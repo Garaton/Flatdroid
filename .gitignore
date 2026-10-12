@@ -1,0 +1,12 @@
+.gradle/
+build/
+.kotlin/
+.cxx/
+.externalNativeBuild/
+local.properties
+.idea/
+*.iml
+captures/
+*.keystore
+*.jks
+.claude/settings.local.json
