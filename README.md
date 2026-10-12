@@ -72,7 +72,7 @@ Hardening:
 
 Flatdroid builds on these projects:
 
-- [PRoot](https://github.com/termux/proot) (Termux fork): GPL-2.0
+- [PRoot](https://github.com/termux/proot): GPL-2.0
 - [talloc](): LGPL-3.0
 - [Alpine Linux](https://alpinelinux.org/): rootfs and packages
 - [Flatpak](https://flatpak.org/): LGPL-2.1-or-later
