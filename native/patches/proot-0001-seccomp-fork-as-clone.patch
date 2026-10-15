@@ -1,0 +1,26 @@
+diff --git a/src/tracee/seccomp.c b/src/tracee/seccomp.c
+index 66dfef3..f2fe7ba 100644
+--- a/src/tracee/seccomp.c
++++ b/src/tracee/seccomp.c
+@@ -626,6 +626,21 @@ static int handle_seccomp_event_common(Tracee *tracee)
+ 		break;
+ 	}
+ 
++	case PR_fork:
++	{
++		/* Android's app seccomp policy allows clone(2) but not
++		 * fork(2) on x86_64, which musl's fork() uses there.
++		 * Re-issue it as clone(SIGCHLD, 0), which is what fork
++		 * does.  The parent's registers are restored afterwards;
++		 * the child keeps SYSARG_1 and SYSARG_2 as rewritten,
++		 * which musl's _Fork doesn't read after the syscall.  */
++		set_sysnum(tracee, PR_clone);
++		poke_reg(tracee, SYSARG_1, SIGCHLD);
++		poke_reg(tracee, SYSARG_2, 0);
++		restart_syscall_after_seccomp(tracee);
++		break;
++	}
++
+ 	case PR_set_robust_list:
+ 	default:
+ 		/* Set errno to -ENOSYS */
