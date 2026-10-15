@@ -60,8 +60,23 @@ android {
     packaging { jniLibs { useLegacyPackaging = true } }
     ndkVersion = "30.0.16248370"
 
+    // Release signing reads FLATDROID_RELEASE_* from ~/.gradle/gradle.properties; without them,
+    // release builds are unsigned.
+    signingConfigs {
+        val storeFile = providers.gradleProperty("FLATDROID_RELEASE_STORE_FILE").orNull
+        if (storeFile != null) {
+            create("release") {
+                this.storeFile = file(storeFile)
+                storePassword = providers.gradleProperty("FLATDROID_RELEASE_STORE_PASSWORD").get()
+                keyAlias = providers.gradleProperty("FLATDROID_RELEASE_KEY_ALIAS").get()
+                keyPassword = providers.gradleProperty("FLATDROID_RELEASE_KEY_PASSWORD").get()
+            }
+        }
+    }
+
     buildTypes {
         release {
+            signingConfig = signingConfigs.findByName("release")
             optimization {
                 enable = true
                 packageScope = setOf("androidx.**", "kotlin.**", "kotlinx.**")
@@ -83,6 +98,7 @@ abstract class BuildProotTask @Inject constructor(private val exec: ExecOperatio
     @get:Input abstract val abi: Property<String>
     @get:InputFile abstract val script: RegularFileProperty
     @get:InputFile abstract val crossAnswers: RegularFileProperty
+    @get:InputDirectory abstract val patches: DirectoryProperty
     @get:Internal abstract val ndkDirectory: DirectoryProperty
     @get:Input val ndkPath: Provider<String> get() = ndkDirectory.map { it.asFile.absolutePath }
     @get:Internal abstract val workDirectory: DirectoryProperty
@@ -105,6 +121,7 @@ val prootTasks = architectures.keys.associateWith { abi ->
         this.abi = abi
         script = rootProject.file("native/build-proot.sh")
         crossAnswers = rootProject.file("native/talloc-cross-answers.txt")
+        patches = rootProject.layout.projectDirectory.dir("native/patches")
         ndkDirectory = androidComponents.sdkComponents.ndkDirectory
         workDirectory = layout.buildDirectory.dir("native-work")
         outputDirectory = layout.buildDirectory.dir("generated/proot/$abi")

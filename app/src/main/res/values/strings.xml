@@ -1,3 +1,54 @@
 <resources>
     <string name="app_name">Flatdroid</string>
+
+    <string name="setup_title">Set up Flatdroid</string>
+    <string name="setup_intro">Flatdroid downloads Alpine Linux, then installs Flatpak, a display server (Xvnc and Openbox) and PulseAudio into it. This downloads about 140 MB and needs about 400 MB of storage. Setup continues in the background and resumes if it is interrupted.</string>
+    <string name="setup_start">Start setup</string>
+    <string name="setup_resume">Resume setup</string>
+    <string name="setup_retry">Retry</string>
+    <string name="setup_show_log">Show full log</string>
+    <string name="setup_hide_log">Hide full log</string>
+    <string name="setup_failed">Failed: %1$s</string>
+
+    <string name="setup_step_rootfs">Download and extract Alpine</string>
+    <string name="setup_step_packages">Install packages</string>
+    <string name="setup_step_flathub">Add Flathub</string>
+    <string name="setup_step_files">Write configuration files</string>
+
+    <string name="setup_channel">Setup</string>
+    <string name="setup_notification_title">Setting up Flatdroid</string>
+    <string name="setup_notification_done">Flatdroid is set up</string>
+    <string name="setup_notification_failed">Flatdroid setup failed</string>
+
+    <string name="setup_settings_title">Choose your settings</string>
+    <string name="setup_settings_intro">Flatdroid is installed. You can change these later in Settings.</string>
+    <string name="setup_settings_finish">Finish</string>
+
+    <string name="settings_title">Settings</string>
+    <string name="settings_section_flatpak">Flatpak</string>
+    <string name="settings_languages">Only download translations for my languages (%1$s)</string>
+    <string name="settings_languages_hint">Flatpak then skips translations for other languages when it installs and updates apps, which saves space.</string>
+    <string name="settings_save">Save</string>
+    <string name="settings_back">Back</string>
+    <string name="settings_applying">Applying…</string>
+    <string name="settings_failed">Could not apply the settings: %1$s</string>
+    <string name="settings_open">Settings</string>
+    <string name="settings_section_danger">Danger zone</string>
+
+    <string name="terminal_title">Alpine terminal</string>
+    <string name="ready_command_label">Run a command in Alpine</string>
+    <string name="ready_run">Run</string>
+    <string name="ready_running">Running…</string>
+    <string name="command_cancel">Cancel</string>
+
+    <string name="reset_button">Reset Alpine environment…</string>
+    <string name="reset_title">Reset Alpine environment?</string>
+    <string name="reset_text">Alpine is deleted and set up again from scratch: downloaded again, and its packages reinstalled.</string>
+    <string name="reset_keep">Keep installed Flatpaks</string>
+    <string name="reset_keep_hint">Installed apps, runtimes, remotes and the Flatpak configuration are moved aside and put back afterwards; they are not downloaded again. Each app\'s settings and data are kept.</string>
+    <string name="reset_wipe_hint">Everything installed with Flatpak is deleted as well, including each app\'s settings and data, and Flatdroid\'s settings. Files in Documents/Flatdroid are not touched.</string>
+    <string name="reset_confirm">Reset</string>
+    <string name="reset_cancel">Cancel</string>
+    <string name="reset_running">Resetting the Alpine environment…</string>
+    <string name="reset_done">Alpine environment reset; start setup to install it again.</string>
 </resources>

@@ -13,26 +13,40 @@ This is an almost entirely vibe-coded app in order to train my agentic coding sk
 - [Overview](#overview)
 - [Requirements](#requirements)
 - [Installation](#installation)
+- [Features](#features)
+- [Building](#building)
 - [Methodology](#methodology)
 - [Security](#security)
 - [Acknowledgements](#acknowledgements)
 
 ## Overview
 
-Flatdroid runs Linux desktop Flatpak apps from Flathub on Android phones, without root. It sets up a small Alpine Linux environment inside the app using proot, uses Flatpak there to download and update apps, and launches each app with its own launcher, as Flatpak's normal sandbox can't run on Android. Apps draw to a virtual X11 display that you view with a VNC viewer such as AVNC.
+Flatdroid runs Linux desktop Flatpak apps from Flathub on Android phones, without root. It sets up a small Alpine Linux environment inside the app with proot, and uses the `flatpak` CLI to download and update apps, and launches each app with its own launcher, as Flatpak's normal sandbox can't run on Android (bwrap needs namespaces). Apps draw to a virtual X11 display that you view with a VNC viewer such as AVNC.
 
-The app uses Documents/Flatdroid as its home directory, any files it creates and is put within home show up here for you to access. With there being optional settings to automatically see everything in Documents/Flatdroid without needing to grant access for each individual file, and the ability to mount the shared Android storage onto /sdcard.
+The app uses `Documents/Flatdroid` as its home directory, any files it creates and is put within home show up there for you to access. With there also being optional settings to automatically see everything in `Documents/Flatdroid` without needing to grant individual access, and the ability to bind shared Android storage to `/sdcard`.
 
 ## Requirements
 
-- Version and Architecture: Android 7+ (minSdk 24), arm64-v8a or x86_64, and only arm64 tested so far.
+- Version and Architecture: Android 7+ (minSdk 24), arm64-v8a or x86_64.
 - Internet: For initial setup, and Flatpak downloading.
-- Storage Space: 0.4-1 GB per Flatpak runtime.
+- Storage Space: ~400 MB for initial required packages, and 0.4-1 GB per Flatpak runtime.
 - VNC Viewer: AVNC, bVNC, etc.
 
 ## Installation
 
 Placeholder to be made when building is done
+
+## Features
+
+Placeholder
+
+## Building
+
+- Requirements: Android SDK platform-tools, platforms;android-35, build-tools 35, NDK 30, JDK 21, CMake 3.22.1, make, git, curl, gawk, readelf.
+- Clone the repository: `git clone https://github.com/Garaton/flatdroid.git`.
+- Build: In the base directory: `./gradlew assemble[architecture]["Release" or "Debug"]`.
+  - ex: `./gradlew assembleArm64Debug`
+- Architectures: Arm64, X86_64, Universal (only 64-bit systems are supported).
 
 ## Methodology
 
@@ -46,8 +60,8 @@ Flatpak Needs:
 Issues:
 - bwrap and proot have compatibility issues so base `flatpak run` doesn't work (custom launcher used).
 
-What is Done:
-- proot is used to mount needed flatpak runtime data, and Documents/Flatdroid on flatpak run.
+How it Works:
+- proot is used to bind needed flatpak runtime data, and Documents/Flatdroid on flatpak launch.
 - proot fakes success on namespaces, but Android doesn't have namespaces, which creates bwrap incompatibility.
 - Flatpaks are launched through a custom launcher to get around bwrap and other issues.
 - Xvnc and Openbox are used for display management.
@@ -57,30 +71,30 @@ What is Done:
 ## Security
 
 Issues:
-- Sandboxes are disabled in order for Flatpak to run, but the Android Sandbox remains.
+- Sandboxes are disabled in order for Flatpak to run.
+    - This does not bypass Android's own sandbox.
     - Flatpaks are not isolated from each other.
-    - This app does not bypass Android's sandbox.
     - Electron and WebKit run without their own sandboxes as well.
-- Flatpak permissions are not enforced. Any and all permissions you give to the app, you give to every single Flatpak.
 - Due to use of external VNC viewer, and VNC passwords being weak, treat it as if any app has access to the VNC session.
+- If a Flatpak escapes proot, it will have access to everything Flatdroid has access to.
 
 Hardening:
-- Every Flatpak launch is ran with a seccomp filter and non-dumpable proot. This isolates Flatpaks from the extent of Flatdroids file permissions (a proccess only has access to files bounded to proot).
-- Varrying "Home Modes" to limit accessible files even more.
+- Every Flatpak launch runs with a seccomp filter and non-dumpable proot. This prevents Flatpaks from reaching the extent of Flatdroid's permissions (a process only has access to what is bound to proot).
+- Different "Home Modes" to limit accessible files even more.
+- Per-Flatpak permissions, with the ability to also disable permissions.
 
 ## Acknowledgements
 
-Flatdroid builds on these projects:
+Flatdroid builds on and uses these projects:
 
-- [PRoot](https://github.com/termux/proot): GPL-2.0
-- [talloc](): LGPL-3.0
+- [PRoot](https://github.com/termux/proot): GPL-2.0, built from a pinned commit with small patches in `native/patches/`
+- [talloc](https://talloc.samba.org/talloc/doc/html/index.html): LGPL-3.0-or-later
 - [Alpine Linux](https://alpinelinux.org/): rootfs and packages
 - [Flatpak](https://flatpak.org/): LGPL-2.1-or-later
 - [Flathub](https://flathub.org/)
 - [TigerVNC](https://tigervnc.org/) (Xvnc): GPL-2.0
 - [Openbox](http://openbox.org/): GPL-2.0
 - [PulseAudio](https://www.freedesktop.org/wiki/Software/PulseAudio/): LGPL-2.1
-- [proot-distro](https://github.com/termux/proot-distro) and [RedTerm](https://github.com/GlobalTechInfo/RedTerm): GPL-3.0, references for running proot without Termux
 
 ## License
 Licensed under the GNU General Public License v3.0 or later (GPL-3.0-or-later). See LICENSE.

@@ -70,6 +70,12 @@ cd "$WORK/proot"
 git fetch -q --depth 1 --tags "$PROOT_REPO" "$PROOT_COMMIT"
 git checkout -q FETCH_HEAD
 [ "$(git rev-parse HEAD)" = "$PROOT_COMMIT" ] || { echo "proot commit mismatch" >&2; exit 1; }
+# Our patches to the pinned proot, in name order (see native/patches/README.md).
+for patch in "$HERE"/patches/proot-*.patch; do
+    [ -e "$patch" ] || continue
+    git apply --whitespace=nowarn "$patch" || { echo "patch failed: $patch" >&2; exit 1; }
+    echo "applied $(basename "$patch")"
+done
 cd src
 # LOADER_CFLAGS/LOADER_LDFLAGS from the environment are prepended to the makefile's own (+=).
 # The loader runs before any libc or TLS exists: no stack protector, no FORTIFY, no PIE/RELRO.

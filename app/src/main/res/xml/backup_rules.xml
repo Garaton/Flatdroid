@@ -1,6 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Auto Backup on Android 11 and older. The Alpine rootfs (and everything later installed in it)
-     is large, rebuilt by setup, and full of symlinks; it is never backed up. -->
+<!-- Auto Backup on Android 9 to 11 (backup is off below 9, see values/bools.xml). Only each
+     Flatpak's settings and data (files/appdata) and Flatdroid's settings are backed up, and only when the backup is
+     end-to-end encrypted (a lock screen is set). Everything else is left out by including only
+     appdata: the Alpine rootfs and Flatpak installation (large, rebuilt by setup), setup state and
+     the launcher's files (machine-id, passwd with this install's UID). Flatpak caches live in the
+     cache directory, which is never backed up. -->
 <full-backup-content>
-    <exclude domain="file" path="alpine" />
+    <include domain="file" path="appdata" requireFlags="clientSideEncryption" />
+    <include domain="file" path="settings.properties" requireFlags="clientSideEncryption" />
 </full-backup-content>

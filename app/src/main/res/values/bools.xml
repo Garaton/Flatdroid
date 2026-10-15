@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Backups hold each Flatpak's settings, so they must be end-to-end encrypted, which Android
+         only guarantees from 9 (API 28, see values-v28 and xml/backup_rules.xml). Off below that. -->
+    <bool name="allow_backup">false</bool>
+</resources>

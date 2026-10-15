@@ -11,6 +11,7 @@ Android app (`com.garathon.flatdroid`, Kotlin, GPL-3.0-or-later) that installs F
 - Don't build a terminal emulator. The settings "terminal" is one command field with its output.
 - Don't spend time on bubblewrap or stock `flatpak run`; the custom launcher is the design.
 - Write temporary files to cache, if something is being downloaded, or will be deleted later that goes to cache. The only files that remain outside of cache are files and directories needed for the app to function and have persistence (Alpine rootfs, Flatpaks, settings, etc).
+- Do not modify the README.md, if you believe it should be changed, if it needs changing, give short suggestions to the owner, suggestions are not lines to copy paste.
 
 ## Working with the owner
 
@@ -46,15 +47,13 @@ Android app (`com.garathon.flatdroid`, Kotlin, GPL-3.0-or-later) that installs F
 ## Suggested first milestones
 
 1. **Skeleton APK:** application ID, Kotlin, targetSdk 35+, minSdk 24, proot native libraries (use RedTerm's build script as reference), run `echo hi` in an extracted Alpine. This closes experiment 2 with our own APK.
-2. **Setup flow:** extract the rootfs, `apk add flatpak tigervnc openbox pulseaudio ca-certificates` (tigervnc until milestone 6 replaces it), add Flathub, write Openbox config, VNC password; progress UI and resume.
-3. **Metadata parser and launcher builder** (pure Kotlin, unit-tested), producing the proot argument list from ConfirmedWorkingProcess.md section 6 (`fdrun` in FinalTests.md is the shell equivalent). Reproduce the tested launches from the app.
-4. **Hardening:** build proot non-dumpable and add the `fdsec` seccomp helper to every launch (decision doc section 13; stand-ins in SecurityTests/); refuse to launch if `Seccomp_filters` shows no filter.
-5. **Foreground service and display:** a `specialUse` foreground service that owns Xvnc/Openbox (and later PulseAudio and the app), then opens the external viewer.
-6. **Xvnc build:** GitHub Actions workflow (arm64 and x86_64 runners, `alpine:3.24` container) applying the verified `--disable-glx` APKBUILD change and packaging the archive (decision doc section 5). Replaces Alpine's `tigervnc` in setup.
-7. **Audio:** the AudioTrack player reading the simple-protocol socket (server side already confirmed).
-8. **Files:** HOME on `Documents/Flatdroid`, private dot-dir binds, Import picker, DocumentsProvider, optional All files access toggle.
-9. **Testing:** experiment 9 (background survival and child-process limits).
-10. **Link handling:** OpenURI portal and/or `xdg-open` stand-in (decision doc section 5).
-11. **UI:** if not fully done yet, it should be done here. It is expected that by this point most UI will already be done, and the UI Document has already been requested.
-12. **Build scripts:** arm64-v8a and x86_64 APKs only (Flathub publishes only aarch64 and x86_64); keep architecture strings (`aarch64`, `aarch64-linux-gnu`, ELF check) parameterised. Only arm64-v8a has been tested.
+2. **Setup flow:** extract the rootfs, `apk add flatpak tigervnc openbox pulseaudio ca-certificates` (tigervnc until milestone 6 replaces it), add Flathub, other config file setup; progress UI and resume. Along with settings setup menu (will be filled with more settings later on, initially just the language question).
+3. **Metadata parser and launcher builder:** (pure Kotlin, unit-tested), producing the proot argument list from ConfirmedWorkingProcess.md section 6 (`fdrun` in FinalTests.md is the shell equivalent). Reproduce the tested launches from the app. No shared storage access yet. This should let us connect to flatpaks from a VNC viewer. Possible version number `0.3`.
+4. **Audio:** the AudioTrack player reading the simple-protocol socket (server side already confirmed). Due to simplicity could be bundled with milestone 3 in implementation.
+5. **Hardening:** build proot non-dumpable and add the `fdsec` seccomp helper to every launch (decision doc section 13; stand-ins in SecurityTests/); refuse to launch if `Seccomp_filters` shows no filter.
+6. **Files:** HOME on `Documents/Flatdroid`, private dot-dir binds, Import picker, DocumentsProvider, optional All files access toggle. (By this point something resembling the final UI should be implemented, since there's app interactions and setting toggles). Possible version number `0.5`.
+7. **Xvnc build:** GitHub Actions workflow (arm64 and x86_64 runners, `alpine:3.24` container) applying the verified `--disable-glx` APKBUILD change and packaging the archive (decision doc section 5). Replaces Alpine's `tigervnc` in setup.
+8. **UI:** if not fully done yet, it should be done here. It is expected that by this point most UI will already be done, and the UI Document has already been requested. Possible version number `0.7`.
+9. **Feature cleanup:** It is expected that some requested features will be missed as they have not fully pertained to what was needed in the previous milestones, this milestone is aimed at getting ther est of the features that could have been missed. Also handle links using possibly OpenURI portal and/or `xdg-open` stand-in. Also at this point with a mostly working app we consider what else might be nice before initial release. Possible version number `0.9`.
+10. **Testing:** experiment 9 (background survival and child-process limits). Possible version number `1.0`. Also handle release aspects here like signing.
 
