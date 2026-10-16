@@ -36,6 +36,11 @@ class GuestFilesTest {
         assertTrue("<maximized>yes</maximized>" in rc)
         assertTrue("type=\"normal\"" in rc)
         assertTrue("<decor>" !in rc)
+        // No minimise button (I); the empty desktop lists windows.
+        assertTrue("<titleLayout>NLMC</titleLayout>" in rc)
+        assertTrue("<context name=\"Root\"><mousebind button=\"Left\" action=\"Press\"><action name=\"ShowMenu\"><menu>client-list-combined-menu</menu>" in rc)
+        val doc = javax.xml.parsers.DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(rc.byteInputStream())
+        assertEquals(8 + 6, doc.getElementsByTagName("context").length)
     }
 
     @Test

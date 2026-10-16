@@ -29,6 +29,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.garathon.flatdroid.R
+import com.garathon.flatdroid.setup.ResetMode
 import com.garathon.flatdroid.setup.SetupStep
 import com.garathon.flatdroid.setup.SetupUi
 import com.garathon.flatdroid.ui.theme.FlatdroidTheme
@@ -41,7 +42,7 @@ import com.garathon.flatdroid.ui.theme.FlatdroidTheme
 fun SetupScreen(
     ui: SetupUi,
     onStart: () -> Unit,
-    onReset: (keepFlatpaks: Boolean) -> Unit,
+    onReset: (ResetMode) -> Unit,
     modifier: Modifier = Modifier,
     /** The command field, for looking into a failed or interrupted setup; null hides it. */
     command: CommandState? = null,

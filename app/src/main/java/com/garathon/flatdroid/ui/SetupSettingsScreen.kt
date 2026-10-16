@@ -51,7 +51,7 @@ fun SetupSettingsScreen(
             SelectionContainer { Text(stringResource(R.string.settings_failed, it), color = MaterialTheme.colorScheme.error) }
         }
         Button(
-            onClick = { onFinish(UserSettings(if (onlyMyLanguages) deviceLanguages else GuestFiles.ALL_LANGUAGES)) },
+            onClick = { onFinish(settings.copy(flatpakLanguages = if (onlyMyLanguages) deviceLanguages else GuestFiles.ALL_LANGUAGES)) },
             enabled = !applying,
         ) {
             Text(stringResource(if (applying) R.string.settings_applying else R.string.setup_settings_finish))

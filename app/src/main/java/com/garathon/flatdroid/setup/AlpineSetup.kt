@@ -3,11 +3,9 @@ package com.garathon.flatdroid.setup
 import android.os.StatFs
 import com.garathon.flatdroid.BuildConfig
 import com.garathon.flatdroid.alpine.AlpineEnvironment
-import com.garathon.flatdroid.alpine.GuestFiles
 import com.garathon.flatdroid.flatpak.FlatpakCommands
 import com.garathon.flatdroid.flatpak.LauncherFiles
 import com.garathon.flatdroid.proot.ProcessResult
-import com.garathon.flatdroid.util.writeTextAtomically
 import java.io.File
 import java.io.IOException
 
@@ -129,13 +127,9 @@ class AlpineSetup(
         }
     }
 
-    /**
-     * Files Flatdroid generates once, outside the rootfs: the Openbox config (to be bound into
-     * Alpine when Openbox runs) and the /etc files for Flatpak roots.
-     */
+    /** Files Flatdroid generates outside the rootfs: the /etc files for Flatpak roots. */
     private fun configFiles() {
         launcherFiles.write()
-        env.openboxConfig.writeTextAtomically(GuestFiles.openboxRc())
     }
 
     private fun run(
@@ -159,8 +153,12 @@ class AlpineSetup(
     private fun mib(bytes: Long) = "%.1f".format(bytes / 1048576.0)
 
     companion object {
-        /** Alpine's tigervnc stays until our own Xvnc build replaces it. */
-        val PACKAGES = listOf("flatpak", "tigervnc", "openbox", "pulseaudio", "ca-certificates")
+        /**
+         * Alpine's tigervnc stays until our own Xvnc build replaces it. Openbox needs a font: without
+         * one its title bars collapse to a few pixels. ostree repairs the Flatpak repository after
+         * an interrupted removal (FlatpakTaskService).
+         */
+        val PACKAGES = listOf("flatpak", "ostree", "tigervnc", "openbox", "font-cantarell", "pulseaudio", "ca-certificates")
         private const val APK_CACHE = "/var/cache/apk"
         /** Free space setup needs: the minirootfs, and the package cache plus installed packages. */
         private const val ROOTFS_BYTES = 20L shl 20

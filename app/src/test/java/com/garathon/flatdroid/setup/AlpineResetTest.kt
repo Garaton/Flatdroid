@@ -25,6 +25,8 @@ class AlpineResetTest {
     private lateinit var state: SetupStateStore
     private lateinit var temp: File
     private lateinit var appData: File
+    private lateinit var appCache: File
+    private lateinit var electron: File
     private lateinit var reset: AlpineReset
 
     private val tarGz: ByteArray = ByteArrayOutputStream().also { out ->
@@ -50,7 +52,16 @@ class AlpineResetTest {
         state = SetupStateStore(File(tmp.root, "files/setup.properties"))
         temp = File(cache, "alpine/tmp").apply { mkdirs(); File(this, "junk").writeText("x") }
         appData = File(tmp.root, "files/appdata/org.xfce.mousepad/config").apply { mkdirs(); File(this, "mousepadrc").writeText("[State]") }.parentFile!!.parentFile!!
-        reset = AlpineReset(File(alpine, "reset-pending"), installer, state, listOf(File(cache, "alpine")), listOf(appData), JvmTarFs)
+        appCache = File(cache, "appcache/org.xfce.mousepad").apply { mkdirs(); File(this, "thumb").writeText("x") }
+        electron = File(tmp.root, "files/electron/dev.bambosh.UnofficialHomestuckCollection").apply { mkdirs() }
+        reset = AlpineReset(
+            File(alpine, "reset-pending"), installer, state,
+            temporary = listOf(File(cache, "alpine")),
+            appCaches = listOf(appCache.parentFile!!),
+            flatpakFiles = listOf(electron.parentFile!!),
+            userData = listOf(appData),
+            fs = JvmTarFs,
+        )
 
         // A set-up environment: Alpine, a Flatpak file that is a link2symlink link into .l2s,
         // Flatpak config, something installed by apk, setup state and a VNC password.
@@ -71,7 +82,7 @@ class AlpineResetTest {
 
     @Test
     fun keepFlatpaksBringsThemBackIntoTheNewRootfs() {
-        reset.request(keepFlatpaks = true)
+        reset.request(ResetMode.KEEP_FLATPAKS)
         assertTrue(reset.isPending())
         reset.finish()
 
@@ -93,11 +104,26 @@ class AlpineResetTest {
     }
 
     @Test
+    fun removeFlatpaksKeepsAppDataAndCaches() {
+        reset.request(ResetMode.REMOVE_FLATPAKS)
+        reset.finish()
+        assertFalse(installer.hasKept())
+        assertFalse(electron.exists())
+        assertEquals("[State]", File(appData, "org.xfce.mousepad/config/mousepadrc").readText())
+        assertEquals("x", File(appCache, "thumb").readText())
+        assertFalse(temp.exists())
+        installer.install(source)
+        assertFalse(File(installer.rootfs, "root/.local/share/flatpak").exists())
+    }
+
+    @Test
     fun wipeDeletesFlatpaksToo() {
-        reset.request(keepFlatpaks = false)
+        reset.request(ResetMode.WIPE)
         reset.finish()
         assertFalse(installer.hasKept())
         assertFalse(appData.exists())
+        assertFalse(appCache.exists())
+        assertFalse(electron.exists())
         installer.install(source)
         assertFalse(File(installer.rootfs, "root/.local/share/flatpak").exists())
         assertFalse(File(installer.rootfs, ".l2s/.l2s.mousepad0001").exists())
@@ -106,7 +132,7 @@ class AlpineResetTest {
 
     @Test
     fun interruptedResetFinishesLater() {
-        reset.request(keepFlatpaks = true)
+        reset.request(ResetMode.KEEP_FLATPAKS)
         installer.setAside() // the process died after this
         reset.finish()
         installer.install(source)
@@ -115,7 +141,7 @@ class AlpineResetTest {
 
     @Test
     fun installInterruptedAfterRestoringStillKeepsFlatpaks() {
-        reset.request(keepFlatpaks = true)
+        reset.request(ResetMode.KEEP_FLATPAKS)
         reset.finish()
         // As if a previous install died after moving the kept paths into the partial rootfs.
         val partial = File(cache, "rootfs.partial")

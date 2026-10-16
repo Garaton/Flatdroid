@@ -38,12 +38,16 @@ object SetupController {
     fun store(context: Context) = SetupStateStore(File(context.filesDir, "setup.properties"))
     fun settings(context: Context) = UserSettingsStore(File(context.filesDir, SETTINGS_FILE))
 
-    fun reset(context: Context, env: AlpineEnvironment = AlpineEnvironment(context)) = AlpineReset(
+    fun reset(context: Context, env: AlpineEnvironment = AlpineEnvironment.get(context)) = AlpineReset(
         pendingFile = File(context.filesDir, "alpine/reset-pending"),
         installer = env.installer,
         state = store(context),
-        temporary = env.temporaryFiles() + AppData.cacheRoot(context),
-        flatpakData = listOf(AppData.root(context), AppData.launcherDir(context), File(context.filesDir, SETTINGS_FILE)),
+        temporary = env.temporaryFiles() + listOf(AppData.rootsDir(context), AppData.appTmpDir(context), AppData.sessionDir(context)),
+        appCaches = listOf(AppData.cacheRoot(context)),
+        flatpakFiles = listOf(AppData.electronDir(context)),
+        userData = listOf(
+            AppData.root(context), AppData.launcherDir(context), AppData.settingsDir(context), File(context.filesDir, SETTINGS_FILE),
+        ),
         fs = AndroidTarFs,
     )
 

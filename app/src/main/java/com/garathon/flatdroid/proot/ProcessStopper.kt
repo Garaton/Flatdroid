@@ -29,19 +29,39 @@ object AndroidSignals : Signals {
 
 /**
  * Stops a proot and what runs under it. proot ignores SIGTERM and SIGINT, so Process.destroy()
- * does nothing to it. Instead, like Ctrl-C, the processes under proot get SIGINT first, so they
- * can stop cleanly; then proot gets SIGQUIT, on which it kills every process it traces and exits;
- * SIGKILL is the last resort.
+ * does nothing to it. Instead, like Ctrl-C, the processes under proot get SIGINT first and
+ * [interruptGraceMillis] to stop by themselves; then proot gets SIGQUIT, on which it kills every
+ * process it traces and exits; SIGKILL is the last resort.
+ *
+ * The SIGQUIT step isn't clean: proot SIGKILLs processes wherever they are, including one that
+ * stopped at a syscall after proot's link2symlink lowered a hard link's count but before the
+ * unlink ran. The count then stays too low, and a later deletion removes content that a link
+ * still points to. A process ending on SIGINT itself only dies between syscalls, so commands
+ * that change Alpine or the Flatpak installation get a long [interruptGraceMillis].
  */
 class ProcessStopper(
     private val signals: Signals,
-    private val graceMillis: Long = 3_000,
+    private val interruptGraceMillis: Long = SHORT_GRACE_MS,
+    private val graceMillis: Long = SHORT_GRACE_MS,
     private val procDir: File = File("/proc"),
 ) {
     /** Stops [process] (whose pid is [pid]); returns once it has exited or after the last resort. */
     fun stop(process: Process, pid: Int) {
+        interrupt(pid)
+        if (waitForExit(process, interruptGraceMillis)) return
+        kill(process, pid)
+    }
+
+    /** Ctrl-C: SIGINT to the processes under proot [pid]. Returns at once. */
+    fun interrupt(pid: Int) {
         descendants(pid).forEach { signals.send(it, StopSignal.INTERRUPT) }
-        if (waitForExit(process, graceMillis)) return
+    }
+
+    /**
+     * The hard way, for when SIGINT wasn't enough: SIGQUIT to proot, then SIGKILL to everything
+     * left. Returns once [process] has exited or after the last resort.
+     */
+    fun kill(process: Process, pid: Int) {
         signals.send(pid, StopSignal.QUIT)
         if (waitForExit(process, graceMillis)) return
         (descendants(pid) + pid).forEach { signals.send(it, StopSignal.KILL) }
@@ -74,6 +94,11 @@ class ProcessStopper(
     }
 
     companion object {
+        /** For commands the user runs and may want gone at once. */
+        const val SHORT_GRACE_MS = 3_000L
+        /** For commands that change Alpine or the Flatpak installation (see the class comment). */
+        const val LENIENT_GRACE_MS = 60_000L
+
         /**
          * The pid of [process]. java.lang.Process has no pid() on Android, but its toString() is
          * "Process[pid=…, …]" (on Android and on the desktop JDK alike).

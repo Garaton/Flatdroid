@@ -1,0 +1,40 @@
+diff --git a/src/tracee/seccomp.c b/src/tracee/seccomp.c
+index f2fe7ba..9ee3167 100644
+--- a/src/tracee/seccomp.c
++++ b/src/tracee/seccomp.c
+@@ -1,4 +1,5 @@
+ #include <errno.h>     /* E*, */
++#include <fcntl.h>     /* AT_EACCESS, AT_SYMLINK_NOFOLLOW, */
+ #include <signal.h>    /* SIGSYS, */
+ #include <unistd.h>    /* getpgid, */
+ #include <utime.h>     /* utimbuf, */
+@@ -626,6 +627,29 @@ static int handle_seccomp_event_common(Tracee *tracee)
+ 		break;
+ 	}
+ 
++	case PR_faccessat2:
++	{
++		/* Android's app seccomp policy blocks faccessat2(2) before
++		 * Android 16.  On ENOSYS glibc emulates AT_EACCESS and
++		 * AT_SYMLINK_NOFOLLOW itself, but musl only falls back for
++		 * AT_EACCESS and fails with EINVAL for AT_SYMLINK_NOFOLLOW,
++		 * which GLib reads as "file missing".  Re-issue it as
++		 * faccessat(dirfd, path, mode).  Exact for no flags and
++		 * AT_EACCESS (tracees' real and effective IDs are the same);
++		 * with AT_SYMLINK_NOFOLLOW the only difference is a dangling
++		 * symlink, which is reported as missing.  Other flags
++		 * (AT_EMPTY_PATH) keep failing with ENOSYS.  */
++		word_t flags = peek_reg(tracee, CURRENT, SYSARG_4);
++		if ((flags & ~(AT_EACCESS | AT_SYMLINK_NOFOLLOW)) != 0) {
++			set_result_after_seccomp(tracee, -ENOSYS);
++			break;
++		}
++		set_sysnum(tracee, PR_faccessat);
++		poke_reg(tracee, SYSARG_4, 0);
++		restart_syscall_after_seccomp(tracee);
++		break;
++	}
++
+ 	case PR_fork:
+ 	{
+ 		/* Android's app seccomp policy allows clone(2) but not

@@ -15,6 +15,8 @@ import java.util.Properties
 data class UserSettings(
     /** Flatpak's `languages` value: the device's languages plus English, or [GuestFiles.ALL_LANGUAGES]. */
     val flatpakLanguages: String,
+    /** Shows settings Flatdroid normally manages itself (such as an Electron app's flags). */
+    val developerOptions: Boolean = false,
 ) {
     val onlyMyLanguages: Boolean get() = flatpakLanguages != GuestFiles.ALL_LANGUAGES
 
@@ -33,16 +35,18 @@ class UserSettingsStore(private val file: File) {
         if (!file.isFile) return null
         val props = Properties().apply { file.inputStream().use { load(it) } }
         val languages = props.getProperty(KEY_LANGUAGES) ?: return null
-        return UserSettings(flatpakLanguages = languages)
+        return UserSettings(flatpakLanguages = languages, developerOptions = props.getProperty(KEY_DEVELOPER) == "true")
     }
 
     fun save(settings: UserSettings) {
         val props = Properties()
         props.setProperty(KEY_LANGUAGES, settings.flatpakLanguages)
+        if (settings.developerOptions) props.setProperty(KEY_DEVELOPER, "true")
         file.writeTextAtomically(StringWriter().also { props.store(it, null) }.toString())
     }
 
     private companion object {
         const val KEY_LANGUAGES = "flatpak.languages"
+        const val KEY_DEVELOPER = "ui.developerOptions"
     }
 }

@@ -22,9 +22,8 @@ import com.garathon.flatdroid.R
 import com.garathon.flatdroid.ui.theme.FlatdroidTheme
 
 /**
- * The Alpine terminal: the single command field (one command, its output, no session; not a
- * terminal emulator). For now it is the screen after setup, with a Settings button; once there is
- * a home screen it becomes Settings → Terminal, left with Back.
+ * The Alpine terminal (Settings → Terminal): the single command field (one command, its output,
+ * no session; not a terminal emulator).
  */
 @Composable
 fun TerminalScreen(
@@ -32,7 +31,7 @@ fun TerminalScreen(
     running: Boolean,
     onRun: (String) -> Unit,
     onCancel: () -> Unit,
-    onOpenSettings: () -> Unit,
+    onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val scroll = rememberScrollState()
@@ -44,8 +43,8 @@ fun TerminalScreen(
     ) {
         Text(stringResource(R.string.terminal_title), style = MaterialTheme.typography.headlineSmall)
         CommandInput(running, onRun, onCancel, Modifier.fillMaxWidth()) {
-            OutlinedButton(onClick = onOpenSettings, enabled = !running) {
-                Text(stringResource(R.string.settings_open))
+            OutlinedButton(onClick = onBack) {
+                Text(stringResource(R.string.settings_back))
             }
         }
         SelectionContainer(modifier = Modifier.fillMaxWidth().weight(1f).verticalScroll(scroll)) {
@@ -62,6 +61,6 @@ fun TerminalScreen(
 @Composable
 private fun TerminalScreenPreview() {
     FlatdroidTheme {
-        TerminalScreen(output = "$ flatpak remotes\nflathub\n(exit 0)", running = false, onRun = {}, onCancel = {}, onOpenSettings = {})
+        TerminalScreen(output = "$ flatpak remotes\nflathub\n(exit 0)", running = false, onRun = {}, onCancel = {}, onBack = {})
     }
 }

@@ -8,8 +8,18 @@
     <!-- Setup runs as a foreground service with a progress notification. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- A running Flatpak session (display, audio, the app) stays in the foreground. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- Whether a VNC viewer is installed, to open the session's display. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="vnc" />
+        </intent>
+    </queries>
 
     <application
         android:allowBackup="@bool/allow_backup"
@@ -36,6 +46,20 @@
             android:name=".setup.SetupService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <service
+            android:name=".flatpak.FlatpakTaskService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <service
+            android:name=".session.SessionService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Runs a Linux desktop app (Flatpak) under proot with its X11 display server and audio server, while the user views it in a VNC viewer." />
+        </service>
     </application>
 
 </manifest>

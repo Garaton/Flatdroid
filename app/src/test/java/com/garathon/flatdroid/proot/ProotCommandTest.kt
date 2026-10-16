@@ -93,4 +93,72 @@ class ProotCommandTest {
     fun unknownFdLinkIsRejected() {
         binds.copy(missingFdLinks = setOf("/etc/passwd"))
     }
+
+    private val flatpakBinds = FlatpakBinds(
+        root = "/cache/roots/org.xfce.mousepad",
+        runtimeFiles = "/fp/runtime/org.freedesktop.Platform/aarch64/26.08/abc/files",
+        appFiles = "/fp/app/org.xfce.mousepad/aarch64/stable/def/files",
+        etc = linkedMapOf("resolv.conf" to "/files/launcher/etc/resolv.conf", "passwd" to "/files/launcher/etc/passwd"),
+        extensions = listOf("/fp/runtime/GL.default/files" to "/usr/lib/aarch64-linux-gnu/GL/default"),
+        tmp = "/cache/apptmp/org.xfce.mousepad/tmp",
+        shm = "/cache/apptmp/org.xfce.mousepad/shm",
+        x11Sockets = "/cache/session/x11",
+        pulseSockets = "/cache/session/pulse",
+        home = "/files/appdata/org.xfce.mousepad/home",
+        homeOverlays = listOf("/files/appdata/org.xfce.mousepad/config" to "/home/user/.config"),
+        extra = listOf("/files/electron/x" to "/app/x"),
+    )
+
+    /** The same binds, in the same order, as the tested shell launcher (fdrun). */
+    @Test
+    fun flatpakArgvMatchesTheTestedLauncher() {
+        val inv = ProotCommand.flatpak(paths, flatpakBinds, linkedMapOf("PATH" to "/app/bin:/usr/bin", "A" to "x y"), listOf("/app/bin/mousepad", "--flag"))
+        assertEquals(
+            listOf(
+                "/lib/libproot.so", "--kill-on-exit", "--sysvipc", "--link2symlink", "-L",
+                "--rootfs=/cache/roots/org.xfce.mousepad", "--cwd=/",
+                "--bind=/files/alpine/rootfs/.l2s",
+                "--bind=/fp/runtime/org.freedesktop.Platform/aarch64/26.08/abc/files:/usr",
+                "--bind=/fp/app/org.xfce.mousepad/aarch64/stable/def/files:/app",
+                "--bind=/fp/runtime/org.freedesktop.Platform/aarch64/26.08/abc/files/etc:/etc",
+                "--bind=/files/launcher/etc/resolv.conf:/etc/resolv.conf",
+                "--bind=/files/launcher/etc/passwd:/etc/passwd",
+                "--bind=/fp/runtime/GL.default/files:/usr/lib/aarch64-linux-gnu/GL/default",
+                "--bind=/dev", "--bind=/proc", "--bind=/sys",
+                "--bind=/cache/apptmp/org.xfce.mousepad/shm:/dev/shm",
+                "--bind=/cache/apptmp/org.xfce.mousepad/tmp:/tmp",
+                "--bind=/cache/session/x11:/tmp/.X11-unix",
+                "--bind=/cache/session/pulse:/run/pulse",
+                "--bind=/files/appdata/org.xfce.mousepad/home:/home/user",
+                "--bind=/files/appdata/org.xfce.mousepad/config:/home/user/.config",
+                "--bind=/files/electron/x:/app/x",
+                "/usr/bin/env", "PATH=/app/bin:/usr/bin", "A=x y",
+                "/app/bin/mousepad", "--flag",
+            ),
+            inv.argv,
+        )
+        assertEquals(setOf("PROOT_LOADER", "PROOT_TMP_DIR", "PROOT_L2S_DIR"), inv.env.keys)
+        assertTrue("--change-id=0:0" !in inv.argv)
+    }
+
+    @Test
+    fun flatpakPrefixRunsBeforeEnv() {
+        val argv = ProotCommand.flatpak(paths, flatpakBinds, emptyMap(), listOf("/app/bin/x"), prefix = listOf("/.flatdroid/fdsec")).argv
+        assertEquals(listOf("/.flatdroid/fdsec", "/usr/bin/env", "/app/bin/x"), argv.takeLast(3))
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun flatpakCommandThatEnvWouldReadAsAVariableIsRejected() {
+        ProotCommand.flatpak(paths, flatpakBinds, emptyMap(), listOf("/app/bin/a=b"))
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun flatpakEnvironmentNameIsChecked() {
+        ProotCommand.flatpak(paths, flatpakBinds, mapOf("--help" to "x"), listOf("/app/bin/x"))
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun flatpakEtcNameCannotLeaveEtc() {
+        flatpakBinds.copy(etc = mapOf("../usr/x" to "/files/x"))
+    }
 }
