@@ -3,6 +3,7 @@ package com.garathon.flatdroid.ui
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.RectF
+import android.util.LruCache
 import androidx.core.graphics.createBitmap
 import com.caverock.androidsvg.SVG
 import androidx.compose.foundation.Image
@@ -189,17 +190,22 @@ private fun AppRow(app: InstalledApp, running: Boolean, enabled: Boolean, onLaun
     }
 }
 
+/**
+ * Decoded icons by path, so a row scrolling back into view isn't decoded again. An app update
+ * deploys to a new directory, so its new icon has a new path.
+ */
+private val iconCache = LruCache<String, ImageBitmap>(64)
+
 /** The app's icon, or a plain tile when it has none Android can draw. */
 @Composable
 fun AppIcon(file: File?, modifier: Modifier = Modifier) {
-    val bitmap by produceState<ImageBitmap?>(null, file) {
-        value = file?.let {
-            withContext(Dispatchers.IO) {
-                try {
-                    decodeIcon(it)?.asImageBitmap()
-                } catch (_: Exception) {
-                    null
-                }
+    val bitmap by produceState(file?.let { iconCache.get(it.path) }, file) {
+        if (value != null || file == null) return@produceState
+        value = withContext(Dispatchers.IO) {
+            try {
+                decodeIcon(file)?.asImageBitmap()?.also { iconCache.put(file.path, it) }
+            } catch (_: Exception) {
+                null
             }
         }
     }

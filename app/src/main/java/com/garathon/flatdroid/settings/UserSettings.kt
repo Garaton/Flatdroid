@@ -17,13 +17,56 @@ data class UserSettings(
     val flatpakLanguages: String,
     /** Shows settings Flatdroid normally manages itself (such as an Electron app's flags). */
     val developerOptions: Boolean = false,
+    /** The VNC viewer's package; null to choose every time. */
+    val vncViewer: String? = null,
+    /** Xvnc sends up to 60 frames a second instead of 30: smoother, more CPU when the picture moves. */
+    val frameRate60: Boolean = false,
+    /** Developer setting: Xvnc's frame rate, overriding [frameRate60]; null when not set. */
+    val customFrameRate: Int? = null,
+    /** Developer setting: as many frames as Xvnc can send, overriding the others. */
+    val uncappedFrameRate: Boolean = false,
+    /** Developer setting: let Flatpak install vendor GPU runtimes (masked otherwise; see [commands]). */
+    val installGpuRuntimes: Boolean = false,
+    /** Developer setting: Openbox draws title bars (close, maximize) on windows. */
+    val titleBars: Boolean = true,
 ) {
     val onlyMyLanguages: Boolean get() = flatpakLanguages != GuestFiles.ALL_LANGUAGES
 
-    /** The commands that apply these settings in Alpine, in order. */
-    fun commands(): List<List<String>> = listOf(FlatpakCommands.setLanguages(flatpakLanguages))
+    /** Xvnc's `-FrameRate`. The developer settings count only while developer options are on. */
+    val frameRate: Int
+        get() = when {
+            developerOptions && uncappedFrameRate -> UNCAPPED_FRAME_RATE
+            developerOptions && customFrameRate != null -> customFrameRate
+            frameRate60 -> 60
+            else -> DEFAULT_FRAME_RATE
+        }
+
+    /** Whether windows get title bars; the developer setting counts only while developer options are on. */
+    val windowTitleBars: Boolean get() = !developerOptions || titleBars
+
+    /**
+     * The commands that apply these settings in Alpine, in order. Vendor GPU runtimes are masked
+     * and uninstalled unless the developer setting allows them: masking is idempotent, while
+     * removing a mask that isn't there fails, so allowing them adds each mask and then removes it.
+     */
+    fun commands(): List<List<String>> {
+        val allowGpu = developerOptions && installGpuRuntimes
+        val gpu = FlatpakCommands.GPU_RUNTIME_PATTERNS.flatMap { pattern ->
+            listOf(FlatpakCommands.mask(pattern)) + if (allowGpu) listOf(FlatpakCommands.unmask(pattern)) else emptyList()
+        }
+        val removeGpu = if (allowGpu) emptyList() else listOf(FlatpakCommands.uninstallMatching(FlatpakCommands.GPU_RUNTIME_PATTERNS))
+        return listOf(FlatpakCommands.setLanguages(flatpakLanguages)) + gpu + removeGpu
+    }
 
     companion object {
+        const val DEFAULT_FRAME_RATE = 30
+        /**
+         * "Uncapped": Xvnc 1.16 has no unlimited value (`-FrameRate 0` makes it exit once a viewer
+         * connects), and 1000 is above anything it reaches.
+         */
+        const val UNCAPPED_FRAME_RATE = 1000
+        val CUSTOM_FRAME_RATES = 1..UNCAPPED_FRAME_RATE
+
         /** Defaults for a device whose languages, as Flatpak's value, are [deviceLanguages]. */
         fun defaults(deviceLanguages: String) = UserSettings(flatpakLanguages = deviceLanguages)
     }
@@ -35,18 +78,39 @@ class UserSettingsStore(private val file: File) {
         if (!file.isFile) return null
         val props = Properties().apply { file.inputStream().use { load(it) } }
         val languages = props.getProperty(KEY_LANGUAGES) ?: return null
-        return UserSettings(flatpakLanguages = languages, developerOptions = props.getProperty(KEY_DEVELOPER) == "true")
+        return UserSettings(
+            flatpakLanguages = languages,
+            developerOptions = props.getProperty(KEY_DEVELOPER) == "true",
+            vncViewer = props.getProperty(KEY_VNC_VIEWER)?.takeIf { it.isNotBlank() },
+            frameRate60 = props.getProperty(KEY_FRAME_RATE_60) == "true",
+            customFrameRate = props.getProperty(KEY_CUSTOM_FRAME_RATE)?.toIntOrNull()?.takeIf { it in UserSettings.CUSTOM_FRAME_RATES },
+            uncappedFrameRate = props.getProperty(KEY_UNCAPPED_FRAME_RATE) == "true",
+            installGpuRuntimes = props.getProperty(KEY_GPU_RUNTIMES) == "true",
+            titleBars = props.getProperty(KEY_TITLE_BARS) != "false",
+        )
     }
 
     fun save(settings: UserSettings) {
         val props = Properties()
         props.setProperty(KEY_LANGUAGES, settings.flatpakLanguages)
         if (settings.developerOptions) props.setProperty(KEY_DEVELOPER, "true")
+        settings.vncViewer?.let { props.setProperty(KEY_VNC_VIEWER, it) }
+        if (settings.frameRate60) props.setProperty(KEY_FRAME_RATE_60, "true")
+        settings.customFrameRate?.let { props.setProperty(KEY_CUSTOM_FRAME_RATE, it.toString()) }
+        if (settings.uncappedFrameRate) props.setProperty(KEY_UNCAPPED_FRAME_RATE, "true")
+        if (settings.installGpuRuntimes) props.setProperty(KEY_GPU_RUNTIMES, "true")
+        if (!settings.titleBars) props.setProperty(KEY_TITLE_BARS, "false")
         file.writeTextAtomically(StringWriter().also { props.store(it, null) }.toString())
     }
 
     private companion object {
         const val KEY_LANGUAGES = "flatpak.languages"
         const val KEY_DEVELOPER = "ui.developerOptions"
+        const val KEY_VNC_VIEWER = "vnc.viewer"
+        const val KEY_FRAME_RATE_60 = "vnc.frameRate60"
+        const val KEY_CUSTOM_FRAME_RATE = "vnc.frameRate"
+        const val KEY_UNCAPPED_FRAME_RATE = "vnc.frameRateUncapped"
+        const val KEY_GPU_RUNTIMES = "flatpak.gpuRuntimes"
+        const val KEY_TITLE_BARS = "display.titleBars"
     }
 }

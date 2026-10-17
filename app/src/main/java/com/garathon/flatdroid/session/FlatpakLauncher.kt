@@ -1,6 +1,8 @@
 package com.garathon.flatdroid.session
 
 import android.content.Context
+import android.os.Build
+import android.os.FileObserver
 import android.system.Os
 import com.garathon.flatdroid.R
 import com.garathon.flatdroid.alpine.AlpineEnvironment
@@ -16,17 +18,23 @@ import com.garathon.flatdroid.launcher.LaunchPlan
 import com.garathon.flatdroid.launcher.LaunchPlanner
 import com.garathon.flatdroid.launcher.PlanResult
 import com.garathon.flatdroid.launcher.VncPassword
+import com.garathon.flatdroid.proot.AlpineBinds
+import com.garathon.flatdroid.proot.DevNodes
 import com.garathon.flatdroid.proot.GuestPaths
 import com.garathon.flatdroid.proot.ProotCommand
 import com.garathon.flatdroid.proot.ProotProcess
 import com.garathon.flatdroid.proot.ProotRunner
 import com.garathon.flatdroid.setup.AndroidTarFs
+import com.garathon.flatdroid.settings.UserSettings
+import com.garathon.flatdroid.setup.SetupController
 import com.garathon.flatdroid.setup.deleteTree
 import com.garathon.flatdroid.util.httpDownload
 import com.garathon.flatdroid.util.sha256
 import com.garathon.flatdroid.util.writeTextAtomically
 import java.io.File
 import java.io.IOException
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /** A launch that can't go ahead; [message] is shown to the user. */
@@ -40,7 +48,7 @@ class FlatpakLauncher(private val context: Context) {
     private val env = AlpineEnvironment.get(context)
     private val arch = env.arch
     private val installation = FlatpakInstallation(env.flatpakDir, arch)
-    private val planner = LaunchPlanner(installation, arch, File(env.paths().l2sDir), AndroidLinkFs::readlink)
+    private val planner = LaunchPlanner(installation, arch, File(env.paths().l2sDir), AndroidLinkFs::readlink, DevNodes::hostHas)
     private val sessionDir = AppData.sessionDir(context)
     private val x11Dir = File(sessionDir, "x11")
     private val pulseDir = File(sessionDir, "pulse")
@@ -108,12 +116,16 @@ class FlatpakLauncher(private val context: Context) {
 
         SessionController.starting(appId, context.getString(R.string.session_preparing_files))
         prepareDirs(appId, plan)
-        checkBindSources(plan)
+        val userSettings = SetupController.settings(context).load()
         val password = VncPassword.random()
-        writeSessionFiles(password)
+        writeSessionFiles(password, titleBars = userSettings?.windowTitleBars ?: true)
+        // After both, which create the directories it checks: they live in the cache, which Android may
+        // clear at any time, and a fresh install has none yet.
+        checkBindSources(plan)
 
         SessionController.starting(appId, context.getString(R.string.session_starting_display))
-        val helpers = startHelpers(settings.geometry)
+        val frameRate = userSettings?.frameRate ?: UserSettings.DEFAULT_FRAME_RATE
+        val helpers = startHelpers(settings.geometry, frameRate)
         var app: ProotProcess? = null
         try {
             waitForFile(File(x11Dir, SessionScript.X_SOCKET), helpers, DISPLAY_TIMEOUT_MS, context.getString(R.string.launch_display_failed))
@@ -144,6 +156,9 @@ class FlatpakLauncher(private val context: Context) {
                     SessionController.starting(appId, context.getString(R.string.session_relaunching_newer_flags))
                     plan = (planner.plan(appId, hostDirs(appId), options(appId)) as? PlanResult.Ready)?.plan
                         ?: throw LaunchException(context.getString(R.string.launch_app_changed))
+                    // The app has run, so it may have replaced its own directories with links meanwhile.
+                    prepareDirs(appId, plan)
+                    checkBindSources(plan)
                     continue
                 }
                 if (triedNewerFlags && (gpuFailed.get() || code != 0)) {
@@ -166,6 +181,7 @@ class FlatpakLauncher(private val context: Context) {
         return LaunchOptions(
             newerElectronFlags = settings.newerElectronFlags,
             electronSwap = app?.let { electronSwap(appId).preparedFor(it) },
+            wholeDev = settings.wholeDev,
         )
     }
 
@@ -199,7 +215,6 @@ class FlatpakLauncher(private val context: Context) {
             ),
             x11Sockets = x11Dir,
             pulseSockets = pulseDir,
-            missingFdLinks = env.missingFdLinks(),
         )
     }
 
@@ -209,6 +224,7 @@ class FlatpakLauncher(private val context: Context) {
         AndroidTarFs.deleteTree(root)
         val mountPoints = listOf("usr", "app", "etc", "dev", "proc", "sys", "tmp") + listOf(GuestPaths.PULSE_DIR, GuestPaths.HOME).map { it.removePrefix("/") }
         for (dir in mountPoints) File(root, dir).mkdirs()
+        if (!plan.binds.wholeDev) DevNodes.createMountPoints(root, plan.binds.dev + AlpineBinds.FD_LINKS.keys)
         for (name in plan.usrLinks) Os.symlink("usr/$name", File(root, name).path)
         File(root, ".flatpak-info").writeText(plan.flatpakInfo)
 
@@ -246,11 +262,11 @@ class FlatpakLauncher(private val context: Context) {
      * binds are writable), a copy of the machine-id, resolv.conf for the current network, and the
      * VNC password file. Old sockets are removed.
      */
-    private fun writeSessionFiles(password: String) {
+    private fun writeSessionFiles(password: String, titleBars: Boolean) {
         val launcher = AppData.launcherFiles(context)
         launcher.write()
-        File(etcDir, "machine-id").writeTextAtomically(launcher.machineId.readText())
-        File(etcDir, "resolv.conf").writeTextAtomically(env.resolvConf())
+        File(etcDir, "machine-id").writeTextAtomically(launcher.machineId.readText(), durable = false)
+        File(etcDir, "resolv.conf").writeTextAtomically(env.resolvConf(), durable = false)
         for (dir in listOf(x11Dir, pulseDir, vncDir)) {
             AndroidTarFs.deleteTree(dir)
             dir.mkdirs()
@@ -259,11 +275,11 @@ class FlatpakLauncher(private val context: Context) {
             writeBytes(VncPassword.file(password))
             Os.chmod(path, 0x180) // 0600
         }
-        File(sessionDir, "session.sh").writeTextAtomically(SessionScript.TEXT)
-        File(sessionDir, "openbox-rc.xml").writeTextAtomically(GuestFiles.openboxRc())
+        File(sessionDir, "session.sh").writeTextAtomically(SessionScript.TEXT, durable = false)
+        File(sessionDir, "openbox-rc.xml").writeTextAtomically(GuestFiles.openboxRc(titleBars), durable = false)
     }
 
-    private fun startHelpers(geometry: String): ProotProcess {
+    private fun startHelpers(geometry: String, frameRate: Int): ProotProcess {
         val binds = listOf(
             x11Dir.path to GuestPaths.X11_DIR,
             pulseDir.path to GuestPaths.PULSE_DIR,
@@ -272,25 +288,48 @@ class FlatpakLauncher(private val context: Context) {
             File(sessionDir, "openbox-rc.xml").path to SessionScript.GUEST_OPENBOX_RC,
         )
         return env.start(
-            listOf("/bin/sh", SessionScript.GUEST_SCRIPT, geometry, SessionScript.VNC_PORT.toString()),
+            listOf("/bin/sh", SessionScript.GUEST_SCRIPT, geometry, SessionScript.VNC_PORT.toString(), frameRate.toString()),
             binds,
         ) { SessionController.log("[display] $it") }
     }
 
     /**
-     * Waits until [file] exists. Fails with [error] (or returns false when it is null) on timeout
-     * or when the helpers have exited.
+     * Waits until [file] exists, woken by a [FileObserver] on its directory as soon as it is
+     * created. Fails with [error] (or returns false when it is null) on timeout or when the
+     * helpers have exited, which is checked every [HELPER_CHECK_MS].
      */
     private fun waitForFile(file: File, helpers: ProotProcess, timeoutMs: Long, error: String?): Boolean {
-        val deadline = System.currentTimeMillis() + timeoutMs
-        while (!file.exists()) {
-            if (!helpers.isAlive || System.currentTimeMillis() > deadline) {
-                if (error != null) throw LaunchException(error)
-                return false
+        val created = CountDownLatch(1)
+        val observer = directoryObserver(file.parentFile!!) { name -> if (name == file.name) created.countDown() }
+        observer.startWatching()
+        try {
+            val deadline = System.currentTimeMillis() + timeoutMs
+            while (!file.exists()) {
+                if (!helpers.isAlive || System.currentTimeMillis() > deadline) {
+                    if (error != null) throw LaunchException(error)
+                    return false
+                }
+                created.await(HELPER_CHECK_MS, TimeUnit.MILLISECONDS)
             }
-            Thread.sleep(100)
+            return true
+        } finally {
+            observer.stopWatching()
         }
-        return true
+    }
+
+    /** Calls [onCreated] with the name of each entry created in [dir]. */
+    private fun directoryObserver(dir: File, onCreated: (String) -> Unit): FileObserver {
+        val mask = FileObserver.CREATE or FileObserver.MOVED_TO
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            object : FileObserver(dir, mask) {
+                override fun onEvent(event: Int, path: String?) { path?.let(onCreated) }
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            object : FileObserver(dir.path, mask) {
+                override fun onEvent(event: Int, path: String?) { path?.let(onCreated) }
+            }
+        }
     }
 
     private fun describe(result: PlanResult): String = when (result) {
@@ -304,5 +343,6 @@ class FlatpakLauncher(private val context: Context) {
     private companion object {
         const val DISPLAY_TIMEOUT_MS = 30_000L
         const val AUDIO_TIMEOUT_MS = 10_000L
+        const val HELPER_CHECK_MS = 250L
     }
 }

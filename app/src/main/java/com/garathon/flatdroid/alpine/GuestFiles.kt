@@ -40,10 +40,11 @@ object GuestFiles {
      * normal windows maximised with their title bars kept (GTK3/Qt windows need them to close);
      * no minimise button, since there is no taskbar to bring a window back; tapping the empty
      * desktop lists the windows, minimised ones included (apps can still minimise themselves);
-     * close and maximise buttons, moving and resizing. Written for every session and bound into
-     * Alpine when Openbox starts.
+     * close and maximise buttons, moving and resizing. Without [titleBars] windows have no
+     * decorations at all (apps then close through their own menus). Written for every session and
+     * bound into Alpine when Openbox starts.
      */
-    fun openboxRc(): String {
+    fun openboxRc(titleBars: Boolean = true): String {
         fun bind(button: String, event: String, actions: String) =
             "<mousebind button=\"$button\" action=\"$event\">$actions</mousebind>"
         val focus = "<action name=\"Focus\"/><action name=\"Raise\"/>"
@@ -72,7 +73,7 @@ object GuestFiles {
             |<context name="Maximize">${bind("Left", "Click", "<action name=\"ToggleMaximize\"/>")}</context>
             |<context name="Root">${bind("Left", "Press", windowList)}${bind("Right", "Press", windowList)}</context>
             |</mouse>
-            |<applications><application class="*" type="normal"><maximized>yes</maximized></application></applications>
+            |<applications><application class="*" type="normal"><maximized>yes</maximized>${if (titleBars) "" else "<decor>no</decor>"}</application></applications>
             |</openbox_config>
             |""".trimMargin()
     }

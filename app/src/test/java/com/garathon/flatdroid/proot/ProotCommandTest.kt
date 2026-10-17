@@ -17,6 +17,7 @@ class ProotCommandTest {
         tmp = "/cache/alpine/tmp",
         shm = "/cache/alpine/shm",
         emptyDir = "/files/alpine/generated/empty",
+        dev = listOf("/dev/null", "/dev/urandom"),
     )
 
     @Test
@@ -26,7 +27,10 @@ class ProotCommandTest {
             listOf(
                 "/lib/libproot.so", "--kill-on-exit", "--link2symlink", "--sysvipc", "-L",
                 "--change-id=0:0", "--rootfs=/files/alpine/rootfs", "--cwd=/root",
-                "--bind=/dev", "--bind=/proc", "--bind=/sys", "--bind=/dev/urandom:/dev/random",
+                "--bind=/dev/null", "--bind=/dev/urandom",
+                "--bind=/proc", "--bind=/sys", "--bind=/dev/urandom:/dev/random",
+                "--bind=/proc/self/fd:/dev/fd", "--bind=/proc/self/fd/0:/dev/stdin",
+                "--bind=/proc/self/fd/1:/dev/stdout", "--bind=/proc/self/fd/2:/dev/stderr",
                 "--bind=/cache/alpine/shm:/dev/shm",
                 "--bind=/cache/alpine/tmp:/tmp",
                 "--bind=/files/alpine/generated/resolv.conf:/etc/resolv.conf",
@@ -39,20 +43,16 @@ class ProotCommandTest {
     }
 
     @Test
-    fun fakeProcFdLinksAndExtraBindsComeBeforeTheCommand() {
+    fun fakeProcAndExtraBindsComeBeforeTheCommand() {
         val inv = ProotCommand.alpine(
             paths,
             binds.copy(
                 fakeProc = mapOf("/proc/stat" to "/files/alpine/generated/proc/stat"),
-                missingFdLinks = setOf("/dev/stdin", "/dev/fd"),
                 extra = listOf("/cache/apk-cache" to "/var/cache/apk"),
             ),
             listOf("/bin/true"),
         )
         val argv = inv.argv
-        assertTrue("--bind=/proc/self/fd:/dev/fd" in argv)
-        assertTrue("--bind=/proc/self/fd/0:/dev/stdin" in argv)
-        assertTrue("--bind=/proc/self/fd/1:/dev/stdout" !in argv)
         assertTrue("--bind=/files/alpine/generated/proc/stat:/proc/stat" in argv)
         assertEquals("--bind=/cache/apk-cache:/var/cache/apk", argv[argv.size - 2])
         assertEquals("/bin/true", argv.last())
@@ -90,8 +90,21 @@ class ProotCommandTest {
     }
 
     @Test(expected = IllegalArgumentException::class)
-    fun unknownFdLinkIsRejected() {
-        binds.copy(missingFdLinks = setOf("/etc/passwd"))
+    fun nonDevPathIsRejected() {
+        binds.copy(dev = listOf("/etc/passwd"))
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun binderIsRejected() {
+        flatpakBinds.copy(dev = listOf("/dev/binder"))
+    }
+
+    @Test
+    fun wholeDevReplacesTheList() {
+        val argv = ProotCommand.flatpak(paths, flatpakBinds.copy(wholeDev = true), emptyMap(), listOf("/app/bin/x")).argv
+        assertTrue("--bind=/dev" in argv)
+        assertTrue("--bind=/dev/null" !in argv)
+        assertTrue("--bind=/proc/self/fd:/dev/fd" in argv)
     }
 
     private val flatpakBinds = FlatpakBinds(
@@ -106,6 +119,7 @@ class ProotCommandTest {
         pulseSockets = "/cache/session/pulse",
         home = "/files/appdata/org.xfce.mousepad/home",
         homeOverlays = listOf("/files/appdata/org.xfce.mousepad/config" to "/home/user/.config"),
+        dev = listOf("/dev/null", "/dev/dri"),
         extra = listOf("/files/electron/x" to "/app/x"),
     )
 
@@ -124,7 +138,9 @@ class ProotCommandTest {
                 "--bind=/files/launcher/etc/resolv.conf:/etc/resolv.conf",
                 "--bind=/files/launcher/etc/passwd:/etc/passwd",
                 "--bind=/fp/runtime/GL.default/files:/usr/lib/aarch64-linux-gnu/GL/default",
-                "--bind=/dev", "--bind=/proc", "--bind=/sys",
+                "--bind=/dev/null", "--bind=/dev/dri", "--bind=/proc", "--bind=/sys",
+                "--bind=/proc/self/fd:/dev/fd", "--bind=/proc/self/fd/0:/dev/stdin",
+                "--bind=/proc/self/fd/1:/dev/stdout", "--bind=/proc/self/fd/2:/dev/stderr",
                 "--bind=/cache/apptmp/org.xfce.mousepad/shm:/dev/shm",
                 "--bind=/cache/apptmp/org.xfce.mousepad/tmp:/tmp",
                 "--bind=/cache/session/x11:/tmp/.X11-unix",

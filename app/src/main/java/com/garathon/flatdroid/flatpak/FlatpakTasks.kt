@@ -15,6 +15,8 @@ sealed interface FlatpakTask {
     data object UpdateAll : FlatpakTask
     /** [deleteData] also removes the app's private settings, data and home. */
     data class Uninstall(val appId: String, val deleteData: Boolean) : FlatpakTask
+    /** The repository clean-up on its own, after an update or uninstall Flatdroid didn't see end. */
+    data object Repair : FlatpakTask
 }
 
 data class FlatpakTaskUi(

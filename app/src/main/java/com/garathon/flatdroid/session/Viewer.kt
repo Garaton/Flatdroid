@@ -1,11 +1,18 @@
 package com.garathon.flatdroid.session
 
+import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import androidx.core.net.toUri
+import com.garathon.flatdroid.R
 
 /** Opening an external VNC viewer on the session's display. */
 object Viewer {
     const val HOST = "127.0.0.1"
+
+    /** An installed app that opens `vnc:` links. */
+    data class App(val packageName: String, val label: String)
 
     /**
      * A `vnc://` link with the password as the `VncPassword` parameter (RFC 7869 style), which
@@ -18,6 +25,27 @@ object Viewer {
         .appendQueryParameter("VncPassword", password)
         .build()
 
-    fun intent(password: String): Intent =
-        Intent(Intent.ACTION_VIEW, uri(password)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    /** Installed viewers (apps that open `vnc:` links), by label. */
+    fun installed(context: Context): List<App> {
+        val pm = context.packageManager
+        @Suppress("DEPRECATION")
+        val activities = pm.queryIntentActivities(Intent(Intent.ACTION_VIEW, "vnc://$HOST".toUri()), PackageManager.MATCH_DEFAULT_ONLY)
+        return activities.map { App(it.activityInfo.packageName, it.loadLabel(pm).toString()) }
+            .distinctBy { it.packageName }
+            .sortedBy { it.label.lowercase() }
+    }
+
+    /**
+     * Opens the display in [chosen] (a package from Settings) if it is still installed, else
+     * through a chooser every time: the link carries the password, so it must not go to whichever
+     * app made itself the default for `vnc:` links. Null when no viewer is installed.
+     */
+    fun intent(context: Context, password: String, chosen: String?): Intent? {
+        val viewers = installed(context)
+        if (viewers.isEmpty()) return null
+        val view = Intent(Intent.ACTION_VIEW, uri(password))
+        val target = chosen?.takeIf { pkg -> viewers.any { it.packageName == pkg } }
+        val intent = if (target != null) view.setPackage(target) else Intent.createChooser(view, context.getString(R.string.session_open_viewer))
+        return intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
 }

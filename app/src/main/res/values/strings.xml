@@ -15,6 +15,21 @@
     <string name="setup_step_flathub">Add Flathub</string>
     <string name="setup_step_files">Write configuration files</string>
 
+    <string name="setup_progress_mib">%1$s / %2$s MiB</string>
+    <string name="setup_progress_extracting">Checking and extracting</string>
+    <string name="setup_progress_proot">Checking that proot runs</string>
+    <string name="setup_progress_upgrade">Upgrading Alpine</string>
+    <string name="setup_progress_packages">Installing packages</string>
+    <string name="setup_progress_fix">Running failed package scripts again</string>
+    <string name="setup_progress_flathub">Adding Flathub</string>
+    <string name="setup_progress_flathub_retry">Adding Flathub (attempt %1$d of %2$d)</string>
+    <string name="setup_error_proot">proot can\'t run Alpine on this device: %1$s</string>
+    <string name="setup_error_space">Not enough free storage: %1$d MiB free, about %2$d MiB needed</string>
+    <string name="setup_error_scripts">Package scripts failed:\n%1$s</string>
+    <string name="setup_error_packages">Packages not installed: %1$s</string>
+    <string name="setup_error_flathub">Could not add Flathub with its signing key: %1$s</string>
+    <string name="setup_error_timeout">Timed out: %1$s</string>
+    <string name="setup_time_limit">Android stopped the setup service (time limit); open Flatdroid to resume</string>
     <string name="setup_channel">Setup</string>
     <string name="setup_notification_title">Setting up Flatdroid</string>
     <string name="setup_notification_done">Flatdroid is set up</string>
@@ -36,6 +51,13 @@
     <string name="settings_section_danger">Danger zone</string>
 
     <string name="terminal_title">Alpine terminal</string>
+    <string name="terminal_ctrl_c">(Ctrl-C sent; press ✕ again to force-stop)</string>
+    <string name="terminal_force_stopping">(force-stopping)</string>
+    <string name="terminal_timed_out">(timed out)</string>
+    <string name="terminal_stopped">(stopped, exit %1$s)</string>
+    <string name="terminal_exit">(exit %1$s)</string>
+    <string name="terminal_cancelled">(cancelled)</string>
+    <string name="terminal_error">ERROR: %1$s</string>
     <string name="ready_command_label">Run a command in Alpine</string>
     <string name="ready_run">Run</string>
     <string name="ready_running">Running…</string>
@@ -77,6 +99,7 @@
     <string name="task_channel">Installing and updating</string>
     <string name="task_installing">Installing %1$s</string>
     <string name="task_updating">Updating all apps</string>
+    <string name="task_repairing">Repairing Flatpak\'s storage after an interrupted task</string>
     <string name="task_uninstalling">Uninstalling %1$s</string>
     <string name="task_done">Done: %1$s</string>
     <string name="task_failed">Failed: %1$s (%2$s)</string>
@@ -87,8 +110,30 @@
     <string name="task_cleaning_up">Cleaning up Flatpak\'s storage</string>
     <string name="task_cancelling">Cancelling… (letting Flatpak stop cleanly)</string>
     <string name="task_timed_out">Timed out</string>
+    <string name="task_log_done">(done)</string>
+    <string name="task_log_failed">(%1$s)</string>
+    <string name="task_log_cleanup_failed">(clean-up failed: %1$s)</string>
+    <plurals name="task_log_removed_broken">
+        <item quantity="one">(removed %1$d file whose content was gone)</item>
+        <item quantity="other">(removed %1$d files whose content was gone)</item>
+    </plurals>
     <string name="log_top">Top</string>
     <string name="log_bottom">Bottom</string>
+    <string name="settings_section_viewer">VNC viewer</string>
+    <string name="settings_viewer_hint">Open viewer hands the session\'s password to this app. With \"Ask every time\", Android asks which app to use each time, so no app can quietly become the default.</string>
+    <string name="settings_viewer_ask">Ask every time</string>
+    <string name="settings_viewer_missing">%1$s (not installed)</string>
+    <string name="settings_frame_rate_60">60 frames per second</string>
+    <string name="settings_frame_rate_60_hint">Smoother motion, but the display uses more CPU and battery when the picture moves a lot (scrolling, video). Off: 30 frames per second. Applies from the next launch.</string>
+    <string name="settings_custom_frame_rate">Frame rate</string>
+    <string name="settings_custom_frame_rate_hint">%1$d to %2$d; overrides the setting above. Empty to use it.</string>
+    <string name="settings_uncapped_frame_rate">Uncapped frame rate</string>
+    <string name="settings_uncapped_frame_rate_hint">As many frames as Xvnc can send. Uses the most CPU and battery when the picture moves.</string>
+    <string name="settings_title_bars">Window title bars</string>
+    <string name="settings_title_bars_hint">Title bars with close and maximize buttons on app windows. Without them apps get more room, but some (GTK3, Qt) can then only be closed from their own menus. Applies from the next launch.</string>
+    <string name="settings_gpu_runtimes">Install GPU runtimes</string>
+    <string name="settings_gpu_runtimes_hint">Lets Flatpak install vendor GPU and video decoding runtimes (NVIDIA, VAAPI) with apps. Flatdroid renders in software and doesn\'t use them; off saves space, and saving with it off removes ones already installed.</string>
+    <string name="developer_setting">Developer setting</string>
     <string name="settings_section_developer">Developer</string>
     <string name="settings_developer_options">Developer options</string>
     <string name="settings_developer_options_hint">Shows settings Flatdroid normally manages itself, such as the flags for newer Electron in each app\'s settings.</string>
@@ -145,6 +190,9 @@
     <string name="app_settings_electron">Electron</string>
     <string name="app_settings_electron_newer">Flags for newer Electron</string>
     <string name="app_settings_electron_newer_hint">Only for Electron apps. Flatdroid turns them on when the app fails with \"GPU process isn\'t usable\", and off again if the app still fails; older Electron (such as 9) shows no window with them.</string>
+    <string name="app_settings_devices">Devices</string>
+    <string name="app_settings_whole_dev">All of /dev</string>
+    <string name="app_settings_whole_dev_hint">This app asks for all devices. Normally it gets graphics, input, KVM and USB devices where the phone has them. With this on it gets every device node, including Android\'s Binder, through which it can call Android\'s system services as Flatdroid.</string>
     <string name="app_settings_storage">Storage</string>
     <string name="app_settings_cache_size">Cache: %1$s</string>
     <string name="app_settings_cache_measuring">Cache: measuring…</string>

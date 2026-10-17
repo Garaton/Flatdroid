@@ -106,6 +106,41 @@ class ElectronSwapTest {
         }
         assertNull(swap.preparedFor(app))
         assertFalse(File(tmp.root, "files/electron/$id/resources/stolen").exists())
+        // The half-built swap is in the cache, not in private storage.
+        assertFalse(File(tmp.root, "files/electron/$id").exists())
+        assertTrue(File(tmp.root, "cache/${ElectronSwap.BUILD_DIR}/$id").isDirectory)
+        swap.delete()
+        assertFalse(File(tmp.root, "cache/${ElectronSwap.BUILD_DIR}/$id").exists())
+    }
+
+    @Test
+    fun resetsFindTheBuildDirectoryAndOldDownloads() {
+        val cache = tmp.newFolder("c")
+        for (name in listOf("electron-build", "electron-9.4.4", "electron-30.0.0", "appcache")) java.io.File(cache, name).mkdirs()
+        assertEquals(setOf("electron-build", "electron-9.4.4", "electron-30.0.0"), ElectronSwap.temporaryFiles(cache).map { it.name }.toSet())
+        assertEquals(3, ElectronSwap.temporaryFiles(cache).size)
+    }
+
+    @Test
+    fun leftoversKeepOnlySwapsAndCachesOfInstalledApps() {
+        val (swap, needed, app) = setUp(electronZip)
+        swap.prepare(app, needed) { _, _, _ -> }
+        val electronDir = File(tmp.root, "files/electron")
+        val stale = File(electronDir, "gone.App").apply { mkdirs() }
+        val oldBuild = File(electronDir, "$id.new").apply { mkdirs() }
+        val caches = File(tmp.root, "cache/appcache")
+        File(caches, id).mkdirs()
+        File(caches, "gone.App/x").apply { parentFile!!.mkdirs(); writeText("x") }
+        val installation = FlatpakInstallation(File(tmp.root, "flatpak"), "aarch64")
+
+        val removed = Leftovers(installation, electronDir, listOf(caches), JvmTarFs).clean()
+
+        assertEquals(setOf(stale, oldBuild, File(caches, "gone.App")), removed.toSet())
+        assertTrue(File(electronDir, id).isDirectory)
+        assertTrue(File(caches, id).isDirectory)
+        // A swap made for an older deployment goes too.
+        File(electronDir, id).resolve(".flatdroid-electron").writeText("deploy=oldhash\n")
+        assertEquals(listOf(File(electronDir, id)), Leftovers(installation, electronDir, emptyList(), JvmTarFs).clean())
     }
 
     @Test
@@ -137,6 +172,7 @@ class ElectronSwapTest {
             assertTrue(e.message!!, "Unsafe path" in e.message!!)
         }
         assertFalse(File(tmp.root, "files/electron/escape").exists())
+        assertFalse(File(tmp.root, "cache/${ElectronSwap.BUILD_DIR}/escape").exists())
         assertNull(swap.preparedFor(app))
     }
 

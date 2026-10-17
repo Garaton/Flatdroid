@@ -22,6 +22,11 @@ data class AppSettings(
     val newerElectronFlags: Boolean = false,
     /** When the app was last launched, in milliseconds since the epoch; null if never. */
     val lastOpened: Long? = null,
+    /**
+     * For an app asking for all devices: bind the host's whole /dev, Binder included, instead of
+     * the device groups Flatpak names. Shown only with developer options.
+     */
+    val wholeDev: Boolean = false,
 ) {
     val width: Int get() = when (displaySize) {
         DisplaySize.PORTRAIT -> PORTRAIT_WIDTH
@@ -66,6 +71,7 @@ class AppSettingsStore(private val file: File) {
             customHeight = size(KEY_HEIGHT, defaults.customHeight),
             newerElectronFlags = props.getProperty(KEY_ELECTRON_NEWER) == "true",
             lastOpened = props.getProperty(KEY_LAST_OPENED)?.toLongOrNull(),
+            wholeDev = props.getProperty(KEY_WHOLE_DEV) == "true",
         )
     }
 
@@ -78,6 +84,7 @@ class AppSettingsStore(private val file: File) {
         }
         props.setProperty(KEY_ELECTRON_NEWER, settings.newerElectronFlags.toString())
         settings.lastOpened?.let { props.setProperty(KEY_LAST_OPENED, it.toString()) }
+        props.setProperty(KEY_WHOLE_DEV, settings.wholeDev.toString())
         file.writeTextAtomically(StringWriter().also { props.store(it, null) }.toString())
     }
 
@@ -93,5 +100,6 @@ class AppSettingsStore(private val file: File) {
         const val KEY_HEIGHT = "display.height"
         const val KEY_ELECTRON_NEWER = "electron.newerFlags"
         const val KEY_LAST_OPENED = "lastOpened"
+        const val KEY_WHOLE_DEV = "dev.whole"
     }
 }

@@ -44,6 +44,13 @@ class GuestFilesTest {
     }
 
     @Test
+    fun openboxWithoutTitleBarsUndecoratesNormalWindowsOnly() {
+        val rc = GuestFiles.openboxRc(titleBars = false)
+        assertTrue("<application class=\"*\" type=\"normal\"><maximized>yes</maximized><decor>no</decor></application>" in rc)
+        javax.xml.parsers.DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(rc.byteInputStream())
+    }
+
+    @Test
     fun fakeStatHasOneLinePerCpuAndConsistentTotals() {
         val proc = GuestFiles.fakeProc(cpuCount = 8, kernelRelease = "5.15.0", kernelVersion = "#1 SMP", uptimeSeconds = 100, bootEpochSeconds = 1_700_000_000)
         val stat = proc.getValue("/proc/stat").lines()

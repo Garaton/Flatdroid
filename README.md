@@ -17,7 +17,7 @@ This is an almost entirely vibe-coded app in order to train my agentic coding sk
 - [Building](#building)
 - [Methodology](#methodology)
 - [Security](#security)
-- [Acknowledgements](#acknowledgements)
+- [Acknowledgments](#acknowledgments)
 
 ## Overview
 
@@ -30,11 +30,11 @@ The app uses `Documents/Flatdroid` as its home directory, any files it creates a
 - Version and Architecture: Android 7+ (minSdk 24), arm64-v8a or x86_64.
 - Internet: For initial setup, and Flatpak downloading.
 - Storage Space: ~400 MB for initial required packages, and 0.4-1 GB per Flatpak runtime.
-- VNC Viewer: AVNC, bVNC, etc.
+- VNC Viewer App: AVNC, bVNC, etc.
 
 ## Installation
 
-Placeholder to be made when building is done
+Placeholder to be made when hardening milestone is done, with apk download information, and setup option information
 
 ## Features
 
@@ -82,8 +82,9 @@ Hardening:
 - Every Flatpak launch runs with a seccomp filter and non-dumpable proot. This prevents Flatpaks from reaching the extent of Flatdroid's permissions (a process only has access to what is bound to proot).
 - Different "Home Modes" to limit accessible files even more.
 - Per-Flatpak permissions, with the ability to also disable permissions.
+- Other miscellaneous low cost hardening.
 
-## Acknowledgements
+## Acknowledgments
 
 Flatdroid builds on and uses these projects:
 
@@ -97,6 +98,7 @@ Flatdroid builds on and uses these projects:
 - [PulseAudio](https://www.freedesktop.org/wiki/Software/PulseAudio/): LGPL-2.1
 
 ## License
+
 Licensed under the GNU General Public License v3.0 or later (GPL-3.0-or-later). See LICENSE.
 
 ## DISCLAIMER

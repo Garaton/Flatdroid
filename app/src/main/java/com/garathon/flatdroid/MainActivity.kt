@@ -139,6 +139,7 @@ class MainActivity : ComponentActivity() {
             Screen.Settings -> SettingsScreen(
                 settings = remember { savedSettings(languages) },
                 deviceLanguages = languages,
+                viewers = remember { Viewer.installed(this) },
                 applying = applying,
                 error = settingsError,
                 onSave = { viewModel.applySettings(it) { navigate(Screen.Home) } },
@@ -174,6 +175,7 @@ class MainActivity : ComponentActivity() {
                             new.copy(
                                 lastOpened = old.lastOpened,
                                 newerElectronFlags = if (developerOptions) new.newerElectronFlags else old.newerElectronFlags,
+                                wholeDev = if (developerOptions) new.wholeDev else old.wholeDev,
                             )
                         }
                         navigate(Screen.Home)
@@ -259,7 +261,9 @@ class MainActivity : ComponentActivity() {
 
     private fun openViewer(password: String) {
         try {
-            startActivity(Viewer.intent(password))
+            val intent = Viewer.intent(this, password, SetupController.settings(this).load()?.vncViewer)
+                ?: throw ActivityNotFoundException()
+            startActivity(intent)
         } catch (_: ActivityNotFoundException) {
             Toast.makeText(this, R.string.session_no_viewer, Toast.LENGTH_LONG).show()
         }
@@ -269,6 +273,19 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         SetupController.refresh(this)
         home.reload()
+        repairAfterKilledTask()
+    }
+
+    /**
+     * An update or uninstall that never ended (Flatdroid was killed in the middle) can leave the
+     * repository half-pruned; its marker is still there, so clean up now, before anything else
+     * uses the repository. Not while setup or a reset is unfinished, or anything else runs.
+     */
+    private fun repairAfterKilledTask() {
+        val setup = SetupController.state.value
+        if (!AppData.taskMarker(this).exists() || !setup.isComplete || setup.running) return
+        if (FlatpakTasks.ui.value.running != null || SessionController.isBusy) return
+        FlatpakTaskService.start(this, FlatpakTask.Repair)
     }
 
     private fun startSetup() {

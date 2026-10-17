@@ -12,6 +12,7 @@ import com.garathon.flatdroid.flatpak.InstalledApp
 import com.garathon.flatdroid.flatpak.InstalledApps
 import com.garathon.flatdroid.session.SessionController
 import com.garathon.flatdroid.session.SessionState
+import com.garathon.flatdroid.setup.SetupController
 import com.garathon.flatdroid.setup.AndroidTarFs
 import com.garathon.flatdroid.setup.deleteTree
 import kotlinx.coroutines.Dispatchers
@@ -25,7 +26,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
 
-/** Installed apps for the home list; reloaded after Flatpak tasks and sessions. */
+/** Installed apps for the home list; reloaded after Flatpak tasks, sessions and setup. */
 class HomeViewModel(app: Application) : AndroidViewModel(app) {
     private val _apps = MutableStateFlow<List<InstalledApp>?>(null)
     /** Null until first loaded. */
@@ -37,6 +38,8 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
                 FlatpakTasks.ui.distinctUntilChangedBy { it.generation }.map { },
                 // A launch records the last-opened time.
                 SessionController.ui.distinctUntilChangedBy { it.state is SessionState.Running }.map { },
+                // Setup after a reset brings kept Flatpaks back while the screen stays open.
+                SetupController.state.distinctUntilChangedBy { it.isComplete && !it.running }.map { },
             ).collect { reload() }
         }
     }

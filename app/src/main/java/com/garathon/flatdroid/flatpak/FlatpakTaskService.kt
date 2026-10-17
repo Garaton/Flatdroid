@@ -17,9 +17,11 @@ import androidx.core.content.ContextCompat
 import com.garathon.flatdroid.MainActivity
 import com.garathon.flatdroid.R
 import com.garathon.flatdroid.alpine.AlpineEnvironment
+import com.garathon.flatdroid.launcher.ElectronSwap
 import com.garathon.flatdroid.session.SessionController
 import com.garathon.flatdroid.setup.AndroidTarFs
 import com.garathon.flatdroid.setup.deleteTree
+import com.garathon.flatdroid.util.writeTextAtomically
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -58,9 +60,12 @@ class FlatpakTaskService : Service() {
         wakeLock = getSystemService(PowerManager::class.java)
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Flatdroid:flatpak")
             .apply { acquire(WAKE_LOCK_TIMEOUT_MS) }
+        // Installs are left out: an interrupted download is already safe (see cleanUpAfter).
+        val marker = AppData.taskMarker(applicationContext).takeIf { task !is FlatpakTask.Install }
         job = scope.launch {
             var error: String? = null
             try {
+                marker?.writeTextAtomically(task.toString())
                 runInterruptible { perform(task) }
             } catch (e: CancellationException) {
                 error = getString(R.string.task_cancelled)
@@ -69,7 +74,8 @@ class FlatpakTaskService : Service() {
                 error = e.message ?: e.toString()
                 runInterruptible { cleanUpAfter(task) }
             } finally {
-                FlatpakTasks.log(error?.let { "($it)" } ?: "(done)")
+                marker?.delete()
+                FlatpakTasks.log(error?.let { getString(R.string.task_log_failed, it) } ?: getString(R.string.task_log_done))
                 FlatpakTasks.end(task, error)
                 stopSelf()
             }
@@ -106,6 +112,7 @@ class FlatpakTaskService : Service() {
                 run(env, FlatpakCommands.uninstallUnused, getString(R.string.task_removing_unused))
                 run(env, FlatpakCommands.update)
             }
+            FlatpakTask.Repair -> cleanRepository(env)
             is FlatpakTask.Uninstall -> {
                 run(env, FlatpakCommands.uninstall(task.appId))
                 run(env, FlatpakCommands.uninstallUnused, getString(R.string.task_removing_unused))
@@ -127,7 +134,7 @@ class FlatpakTaskService : Service() {
         try {
             cleanRepository(AlpineEnvironment.get(applicationContext))
         } catch (e: Exception) {
-            FlatpakTasks.log("(clean-up failed: ${e.message})")
+            FlatpakTasks.log(getString(R.string.task_log_cleanup_failed, e.message ?: e.toString()))
         }
     }
 
@@ -135,7 +142,7 @@ class FlatpakTaskService : Service() {
     private fun cleanRepository(env: AlpineEnvironment) {
         FlatpakTasks.newCommand(getString(R.string.task_cleaning_up))
         val removed = BrokenLinks(File(env.paths().l2sDir), AndroidLinkFs).removeUnder(env.flatpakDir)
-        if (removed > 0) FlatpakTasks.log("(removed $removed files whose content was gone)")
+        if (removed > 0) FlatpakTasks.log(resources.getQuantityString(R.plurals.task_log_removed_broken, removed, removed))
         run(env, FlatpakCommands.cleanRepository, getString(R.string.task_cleaning_up))
     }
 
@@ -151,10 +158,13 @@ class FlatpakTaskService : Service() {
         }
     }
 
-    /** What Flatdroid kept for the app: always its cache and Electron swap; its data on request. */
+    /** What Flatdroid kept for the app: always its caches and Electron swap; its data on request. */
     private fun removeAppFiles(appId: String, deleteData: Boolean) {
         val ctx = applicationContext
-        val remove = mutableListOf(File(AppData.cacheRoot(ctx), appId), File(AppData.electronDir(ctx), appId))
+        val remove = mutableListOf(
+            File(AppData.cacheRoot(ctx), appId), File(AppData.rootsDir(ctx), appId), File(AppData.appTmpDir(ctx), appId),
+            File(AppData.electronDir(ctx), appId), File(AlpineEnvironment.get(ctx).cacheDir, "${ElectronSwap.BUILD_DIR}/$appId"),
+        )
         if (deleteData) {
             remove += File(AppData.root(ctx), appId)
             AppData.settings(ctx, appId).delete()
@@ -216,6 +226,7 @@ class FlatpakTaskService : Service() {
             when (task) {
                 is FlatpakTask.Install -> intent.putExtra(EXTRA_TASK, "install").putExtra(EXTRA_APP_ID, task.appId)
                 FlatpakTask.UpdateAll -> intent.putExtra(EXTRA_TASK, "update")
+                FlatpakTask.Repair -> intent.putExtra(EXTRA_TASK, "repair")
                 is FlatpakTask.Uninstall -> intent.putExtra(EXTRA_TASK, "uninstall").putExtra(EXTRA_APP_ID, task.appId)
                     .putExtra(EXTRA_DELETE_DATA, task.deleteData)
             }
@@ -227,6 +238,7 @@ class FlatpakTaskService : Service() {
             return when (intent.getStringExtra(EXTRA_TASK)) {
                 "install" -> appId?.let { FlatpakTask.Install(it) }
                 "update" -> FlatpakTask.UpdateAll
+                "repair" -> FlatpakTask.Repair
                 "uninstall" -> appId?.let { FlatpakTask.Uninstall(it, intent.getBooleanExtra(EXTRA_DELETE_DATA, false)) }
                 else -> null
             }
@@ -240,6 +252,7 @@ class FlatpakTaskService : Service() {
         fun describe(context: Context, task: FlatpakTask): String = when (task) {
             is FlatpakTask.Install -> context.getString(R.string.task_installing, task.appId)
             FlatpakTask.UpdateAll -> context.getString(R.string.task_updating)
+            FlatpakTask.Repair -> context.getString(R.string.task_repairing)
             is FlatpakTask.Uninstall -> context.getString(R.string.task_uninstalling, task.appId)
         }
     }

@@ -1,5 +1,6 @@
 package com.garathon.flatdroid.proot
 
+import com.garathon.flatdroid.util.forEachLineLimited
 import java.io.File
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -59,6 +60,9 @@ object ProotRunner {
     /** How much of a command's output [run] keeps; callers read its last lines. */
     const val MAX_OUTPUT_CHARS = 256 * 1024
 
+    /** Longer output lines are handed on in pieces of this size. */
+    const val MAX_LINE_CHARS = 8192
+
     /** Starts [invocation]; [stdin] is written and closed (empty when null). */
     fun start(
         invocation: ProotInvocation,
@@ -84,7 +88,7 @@ object ProotRunner {
         }
         val reader = thread(name = "proot-output") {
             try {
-                process.inputStream.bufferedReader().useLines { lines -> lines.forEach(onLine) }
+                process.inputStream.reader().use { it.forEachLineLimited(MAX_LINE_CHARS, onLine) }
             } catch (_: java.io.IOException) {
                 // The stream closed while the process was being stopped.
             }

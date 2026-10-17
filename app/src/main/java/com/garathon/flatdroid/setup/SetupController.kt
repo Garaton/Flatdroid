@@ -3,6 +3,7 @@ package com.garathon.flatdroid.setup
 import android.content.Context
 import com.garathon.flatdroid.alpine.AlpineEnvironment
 import com.garathon.flatdroid.flatpak.AppData
+import com.garathon.flatdroid.launcher.ElectronSwap
 import com.garathon.flatdroid.settings.UserSettingsStore
 import com.garathon.flatdroid.util.DebugLog
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -42,7 +43,8 @@ object SetupController {
         pendingFile = File(context.filesDir, "alpine/reset-pending"),
         installer = env.installer,
         state = store(context),
-        temporary = env.temporaryFiles() + listOf(AppData.rootsDir(context), AppData.appTmpDir(context), AppData.sessionDir(context)),
+        temporary = env.temporaryFiles() + listOf(AppData.rootsDir(context), AppData.appTmpDir(context), AppData.sessionDir(context)) +
+            ElectronSwap.temporaryFiles(env.cacheDir),
         appCaches = listOf(AppData.cacheRoot(context)),
         flatpakFiles = listOf(AppData.electronDir(context)),
         userData = listOf(

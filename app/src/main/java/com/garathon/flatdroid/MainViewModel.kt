@@ -59,10 +59,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val proc = command ?: return
         if (!interrupted) {
             interrupted = true
-            end("(Ctrl-C sent; press ✕ again to force-stop)")
+            end(text(R.string.terminal_ctrl_c))
             viewModelScope.launch(Dispatchers.IO) { proc.interrupt() }
         } else {
-            end("(force-stopping)")
+            end(text(R.string.terminal_force_stopping))
             viewModelScope.launch(Dispatchers.IO) { proc.kill() }
         }
     }
@@ -84,7 +84,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     val env = AlpineEnvironment.get(app)
                     for (command in settings.commands()) {
                         DebugLog.i("$ ${command.joinToString(" ")}")
-                        val result = env.run(command, onLine = DebugLog::i)
+                        // Uninstalling runtimes can take minutes under proot.
+                        val result = env.run(command, timeoutSeconds = SETTINGS_TIMEOUT_SECONDS, onLine = DebugLog::i)
                         if (result.exitCode != 0) {
                             throw IOException(result.output.lines().lastOrNull { it.isNotBlank() } ?: "exit ${result.exitCode}")
                         }
@@ -125,18 +126,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 watchdog.cancel()
                 end(
                     when {
-                        timedOut -> "(timed out)"
-                        interrupted -> "(stopped, exit $code)"
-                        else -> "(exit $code)"
+                        timedOut -> text(R.string.terminal_timed_out)
+                        interrupted -> text(R.string.terminal_stopped, code)
+                        else -> text(R.string.terminal_exit, code)
                     }
                 )
             } catch (e: CancellationException) {
                 // The screen is gone for good: stop the command without asking.
                 proc?.let { withContext(NonCancellable) { runInterruptible { it.stop() } } }
-                end("(cancelled)")
+                end(text(R.string.terminal_cancelled))
                 throw e
             } catch (e: Exception) {
-                end("ERROR: $e")
+                end(text(R.string.terminal_error, e))
             } finally {
                 this@MainViewModel.command = null
                 _running.value = false
@@ -149,6 +150,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         outputLines.add(line)
     }
 
+    private fun text(id: Int, vararg args: Any?): String = getApplication<Application>().getString(id, *args)
+
     private fun end(line: String) {
         DebugLog.i(line)
         outputLines.add(line)
@@ -156,6 +159,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private companion object {
         const val COMMAND_TIMEOUT_SECONDS = 30 * 60L
+        const val SETTINGS_TIMEOUT_SECONDS = 15 * 60L
         const val MAX_OUTPUT_LINES = 2_000
         const val LIVE_OUTPUT_LINES = 300
         const val OUTPUT_INTERVAL_MS = 100L

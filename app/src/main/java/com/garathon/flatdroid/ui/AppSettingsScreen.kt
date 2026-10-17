@@ -42,7 +42,8 @@ import com.garathon.flatdroid.ui.theme.FlatdroidTheme
 
 /**
  * One app's settings: its display size, its cache, and uninstalling; with [developerOptions],
- * also the Electron flags Flatdroid otherwise manages itself.
+ * also the Electron flags Flatdroid otherwise manages itself and, for apps asking for all
+ * devices, the host's whole /dev.
  */
 @Composable
 fun AppSettingsScreen(
@@ -65,6 +66,7 @@ fun AppSettingsScreen(
     var width by rememberSaveable { mutableStateOf(settings.customWidth.toString()) }
     var height by rememberSaveable { mutableStateOf(settings.customHeight.toString()) }
     var newerElectron by rememberSaveable { mutableStateOf(settings.newerElectronFlags) }
+    var wholeDev by rememberSaveable { mutableStateOf(settings.wholeDev) }
     var confirmUninstall by rememberSaveable { mutableStateOf(false) }
     var cacheCleared by rememberSaveable { mutableStateOf(false) }
 
@@ -87,7 +89,7 @@ fun AppSettingsScreen(
             }
         }
 
-        Text(stringResource(R.string.app_settings_display), style = MaterialTheme.typography.titleMedium)
+        SectionTitle(stringResource(R.string.app_settings_display))
         Text(stringResource(R.string.app_settings_display_hint), style = MaterialTheme.typography.bodySmall)
         Column(Modifier.selectableGroup()) {
             RadioRow(choice == DisplaySize.PORTRAIT, { choice = DisplaySize.PORTRAIT }, stringResource(R.string.app_settings_portrait, AppSettings.PORTRAIT_WIDTH, AppSettings.PORTRAIT_HEIGHT))
@@ -103,11 +105,20 @@ fun AppSettingsScreen(
         }
 
         if (developerOptions) {
-            Text(stringResource(R.string.app_settings_electron), style = MaterialTheme.typography.titleMedium)
+            SectionTitle(stringResource(R.string.app_settings_electron))
             SwitchRow(
                 newerElectron, { newerElectron = it },
                 stringResource(R.string.app_settings_electron_newer), stringResource(R.string.app_settings_electron_newer_hint),
+                developer = true,
             )
+            if (app.requestsAllDevices) {
+                SectionTitle(stringResource(R.string.app_settings_devices))
+                SwitchRow(
+                    wholeDev, { wholeDev = it },
+                    stringResource(R.string.app_settings_whole_dev), stringResource(R.string.app_settings_whole_dev_hint),
+                    developer = true,
+                )
+            }
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -120,6 +131,7 @@ fun AppSettingsScreen(
                             customWidth = if (custom) size(width)!! else settings.customWidth,
                             customHeight = if (custom) size(height)!! else settings.customHeight,
                             newerElectronFlags = newerElectron,
+                            wholeDev = wholeDev,
                         )
                     )
                 },
@@ -128,7 +140,7 @@ fun AppSettingsScreen(
             TextButton(onClick = onBack) { Text(stringResource(R.string.settings_back)) }
         }
 
-        Text(stringResource(R.string.app_settings_storage), style = MaterialTheme.typography.titleMedium)
+        SectionTitle(stringResource(R.string.app_settings_storage))
         Text(
             cacheBytes?.let { stringResource(R.string.app_settings_cache_size, Formatter.formatShortFileSize(LocalContext.current, it)) }
                 ?: stringResource(R.string.app_settings_cache_measuring),
@@ -139,7 +151,7 @@ fun AppSettingsScreen(
             Text(stringResource(if (cacheCleared) R.string.app_settings_cache_cleared else R.string.app_settings_clear_cache))
         }
 
-        Text(stringResource(R.string.settings_section_danger), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.error)
+        SectionTitle(stringResource(R.string.settings_section_danger), danger = true)
         OutlinedButton(onClick = { confirmUninstall = true }, enabled = canUninstall) {
             Text(stringResource(R.string.uninstall_button), color = MaterialTheme.colorScheme.error)
         }

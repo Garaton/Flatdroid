@@ -1,6 +1,7 @@
 package com.garathon.flatdroid.ui
 
 import android.content.ClipData
+import android.os.PersistableBundle
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -116,9 +117,22 @@ private fun PasswordLine(password: String) {
             style = MaterialTheme.typography.bodyMedium,
             fontFamily = FontFamily.Monospace,
         )
-        TextButton(onClick = { scope.launch { clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("VNC password", password))) } }) { Text(stringResource(R.string.session_copy_password)) }
+        TextButton(onClick = { scope.launch { clipboard.setClipEntry(ClipEntry(sensitiveText("VNC password", password))) } }) {
+            Text(stringResource(R.string.session_copy_password))
+        }
     }
 }
+
+/**
+ * Clipboard text marked sensitive, so keyboards and Android's clipboard preview don't show or keep
+ * it (Android 13+; older versions ignore the mark).
+ */
+private fun sensitiveText(label: String, text: String): ClipData = ClipData.newPlainText(label, text).apply {
+    description.extras = PersistableBundle().apply { putBoolean(EXTRA_IS_SENSITIVE, true) }
+}
+
+/** `ClipDescription.EXTRA_IS_SENSITIVE`, which only exists in the API from Android 13. */
+private const val EXTRA_IS_SENSITIVE = "android.content.extra.IS_SENSITIVE"
 
 /** The running or finished Flatpak task. Nothing when there is none. */
 @Composable

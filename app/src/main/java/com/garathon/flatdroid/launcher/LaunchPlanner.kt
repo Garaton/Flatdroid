@@ -3,6 +3,7 @@ package com.garathon.flatdroid.launcher
 import com.garathon.flatdroid.flatpak.Deployment
 import com.garathon.flatdroid.flatpak.FlatpakInstallation
 import com.garathon.flatdroid.flatpak.FlatpakRef
+import com.garathon.flatdroid.proot.DevNodes
 import com.garathon.flatdroid.proot.FlatpakBinds
 import java.io.File
 
@@ -18,7 +19,6 @@ data class HostDirs(
     val etc: Map<String, File>,
     val x11Sockets: File,
     val pulseSockets: File,
-    val missingFdLinks: Set<String> = emptySet(),
 )
 
 /** Per-app choices that change a launch. */
@@ -29,6 +29,8 @@ data class LaunchOptions(
     val electronSwap: File? = null,
     val extraArgs: List<String> = emptyList(),
     val environment: Map<String, String> = emptyMap(),
+    /** For an app asking for `devices=all`: the host's whole /dev, Binder included (the app's own setting). */
+    val wholeDev: Boolean = false,
 )
 
 /** Everything needed to start an app: its proot binds, environment and command, and its root's layout. */
@@ -77,6 +79,8 @@ class LaunchPlanner(
     /** link2symlink's directory: the only absolute link targets that are host paths. */
     private val l2sDir: File,
     private val readlink: (File) -> String?,
+    /** Whether a host /dev entry exists on this device. */
+    private val devExists: (String) -> Boolean = { File(it).exists() },
 ) {
     fun plan(appId: String, dirs: HostDirs, options: LaunchOptions = LaunchOptions()): PlanResult {
         val app = installation.app(appId) ?: return PlanResult.NotInstalled(appId)
@@ -137,6 +141,7 @@ class LaunchPlanner(
             extensionLdPaths = ldPaths,
             overrides = options.environment,
         )
+        val devices = app.metadata.context.devices
         val binds = FlatpakBinds(
             root = dirs.root.path,
             runtimeFiles = runtime.files.path,
@@ -149,7 +154,8 @@ class LaunchPlanner(
             pulseSockets = dirs.pulseSockets.path,
             home = dirs.home.path,
             homeOverlays = dirs.homeOverlays.map { it.first.path to it.second },
-            missingFdLinks = dirs.missingFdLinks,
+            dev = DevNodes.forApp(devices, devExists),
+            wholeDev = options.wholeDev && DevNodes.ALL in devices,
             extra = extraBinds,
         )
         return PlanResult.Ready(

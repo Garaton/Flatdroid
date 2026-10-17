@@ -5,6 +5,7 @@ import android.content.Context
 import android.os.SystemClock
 import android.system.Os
 import com.garathon.flatdroid.proot.AlpineBinds
+import com.garathon.flatdroid.proot.DevNodes
 import com.garathon.flatdroid.proot.ProcessResult
 import com.garathon.flatdroid.proot.ProcessStopper
 import com.garathon.flatdroid.proot.ProotProcess
@@ -71,7 +72,7 @@ class AlpineEnvironment private constructor(private val context: Context) {
 
     /**
      * Starts [command] in Alpine as fake root and returns at once; the caller stops it. Used for
-     * the long-running display and audio helpers.
+     * the terminal and the long-running display and audio helpers.
      */
     fun start(
         command: List<String>,
@@ -88,9 +89,6 @@ class AlpineEnvironment private constructor(private val context: Context) {
 
     /** resolv.conf for the current network. */
     fun resolvConf(): String = GuestFiles.resolvConf(NetworkDns.servers(context))
-
-    /** Which of /dev/fd, /dev/stdin, /dev/stdout, /dev/stderr the host lacks. */
-    fun missingFdLinks(): Set<String> = AlpineBinds.FD_LINKS.keys.filter { !lexists(File(it)) }.toSet()
 
     fun paths(): ProotPaths = ProotPaths(
         proot = File(libDir, "libproot.so").path,
@@ -121,6 +119,9 @@ class AlpineEnvironment private constructor(private val context: Context) {
             fakeProc[guest] = write("proc/$name", content).path
         }
 
+        val dev = DevNodes.forAlpine(DevNodes::hostHas)
+        DevNodes.createMountPoints(installer.rootfs, dev + AlpineBinds.FD_LINKS.keys)
+
         return AlpineBinds(
             resolvConf = resolv.path,
             hosts = hosts.path,
@@ -128,20 +129,18 @@ class AlpineEnvironment private constructor(private val context: Context) {
             shm = dir(File(cacheAlpine, "shm")).path,
             emptyDir = dir(File(generatedDir, "empty")).path,
             fakeProc = fakeProc,
-            missingFdLinks = missingFdLinks(),
+            dev = dev,
             extra = extra,
         )
     }
 
     private fun write(name: String, content: String): File {
         val file = File(generatedDir, name)
-        if (!file.isFile || file.readText() != content) file.writeTextAtomically(content)
+        if (!file.isFile || file.readText() != content) file.writeTextAtomically(content, durable = false)
         return file
     }
 
     private fun dir(file: File): File = file.apply { mkdirs() }
-
-    private fun lexists(file: File) = AndroidTarFs.isSymlink(file) || file.exists()
 
     private fun hostCanRead(path: String): Boolean = try {
         FileInputStream(path).use { it.read() }

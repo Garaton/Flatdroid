@@ -3,6 +3,7 @@ package com.garathon.flatdroid.launcher
 import com.garathon.flatdroid.flatpak.Deployment
 import com.garathon.flatdroid.setup.TarFs
 import com.garathon.flatdroid.setup.deleteTree
+import com.garathon.flatdroid.util.readTextUpTo
 import com.garathon.flatdroid.util.writeTextAtomically
 import java.io.File
 import java.io.IOException
@@ -12,7 +13,8 @@ import java.util.zip.ZipInputStream
  * An Electron build for this device standing in for one an app ships for another architecture
  * (Flathub's aarch64 Unofficial Homestuck Collection contains x86_64 Electron 9.4.4). Same
  * version, the app's own `resources/` copied in, renamed to the app's binary name, and bound over
- * the app's Electron directory. Kept in `files/electron/<ID>`; prepared again when the app updates.
+ * the app's Electron directory. Built in the cache and moved to `files/electron/<ID>` when
+ * complete; prepared again when the app updates.
  * 
  * (The Homestuck rule)
  */
@@ -30,11 +32,11 @@ class ElectronSwap(
     private val download: (url: String, dest: File, maxBytes: Long, onProgress: (Long, Long) -> Unit) -> Unit,
     private val sha256: (File) -> String,
 ) {
-    private val marker get() = File(dir, MARKER)
+    /** Where the swap is built; in the cache, so a half-built one never stays in private storage. */
+    private val work get() = File(cacheDir, "$BUILD_DIR/${dir.name}")
 
-    /** The prepared directory, if it was made for this deployment of the app (and is still a directory, not a link). */
-    fun preparedFor(app: Deployment): File? =
-        dir.takeIf { !fs.isSymlink(it) && marker.isFile && marker.readText().lines().firstOrNull() == "deploy=${app.dir.name}" }
+    /** The prepared directory, if it was made for this deployment of the app. */
+    fun preparedFor(app: Deployment): File? = dir.takeIf { isPreparedFor(it, app, fs) }
 
     /** What [prepare] is doing, for its progress. */
     enum class Step { CHECKSUMS, DOWNLOAD, VERIFY, EXTRACT, RESOURCES }
@@ -48,7 +50,7 @@ class ElectronSwap(
         val version = needed.version ?: throw IOException("The app's Electron version could not be read")
         if (needed.hasNativeModules) throw IOException("The app has native modules built for ${needed.binaryArch}; another Electron can't load them")
         val zipName = Electron.zipName(version, arch)
-        val downloads = File(cacheDir, "electron-$version").apply { mkdirs() }
+        val downloads = File(cacheDir, "$DOWNLOAD_PREFIX$version").apply { mkdirs() }
 
         onProgress(Step.CHECKSUMS, zipName, null)
         val sums = File(downloads, "SHASUMS256.txt")
@@ -70,7 +72,7 @@ class ElectronSwap(
         }
 
         onProgress(Step.EXTRACT, zipName, null)
-        val work = File(dir.path + ".new")
+        val work = work
         fs.deleteTree(work)
         work.mkdirs()
         extract(zip, work)
@@ -92,14 +94,17 @@ class ElectronSwap(
         File(work, MARKER).writeTextAtomically("deploy=${app.dir.name}\nversion=$version\narch=$arch\n")
 
         fs.deleteTree(dir)
+        dir.parentFile?.mkdirs()
         if (!work.renameTo(dir)) throw IOException("Could not move $work to $dir")
+        // Built in the cache, so its files carry the cache group; this is app data now.
+        dir.walkTopDown().onEnter { it == dir || !fs.isSymlink(it) }.forEach { fs.useOwnGroup(it) }
         fs.deleteTree(downloads)
     }
 
     /** Removes the swap (e.g. when the app is uninstalled). */
     fun delete() {
         fs.deleteTree(dir)
-        fs.deleteTree(File(dir.path + ".new"))
+        fs.deleteTree(work)
     }
 
     private fun extract(zip: File, dest: File) {
@@ -147,9 +152,24 @@ class ElectronSwap(
         }
     }
 
-    private companion object {
-        const val MARKER = ".flatdroid-electron"
+    companion object {
+        private const val MARKER = ".flatdroid-electron"
         /** Electron's Linux zips are 60–120 MiB. */
-        const val MAX_ZIP_BYTES = 256L shl 20
+        private const val MAX_ZIP_BYTES = 256L shl 20
+        /** Under the cache directory: swaps being built, one directory per app. */
+        const val BUILD_DIR = "electron-build"
+        private const val DOWNLOAD_PREFIX = "electron-"
+        /** The marker is in a directory bound into the app's root, so the app can write it. */
+        private const val MAX_MARKER_BYTES = 4096L
+
+        /** In [cacheDir]: swaps being built and downloads a cancelled preparation left (`electron-<version>`). */
+        fun temporaryFiles(cacheDir: File): List<File> =
+            (listOf(File(cacheDir, BUILD_DIR)) + (cacheDir.listFiles { f -> f.name.startsWith(DOWNLOAD_PREFIX) }?.toList() ?: emptyList())).distinct()
+
+        /** Whether [dir] is a swap made for this deployment of the app (and a directory, not a link). */
+        fun isPreparedFor(dir: File, app: Deployment, fs: TarFs): Boolean {
+            val marker = File(dir, MARKER)
+            return !fs.isSymlink(dir) && marker.isFile && marker.readTextUpTo(MAX_MARKER_BYTES)?.lines()?.firstOrNull() == "deploy=${app.dir.name}"
+        }
     }
 }

@@ -75,7 +75,7 @@ class SetupService : Service() {
                 }
                 if (!resetOnly) {
                     val store = SetupController.store(applicationContext)
-                    val setup = AlpineSetup(env, AppData.launcherFiles(applicationContext))
+                    val setup = AlpineSetup(applicationContext, env, AppData.launcherFiles(applicationContext))
                     runInterruptible { SetupRunner(store, setup::perform).run(SetupController.reporter) }
                 }
             } catch (e: Exception) {
@@ -95,7 +95,7 @@ class SetupService : Service() {
 
     /** Android 15 limits dataSync services to 6 hours a day. */
     override fun onTimeout(startId: Int, fgsType: Int) {
-        SetupController.reporter.log("Android stopped the setup service (time limit); open Flatdroid to resume")
+        SetupController.reporter.log(getString(R.string.setup_time_limit))
         stopSelf()
     }
 

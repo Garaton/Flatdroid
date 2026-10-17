@@ -18,6 +18,7 @@ import com.garathon.flatdroid.R
 import com.garathon.flatdroid.flatpak.FlatpakTask
 import com.garathon.flatdroid.flatpak.FlatpakTasks
 import com.garathon.flatdroid.flatpak.InstalledApps
+import com.garathon.flatdroid.setup.SetupController
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -144,10 +145,9 @@ class SessionService : Service() {
             .setContentIntent(open)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
-        if (state is SessionState.Running) {
-            val viewer = PendingIntent.getActivity(
-                this, 1, Viewer.intent(state.password), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-            )
+        val viewerIntent = (state as? SessionState.Running)?.let { Viewer.intent(this, it.password, SetupController.settings(this).load()?.vncViewer) }
+        if (viewerIntent != null) {
+            val viewer = PendingIntent.getActivity(this, 1, viewerIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
             builder.addAction(0, getString(R.string.session_open_viewer), viewer)
         }
         val stop = PendingIntent.getService(

@@ -1,5 +1,6 @@
 package com.garathon.flatdroid.flatpak
 
+import com.garathon.flatdroid.util.readTextUpTo
 import java.io.File
 
 /** An installed app or runtime: its ref and deployed directory (with `files/` and `metadata`). */
@@ -64,7 +65,7 @@ class FlatpakInstallation(root: File, private val arch: String) {
         if (!isValidId(ref.name) || !isValidId(ref.branch) || !isValidId(ref.arch)) return null
         val dir = inside(File(root, "$kind/${ref.name}/${ref.arch}/${ref.branch}/active")) ?: return null
         val metadata = try {
-            FlatpakMetadata.parse(File(dir, "metadata").readText())
+            FlatpakMetadata.parse(File(dir, "metadata").readTextUpTo() ?: return null)
         } catch (_: Exception) {
             return null
         }

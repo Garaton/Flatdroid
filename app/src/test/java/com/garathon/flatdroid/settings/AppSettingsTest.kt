@@ -15,7 +15,7 @@ class AppSettingsTest {
         val store = AppSettingsStore(File(tmp.root, "appsettings/a.App.properties"))
         assertEquals(AppSettings(), store.load())
         assertEquals("1000x1400", store.load().geometry)
-        val saved = AppSettings(DisplaySize.CUSTOM, 960, 640, newerElectronFlags = true, lastOpened = 1234L)
+        val saved = AppSettings(DisplaySize.CUSTOM, 960, 640, newerElectronFlags = true, lastOpened = 1234L, wholeDev = true)
         store.save(saved)
         assertEquals(saved, store.load())
         assertEquals("960x640", store.load().geometry)

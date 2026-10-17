@@ -2,6 +2,7 @@ package com.garathon.flatdroid.launcher
 
 import com.garathon.flatdroid.flatpak.FlatpakInstallation
 import com.garathon.flatdroid.flatpak.TestInstallation
+import com.garathon.flatdroid.proot.DevNodes
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -140,5 +141,24 @@ class LaunchPlannerTest {
         val plan = Ready(planner.plan(id, dirs, LaunchOptions(electronSwap = swap)))
         assertEquals(listOf(swap.path to "/app/uhc"), plan.binds.extra)
         assertEquals(listOf("/app/uhc/uhc") + Electron.BASE_FLAGS, plan.command)
+    }
+
+    @Test
+    fun devFollowsTheMetadatasDevices() {
+        val devPlanner = LaunchPlanner(FlatpakInstallation(inst.root, "aarch64"), "aarch64", l2s, TestInstallation::readlink) { it != "/dev/kvm" }
+        runtimeWithGl()
+        fun plan(id: String, devices: String?, options: LaunchOptions = LaunchOptions()): LaunchPlan {
+            val context = devices?.let { "\n[Context]\ndevices=$it\n" } ?: ""
+            File(inst.app(id, metadata = appMetadata(id, "x", extra = context)), "bin").mkdirs()
+            return Ready(devPlanner.plan(id, dirs, options))
+        }
+        assertEquals(DevNodes.BASE, plan("a.Plain", null).binds.dev)
+        assertEquals(DevNodes.BASE + "/dev/dri", plan("a.Dri", "dri;").binds.dev)
+        val all = plan("a.All", "all;")
+        assertEquals(DevNodes.BASE + listOf("/dev/dri", "/dev/input", "/dev/bus/usb"), all.binds.dev)
+        assertFalse(all.binds.wholeDev)
+        assertTrue(plan("a.All2", "all;", LaunchOptions(wholeDev = true)).binds.wholeDev)
+        // The setting only applies to apps that ask for all devices.
+        assertFalse(plan("a.Dri2", "dri;", LaunchOptions(wholeDev = true)).binds.wholeDev)
     }
 }

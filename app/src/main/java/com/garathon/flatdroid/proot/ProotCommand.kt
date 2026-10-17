@@ -38,8 +38,8 @@ data class AlpineBinds(
     val emptyDir: String,
     /** Stand-ins for /proc entries the app can't read: guest path to host file. */
     val fakeProc: Map<String, String> = emptyMap(),
-    /** Which of /dev/fd, /dev/stdin, /dev/stdout, /dev/stderr the host lacks. */
-    val missingFdLinks: Set<String> = emptySet(),
+    /** Host /dev entries bound at the same path (see [DevNodes]); the rest of /dev isn't there. */
+    val dev: List<String> = emptyList(),
     /** Further binds, host path to guest path. */
     val extra: List<Pair<String, String>> = emptyList(),
 ) {
@@ -50,11 +50,11 @@ data class AlpineBinds(
         for (path in fakeProc.keys + extra.map { it.second }) {
             require(path.startsWith("/") && ':' !in path) { "Unusable guest path: $path" }
         }
-        require(missingFdLinks.all { it in FD_LINKS }) { "Unknown fd link: $missingFdLinks" }
+        require(dev.all(DevNodes::isAllowed)) { "Unusable /dev path: $dev" }
     }
 
     companion object {
-        /** Guest /dev entries and the /proc/self/fd paths that stand in for them. */
+        /** Guest /dev entries and the /proc/self/fd paths that stand in for them; always bound. */
         val FD_LINKS = linkedMapOf(
             "/dev/fd" to "/proc/self/fd",
             "/dev/stdin" to "/proc/self/fd/0",
@@ -85,8 +85,10 @@ data class FlatpakBinds(
     /** [GuestPaths.HOME], then private directories over parts of it: host to guest path. */
     val home: String,
     val homeOverlays: List<Pair<String, String>> = emptyList(),
-    /** Which of /dev/fd, /dev/stdin, /dev/stdout, /dev/stderr the host lacks. */
-    val missingFdLinks: Set<String> = emptySet(),
+    /** Host /dev entries bound at the same path (see [DevNodes]), unless [wholeDev]. */
+    val dev: List<String> = emptyList(),
+    /** The host's whole /dev instead, Binder included: only by the app's own setting. */
+    val wholeDev: Boolean = false,
     /** Further binds, last: host to guest path (e.g. a swapped-in Electron over its app directory). */
     val extra: List<Pair<String, String>> = emptyList(),
 ) {
@@ -97,7 +99,7 @@ data class FlatpakBinds(
         val guests = extensions.map { it.second } + homeOverlays.map { it.second } + extra.map { it.second }
         for (path in guests) require(path.startsWith("/") && ':' !in path) { "Unusable guest path: $path" }
         for (name in etc.keys) require(name.isNotEmpty() && '/' !in name && ':' !in name && name != "..") { "Unusable /etc name: $name" }
-        require(missingFdLinks.all { it in AlpineBinds.FD_LINKS }) { "Unknown fd link: $missingFdLinks" }
+        require(dev.all(DevNodes::isAllowed)) { "Unusable /dev path: $dev" }
     }
 }
 
@@ -113,7 +115,9 @@ object ProotCommand {
 
     /**
      * Runs [command] (absolute guest path first) in the Alpine rootfs as fake root. Only the
-     * rootfs and [binds] are visible; nothing from shared storage.
+     * rootfs and [binds] are visible; nothing from shared storage. The display helpers need fake
+     * root too: Xvnc runs xkbcomp only after setgid()/setuid(), which Android refuses to an app
+     * unless proot fakes them.
      */
     fun alpine(paths: ProotPaths, binds: AlpineBinds, command: List<String>, cwd: String = "/root"): ProotInvocation {
         require(command.isNotEmpty() && command[0].startsWith("/")) {
@@ -128,14 +132,10 @@ object ProotCommand {
             "--change-id=0:0",
             "--rootfs=${paths.rootfs}",
             "--cwd=$cwd",
-            "--bind=/dev",
-            "--bind=/proc",
-            "--bind=/sys",
-            "--bind=/dev/urandom:/dev/random",
         )
-        for ((guest, host) in AlpineBinds.FD_LINKS) {
-            if (guest in binds.missingFdLinks) argv += "--bind=$host:$guest"
-        }
+        for (path in binds.dev) argv += "--bind=$path"
+        argv += listOf("--bind=/proc", "--bind=/sys", "--bind=/dev/urandom:/dev/random")
+        for ((guest, host) in AlpineBinds.FD_LINKS) argv += "--bind=$host:$guest"
         argv += "--bind=${binds.shm}:/dev/shm"
         argv += "--bind=${binds.tmp}:/tmp"
         argv += "--bind=${binds.resolvConf}:/etc/resolv.conf"
@@ -190,10 +190,9 @@ object ProotCommand {
         )
         for ((name, host) in binds.etc) argv += "--bind=$host:/etc/$name"
         for ((host, guest) in binds.extensions) argv += "--bind=$host:$guest"
-        argv += listOf("--bind=/dev", "--bind=/proc", "--bind=/sys")
-        for ((guest, host) in AlpineBinds.FD_LINKS) {
-            if (guest in binds.missingFdLinks) argv += "--bind=$host:$guest"
-        }
+        if (binds.wholeDev) argv += "--bind=/dev" else for (path in binds.dev) argv += "--bind=$path"
+        argv += listOf("--bind=/proc", "--bind=/sys")
+        for ((guest, host) in AlpineBinds.FD_LINKS) argv += "--bind=$host:$guest"
         argv += "--bind=${binds.shm}:/dev/shm"
         argv += "--bind=${binds.tmp}:/tmp"
         argv += "--bind=${binds.x11Sockets}:${GuestPaths.X11_DIR}"

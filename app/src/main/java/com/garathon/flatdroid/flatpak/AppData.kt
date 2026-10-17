@@ -45,6 +45,13 @@ object AppData {
     fun rootsDir(context: Context): File = File(context.cacheDir.canonicalFile, "roots")
     fun appTmpDir(context: Context): File = File(context.cacheDir.canonicalFile, "apptmp")
 
+    /**
+     * Present while an update, uninstall or repair runs; removed when it ends. Still there at the
+     * next start, it means the process was killed in the middle (a force-stop), so the repository
+     * is cleaned up before anything else (see FlatpakTask.Repair).
+     */
+    fun taskMarker(context: Context): File = File(context.filesDir.canonicalFile, "flatpak-task-running")
+
     /** The running session's sockets, VNC password file and generated /etc files. */
     fun sessionDir(context: Context): File = File(context.cacheDir.canonicalFile, "session")
 }

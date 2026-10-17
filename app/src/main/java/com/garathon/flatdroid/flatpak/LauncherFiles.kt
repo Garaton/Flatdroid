@@ -10,8 +10,8 @@ import com.garathon.flatdroid.util.writeTextAtomically
  * storage outside the Alpine rootfs; the launcher binds them into each root. resolv.conf is not
  * here: it follows the current network, so it is generated for every launch.
  *
- * Planned with the launcher: call [write] before every launch, and bind a copy of the machine-id,
- * since binds are writable and one Flatpak could otherwise change what later ones see.
+ * The launcher calls [write] before every launch and binds a copy of the machine-id, since binds
+ * are writable and one Flatpak could otherwise change what later ones see.
  *
  * Kept by a reset that keeps Flatpaks (apps may key data to the machine-id), deleted by one that
  * wipes everything.
@@ -23,10 +23,10 @@ class LauncherFiles(val dir: File, private val uid: Int, private val gid: Int) {
     val group get() = File(dir, "group")
 
     fun write() {
-        hosts.writeTextAtomically(GuestFiles.hosts())
+        hosts.writeTextAtomically(GuestFiles.hosts(), durable = false)
         // The machine-id identifies this installation: generated once, never replaced.
         if (!machineId.isFile) machineId.writeTextAtomically(GuestFiles.machineId())
-        passwd.writeTextAtomically(GuestFiles.passwd(uid, gid))
-        group.writeTextAtomically(GuestFiles.group(gid))
+        passwd.writeTextAtomically(GuestFiles.passwd(uid, gid), durable = false)
+        group.writeTextAtomically(GuestFiles.group(gid), durable = false)
     }
 }

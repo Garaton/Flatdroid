@@ -96,7 +96,7 @@ android {
 abstract class BuildProotTask @Inject constructor(private val exec: ExecOperations) : DefaultTask() {
     @get:Input abstract val abi: Property<String>
     @get:InputFile abstract val script: RegularFileProperty
-    @get:InputFile abstract val crossAnswers: RegularFileProperty
+    @get:InputFile abstract val tallocConfig: RegularFileProperty
     @get:InputDirectory abstract val patches: DirectoryProperty
     @get:Internal abstract val ndkDirectory: DirectoryProperty
     @get:Input val ndkPath: Provider<String> get() = ndkDirectory.map { it.asFile.absolutePath }
@@ -119,7 +119,7 @@ val prootTasks = architectures.keys.associateWith { abi ->
     tasks.register<BuildProotTask>("buildProot_$abi") {
         this.abi = abi
         script = rootProject.file("native/build-proot.sh")
-        crossAnswers = rootProject.file("native/talloc-cross-answers.txt")
+        tallocConfig = rootProject.file("native/talloc-config.h")
         patches = rootProject.layout.projectDirectory.dir("native/patches")
         ndkDirectory = androidComponents.sdkComponents.ndkDirectory
         workDirectory = layout.buildDirectory.dir("native-work")

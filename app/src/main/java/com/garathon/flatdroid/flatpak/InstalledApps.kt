@@ -2,11 +2,20 @@ package com.garathon.flatdroid.flatpak
 
 import android.content.Context
 import com.garathon.flatdroid.alpine.AlpineEnvironment
+import com.garathon.flatdroid.proot.DevNodes
+import com.garathon.flatdroid.util.readTextUpTo
 import java.io.File
 import java.util.Locale
 
 /** An installed app as the home list shows it. */
-data class InstalledApp(val id: String, val name: String, val icon: File?, val lastOpened: Long?)
+data class InstalledApp(
+    val id: String,
+    val name: String,
+    val icon: File?,
+    val lastOpened: Long?,
+    /** Its metadata asks for all devices (`devices=all`). */
+    val requestsAllDevices: Boolean = false,
+)
 
 /** Installed apps with their names and icons, read from what each app exports. */
 class InstalledApps(private val context: Context) {
@@ -20,6 +29,7 @@ class InstalledApps(private val context: Context) {
             name = desktopName(app, id) ?: id,
             icon = icon(app, id),
             lastOpened = AppData.settings(context, id).load().lastOpened,
+            requestsAllDevices = DevNodes.ALL in app.metadata.context.devices,
         )
     }
 
@@ -28,7 +38,7 @@ class InstalledApps(private val context: Context) {
     private fun desktopName(app: Deployment, id: String): String? {
         val file = File(app.export, "share/applications/$id.desktop")
         val desktop = try {
-            Keyfile.parse(file.readText())
+            Keyfile.parse(file.readTextUpTo() ?: return null)
         } catch (_: Exception) {
             return null
         }

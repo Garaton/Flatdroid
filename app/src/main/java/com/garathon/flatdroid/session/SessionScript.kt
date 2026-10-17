@@ -17,20 +17,26 @@ object SessionScript {
     const val GUEST_OPENBOX_RC = "/root/.config/openbox/rc.xml"
 
     /**
-     * Arguments: geometry (WxH), VNC port. Exits when Xvnc does; Flatdroid ends the session by
+     * Arguments: geometry (WxH), VNC port, frame rate. Exits when Xvnc does; Flatdroid ends the session by
      * stopping this proot. `-extension GLX` turns GLX off in Alpine's Xvnc, which still has it
-     * (apps use EGL); Flatdroid's own Xvnc build won't need it. `--use-pid-file=no`: proot
-     * shares the process list, so a stale PID file can match a live process.
+     * (apps use EGL); Flatdroid's own Xvnc build won't need it. `-nolisten local` drops the
+     * abstract socket `@/tmp/.X11-unix/X1`: proot doesn't translate abstract names, so it would be
+     * open to other users of the device, with no authentication; clients use the socket file in
+     * private storage instead. `-NeverShared -DisconnectClients=0`: while a viewer is connected,
+     * Xvnc refuses further connections rather than sharing or handing over the session.
+     * `--use-pid-file=no`: proot shares the process list, so a stale PID file can match a live
+     * process.
      */
     val TEXT = """
         |#!/bin/sh
         |geometry=$1
         |port=$2
+        |frame_rate=$3
         |rm -f /tmp/.X1-lock ${GuestPaths.X11_DIR}/$X_SOCKET ${GuestPaths.PULSE_DIR}/native ${GuestPaths.PULSE_DIR}/simple
         |
         |Xvnc :1 -geometry "${'$'}geometry" -depth 24 -rfbport "${'$'}port" -localhost \
-        |  -SecurityTypes VncAuth -PasswordFile $GUEST_VNC_DIR/passwd \
-        |  -extension MIT-SHM -extension GLX &
+        |  -SecurityTypes VncAuth -PasswordFile $GUEST_VNC_DIR/passwd -NeverShared -DisconnectClients=0 -FrameRate "${'$'}frame_rate" \
+        |  -nolisten local -extension MIT-SHM -extension GLX &
         |xvnc=${'$'}!
         |i=0
         |while [ ! -S ${GuestPaths.X11_DIR}/$X_SOCKET ]; do
