@@ -84,14 +84,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     val env = AlpineEnvironment.get(app)
                     for (command in settings.commands()) {
                         DebugLog.i("$ ${command.joinToString(" ")}")
-                        // Uninstalling runtimes can take minutes under proot.
-                        val result = env.run(command, timeoutSeconds = SETTINGS_TIMEOUT_SECONDS, onLine = DebugLog::i)
+                        val result = env.run(command, timeoutSeconds = UserSettings.APPLY_TIMEOUT_SECONDS, onLine = DebugLog::i)
                         if (result.exitCode != 0) {
                             throw IOException(result.output.lines().lastOrNull { it.isNotBlank() } ?: "exit ${result.exitCode}")
                         }
                     }
                 }
-                SetupController.settingsApplied(app)
                 withContext(Dispatchers.Main) { onApplied() }
             } catch (e: Exception) {
                 _settingsError.value = e.message ?: e.toString()
@@ -159,7 +157,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private companion object {
         const val COMMAND_TIMEOUT_SECONDS = 30 * 60L
-        const val SETTINGS_TIMEOUT_SECONDS = 15 * 60L
         const val MAX_OUTPUT_LINES = 2_000
         const val LIVE_OUTPUT_LINES = 300
         const val OUTPUT_INTERVAL_MS = 100L

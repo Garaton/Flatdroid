@@ -8,6 +8,7 @@ import com.garathon.flatdroid.alpine.AlpineEnvironment
 import com.garathon.flatdroid.flatpak.FlatpakCommands
 import com.garathon.flatdroid.flatpak.LauncherFiles
 import com.garathon.flatdroid.proot.ProcessResult
+import com.garathon.flatdroid.settings.UserSettings
 import java.io.File
 import java.io.IOException
 
@@ -23,6 +24,7 @@ class AlpineSetup(
         SetupStep.PACKAGES -> packages(reporter)
         SetupStep.FLATHUB -> flathub(reporter)
         SetupStep.CONFIG_FILES -> configFiles()
+        SetupStep.SETTINGS -> applySettings(reporter)
     }
 
     private fun rootfs(reporter: SetupReporter) {
@@ -138,6 +140,15 @@ class AlpineSetup(
     /** Files Flatdroid generates outside the rootfs: the /etc files for Flatpak roots. */
     private fun configFiles() {
         launcherFiles.write()
+    }
+
+    /** The settings the user chose before setup (Settings applies later changes itself). */
+    private fun applySettings(reporter: SetupReporter) {
+        val settings = SetupController.settings(context).load() ?: throw IOException(context.getString(R.string.setup_error_no_settings))
+        for (command in settings.commands()) {
+            val result = run(command, reporter, UserSettings.APPLY_TIMEOUT_SECONDS)
+            if (result.exitCode != 0) throw IOException(lastLine(result).ifEmpty { "exit ${result.exitCode}" })
+        }
     }
 
     private fun run(

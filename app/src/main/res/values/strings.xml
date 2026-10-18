@@ -2,7 +2,7 @@
     <string name="app_name">Flatdroid</string>
 
     <string name="setup_title">Set up Flatdroid</string>
-    <string name="setup_intro">Flatdroid downloads Alpine Linux, then installs Flatpak, a display server (Xvnc and Openbox) and PulseAudio into it. This downloads about 140 MB and needs about 400 MB of storage. Setup continues in the background and resumes if it is interrupted.</string>
+    <string name="setup_intro">Flatdroid downloads Alpine Linux, then installs Flatpak, a display server (Xvnc and Openbox) and PulseAudio into it. This downloads about 140 MB and needs about 400 MB of storage.</string>
     <string name="setup_start">Start setup</string>
     <string name="setup_resume">Resume setup</string>
     <string name="setup_retry">Retry</string>
@@ -14,6 +14,7 @@
     <string name="setup_step_packages">Install packages</string>
     <string name="setup_step_flathub">Add Flathub</string>
     <string name="setup_step_files">Write configuration files</string>
+    <string name="setup_step_settings">Apply your settings</string>
 
     <string name="setup_progress_mib">%1$s / %2$s MiB</string>
     <string name="setup_progress_extracting">Checking and extracting</string>
@@ -28,6 +29,7 @@
     <string name="setup_error_scripts">Package scripts failed:\n%1$s</string>
     <string name="setup_error_packages">Packages not installed: %1$s</string>
     <string name="setup_error_flathub">Could not add Flathub with its signing key: %1$s</string>
+    <string name="setup_error_no_settings">Your settings are missing; reset to choose them again</string>
     <string name="setup_error_timeout">Timed out: %1$s</string>
     <string name="setup_time_limit">Android stopped the setup service (time limit); open Flatdroid to resume</string>
     <string name="setup_channel">Setup</string>
@@ -36,8 +38,8 @@
     <string name="setup_notification_failed">Flatdroid setup failed</string>
 
     <string name="setup_settings_title">Choose your settings</string>
-    <string name="setup_settings_intro">Flatdroid is installed. You can change these later in Settings.</string>
-    <string name="setup_settings_finish">Finish</string>
+    <string name="setup_settings_intro">Setup applies these to Flatdroid. You can change them later in Settings.</string>
+    <string name="setup_settings_continue">Continue</string>
 
     <string name="settings_title">Settings</string>
     <string name="settings_section_flatpak">Flatpak</string>
@@ -45,13 +47,13 @@
     <string name="settings_languages_hint">Flatpak then skips translations for other languages when it installs and updates apps, which saves space.</string>
     <string name="settings_save">Save</string>
     <string name="settings_back">Back</string>
-    <string name="settings_applying">Applying…</string>
+    <string name="settings_applying">Applying...</string>
     <string name="settings_failed">Could not apply the settings: %1$s</string>
     <string name="settings_open">Settings</string>
     <string name="settings_section_danger">Danger zone</string>
 
     <string name="terminal_title">Alpine terminal</string>
-    <string name="terminal_ctrl_c">(Ctrl-C sent; press ✕ again to force-stop)</string>
+    <string name="terminal_ctrl_c">(Ctrl-C sent; press X again to force-stop)</string>
     <string name="terminal_force_stopping">(force-stopping)</string>
     <string name="terminal_timed_out">(timed out)</string>
     <string name="terminal_stopped">(stopped, exit %1$s)</string>
@@ -63,15 +65,15 @@
     <string name="ready_running">Running…</string>
     <string name="command_cancel">Cancel</string>
 
-    <string name="reset_button">Reset Alpine environment…</string>
+    <string name="reset_button">Reset Alpine environment...</string>
     <string name="reset_title">Reset Alpine environment?</string>
     <string name="reset_text">Alpine is deleted and set up again from scratch: downloaded again, and its packages reinstalled.</string>
     <string name="reset_keep">Keep installed Flatpaks</string>
     <string name="reset_remove">Remove Flatpaks, keep app data and caches</string>
     <string name="reset_wipe">Wipe everything</string>
-    <string name="reset_keep_hint">Installed apps, runtimes, remotes and the Flatpak configuration are moved aside and put back afterwards; they are not downloaded again. Each app\'s settings and data are kept.</string>
-    <string name="reset_remove_hint">Installed apps and runtimes are deleted and downloaded again when you reinstall them. Each app\'s settings, data and caches, and Flatdroid\'s settings, are kept, so a reinstalled app finds them again.</string>
-    <string name="reset_wipe_hint">Everything installed with Flatpak is deleted as well, including each app\'s settings and data, and Flatdroid\'s settings. Files in Documents/Flatdroid are not touched.</string>
+    <string name="reset_keep_hint">Flatpaks and all associated data (settings, cache, homes, etc), stay downloaded within Flatdroid to be used again after the environment is reset.</string>
+    <string name="reset_remove_hint">Flatpaks and all runtimes are removed, however their associated data (settings, cache, home, etc) stay can </string>
+    <string name="reset_wipe_hint">Everything in Flatdroid is wiped (Alpine, Flatpak apps and data), and you start from a clean slate. The only thing that remains the same is Flatdroid\'s own global settings.</string>
     <string name="reset_confirm">Reset</string>
     <string name="reset_cancel">Cancel</string>
     <string name="reset_running">Resetting the Alpine environment…</string>
@@ -83,7 +85,7 @@
     <string name="home_search">Search apps</string>
     <string name="home_sort_last_opened">Last opened</string>
     <string name="home_sort_name">Name</string>
-    <string name="home_empty">No apps installed yet. Tap + and enter an app ID from Flathub, such as org.xfce.mousepad.</string>
+    <string name="home_empty">No apps installed yet. Tap + and enter an app ID from Flathub.</string>
     <string name="home_no_match">No app matches.</string>
     <string name="home_last_opened">Last opened:</string>
     <string name="home_never_opened">Never</string>
@@ -120,23 +122,24 @@
     <string name="log_top">Top</string>
     <string name="log_bottom">Bottom</string>
     <string name="settings_section_viewer">VNC viewer</string>
-    <string name="settings_viewer_hint">Open viewer hands the session\'s password to this app. With \"Ask every time\", Android asks which app to use each time, so no app can quietly become the default.</string>
+    <string name="settings_viewer">Default viewer</string>
+    <string name="settings_viewer_hint">Determines what the default VNC Viewer app is. With \"Ask every time\", Android asks which app to use each time.</string>
     <string name="settings_viewer_ask">Ask every time</string>
     <string name="settings_viewer_missing">%1$s (not installed)</string>
-    <string name="settings_frame_rate_60">60 frames per second</string>
-    <string name="settings_frame_rate_60_hint">Smoother motion, but the display uses more CPU and battery when the picture moves a lot (scrolling, video). Off: 30 frames per second. Applies from the next launch.</string>
+    <string name="settings_frame_rate_60">60 FPS Mode</string>
+    <string name="settings_frame_rate_60_hint">Changes away from the default 30 FPS, increases CPU usage and reduces battery life. Applies next Flatpak launch.</string>
     <string name="settings_custom_frame_rate">Frame rate</string>
-    <string name="settings_custom_frame_rate_hint">%1$d to %2$d; overrides the setting above. Empty to use it.</string>
+    <string name="settings_custom_frame_rate_hint">%1$d to %2$d; overrides any other FPS setting. Clear this field to go back to 30/60 FPS.</string>
     <string name="settings_uncapped_frame_rate">Uncapped frame rate</string>
-    <string name="settings_uncapped_frame_rate_hint">As many frames as Xvnc can send. Uses the most CPU and battery when the picture moves.</string>
+    <string name="settings_uncapped_frame_rate_hint">As many frames as Xvnc can send.</string>
     <string name="settings_title_bars">Window title bars</string>
-    <string name="settings_title_bars_hint">Title bars with close and maximize buttons on app windows. Without them apps get more room, but some (GTK3, Qt) can then only be closed from their own menus. Applies from the next launch.</string>
+    <string name="settings_title_bars_hint">Title bars with close and maximize buttons on app windows. Without them apps get more room, but some (GTK3, Qt) can then only be closed from their own menus. Applies next Flatpak launch.</string>
     <string name="settings_gpu_runtimes">Install GPU runtimes</string>
     <string name="settings_gpu_runtimes_hint">Lets Flatpak install vendor GPU and video decoding runtimes (NVIDIA, VAAPI) with apps. Flatdroid renders in software and doesn\'t use them; off saves space, and saving with it off removes ones already installed.</string>
     <string name="developer_setting">Developer setting</string>
     <string name="settings_section_developer">Developer</string>
     <string name="settings_developer_options">Developer options</string>
-    <string name="settings_developer_options_hint">Shows settings Flatdroid normally manages itself, such as the flags for newer Electron in each app\'s settings.</string>
+    <string name="settings_developer_options_hint">Shows extra settings that Flatdroid either manages itself, or are dangerous/unfriendly for the average user.</string>
 
     <string name="session_channel">Running app</string>
     <string name="session_starting">Starting…</string>
@@ -151,7 +154,7 @@
     <string name="session_stop">Stop</string>
     <string name="session_ended">%1$s has closed.</string>
     <string name="session_failed">Could not run the app: %1$s</string>
-    <string name="session_no_viewer">No VNC viewer is installed. Install one, such as AVNC, and connect to the address shown with the password.</string>
+    <string name="session_no_viewer">No VNC viewer is installed. Install one (such as AVNC) then connect to the address shown with the password.</string>
     <string name="session_log_title">App output</string>
     <string name="session_reading_metadata">Reading the app\'s metadata</string>
     <string name="session_preparing_files">Preparing files</string>
@@ -167,7 +170,7 @@
     <string name="launch_newer_flags_failed">The app failed with and without newer Electron\'s flags (exit %1$d)</string>
 
     <string name="electron_title">Download Electron for this device?</string>
-    <string name="electron_offer">%1$s comes with Electron %2$s built for %3$s, which can\'t run on this %4$s device. Flatdroid can download Electron %2$s for this device from GitHub (about 80 MB, checked against its published checksum) and use it with the app\'s own files.</string>
+    <string name="electron_offer">%1$s comes with Electron %2$s built for %3$s, which can\'t run on this %4$s device. Flatdroid can download Electron %2$s for this device from GitHub and use it with the app\'s own files.</string>
     <string name="electron_cannot">%1$s comes with Electron built for %2$s, which can\'t run on this device, and it can\'t be replaced: %3$s</string>
     <string name="electron_download">Download</string>
     <string name="electron_preparing">Preparing Electron</string>
@@ -181,7 +184,7 @@
     <string name="electron_step_resources">Copying the app\'s resources</string>
 
     <string name="app_settings_display">Display size</string>
-    <string name="app_settings_display_hint">The size the app\'s screen starts at. A viewer\'s option to resize the remote desktop can change it while the app runs (for example when you rotate the phone).</string>
+    <string name="app_settings_display_hint">The size the app\'s screen starts at.</string>
     <string name="app_settings_portrait">Portrait (%1$d × %2$d)</string>
     <string name="app_settings_landscape">Landscape (%1$d × %2$d)</string>
     <string name="app_settings_custom">Custom</string>

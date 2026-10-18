@@ -74,6 +74,9 @@ class SetupService : Service() {
                     SetupController.reporter.log(getString(R.string.reset_done))
                 }
                 if (!resetOnly) {
+                    // Setup is started from the settings screen, so they are chosen by now; recorded here,
+                    // after any reset, which clears the record.
+                    SetupController.settingsChosen(applicationContext)
                     val store = SetupController.store(applicationContext)
                     val setup = AlpineSetup(applicationContext, env, AppData.launcherFiles(applicationContext))
                     runInterruptible { SetupRunner(store, setup::perform).run(SetupController.reporter) }

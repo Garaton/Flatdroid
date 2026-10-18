@@ -5,7 +5,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
@@ -25,17 +24,16 @@ import com.garathon.flatdroid.settings.UserSettings
 import com.garathon.flatdroid.ui.theme.FlatdroidTheme
 
 /**
- * Step 2 of setup, after the installation: the choices setup needs from the user, then Finish.
- * Shown again after a reset, pre-filled with the saved [settings], so they are applied to the new
- * Alpine. [deviceLanguages] is Flatpak's value for the device's languages (e.g. "de;en").
+ * Step 1 of setup, before the installation: the choices setup needs from the user, then
+ * Continue, which starts setup (its last step applies them). Shown again after a reset,
+ * pre-filled with the saved [settings]. [deviceLanguages] is Flatpak's value for the device's
+ * languages (e.g. "de;en").
  */
 @Composable
 fun SetupSettingsScreen(
     settings: UserSettings,
     deviceLanguages: String,
-    applying: Boolean,
-    error: String?,
-    onFinish: (UserSettings) -> Unit,
+    onContinue: (UserSettings) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var onlyMyLanguages by rememberSaveable { mutableStateOf(settings.onlyMyLanguages) }
@@ -46,15 +44,12 @@ fun SetupSettingsScreen(
     ) {
         Text(stringResource(R.string.setup_settings_title), style = MaterialTheme.typography.headlineSmall)
         Text(stringResource(R.string.setup_settings_intro), style = MaterialTheme.typography.bodyMedium)
-        LanguagesOption(onlyMyLanguages, deviceLanguages, enabled = !applying) { onlyMyLanguages = it }
-        error?.let {
-            SelectionContainer { Text(stringResource(R.string.settings_failed, it), color = MaterialTheme.colorScheme.error) }
-        }
-        Button(
-            onClick = { onFinish(settings.copy(flatpakLanguages = if (onlyMyLanguages) deviceLanguages else GuestFiles.ALL_LANGUAGES)) },
-            enabled = !applying,
-        ) {
-            Text(stringResource(if (applying) R.string.settings_applying else R.string.setup_settings_finish))
+        SwitchRow(
+        	onlyMyLanguages, { onlyMyLanguages = it },
+        	stringResource(R.string.settings_languages, deviceLanguages.replace(";", ", ")), stringResource(R.string.settings_languages_hint),
+        )
+        Button(onClick = { onContinue(settings.copy(flatpakLanguages = if (onlyMyLanguages) deviceLanguages else GuestFiles.ALL_LANGUAGES)) }) {
+            Text(stringResource(R.string.setup_settings_continue))
         }
     }
 }
@@ -63,6 +58,6 @@ fun SetupSettingsScreen(
 @Composable
 private fun SetupSettingsScreenPreview() {
     FlatdroidTheme {
-        SetupSettingsScreen(UserSettings.defaults("de;en"), "de;en", applying = false, error = null, onFinish = {})
+        SetupSettingsScreen(UserSettings.defaults("de;en"), "de;en", onContinue = {})
     }
 }

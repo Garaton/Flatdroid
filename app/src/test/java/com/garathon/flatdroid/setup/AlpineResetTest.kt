@@ -75,7 +75,7 @@ class AlpineResetTest {
         Files.createSymbolicLink(File(flatpak, "app/org.xfce.mousepad/files/bin/mousepad").toPath(), backing.toPath())
         File(rootfs, "usr/bin").mkdirs()
         File(rootfs, "usr/bin/Xvnc").writeText("old Xvnc")
-        state.save(SetupState(SetupStep.entries.toSet(), settingsApplied = true))
+        state.save(SetupState(SetupStep.entries.toSet(), settingsChosen = true))
     }
 
     private val mousepad get() = File(installer.rootfs, "root/.local/share/flatpak/app/org.xfce.mousepad/files/bin/mousepad")

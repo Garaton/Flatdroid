@@ -4,19 +4,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExposedDropdownMenuAnchorType
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
@@ -25,13 +17,11 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.garathon.flatdroid.R
@@ -85,41 +75,54 @@ fun SettingsScreen(
         Text(stringResource(R.string.settings_title), style = MaterialTheme.typography.headlineSmall)
 
         SectionTitle(stringResource(R.string.settings_section_flatpak))
-        LanguagesOption(onlyMyLanguages, deviceLanguages, enabled = !applying) { onlyMyLanguages = it }
+        
+        SwitchRow(
+        	onlyMyLanguages, { onlyMyLanguages = it },
+        	stringResource(R.string.settings_languages, deviceLanguages.replace(";", ", ")), stringResource(R.string.settings_languages_hint),
+        	enabled = !applying
+        )
 
         SectionTitle(stringResource(R.string.settings_section_viewer))
-        Text(stringResource(R.string.settings_viewer_hint), style = MaterialTheme.typography.bodySmall)
-        ViewerChoice(vncViewer, viewers, enabled = !applying) { vncViewer = it }
+        val askViewer = stringResource(R.string.settings_viewer_ask)
+        // Only the saved choice can be missing: the list holds installed viewers.
+        val missingViewer = stringResource(R.string.settings_viewer_missing, vncViewer.orEmpty())
+        DropdownRow(
+            selected = vncViewer,
+            options = listOf(null) + viewers.map { it.packageName },
+            onSelect = { vncViewer = it },
+            label = { id -> if (id == null) askViewer else viewers.firstOrNull { it.packageName == id }?.label ?: missingViewer },
+            title = stringResource(R.string.settings_viewer),
+            hint = stringResource(R.string.settings_viewer_hint),
+            enabled = !applying,
+        )
         SwitchRow(
             frameRate60, { frameRate60 = it },
             stringResource(R.string.settings_frame_rate_60), stringResource(R.string.settings_frame_rate_60_hint), enabled = !applying,
         )
+        if (developerOptions) {
+            TextRow(
+                content = customFrameRate,
+                onChange = { customFrameRate = it.filter(Char::isDigit).take(4) },
+                title = stringResource(R.string.settings_custom_frame_rate),
+                hint = stringResource(R.string.settings_custom_frame_rate_hint, UserSettings.CUSTOM_FRAME_RATES.first, UserSettings.CUSTOM_FRAME_RATES.last),
+                isError = !customFrameRateValid,
+                enabled = !applying && !uncappedFrameRate,
+                developer = true
+            )
+            SwitchRow(
+                uncappedFrameRate, { uncappedFrameRate = it },
+                stringResource(R.string.settings_uncapped_frame_rate), stringResource(R.string.settings_uncapped_frame_rate_hint),
+                enabled = !applying, developer = true,
+            )
+        }
 
+		// Developer Section
         SectionTitle(stringResource(R.string.settings_section_developer))
         SwitchRow(
             developerOptions, { developerOptions = it },
             stringResource(R.string.settings_developer_options), stringResource(R.string.settings_developer_options_hint), enabled = !applying,
         )
         if (developerOptions) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                DeveloperMark()
-                OutlinedTextField(
-                    value = customFrameRate,
-                    onValueChange = { customFrameRate = it.filter(Char::isDigit).take(4) },
-                    label = { Text(stringResource(R.string.settings_custom_frame_rate)) },
-                    supportingText = { Text(stringResource(R.string.settings_custom_frame_rate_hint, UserSettings.CUSTOM_FRAME_RATES.first, UserSettings.CUSTOM_FRAME_RATES.last)) },
-                    isError = !customFrameRateValid,
-                    singleLine = true,
-                    enabled = !applying && !uncappedFrameRate,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.weight(1f),
-                )
-            }
-            SwitchRow(
-                uncappedFrameRate, { uncappedFrameRate = it },
-                stringResource(R.string.settings_uncapped_frame_rate), stringResource(R.string.settings_uncapped_frame_rate_hint),
-                enabled = !applying, developer = true,
-            )
             SwitchRow(
                 titleBars, { titleBars = it },
                 stringResource(R.string.settings_title_bars), stringResource(R.string.settings_title_bars_hint),
@@ -164,39 +167,6 @@ fun SettingsScreen(
         SectionTitle(stringResource(R.string.settings_section_danger), danger = true)
         OutlinedButton(onClick = { confirmReset = true }, enabled = !applying && canReset) {
             Text(stringResource(R.string.reset_button), color = MaterialTheme.colorScheme.error)
-        }
-    }
-}
-
-/**
- * The VNC viewer as a dropdown: "Ask every time" ([chosen] null) or one of [viewers]. A chosen
- * viewer that was uninstalled is shown as such until another is picked; links go to the chooser
- * meanwhile.
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun ViewerChoice(chosen: String?, viewers: List<Viewer.App>, enabled: Boolean, onChange: (String?) -> Unit) {
-    var expanded by remember { mutableStateOf(false) }
-    val ask = stringResource(R.string.settings_viewer_ask)
-    val label = when (chosen) {
-        null -> ask
-        else -> viewers.firstOrNull { it.packageName == chosen }?.label ?: stringResource(R.string.settings_viewer_missing, chosen)
-    }
-    ExposedDropdownMenuBox(expanded = expanded && enabled, onExpandedChange = { if (enabled) expanded = it }) {
-        OutlinedTextField(
-            value = label,
-            onValueChange = {},
-            readOnly = true,
-            enabled = enabled,
-            singleLine = true,
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-            modifier = Modifier.fillMaxWidth().menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable, enabled),
-        )
-        ExposedDropdownMenu(expanded = expanded && enabled, onDismissRequest = { expanded = false }) {
-            DropdownMenuItem(text = { Text(ask) }, onClick = { onChange(null); expanded = false })
-            for (viewer in viewers) {
-                DropdownMenuItem(text = { Text(viewer.label) }, onClick = { onChange(viewer.packageName); expanded = false })
-            }
         }
     }
 }

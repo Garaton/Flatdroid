@@ -8,8 +8,8 @@ import java.io.StringWriter
 import java.util.Properties
 
 /**
- * Choices made in Flatdroid's settings. The settings screen asks for them once setup is done,
- * and they can be changed later. Kept in `files/settings.properties`, which is backed up (end-to-end
+ * Choices made in Flatdroid's settings. The settings screen asks for them before setup, and
+ * they can be changed later. Kept in `files/settings.properties`, which is backed up (end-to-end
  * encrypted only) and survives a reset that keeps Flatpaks.
  */
 data class UserSettings(
@@ -66,6 +66,8 @@ data class UserSettings(
          */
         const val UNCAPPED_FRAME_RATE = 1000
         val CUSTOM_FRAME_RATES = 1..UNCAPPED_FRAME_RATE
+        /** Per command of [commands]: uninstalling runtimes can take minutes under proot. */
+        const val APPLY_TIMEOUT_SECONDS = 15 * 60L
 
         /** Defaults for a device whose languages, as Flatpak's value, are [deviceLanguages]. */
         fun defaults(deviceLanguages: String) = UserSettings(flatpakLanguages = deviceLanguages)

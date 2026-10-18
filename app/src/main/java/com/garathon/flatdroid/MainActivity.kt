@@ -85,11 +85,17 @@ class MainActivity : ComponentActivity() {
                     val modifier = Modifier.padding(innerPadding)
                     val output by viewModel.output.collectAsState()
                     val running by viewModel.running.collectAsState()
-                    val applying by viewModel.applying.collectAsState()
-                    val settingsError by viewModel.settingsError.collectAsState()
                     var screen by rememberSaveable(stateSaver = Screen.Saver) { mutableStateOf<Screen>(Screen.Home) }
                     when {
-                        // Screen 1: setup, the same for everyone.
+                        // Screen 1: the user's settings, asked before setup (again after a reset,
+                        // pre-filled); setup's last step applies them.
+                        !setup.settingsChosen && !setup.isComplete && !setup.running -> SetupSettingsScreen(
+                            settings = remember { savedSettings(languages) },
+                            deviceLanguages = languages,
+                            onContinue = { SetupController.settings(this).save(it); startSetup() },
+                            modifier = modifier,
+                        )
+                        // Screen 2: setup, the same for everyone.
                         !setup.isComplete || setup.running -> SetupScreen(
                             ui = setup,
                             onStart = ::startSetup,
@@ -97,16 +103,6 @@ class MainActivity : ComponentActivity() {
                             modifier = modifier,
                             // Once Alpine is extracted, commands can look into a failed setup.
                             command = if (SetupStep.ROOTFS in setup.completed) CommandState(output, running, viewModel::run, viewModel::cancel) else null,
-                        )
-                        // Screen 2: the user's settings, asked once setup is done (again after a reset,
-                        // pre-filled, so they are applied to the new Alpine).
-                        !setup.settingsApplied -> SetupSettingsScreen(
-                            settings = remember { savedSettings(languages) },
-                            deviceLanguages = languages,
-                            applying = applying,
-                            error = settingsError,
-                            onFinish = { viewModel.applySettings(it) {} },
-                            modifier = modifier,
                         )
                         else -> Main(screen, { screen = it }, languages, modifier)
                     }
@@ -153,8 +149,8 @@ class MainActivity : ComponentActivity() {
             is Screen.AppSettings -> {
                 val list = apps ?: return
                 val app = list.firstOrNull { it.id == screen.appId }
-                if (app == null) {
-                    // Uninstalled meanwhile.
+                if (app == null || session.state.appIdOrNull == app.id) {
+                    // Uninstalled meanwhile, or running (the home screen doesn't open a running app's settings).
                     LaunchedEffect(Unit) { navigate(Screen.Home) }
                     return
                 }

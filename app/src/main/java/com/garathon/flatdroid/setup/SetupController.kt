@@ -22,8 +22,8 @@ data class SetupUi(
     val fraction: Float? = null,
     val detail: String = "",
     val log: List<String> = emptyList(),
-    /** The user's settings have been applied to this Alpine; until then the settings screen shows. */
-    val settingsApplied: Boolean = false,
+    /** The user chose their settings for this setup; until then the settings screen shows. */
+    val settingsChosen: Boolean = false,
 ) {
     val isComplete: Boolean get() = completed.containsAll(SetupStep.entries)
 }
@@ -59,19 +59,19 @@ object SetupController {
      */
     fun refresh(context: Context) {
         val saved = if (reset(context).isPending()) SetupState() else store(context).load()
-        _state.update { if (it.running) it else it.copy(completed = saved.completed, settingsApplied = saved.settingsApplied) }
+        _state.update { if (it.running) it else it.copy(completed = saved.completed, settingsChosen = saved.settingsChosen) }
     }
 
-    /** Records that the user's settings are now applied to this Alpine. */
-    fun settingsApplied(context: Context) {
+    /** Records that setup started with the user's chosen settings. */
+    fun settingsChosen(context: Context) {
         val store = store(context)
-        store.save(store.load().copy(settingsApplied = true))
-        _state.update { it.copy(settingsApplied = true) }
+        store.save(store.load().copy(settingsChosen = true))
+        _state.update { it.copy(settingsChosen = true) }
     }
 
     /** After a reset: nothing finished, but keep the log and the running flag. */
     fun cleared() = _state.update {
-        it.copy(completed = emptySet(), settingsApplied = false, failed = null, error = null, current = null, fraction = null, detail = "")
+        it.copy(completed = emptySet(), settingsChosen = false, failed = null, error = null, current = null, fraction = null, detail = "")
     }
 
     /** Marks setup as running; false when it already was. */

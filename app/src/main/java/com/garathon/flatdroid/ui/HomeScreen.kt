@@ -184,7 +184,8 @@ private fun AppRow(app: InstalledApp, running: Boolean, enabled: Boolean, onLaun
                 textAlign = TextAlign.End,
             )
         }
-        IconButton(onClick = onSettings) {
+        // Its settings would change files the running app uses.
+        IconButton(onClick = onSettings, enabled = !running) {
             Icon(Icons.Filled.Settings, contentDescription = stringResource(R.string.app_settings_open, app.name))
         }
     }
