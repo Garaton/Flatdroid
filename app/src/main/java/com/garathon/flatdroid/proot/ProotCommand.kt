@@ -79,9 +79,9 @@ data class FlatpakBinds(
     /** Private /tmp and /dev/shm. */
     val tmp: String,
     val shm: String,
-    /** Xvnc's socket directory ([GuestPaths.X11_DIR]) and PulseAudio's ([GuestPaths.PULSE_DIR]). */
+    /** Xvnc's socket directory ([GuestPaths.X11_DIR]) and PulseAudio's ([GuestPaths.PULSE_DIR]; null without sound). */
     val x11Sockets: String,
-    val pulseSockets: String,
+    val pulseSockets: String?,
     /** [GuestPaths.HOME], then private directories over parts of it: host to guest path. */
     val home: String,
     val homeOverlays: List<Pair<String, String>> = emptyList(),
@@ -93,7 +93,7 @@ data class FlatpakBinds(
     val extra: List<Pair<String, String>> = emptyList(),
 ) {
     init {
-        val hosts = listOf(root, runtimeFiles, appFiles, tmp, shm, x11Sockets, pulseSockets, home) +
+        val hosts = listOfNotNull(root, runtimeFiles, appFiles, tmp, shm, x11Sockets, pulseSockets, home) +
             etc.values + extensions.map { it.first } + homeOverlays.map { it.first } + extra.map { it.first }
         for (path in hosts) require(path.startsWith("/") && ':' !in path) { "Unusable host path: $path" }
         val guests = extensions.map { it.second } + homeOverlays.map { it.second } + extra.map { it.second }
@@ -196,7 +196,7 @@ object ProotCommand {
         argv += "--bind=${binds.shm}:/dev/shm"
         argv += "--bind=${binds.tmp}:/tmp"
         argv += "--bind=${binds.x11Sockets}:${GuestPaths.X11_DIR}"
-        argv += "--bind=${binds.pulseSockets}:${GuestPaths.PULSE_DIR}"
+        binds.pulseSockets?.let { argv += "--bind=$it:${GuestPaths.PULSE_DIR}" }
         argv += "--bind=${binds.home}:${GuestPaths.HOME}"
         for ((host, guest) in binds.homeOverlays) argv += "--bind=$host:$guest"
         for ((host, guest) in binds.extra) argv += "--bind=$host:$guest"

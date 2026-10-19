@@ -35,15 +35,19 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.garathon.flatdroid.R
+import com.garathon.flatdroid.audio.MicStreamer
 import com.garathon.flatdroid.flatpak.InstalledApp
 import com.garathon.flatdroid.settings.AppSettings
 import com.garathon.flatdroid.settings.DisplaySize
 import com.garathon.flatdroid.ui.theme.FlatdroidTheme
 
 /**
- * One app's settings: its display size, its cache, and uninstalling; with [developerOptions],
- * also the Electron flags Flatdroid otherwise manages itself and, for apps asking for all
- * devices, the host's whole /dev.
+ * One app's settings: its display size, its permissions (sound and microphone), its cache, and
+ * uninstalling; with [developerOptions], for apps asking for all devices, also the host's whole
+ * /dev. Sound left at its default is saved as unset, so it follows the app's metadata.
+ * [onRequestMicrophone] asks Android for its microphone permission and reports whether it was
+ * granted: the microphone turns on only with it, so a notification can later allow it for a
+ * session. With [developerOptions], the microphone can also be always allowed.
  */
 @Composable
 fun AppSettingsScreen(
@@ -56,6 +60,7 @@ fun AppSettingsScreen(
     /** False while any app or a Flatpak task runs. */
     canUninstall: Boolean,
     developerOptions: Boolean,
+    onRequestMicrophone: (onResult: (Boolean) -> Unit) -> Unit,
     onSave: (AppSettings) -> Unit,
     onBack: () -> Unit,
     onClearCache: () -> Unit,
@@ -65,8 +70,13 @@ fun AppSettingsScreen(
     var choice by rememberSaveable { mutableStateOf(settings.displaySize) }
     var width by rememberSaveable { mutableStateOf(settings.customWidth.toString()) }
     var height by rememberSaveable { mutableStateOf(settings.customHeight.toString()) }
-    var newerElectron by rememberSaveable { mutableStateOf(settings.newerElectronFlags) }
     var wholeDev by rememberSaveable { mutableStateOf(settings.wholeDev) }
+    val audioDefault = app.requestsAudio
+    var audio by rememberSaveable { mutableStateOf(settings.audio ?: audioDefault) }
+    var microphone by rememberSaveable { mutableStateOf(settings.microphone) }
+    var alwaysAllowMicrophone by rememberSaveable { mutableStateOf(settings.alwaysAllowMicrophone) }
+    var micRefused by rememberSaveable { mutableStateOf(false) }
+    val context = LocalContext.current
     var confirmUninstall by rememberSaveable { mutableStateOf(false) }
     var cacheCleared by rememberSaveable { mutableStateOf(false) }
 
@@ -104,21 +114,41 @@ fun AppSettingsScreen(
             }
         }
 
+        SectionTitle(stringResource(R.string.app_settings_permissions))
+        SwitchRow(
+            audio, { audio = it },
+            stringResource(R.string.app_settings_audio),
+            stringResource(if (app.requestsAudio) R.string.app_settings_audio_requested else R.string.app_settings_audio_not_requested),
+        )
+        SwitchRow(
+            microphone,
+            { on ->
+                micRefused = false
+                if (!on || MicStreamer.hasPermission(context)) {
+                    microphone = on
+                } else {
+                    onRequestMicrophone { granted -> if (granted) microphone = true else micRefused = true }
+                }
+            },
+            stringResource(R.string.app_settings_microphone),
+            stringResource(if (micRefused) R.string.app_settings_microphone_android_denied else R.string.app_settings_microphone_hint),
+            enabled = audio,
+        )
         if (developerOptions) {
-            SectionTitle(stringResource(R.string.app_settings_electron))
             SwitchRow(
-                newerElectron, { newerElectron = it },
-                stringResource(R.string.app_settings_electron_newer), stringResource(R.string.app_settings_electron_newer_hint),
+                alwaysAllowMicrophone, { alwaysAllowMicrophone = it },
+                stringResource(R.string.app_settings_always_allow_microphone), stringResource(R.string.app_settings_always_allow_microphone_hint),
+                enabled = audio && microphone, developer = true,
+            )
+        }
+
+        if (developerOptions && app.requestsAllDevices) {
+            SectionTitle(stringResource(R.string.app_settings_devices))
+            SwitchRow(
+                wholeDev, { wholeDev = it },
+                stringResource(R.string.app_settings_whole_dev), stringResource(R.string.app_settings_whole_dev_hint),
                 developer = true,
             )
-            if (app.requestsAllDevices) {
-                SectionTitle(stringResource(R.string.app_settings_devices))
-                SwitchRow(
-                    wholeDev, { wholeDev = it },
-                    stringResource(R.string.app_settings_whole_dev), stringResource(R.string.app_settings_whole_dev_hint),
-                    developer = true,
-                )
-            }
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -130,8 +160,10 @@ fun AppSettingsScreen(
                             displaySize = choice,
                             customWidth = if (custom) size(width)!! else settings.customWidth,
                             customHeight = if (custom) size(height)!! else settings.customHeight,
-                            newerElectronFlags = newerElectron,
                             wholeDev = wholeDev,
+                            audio = audio.takeIf { it != audioDefault },
+                            microphone = microphone,
+                            alwaysAllowMicrophone = if (developerOptions) alwaysAllowMicrophone else settings.alwaysAllowMicrophone,
                         )
                     )
                 },
@@ -195,7 +227,7 @@ private fun AppSettingsScreenPreview() {
     FlatdroidTheme {
         AppSettingsScreen(
             InstalledApp("org.xfce.mousepad", "Mousepad", null, null), AppSettings(), cacheBytes = 12_345_678, canClearCache = true, canUninstall = true, developerOptions = true,
-            onSave = {}, onBack = {}, onClearCache = {}, onUninstall = {},
+            onRequestMicrophone = {}, onSave = {}, onBack = {}, onClearCache = {}, onUninstall = {},
         )
     }
 }

@@ -40,6 +40,8 @@ data class SessionUi(
     val message: String? = null,
     /** [message] is an error. */
     val failed: Boolean = false,
+    /** The app that wants the microphone and waits for the user's answer, if any. */
+    val micRequest: String? = null,
 )
 
 /** Process-wide session state: written by [SessionService], read by the UI. */
@@ -49,6 +51,9 @@ object SessionController {
     private val logBuffer = LineBuffer(maxLines = 2_000, scope = appScope)
     /** The last session's output: the app's, and the display helpers' (prefixed). */
     val log: StateFlow<List<String>> = logBuffer.lines
+
+    /** Where answers to [SessionUi.micRequest] go: the running session's microphone, while one has it. */
+    @Volatile var onMicrophoneAnswer: ((Boolean) -> Unit)? = null
 
     val isBusy: Boolean get() = _ui.value.state !is SessionState.Idle && _ui.value.state !is SessionState.ElectronOffer
 
@@ -71,7 +76,15 @@ object SessionController {
     /** Back to idle, with [message] describing the outcome (null for a plain stop). */
     fun ended(message: String?, failed: Boolean = false) {
         message?.let { DebugLog.i("Session: $it") }
-        _ui.update { it.copy(state = SessionState.Idle, message = message, failed = failed && message != null) }
+        _ui.update { it.copy(state = SessionState.Idle, message = message, failed = failed && message != null, micRequest = null) }
+    }
+
+    fun requestMicrophone(appId: String?) = _ui.update { it.copy(micRequest = appId) }
+
+    /** The user's answer to [SessionUi.micRequest]. */
+    fun answerMicrophone(allow: Boolean) {
+        val answer = onMicrophoneAnswer
+        if (answer == null) requestMicrophone(null) else answer(allow)
     }
 
     fun dismissMessage() = _ui.update { it.copy(message = null, failed = false) }

@@ -2,7 +2,8 @@
 
 `build-proot.sh` applies every `proot-*.patch` here, in name order, to the pinned proot commit.
 Each patch should be offered upstream and removed once a pinned commit contains it. Re-check
-each one whenever `PROOT_COMMIT` changes.
+each one whenever `PROOT_COMMIT` changes (last checked at 4a27ca6, v5.1.107.97: both still needed;
+`src/tracee/seccomp.c` is unchanged upstream since a179d3e).
 
 | Patch | What it does | Upstream |
 |---|---|---|

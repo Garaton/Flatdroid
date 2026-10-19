@@ -107,6 +107,13 @@ class ProotCommandTest {
         assertTrue("--bind=/proc/self/fd:/dev/fd" in argv)
     }
 
+    @Test
+    fun noSoundMeansNoPulseAudioSocket() {
+        val argv = ProotCommand.flatpak(paths, flatpakBinds.copy(pulseSockets = null), emptyMap(), listOf("/app/bin/x")).argv
+        assertTrue(argv.none { it.endsWith(":/run/pulse") })
+        assertTrue("--bind=/cache/session/pulse:/run/pulse" in ProotCommand.flatpak(paths, flatpakBinds, emptyMap(), listOf("/app/bin/x")).argv)
+    }
+
     private val flatpakBinds = FlatpakBinds(
         root = "/cache/roots/org.xfce.mousepad",
         runtimeFiles = "/fp/runtime/org.freedesktop.Platform/aarch64/26.08/abc/files",

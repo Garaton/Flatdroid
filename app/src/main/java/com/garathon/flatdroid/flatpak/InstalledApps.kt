@@ -3,6 +3,7 @@ package com.garathon.flatdroid.flatpak
 import android.content.Context
 import com.garathon.flatdroid.alpine.AlpineEnvironment
 import com.garathon.flatdroid.proot.DevNodes
+import com.garathon.flatdroid.settings.AppSettings
 import com.garathon.flatdroid.util.readTextUpTo
 import java.io.File
 import java.util.Locale
@@ -15,6 +16,8 @@ data class InstalledApp(
     val lastOpened: Long?,
     /** Its metadata asks for all devices (`devices=all`). */
     val requestsAllDevices: Boolean = false,
+    /** Its metadata asks for sound (`sockets=pulseaudio`). */
+    val requestsAudio: Boolean = false,
 )
 
 /** Installed apps with their names and icons, read from what each app exports. */
@@ -30,10 +33,14 @@ class InstalledApps(private val context: Context) {
             icon = icon(app, id),
             lastOpened = AppData.settings(context, id).load().lastOpened,
             requestsAllDevices = DevNodes.ALL in app.metadata.context.devices,
+            requestsAudio = AppSettings.PULSEAUDIO_SOCKET in app.metadata.context.sockets,
         )
     }
 
     fun name(id: String): String? = installation.app(id)?.let { desktopName(it, id) }
+
+    /** The `sockets=` the app's metadata asks for; empty if it isn't installed. */
+    fun sockets(id: String): List<String> = installation.app(id)?.metadata?.context?.sockets.orEmpty()
 
     private fun desktopName(app: Deployment, id: String): String? {
         val file = File(app.export, "share/applications/$id.desktop")

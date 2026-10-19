@@ -161,4 +161,12 @@ class LaunchPlannerTest {
         // The setting only applies to apps that ask for all devices.
         assertFalse(plan("a.Dri2", "dri;", LaunchOptions(wholeDev = true)).binds.wholeDev)
     }
+
+    @Test
+    fun noSoundLeavesOutPulseAudio() {
+        runtimeWithGl()
+        File(inst.app("a.Quiet", metadata = appMetadata("a.Quiet", "x")), "bin").mkdirs()
+        assertEquals(File(dirs.pulseSockets, "").path, Ready(planner.plan("a.Quiet", dirs)).binds.pulseSockets)
+        assertEquals(null, Ready(planner.plan("a.Quiet", dirs, LaunchOptions(audio = false))).binds.pulseSockets)
+    }
 }

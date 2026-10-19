@@ -175,9 +175,10 @@ class AlpineSetup(
         /**
          * Alpine's tigervnc stays until our own Xvnc build replaces it. Openbox needs a font: without
          * one its title bars collapse to a few pixels. ostree repairs the Flatpak repository after
-         * an interrupted removal (FlatpakTaskService).
+         * an interrupted removal (FlatpakTaskService). pulseaudio-utils has `pactl`, which tells
+         * when an app records (SessionScript).
          */
-        val PACKAGES = listOf("flatpak", "ostree", "tigervnc", "openbox", "font-cantarell", "pulseaudio", "ca-certificates")
+        val PACKAGES = listOf("flatpak", "ostree", "tigervnc", "openbox", "font-cantarell", "pulseaudio", "pulseaudio-utils", "ca-certificates")
         private const val APK_CACHE = "/var/cache/apk"
         /** Free space setup needs: the minirootfs, and the package cache plus installed packages. */
         private const val ROOTFS_BYTES = 20L shl 20

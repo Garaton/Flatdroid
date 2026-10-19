@@ -233,6 +233,21 @@ fun ElectronDialog(offer: SessionState.ElectronOffer, appName: String, deviceArc
     )
 }
 
+/**
+ * Before launching an app whose microphone asks, when Flatdroid can't post the question later
+ * (notifications are off): the answer holds for the session. Dismissing it cancels the launch.
+ */
+@Composable
+fun MicrophoneLaunchDialog(appName: String, onAnswer: (allow: Boolean) -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.mic_launch_title, appName)) },
+        text = { Text(stringResource(R.string.mic_launch_text)) },
+        confirmButton = { Button(onClick = { onAnswer(true) }) { Text(stringResource(R.string.mic_allow)) } },
+        dismissButton = { TextButton(onClick = { onAnswer(false) }) { Text(stringResource(R.string.mic_deny)) } },
+    )
+}
+
 /** Output lines, selectable so they can be copied into a bug report. */
 @Composable
 fun LogDialog(title: String, lines: List<String>, onDismiss: () -> Unit) {

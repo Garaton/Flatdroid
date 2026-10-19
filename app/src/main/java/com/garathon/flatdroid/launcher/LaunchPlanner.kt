@@ -18,7 +18,8 @@ data class HostDirs(
     /** Generated /etc files: name to host file. */
     val etc: Map<String, File>,
     val x11Sockets: File,
-    val pulseSockets: File,
+    /** PulseAudio's socket directory; null when the app gets no sound. */
+    val pulseSockets: File?,
 )
 
 /** Per-app choices that change a launch. */
@@ -31,6 +32,8 @@ data class LaunchOptions(
     val environment: Map<String, String> = emptyMap(),
     /** For an app asking for `devices=all`: the host's whole /dev, Binder included (the app's own setting). */
     val wholeDev: Boolean = false,
+    /** The app gets PulseAudio's socket (see AppSettings.audioAllowed). */
+    val audio: Boolean = true,
 )
 
 /** Everything needed to start an app: its proot binds, environment and command, and its root's layout. */
@@ -151,7 +154,7 @@ class LaunchPlanner(
             tmp = dirs.tmp.path,
             shm = dirs.shm.path,
             x11Sockets = dirs.x11Sockets.path,
-            pulseSockets = dirs.pulseSockets.path,
+            pulseSockets = dirs.pulseSockets?.takeIf { options.audio }?.path,
             home = dirs.home.path,
             homeOverlays = dirs.homeOverlays.map { it.first.path to it.second },
             dev = DevNodes.forApp(devices, devExists),

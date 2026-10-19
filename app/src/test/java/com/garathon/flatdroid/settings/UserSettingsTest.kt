@@ -28,7 +28,8 @@ class UserSettingsTest {
         assertEquals(UserSettings(GuestFiles.ALL_LANGUAGES), store.load())
         val all = UserSettings(
             "de;en", developerOptions = true, vncViewer = "com.gaurav.avnc", frameRate60 = true, customFrameRate = 45,
-            uncappedFrameRate = true, installGpuRuntimes = true, titleBars = false,
+            uncappedFrameRate = true, installGpuRuntimes = true, titleBars = false, customAudioLatencyMs = 30,
+            lowLatencyAudio = true, highQualityAudio = true,
         )
         store.save(all)
         assertEquals(all, store.load())
@@ -59,6 +60,22 @@ class UserSettingsTest {
         assertTrue(UserSettings("en").windowTitleBars)
         assertTrue(UserSettings("en", titleBars = false).windowTitleBars)
         assertFalse(UserSettings("en", developerOptions = true, titleBars = false).windowTitleBars)
+    }
+
+    @Test
+    fun audioLatencyIs60UnlessTheDeveloperSettingIsOn() {
+        assertEquals(60, UserSettings("en").audioLatencyMs)
+        assertEquals(60, UserSettings("en", customAudioLatencyMs = 20).audioLatencyMs)
+        assertEquals(20, UserSettings("en", developerOptions = true, customAudioLatencyMs = 20).audioLatencyMs)
+    }
+
+    @Test
+    fun audioIsPowerSavingAndFastUnlessTurnedOn() {
+        val base = UserSettings("en")
+        assertEquals(AudioOutputMode.POWER_SAVING, base.audioOutputMode)
+        assertEquals("speex-float-0", base.resampler.pulseName)
+        assertEquals(AudioOutputMode.LOW_LATENCY, base.copy(lowLatencyAudio = true).audioOutputMode)
+        assertEquals("speex-float-1", base.copy(highQualityAudio = true).resampler.pulseName)
     }
 
     @Test

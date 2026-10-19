@@ -15,10 +15,7 @@ data class AppSettings(
     /** Used with [DisplaySize.CUSTOM] only. */
     val customWidth: Int = PORTRAIT_WIDTH,
     val customHeight: Int = PORTRAIT_HEIGHT,
-    /**
-     * Electron needed the flags for newer versions ("GPU process isn't usable" without them).
-     * Managed by the launcher; shown only with developer options.
-     */
+    /** Electron needed the flags for newer versions ("GPU process isn't usable" without them). Managed by the launcher. */
     val newerElectronFlags: Boolean = false,
     /** When the app was last launched, in milliseconds since the epoch; null if never. */
     val lastOpened: Long? = null,
@@ -27,7 +24,20 @@ data class AppSettings(
      * the device groups Flatpak names. Shown only with developer options.
      */
     val wholeDev: Boolean = false,
+    /** Sound output (the PulseAudio socket); null follows the app's metadata ([audioAllowed]). */
+    val audio: Boolean? = null,
+    /**
+     * Microphone input, through Android's microphone while the app records. Off by default; on,
+     * the user is asked in a notification the first time the app records in a session, and the
+     * answer holds for that session.
+     */
+    val microphone: Boolean = false,
+    /** Developer setting: with [microphone] on, record whenever the app does, without asking. */
+    val alwaysAllowMicrophone: Boolean = false,
 ) {
+    /** Whether the app gets sound: its own setting, else whether its metadata asks for PulseAudio. */
+    fun audioAllowed(sockets: List<String>): Boolean = audio ?: (PULSEAUDIO_SOCKET in sockets)
+
     val width: Int get() = when (displaySize) {
         DisplaySize.PORTRAIT -> PORTRAIT_WIDTH
         DisplaySize.LANDSCAPE -> LANDSCAPE_WIDTH
@@ -47,6 +57,8 @@ data class AppSettings(
         const val LANDSCAPE_HEIGHT = 1000
         const val MIN_SIZE = 320
         const val MAX_SIZE = 4096
+        /** Flatpak's `sockets=` name for sound. */
+        const val PULSEAUDIO_SOCKET = "pulseaudio"
     }
 }
 
@@ -72,6 +84,9 @@ class AppSettingsStore(private val file: File) {
             newerElectronFlags = props.getProperty(KEY_ELECTRON_NEWER) == "true",
             lastOpened = props.getProperty(KEY_LAST_OPENED)?.toLongOrNull(),
             wholeDev = props.getProperty(KEY_WHOLE_DEV) == "true",
+            audio = props.getProperty(KEY_AUDIO)?.toBooleanStrictOrNull(),
+            microphone = props.getProperty(KEY_MICROPHONE) == "true",
+            alwaysAllowMicrophone = props.getProperty(KEY_MICROPHONE_ALWAYS) == "true",
         )
     }
 
@@ -85,6 +100,9 @@ class AppSettingsStore(private val file: File) {
         props.setProperty(KEY_ELECTRON_NEWER, settings.newerElectronFlags.toString())
         settings.lastOpened?.let { props.setProperty(KEY_LAST_OPENED, it.toString()) }
         props.setProperty(KEY_WHOLE_DEV, settings.wholeDev.toString())
+        settings.audio?.let { props.setProperty(KEY_AUDIO, it.toString()) }
+        if (settings.microphone) props.setProperty(KEY_MICROPHONE, "true")
+        if (settings.alwaysAllowMicrophone) props.setProperty(KEY_MICROPHONE_ALWAYS, "true")
         file.writeTextAtomically(StringWriter().also { props.store(it, null) }.toString())
     }
 
@@ -101,5 +119,8 @@ class AppSettingsStore(private val file: File) {
         const val KEY_ELECTRON_NEWER = "electron.newerFlags"
         const val KEY_LAST_OPENED = "lastOpened"
         const val KEY_WHOLE_DEV = "dev.whole"
+        const val KEY_AUDIO = "permission.audio"
+        const val KEY_MICROPHONE = "permission.microphone"
+        const val KEY_MICROPHONE_ALWAYS = "permission.microphone.always"
     }
 }

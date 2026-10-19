@@ -29,10 +29,12 @@ import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import com.garathon.flatdroid.alpine.AlpineEnvironment
 import com.garathon.flatdroid.alpine.GuestFiles
+import com.garathon.flatdroid.audio.MicStreamer
 import com.garathon.flatdroid.flatpak.AppData
 import com.garathon.flatdroid.flatpak.FlatpakTask
 import com.garathon.flatdroid.flatpak.FlatpakTaskService
 import com.garathon.flatdroid.flatpak.FlatpakTasks
+import com.garathon.flatdroid.flatpak.InstalledApps
 import com.garathon.flatdroid.session.SessionController
 import com.garathon.flatdroid.session.SessionService
 import com.garathon.flatdroid.session.SessionState
@@ -48,6 +50,7 @@ import com.garathon.flatdroid.ui.ElectronDialog
 import com.garathon.flatdroid.ui.HomeScreen
 import com.garathon.flatdroid.ui.InstallDialog
 import com.garathon.flatdroid.ui.LogDialog
+import com.garathon.flatdroid.ui.MicrophoneLaunchDialog
 import com.garathon.flatdroid.ui.SessionPanel
 import com.garathon.flatdroid.ui.TaskPanel
 import com.garathon.flatdroid.ui.SettingsScreen
@@ -63,6 +66,18 @@ class MainActivity : ComponentActivity() {
     /** An app to launch once the notification permission has been answered. */
     private var pendingLaunch: String? = null
 
+    /** A launch waiting for the microphone question ([needsMicrophoneQuestion]). */
+    private var microphoneQuestion by mutableStateOf<PendingLaunch?>(null)
+
+    /** Called with Android's answer to the microphone permission request in flight. */
+    private var onMicrophoneResult: ((Boolean) -> Unit)? = null
+
+    private val microphonePermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            onMicrophoneResult?.invoke(granted)
+            onMicrophoneResult = null
+        }
+
     /**
      * Setup and launches go ahead whatever the answer; without the permission their notification
      * is just hidden.
@@ -71,7 +86,7 @@ class MainActivity : ComponentActivity() {
         registerForActivityResult(ActivityResultContracts.RequestPermission()) {
             val appId = pendingLaunch
             pendingLaunch = null
-            if (appId != null) SessionService.launch(this, appId) else SetupService.start(this)
+            if (appId != null) continueLaunch(PendingLaunch(appId, prepareElectron = false)) else SetupService.start(this)
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -155,7 +170,8 @@ class MainActivity : ComponentActivity() {
                     return
                 }
                 val store = remember(app.id) { AppData.settings(this, app.id) }
-                val developerOptions = remember { savedSettings(languages).developerOptions }
+                val userSettings = remember { savedSettings(languages) }
+                val developerOptions = userSettings.developerOptions
                 val cacheBytes by home.cacheBytes.collectAsState()
                 LaunchedEffect(app.id) { home.measureCache(app.id) }
                 AppSettingsScreen(
@@ -165,12 +181,13 @@ class MainActivity : ComponentActivity() {
                     canClearCache = session.state.appIdOrNull != app.id,
                     canUninstall = !sessionBusy && !taskRunning,
                     developerOptions = developerOptions,
+                    onRequestMicrophone = ::requestMicrophone,
                     onSave = { new ->
-                        // Keep what the launcher manages: last opened, and the Electron flags unless shown.
+                        // Keep what the launcher manages: last opened and the Electron flags.
                         store.update { old ->
                             new.copy(
                                 lastOpened = old.lastOpened,
-                                newerElectronFlags = if (developerOptions) new.newerElectronFlags else old.newerElectronFlags,
+                                newerElectronFlags = old.newerElectronFlags,
                                 wholeDev = if (developerOptions) new.wholeDev else old.wholeDev,
                             )
                         }
@@ -197,7 +214,7 @@ class MainActivity : ComponentActivity() {
                 (session.state as? SessionState.ElectronOffer)?.let { offer ->
                     ElectronDialog(
                         offer, nameOf(offer.appId), remember { AlpineEnvironment.get(this).arch },
-                        onAccept = { SessionController.ended(null); SessionService.prepareElectronAndLaunch(this, offer.appId) },
+                        onAccept = { SessionController.ended(null); continueLaunch(PendingLaunch(offer.appId, prepareElectron = true)) },
                         onDismiss = { SessionController.ended(null) },
                     )
                 }
@@ -211,6 +228,13 @@ class MainActivity : ComponentActivity() {
                         LogDialog(getString(R.string.task_log_title), lines) { log = null }
                     }
                     null -> Unit
+                }
+                microphoneQuestion?.let { pending ->
+                    MicrophoneLaunchDialog(
+                        nameOf(pending.appId),
+                        onAnswer = { allow -> microphoneQuestion = null; start(pending, allow) },
+                        onDismiss = { microphoneQuestion = null },
+                    )
                 }
                 HomeScreen(
                     apps = apps,
@@ -251,8 +275,37 @@ class MainActivity : ComponentActivity() {
             pendingLaunch = appId
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         } else {
-            SessionService.launch(this, appId)
+            continueLaunch(PendingLaunch(appId, prepareElectron = false))
         }
+    }
+
+    /** Asks the microphone question first when needed, then starts the session. */
+    private fun continueLaunch(pending: PendingLaunch) {
+        if (needsMicrophoneQuestion(pending.appId)) microphoneQuestion = pending else start(pending, micAnswer = null)
+    }
+
+    private fun start(pending: PendingLaunch, micAnswer: Boolean?) {
+        if (pending.prepareElectron) SessionService.prepareElectronAndLaunch(this, pending.appId, micAnswer)
+        else SessionService.launch(this, pending.appId, micAnswer)
+    }
+
+    /**
+     * The app's microphone is on but will ask, and Flatdroid can't post the question when the app
+     * records (notifications are off): it is asked before the launch instead, for the session.
+     */
+    private fun needsMicrophoneQuestion(appId: String): Boolean {
+        val settings = AppData.settings(this, appId).load()
+        val developerOptions = SetupController.settings(this).load()?.developerOptions == true
+        return settings.microphone && !(settings.alwaysAllowMicrophone && developerOptions) &&
+            MicStreamer.hasPermission(this) && !SessionService.canAskInNotification(this) &&
+            settings.audioAllowed(InstalledApps(this).sockets(appId))
+    }
+
+    /** Asks Android for the microphone permission, then calls [onResult] with the answer. */
+    private fun requestMicrophone(onResult: (Boolean) -> Unit) {
+        if (MicStreamer.hasPermission(this)) return onResult(true)
+        onMicrophoneResult = onResult
+        microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
     }
 
     private fun openViewer(password: String) {
@@ -347,6 +400,9 @@ private sealed interface Screen {
         )
     }
 }
+
+/** A launch on hold while the user answers a question. */
+private data class PendingLaunch(val appId: String, val prepareElectron: Boolean)
 
 /** Which output the log dialog shows. */
 private enum class LogKind { SESSION, TASK }

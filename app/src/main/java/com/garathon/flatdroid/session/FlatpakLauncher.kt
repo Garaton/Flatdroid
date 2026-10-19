@@ -1,12 +1,15 @@
 package com.garathon.flatdroid.session
 
 import android.content.Context
+import android.media.AudioManager
 import android.os.Build
 import android.os.FileObserver
 import android.system.Os
 import com.garathon.flatdroid.R
 import com.garathon.flatdroid.alpine.AlpineEnvironment
 import com.garathon.flatdroid.alpine.GuestFiles
+import com.garathon.flatdroid.audio.AudioPlayer
+import com.garathon.flatdroid.audio.MicStreamer
 import com.garathon.flatdroid.flatpak.AndroidLinkFs
 import com.garathon.flatdroid.flatpak.AppData
 import com.garathon.flatdroid.flatpak.FlatpakInstallation
@@ -25,6 +28,8 @@ import com.garathon.flatdroid.proot.ProotCommand
 import com.garathon.flatdroid.proot.ProotProcess
 import com.garathon.flatdroid.proot.ProotRunner
 import com.garathon.flatdroid.setup.AndroidTarFs
+import com.garathon.flatdroid.settings.AudioOutputMode
+import com.garathon.flatdroid.settings.Resampler
 import com.garathon.flatdroid.settings.UserSettings
 import com.garathon.flatdroid.setup.SetupController
 import com.garathon.flatdroid.setup.deleteTree
@@ -42,7 +47,8 @@ class LaunchException(message: String) : IOException(message)
 
 /**
  * Runs one Flatpak session: a fresh Xvnc, Openbox and PulseAudio in Alpine, then the app in its
- * own root. Blocking; interrupting the thread stops the app and the helpers.
+ * own root, with the audio player and, when the app may use it, the microphone. Blocking;
+ * interrupting the thread stops the app and the helpers.
  */
 class FlatpakLauncher(private val context: Context) {
     private val env = AlpineEnvironment.get(context)
@@ -91,7 +97,7 @@ class FlatpakLauncher(private val context: Context) {
      * Launches [appId] and returns when it exits. Returns false without launching if the user
      * must first agree to an Electron swap (the offer is then in [SessionController]).
      */
-    fun run(appId: String): Boolean {
+    fun run(appId: String, micAnswer: Boolean? = null): Boolean {
         SessionController.starting(appId, context.getString(R.string.session_reading_metadata), clearLog = true)
         val store = AppData.settings(context, appId)
         var settings = store.load()
@@ -118,19 +124,51 @@ class FlatpakLauncher(private val context: Context) {
         prepareDirs(appId, plan)
         val userSettings = SetupController.settings(context).load()
         val password = VncPassword.random()
-        writeSessionFiles(password, titleBars = userSettings?.windowTitleBars ?: true)
+        val audio = plan.binds.pulseSockets != null
+        if (settings.microphone && !MicStreamer.hasPermission(context)) {
+            // Android's permission was revoked since the microphone was turned on: off again, as
+            // when Android refuses it in the app's settings.
+            settings = settings.copy(microphone = false)
+            store.update { it.copy(microphone = false) }
+            SessionController.log("[flatdroid] Android's microphone permission was revoked; the app's microphone is off")
+        }
+        val microphone = audio && settings.microphone
+        val outputRate = outputRate()
+        val micRate = MicStreamer.rate()
+        writeSessionFiles(
+            password, titleBars = userSettings?.windowTitleBars ?: true,
+            pulseScript = if (audio) PulseScript.text(outputRate, microphone, micRate) else null,
+        )
         // After both, which create the directories it checks: they live in the cache, which Android may
         // clear at any time, and a fresh install has none yet.
         checkBindSources(plan)
 
         SessionController.starting(appId, context.getString(R.string.session_starting_display))
         val frameRate = userSettings?.frameRate ?: UserSettings.DEFAULT_FRAME_RATE
-        val helpers = startHelpers(settings.geometry, frameRate)
+        val mic = if (!microphone) null else {
+            val alwaysAllowed = settings.alwaysAllowMicrophone && userSettings?.developerOptions == true
+            MicrophoneSession(context, appId, File(pulseDir, PulseScript.MIC_SOCKET), micRate, alwaysAllowed, micAnswer)
+        }
+        SessionController.onMicrophoneAnswer = mic?.let { it::answer }
+        val resampler = userSettings?.resampler ?: Resampler.FAST
+        val helpers = startHelpers(SessionScript.command(settings.geometry, frameRate, audio, microphone = mic != null, resampler), audio) { line ->
+            SessionScript.micUsers(line)?.let { mic?.onUsers(it) }
+        }
         var app: ProotProcess? = null
+        var player: AudioPlayer? = null
         try {
             waitForFile(File(x11Dir, SessionScript.X_SOCKET), helpers, DISPLAY_TIMEOUT_MS, context.getString(R.string.launch_display_failed))
-            if (!waitForFile(File(pulseDir, "native"), helpers, AUDIO_TIMEOUT_MS, null)) {
+            if (!audio) {
+                SessionController.log("[flatdroid] sound is off for this app; PulseAudio isn't started")
+            } else if (!waitForFile(File(pulseDir, PulseScript.NATIVE_SOCKET), helpers, AUDIO_TIMEOUT_MS, null)) {
                 SessionController.log("[flatdroid] PulseAudio did not start; the app has no audio")
+            } else {
+                player = AudioPlayer(
+                    File(pulseDir, PulseScript.SIMPLE_SOCKET), outputRate,
+                    latencyMs = userSettings?.audioLatencyMs ?: UserSettings.DEFAULT_AUDIO_LATENCY_MS,
+                    outputMode = userSettings?.audioOutputMode ?: AudioOutputMode.POWER_SAVING,
+                )
+                player.start()
             }
             var triedNewerFlags = false
             while (true) {
@@ -171,9 +209,17 @@ class FlatpakLauncher(private val context: Context) {
             }
         } finally {
             app?.stop()
+            player?.stop()
+            mic?.stop()
+            SessionController.onMicrophoneAnswer = null
             helpers.stop()
         }
     }
+
+    /** The rate Android's mixer runs at, so PulseAudio's output needs no second resampling. */
+    private fun outputRate(): Int =
+        context.getSystemService(AudioManager::class.java)?.getProperty(AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE)?.toIntOrNull()
+            ?: DEFAULT_OUTPUT_RATE
 
     private fun options(appId: String): LaunchOptions {
         val settings = AppData.settings(context, appId).load()
@@ -182,6 +228,7 @@ class FlatpakLauncher(private val context: Context) {
             newerElectronFlags = settings.newerElectronFlags,
             electronSwap = app?.let { electronSwap(appId).preparedFor(it) },
             wholeDev = settings.wholeDev,
+            audio = settings.audioAllowed(app?.metadata?.context?.sockets.orEmpty()),
         )
     }
 
@@ -222,7 +269,8 @@ class FlatpakLauncher(private val context: Context) {
     private fun prepareDirs(appId: String, plan: LaunchPlan) {
         val root = File(plan.binds.root)
         AndroidTarFs.deleteTree(root)
-        val mountPoints = listOf("usr", "app", "etc", "dev", "proc", "sys", "tmp") + listOf(GuestPaths.PULSE_DIR, GuestPaths.HOME).map { it.removePrefix("/") }
+        val mountPoints = listOf("usr", "app", "etc", "dev", "proc", "sys", "tmp") +
+            listOfNotNull(GuestPaths.PULSE_DIR.takeIf { plan.binds.pulseSockets != null }, GuestPaths.HOME).map { it.removePrefix("/") }
         for (dir in mountPoints) File(root, dir).mkdirs()
         if (!plan.binds.wholeDev) DevNodes.createMountPoints(root, plan.binds.dev + AlpineBinds.FD_LINKS.keys)
         for (name in plan.usrLinks) Os.symlink("usr/$name", File(root, name).path)
@@ -247,7 +295,7 @@ class FlatpakLauncher(private val context: Context) {
      */
     private fun checkBindSources(plan: LaunchPlan) {
         val b = plan.binds
-        val sources = listOf(b.root, b.runtimeFiles, b.appFiles, "${b.runtimeFiles}/etc", b.tmp, b.shm, b.x11Sockets, b.pulseSockets, b.home, env.paths().l2sDir) +
+        val sources = listOfNotNull(b.root, b.runtimeFiles, b.appFiles, "${b.runtimeFiles}/etc", b.tmp, b.shm, b.x11Sockets, b.pulseSockets, b.home, env.paths().l2sDir) +
             b.etc.values + b.extensions.map { it.first } + b.homeOverlays.map { it.first } + b.extra.map { it.first }
         for (path in sources) {
             val file = File(path)
@@ -260,9 +308,9 @@ class FlatpakLauncher(private val context: Context) {
     /**
      * Files every launch gets fresh: the shared /etc files (an app could have changed them, since
      * binds are writable), a copy of the machine-id, resolv.conf for the current network, and the
-     * VNC password file. Old sockets are removed.
+     * VNC password file, and the helpers' scripts ([pulseScript] only with sound). Old sockets are removed.
      */
-    private fun writeSessionFiles(password: String, titleBars: Boolean) {
+    private fun writeSessionFiles(password: String, titleBars: Boolean, pulseScript: String?) {
         val launcher = AppData.launcherFiles(context)
         launcher.write()
         File(etcDir, "machine-id").writeTextAtomically(launcher.machineId.readText(), durable = false)
@@ -277,20 +325,26 @@ class FlatpakLauncher(private val context: Context) {
         }
         File(sessionDir, "session.sh").writeTextAtomically(SessionScript.TEXT, durable = false)
         File(sessionDir, "openbox-rc.xml").writeTextAtomically(GuestFiles.openboxRc(titleBars), durable = false)
+        val pulseFile = File(sessionDir, "pulse.pa")
+        if (pulseScript != null) pulseFile.writeTextAtomically(pulseScript, durable = false) else pulseFile.delete()
     }
 
-    private fun startHelpers(geometry: String, frameRate: Int): ProotProcess {
+    /**
+     * Starts [command] ([SessionScript.command]), with PulseAudio's script bound when there is
+     * [sound]; [onLine] also gets each line of the helpers' output, before it is logged.
+     */
+    private fun startHelpers(command: List<String>, sound: Boolean, onLine: (String) -> Unit): ProotProcess {
         val binds = listOf(
             x11Dir.path to GuestPaths.X11_DIR,
             pulseDir.path to GuestPaths.PULSE_DIR,
             vncDir.path to SessionScript.GUEST_VNC_DIR,
             File(sessionDir, "session.sh").path to SessionScript.GUEST_SCRIPT,
             File(sessionDir, "openbox-rc.xml").path to SessionScript.GUEST_OPENBOX_RC,
-        )
-        return env.start(
-            listOf("/bin/sh", SessionScript.GUEST_SCRIPT, geometry, SessionScript.VNC_PORT.toString(), frameRate.toString()),
-            binds,
-        ) { SessionController.log("[display] $it") }
+        ) + if (sound) listOf(File(sessionDir, "pulse.pa").path to SessionScript.GUEST_PULSE_SCRIPT) else emptyList()
+        return env.start(command, binds) { line ->
+            onLine(line)
+            SessionController.log("[display] $line")
+        }
     }
 
     /**
@@ -344,5 +398,6 @@ class FlatpakLauncher(private val context: Context) {
         const val DISPLAY_TIMEOUT_MS = 30_000L
         const val AUDIO_TIMEOUT_MS = 10_000L
         const val HELPER_CHECK_MS = 250L
+        const val DEFAULT_OUTPUT_RATE = 48_000
     }
 }

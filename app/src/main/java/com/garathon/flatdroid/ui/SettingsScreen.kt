@@ -60,9 +60,14 @@ fun SettingsScreen(
     var uncappedFrameRate by rememberSaveable { mutableStateOf(settings.uncappedFrameRate) }
     var titleBars by rememberSaveable { mutableStateOf(settings.titleBars) }
     var installGpuRuntimes by rememberSaveable { mutableStateOf(settings.installGpuRuntimes) }
+    var audioLatency by rememberSaveable { mutableStateOf(settings.customAudioLatencyMs?.toString() ?: "") }
+    var lowLatencyAudio by rememberSaveable { mutableStateOf(settings.lowLatencyAudio) }
+    var highQualityAudio by rememberSaveable { mutableStateOf(settings.highQualityAudio) }
     // Empty means "not set"; anything else must be a rate Xvnc takes.
     val customFrameRateValue = customFrameRate.toIntOrNull()?.takeIf { it in UserSettings.CUSTOM_FRAME_RATES }
     val customFrameRateValid = customFrameRate.isEmpty() || customFrameRateValue != null
+    val audioLatencyValue = audioLatency.toIntOrNull()?.takeIf { it in UserSettings.AUDIO_LATENCIES_MS }
+    val audioLatencyValid = audioLatency.isEmpty() || audioLatencyValue != null
     var confirmReset by rememberSaveable { mutableStateOf(false) }
     if (confirmReset) {
         ResetDialog(onConfirm = { confirmReset = false; onReset(it) }, onDismiss = { confirmReset = false })
@@ -116,6 +121,30 @@ fun SettingsScreen(
             )
         }
 
+        SectionTitle(stringResource(R.string.settings_section_audio))
+        SwitchRow(
+            lowLatencyAudio, { lowLatencyAudio = it },
+            stringResource(R.string.settings_low_latency_audio), stringResource(R.string.settings_low_latency_audio_hint), enabled = !applying,
+        )
+        SwitchRow(
+            highQualityAudio, { highQualityAudio = it },
+            stringResource(R.string.settings_high_quality_audio), stringResource(R.string.settings_high_quality_audio_hint), enabled = !applying,
+        )
+        if (developerOptions) {
+            TextRow(
+                content = audioLatency,
+                onChange = { audioLatency = it.filter(Char::isDigit).take(4) },
+                title = stringResource(R.string.settings_audio_latency),
+                hint = stringResource(
+                    R.string.settings_audio_latency_hint,
+                    UserSettings.AUDIO_LATENCIES_MS.first, UserSettings.AUDIO_LATENCIES_MS.last, UserSettings.DEFAULT_AUDIO_LATENCY_MS,
+                ),
+                isError = !audioLatencyValid,
+                enabled = !applying,
+                developer = true,
+            )
+        }
+
 		// Developer Section
         SectionTitle(stringResource(R.string.settings_section_developer))
         SwitchRow(
@@ -151,10 +180,13 @@ fun SettingsScreen(
                             uncappedFrameRate = uncappedFrameRate,
                             installGpuRuntimes = installGpuRuntimes,
                             titleBars = titleBars,
+                            customAudioLatencyMs = audioLatencyValue,
+                            lowLatencyAudio = lowLatencyAudio,
+                            highQualityAudio = highQualityAudio,
                         )
                     )
                 },
-                enabled = !applying && customFrameRateValid,
+                enabled = !applying && customFrameRateValid && audioLatencyValid,
             ) {
                 Text(stringResource(if (applying) R.string.settings_applying else R.string.settings_save))
             }
