@@ -36,7 +36,14 @@ data class FlatpakContext(
     val devices: List<String> = emptyList(),
     val filesystems: List<String> = emptyList(),
     val persistent: List<String> = emptyList(),
-)
+) {
+    /**
+     * Asks for Wayland and not for X11 (`x11` or `fallback-x11`). Flatdroid only has X11; such an
+     * app may still work through its toolkit (GTK, Qt), but one with no X11 support (foot) can't.
+     */
+    val waylandOnly: Boolean
+        get() = "wayland" in sockets && "x11" !in sockets && "fallback-x11" !in sockets
+}
 
 /** The metadata file of an installed app or runtime. */
 class FlatpakMetadata(private val keyfile: Keyfile) {

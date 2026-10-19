@@ -25,6 +25,10 @@ object GuestFiles {
 
     fun hosts(): String = "127.0.0.1 localhost\n::1 localhost\n"
 
+    /** An empty Fontconfig file for [com.garathon.flatdroid.proot.GuestPaths.FONT_DIRS]: no host font directories. */
+    fun fontDirs(): String =
+        "<?xml version=\"1.0\"?>\n<!DOCTYPE fontconfig SYSTEM \"urn:fontconfig:fonts.dtd\">\n<fontconfig>\n</fontconfig>\n"
+
     /** A new random machine-id: 32 lowercase hex digits. */
     fun machineId(random: java.util.Random = java.security.SecureRandom()): String =
         (1..16).joinToString("", postfix = "\n") { "%02x".format(random.nextInt(256)) }

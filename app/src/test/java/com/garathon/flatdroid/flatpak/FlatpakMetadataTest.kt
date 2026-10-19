@@ -2,6 +2,8 @@ package com.garathon.flatdroid.flatpak
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Assert.assertFalse
 import org.junit.Test
 
 class FlatpakMetadataTest {
@@ -73,6 +75,14 @@ class FlatpakMetadataTest {
             ),
             m.extensionPoints,
         )
+    }
+
+    @Test
+    fun waylandOnlyMeansNoX11Socket() {
+        assertTrue(FlatpakContext(sockets = listOf("wayland")).waylandOnly)
+        assertFalse(FlatpakContext(sockets = listOf("wayland", "fallback-x11")).waylandOnly)
+        assertFalse(FlatpakContext(sockets = listOf("wayland", "x11")).waylandOnly)
+        assertFalse(FlatpakContext(sockets = listOf("x11", "pulseaudio")).waylandOnly)
     }
 
     @Test

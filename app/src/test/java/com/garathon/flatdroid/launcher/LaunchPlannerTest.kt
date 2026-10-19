@@ -23,7 +23,7 @@ class LaunchPlannerTest {
             root = File(d, "root"), tmp = File(d, "tmp"), shm = File(d, "shm"), home = File(d, "home"),
             homeOverlays = listOf(File(d, "config") to "/home/user/.config"),
             etc = mapOf("passwd" to File(d, "passwd")),
-            x11Sockets = File(d, "x11"), pulseSockets = File(d, "pulse"),
+            x11Sockets = File(d, "x11"), pulseSockets = File(d, "pulse"), fontDirs = File(d, "font-dirs.xml"),
         )
     }
 
@@ -50,6 +50,7 @@ class LaunchPlannerTest {
 
         val plan = Ready(planner.plan("org.supertuxproject.SuperTux", dirs))
         assertEquals(listOf("/app/bin/supertux2"), plan.command)
+        assertEquals(listOf(dirs.fontDirs.path to "/run/host/font-dirs.xml"), plan.binds.extra)
         assertFalse(plan.isElectron)
         assertEquals(listOf("bin", "lib"), plan.usrLinks)
         assertEquals(
@@ -139,7 +140,7 @@ class LaunchPlannerTest {
         val swap = tmp.newFolder("swap")
         File(swap, "uhc").writeBytes(ExecutableTest.elf(0xb7))
         val plan = Ready(planner.plan(id, dirs, LaunchOptions(electronSwap = swap)))
-        assertEquals(listOf(swap.path to "/app/uhc"), plan.binds.extra)
+        assertEquals(listOf(dirs.fontDirs.path to "/run/host/font-dirs.xml", swap.path to "/app/uhc"), plan.binds.extra)
         assertEquals(listOf("/app/uhc/uhc") + Electron.BASE_FLAGS, plan.command)
     }
 
@@ -160,6 +161,14 @@ class LaunchPlannerTest {
         assertTrue(plan("a.All2", "all;", LaunchOptions(wholeDev = true)).binds.wholeDev)
         // The setting only applies to apps that ask for all devices.
         assertFalse(plan("a.Dri2", "dri;", LaunchOptions(wholeDev = true)).binds.wholeDev)
+    }
+
+    @Test
+    fun flatpakInfoUnlessTheAppRunsWithoutIt() {
+        runtimeWithGl()
+        File(inst.app("org.kde.konsole", metadata = appMetadata("org.kde.konsole", "x")), "bin").mkdirs()
+        assertTrue(Ready(planner.plan("org.kde.konsole", dirs)).flatpakInfo!!.contains("build=true"))
+        assertEquals(null, Ready(planner.plan("org.kde.konsole", dirs, LaunchOptions(flatpakInfo = false))).flatpakInfo)
     }
 
     @Test

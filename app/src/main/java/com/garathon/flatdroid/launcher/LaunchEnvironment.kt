@@ -28,6 +28,8 @@ object LaunchEnvironment {
             "PATH" to "/app/bin:/usr/bin",
             "HOME" to GuestPaths.HOME,
             "LANG" to "C.UTF-8",
+            // Terminals (Konsole) start it; Flatpak passes the host's.
+            "SHELL" to "/bin/sh",
             "XDG_RUNTIME_DIR" to "/tmp",
             "FLATPAK_ID" to appId,
             "XDG_CONFIG_HOME" to "$varApp/config",

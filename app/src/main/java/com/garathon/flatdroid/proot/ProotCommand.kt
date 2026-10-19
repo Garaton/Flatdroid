@@ -112,6 +112,7 @@ data class ProotInvocation(val argv: List<String>, val env: Map<String, String>)
  */
 object ProotCommand {
     val GUEST_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    const val FLATPAK_HOST_RESOLV_CONF = "/run/host/monitor/resolv.conf"
 
     /**
      * Runs [command] (absolute guest path first) in the Alpine rootfs as fake root. Only the
@@ -139,6 +140,11 @@ object ProotCommand {
         argv += "--bind=${binds.shm}:/dev/shm"
         argv += "--bind=${binds.tmp}:/tmp"
         argv += "--bind=${binds.resolvConf}:/etc/resolv.conf"
+        // Where a Flatpak host has it. Runtimes ship etc/resolv.conf as a link to this path, and
+        // Flatpak replaces that link while deploying only if it sees it: proot answers a
+        // faccessat2(AT_SYMLINK_NOFOLLOW) about a link through its target, so a dangling link
+        // looks missing, and the deploy fails with "File exists" (KDE runtimes).
+        argv += "--bind=${binds.resolvConf}:$FLATPAK_HOST_RESOLV_CONF"
         argv += "--bind=${binds.hosts}:/etc/hosts"
         argv += "--bind=${binds.emptyDir}:/sys/fs/selinux"
         for ((guest, host) in binds.fakeProc) argv += "--bind=$host:$guest"

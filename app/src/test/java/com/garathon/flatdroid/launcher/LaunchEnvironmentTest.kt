@@ -9,13 +9,14 @@ class LaunchEnvironmentTest {
     fun defaultsMatchTheTestedSet() {
         val env = LaunchEnvironment.build("org.xfce.mousepad", "aarch64-linux-gnu", emptyMap(), glDefault = null)
         assertEquals("/app/bin:/usr/bin", env["PATH"])
+        assertEquals("/bin/sh", env["SHELL"])
         assertEquals("/home/user/.var/app/org.xfce.mousepad/config", env["XDG_CONFIG_HOME"])
         assertEquals("/home/user/.var/app/org.xfce.mousepad/.local/state", env["XDG_STATE_HOME"])
         assertEquals("/app/share:/usr/share:/usr/share/runtime/share", env["XDG_DATA_DIRS"])
         assertEquals("unix:/run/pulse/native", env["PULSE_SERVER"])
         assertEquals("/app/lib:/usr/lib/aarch64-linux-gnu", env["LD_LIBRARY_PATH"])
         assertFalse("LIBGL_ALWAYS_SOFTWARE" in env)
-        assertEquals(27, env.size)
+        assertEquals(28, env.size)
     }
 
     @Test

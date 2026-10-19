@@ -39,6 +39,7 @@ import com.garathon.flatdroid.audio.MicStreamer
 import com.garathon.flatdroid.flatpak.InstalledApp
 import com.garathon.flatdroid.settings.AppSettings
 import com.garathon.flatdroid.settings.DisplaySize
+import com.garathon.flatdroid.settings.EnvironmentText
 import com.garathon.flatdroid.ui.theme.FlatdroidTheme
 
 /**
@@ -47,7 +48,8 @@ import com.garathon.flatdroid.ui.theme.FlatdroidTheme
  * /dev. Sound left at its default is saved as unset, so it follows the app's metadata.
  * [onRequestMicrophone] asks Android for its microphone permission and reports whether it was
  * granted: the microphone turns on only with it, so a notification can later allow it for a
- * session. With [developerOptions], the microphone can also be always allowed.
+ * session. With [developerOptions], the microphone can also be always allowed, and the app's
+ * environment variables set.
  */
 @Composable
 fun AppSettingsScreen(
@@ -75,6 +77,8 @@ fun AppSettingsScreen(
     var audio by rememberSaveable { mutableStateOf(settings.audio ?: audioDefault) }
     var microphone by rememberSaveable { mutableStateOf(settings.microphone) }
     var alwaysAllowMicrophone by rememberSaveable { mutableStateOf(settings.alwaysAllowMicrophone) }
+    var environment by rememberSaveable { mutableStateOf(EnvironmentText.format(settings.environment)) }
+    val environmentValue = EnvironmentText.parse(environment)
     var micRefused by rememberSaveable { mutableStateOf(false) }
     val context = LocalContext.current
     var confirmUninstall by rememberSaveable { mutableStateOf(false) }
@@ -151,6 +155,20 @@ fun AppSettingsScreen(
             )
         }
 
+        if (developerOptions) {
+            SectionTitle(stringResource(R.string.app_settings_launch))
+            TextRow(
+                content = environment,
+                onChange = { environment = it },
+                title = stringResource(R.string.app_settings_environment),
+                hint = stringResource(if (environmentValue == null) R.string.app_settings_environment_invalid else R.string.app_settings_environment_hint),
+                isError = environmentValue == null,
+                developer = true,
+                singleLine = false,
+                keyboardType = KeyboardType.Ascii,
+            )
+        }
+
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
                 onClick = {
@@ -164,10 +182,11 @@ fun AppSettingsScreen(
                             audio = audio.takeIf { it != audioDefault },
                             microphone = microphone,
                             alwaysAllowMicrophone = if (developerOptions) alwaysAllowMicrophone else settings.alwaysAllowMicrophone,
+                            environment = if (developerOptions) environmentValue.orEmpty() else settings.environment,
                         )
                     )
                 },
-                enabled = choice != DisplaySize.CUSTOM || customValid,
+                enabled = (choice != DisplaySize.CUSTOM || customValid) && (!developerOptions || environmentValue != null),
             ) { Text(stringResource(R.string.settings_save)) }
             TextButton(onClick = onBack) { Text(stringResource(R.string.settings_back)) }
         }

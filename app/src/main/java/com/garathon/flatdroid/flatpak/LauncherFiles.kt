@@ -6,7 +6,8 @@ import com.garathon.flatdroid.util.writeTextAtomically
 
 /**
  * The /etc files every Flatpak root gets, which a runtime can't provide on Android: hosts,
- * machine-id, passwd and group (with the app's Android UID). Written at setup, in private
+ * machine-id, passwd and group (with the app's Android UID); also Fontconfig's (empty) list of
+ * host font directories. Written at setup, in private
  * storage outside the Alpine rootfs; the launcher binds them into each root. resolv.conf is not
  * here: it follows the current network, so it is generated for every launch.
  *
@@ -21,6 +22,7 @@ class LauncherFiles(val dir: File, private val uid: Int, private val gid: Int) {
     val machineId get() = File(dir, "machine-id")
     val passwd get() = File(dir, "passwd")
     val group get() = File(dir, "group")
+    val fontDirs get() = File(dir, "font-dirs.xml")
 
     fun write() {
         hosts.writeTextAtomically(GuestFiles.hosts(), durable = false)
@@ -28,5 +30,6 @@ class LauncherFiles(val dir: File, private val uid: Int, private val gid: Int) {
         if (!machineId.isFile) machineId.writeTextAtomically(GuestFiles.machineId())
         passwd.writeTextAtomically(GuestFiles.passwd(uid, gid), durable = false)
         group.writeTextAtomically(GuestFiles.group(gid), durable = false)
+        fontDirs.writeTextAtomically(GuestFiles.fontDirs(), durable = false)
     }
 }

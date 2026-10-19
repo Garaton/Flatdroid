@@ -1,5 +1,6 @@
 package com.garathon.flatdroid.settings
 
+import com.garathon.flatdroid.launcher.LaunchEnvironment
 import com.garathon.flatdroid.util.writeTextAtomically
 import java.io.File
 import java.io.StringWriter
@@ -17,6 +18,11 @@ data class AppSettings(
     val customHeight: Int = PORTRAIT_HEIGHT,
     /** Electron needed the flags for newer versions ("GPU process isn't usable" without them). Managed by the launcher. */
     val newerElectronFlags: Boolean = false,
+    /**
+     * The app's root has no /.flatpak-info: KDE's frameworks reported that they would run
+     * processes on the host. Managed by the launcher.
+     */
+    val withoutFlatpakInfo: Boolean = false,
     /** When the app was last launched, in milliseconds since the epoch; null if never. */
     val lastOpened: Long? = null,
     /**
@@ -34,6 +40,8 @@ data class AppSettings(
     val microphone: Boolean = false,
     /** Developer setting: with [microphone] on, record whenever the app does, without asking. */
     val alwaysAllowMicrophone: Boolean = false,
+    /** Developer setting: variables added to the app's environment, over Flatdroid's own. */
+    val environment: Map<String, String> = emptyMap(),
 ) {
     /** Whether the app gets sound: its own setting, else whether its metadata asks for PulseAudio. */
     fun audioAllowed(sockets: List<String>): Boolean = audio ?: (PULSEAUDIO_SOCKET in sockets)
@@ -63,6 +71,27 @@ data class AppSettings(
 }
 
 /**
+ * [AppSettings.environment] as the user edits it: one `NAME=value` per line; blank lines and lines
+ * starting with `#` are skipped.
+ */
+object EnvironmentText {
+    /** The variables in [text], in order; null if a line isn't `NAME=value` with a usable name. */
+    fun parse(text: String): Map<String, String>? {
+        val variables = linkedMapOf<String, String>()
+        for (raw in text.lines()) {
+            val line = raw.trim()
+            if (line.isEmpty() || line.startsWith("#")) continue
+            val name = line.substringBefore('=', missingDelimiterValue = "")
+            if (!LaunchEnvironment.isName(name)) return null
+            variables[name] = line.substringAfter('=')
+        }
+        return variables
+    }
+
+    fun format(variables: Map<String, String>): String = variables.entries.joinToString("\n") { "${it.key}=${it.value}" }
+}
+
+/**
  * Keeps [AppSettings] in a properties file. Only a custom size is stored as numbers, so the
  * portrait and landscape choices follow Flatdroid's defaults.
  */
@@ -82,11 +111,18 @@ class AppSettingsStore(private val file: File) {
             customWidth = size(KEY_WIDTH, defaults.customWidth),
             customHeight = size(KEY_HEIGHT, defaults.customHeight),
             newerElectronFlags = props.getProperty(KEY_ELECTRON_NEWER) == "true",
+            withoutFlatpakInfo = props.getProperty(KEY_NO_FLATPAK_INFO) == "true",
             lastOpened = props.getProperty(KEY_LAST_OPENED)?.toLongOrNull(),
             wholeDev = props.getProperty(KEY_WHOLE_DEV) == "true",
             audio = props.getProperty(KEY_AUDIO)?.toBooleanStrictOrNull(),
             microphone = props.getProperty(KEY_MICROPHONE) == "true",
             alwaysAllowMicrophone = props.getProperty(KEY_MICROPHONE_ALWAYS) == "true",
+            environment = props.stringPropertyNames()
+                .filter { it.startsWith(KEY_ENV_PREFIX) }
+                .map { it.removePrefix(KEY_ENV_PREFIX) }
+                .filter(LaunchEnvironment::isName)
+                .sorted()
+                .associateWith { props.getProperty(KEY_ENV_PREFIX + it) },
         )
     }
 
@@ -98,11 +134,13 @@ class AppSettingsStore(private val file: File) {
             props.setProperty(KEY_HEIGHT, settings.customHeight.toString())
         }
         props.setProperty(KEY_ELECTRON_NEWER, settings.newerElectronFlags.toString())
+        if (settings.withoutFlatpakInfo) props.setProperty(KEY_NO_FLATPAK_INFO, "true")
         settings.lastOpened?.let { props.setProperty(KEY_LAST_OPENED, it.toString()) }
         props.setProperty(KEY_WHOLE_DEV, settings.wholeDev.toString())
         settings.audio?.let { props.setProperty(KEY_AUDIO, it.toString()) }
         if (settings.microphone) props.setProperty(KEY_MICROPHONE, "true")
         if (settings.alwaysAllowMicrophone) props.setProperty(KEY_MICROPHONE_ALWAYS, "true")
+        for ((name, value) in settings.environment) props.setProperty(KEY_ENV_PREFIX + name, value)
         file.writeTextAtomically(StringWriter().also { props.store(it, null) }.toString())
     }
 
@@ -117,10 +155,12 @@ class AppSettingsStore(private val file: File) {
         const val KEY_WIDTH = "display.width"
         const val KEY_HEIGHT = "display.height"
         const val KEY_ELECTRON_NEWER = "electron.newerFlags"
+        const val KEY_NO_FLATPAK_INFO = "flatpakInfo.none"
         const val KEY_LAST_OPENED = "lastOpened"
         const val KEY_WHOLE_DEV = "dev.whole"
         const val KEY_AUDIO = "permission.audio"
         const val KEY_MICROPHONE = "permission.microphone"
         const val KEY_MICROPHONE_ALWAYS = "permission.microphone.always"
+        const val KEY_ENV_PREFIX = "env."
     }
 }

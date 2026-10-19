@@ -8,6 +8,12 @@ object GuestPaths {
     /** PulseAudio's socket directory. */
     const val PULSE_DIR = "/run/pulse"
 
+    /**
+     * Fontconfig's list of the host's font directories, which Flatpak runtimes include from
+     * their fonts.conf (Fontconfig complains when it is missing). Flatdroid's lists none.
+     */
+    const val FONT_DIRS = "/run/host/font-dirs.xml"
+
     /** A Flatpak's home. */
     const val HOME = "/home/user"
 }

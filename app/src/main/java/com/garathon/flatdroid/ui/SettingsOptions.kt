@@ -91,7 +91,10 @@ fun SwitchRow(checked: Boolean, onChange: (Boolean) -> Unit, title: String, hint
 }
 
 @Composable
-fun TextRow(content: String, onChange: (String) -> Unit, title: String, hint: String? = null, isError: Boolean, enabled: Boolean = true, developer: Boolean = false) {
+fun TextRow(
+    content: String, onChange: (String) -> Unit, title: String, hint: String? = null, isError: Boolean, enabled: Boolean = true, developer: Boolean = false,
+    singleLine: Boolean = true, keyboardType: KeyboardType = KeyboardType.Number,
+) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -103,9 +106,10 @@ fun TextRow(content: String, onChange: (String) -> Unit, title: String, hint: St
             label = { Text(title) },
             supportingText = { if (hint != null) Text(hint) else null },
             isError = isError,
-            singleLine = true,
+            singleLine = singleLine,
+            minLines = if (singleLine) 1 else 3,
             enabled = enabled,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
             modifier = Modifier.weight(1f),
         )
     }

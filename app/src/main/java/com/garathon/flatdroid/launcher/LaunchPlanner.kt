@@ -5,6 +5,7 @@ import com.garathon.flatdroid.flatpak.FlatpakInstallation
 import com.garathon.flatdroid.flatpak.FlatpakRef
 import com.garathon.flatdroid.proot.DevNodes
 import com.garathon.flatdroid.proot.FlatpakBinds
+import com.garathon.flatdroid.proot.GuestPaths
 import java.io.File
 
 /** Host directories for one launch of one app; see AppPaths for where they live. */
@@ -20,6 +21,8 @@ data class HostDirs(
     val x11Sockets: File,
     /** PulseAudio's socket directory; null when the app gets no sound. */
     val pulseSockets: File?,
+    /** Bound at [GuestPaths.FONT_DIRS]. */
+    val fontDirs: File,
 )
 
 /** Per-app choices that change a launch. */
@@ -34,6 +37,8 @@ data class LaunchOptions(
     val wholeDev: Boolean = false,
     /** The app gets PulseAudio's socket (see AppSettings.audioAllowed). */
     val audio: Boolean = true,
+    /** The root gets /.flatpak-info ([LaunchPlanner.flatpakInfo]). */
+    val flatpakInfo: Boolean = true,
 )
 
 /** Everything needed to start an app: its proot binds, environment and command, and its root's layout. */
@@ -44,8 +49,8 @@ data class LaunchPlan(
     val binds: FlatpakBinds,
     val environment: Map<String, String>,
     val command: List<String>,
-    /** Content of the root's /.flatpak-info. */
-    val flatpakInfo: String,
+    /** Content of the root's /.flatpak-info; null for none ([flatpakInfo]). */
+    val flatpakInfo: String?,
     /** Top-level names that are links into /usr (bin, lib, …), as Flatpak makes them. */
     val usrLinks: List<String>,
     val isElectron: Boolean,
@@ -103,7 +108,7 @@ class LaunchPlanner(
         // Electron apps start through zypak, which the launcher skips.
         var command = listOf(commandPath)
         var isElectron = false
-        val extraBinds = mutableListOf<Pair<String, String>>()
+        val extraBinds = mutableListOf(dirs.fontDirs.path to GuestPaths.FONT_DIRS)
         val script = (hostPath(app, commandPath)?.let { Executable.of(it) } as? Executable.Script)?.text
         val electronBinary = script?.let(Electron::zypakTarget)
         if (electronBinary != null) {
@@ -169,7 +174,7 @@ class LaunchPlanner(
                 binds = binds,
                 environment = environment,
                 command = command,
-                flatpakInfo = flatpakInfo(appId, runtimeRef),
+                flatpakInfo = if (options.flatpakInfo) flatpakInfo(appId, runtimeRef) else null,
                 usrLinks = USR_LINKS.filter { File(runtime.files, it).exists() },
                 isElectron = isElectron,
             )
@@ -214,7 +219,17 @@ class LaunchPlanner(
          * `.Devel` and `build=true` turn off old glycin's sandbox (GTK dialogs crash with it); the
          * file's presence also makes GLib use portals, hence GDK_DEBUG=no-portals.
          */
-        fun flatpakInfo(appId: String, runtime: FlatpakRef) =
+        fun flatpakInfo(appId: String, runtime: FlatpakRef): String =
             "[Application]\nname=$appId.Devel\nruntime=runtime/$runtime\n\n[Instance]\nbuild=true\n"
+
+        /**
+         * Printed by KDE's frameworks (KSandbox) when /.flatpak-info makes them run a process on
+         * the host but the app may not ask Flatpak to: there is no host here, and Konsole crashes
+         * in that mode. Such an app runs without the file ([LaunchOptions.flatpakInfo]).
+         */
+        const val KDE_HOST_PROCESS_WARNING = "Process execution expects 'org.freedesktop.Flatpak=talk'"
+
+        /** proot's line when the app's first process was killed by a signal (its exit code is then 0). */
+        const val PROOT_KILLED_BY_SIGNAL = "terminated with signal"
     }
 }

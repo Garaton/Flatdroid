@@ -17,6 +17,8 @@ class LauncherFilesTest {
         assertEquals("root:x:0:0:root:/root:/bin/sh\nuser:x:10729:10729:user:/home/user:/bin/sh\n", files.passwd.readText())
         assertEquals("root:x:0:\nuser:x:10729:\n", files.group.readText())
         assertTrue(files.hosts.readText().startsWith("127.0.0.1 localhost"))
+        // Valid Fontconfig with no host font directories, so runtimes' fonts.conf includes it quietly.
+        assertTrue(files.fontDirs.readText().contains("<fontconfig>\n</fontconfig>"))
         assertTrue(Regex("^[0-9a-f]{32}\n$").matches(files.machineId.readText()))
     }
 

@@ -18,7 +18,8 @@ class AppSettingsTest {
         assertEquals("1000x1400", store.load().geometry)
         val saved = AppSettings(
             DisplaySize.CUSTOM, 960, 640, newerElectronFlags = true, lastOpened = 1234L, wholeDev = true,
-            audio = false, microphone = true, alwaysAllowMicrophone = true,
+            audio = false, microphone = true, alwaysAllowMicrophone = true, withoutFlatpakInfo = true,
+            environment = mapOf("VLC_DATA_PATH" to "/app/share/vlc", "VLC_PLUGIN_PATH" to "/app/lib/vlc/plugins"),
         )
         store.save(saved)
         assertEquals(saved, store.load())
@@ -49,6 +50,19 @@ class AppSettingsTest {
         val file = File(tmp.root, "p.properties")
         AppSettingsStore(file).save(unset)
         assertFalse("permission." in file.readText())
+    }
+
+    @Test
+    fun environmentTextIsOneNameValuePerLine() {
+        assertEquals(
+            mapOf("VLC_PLUGIN_PATH" to "/app/lib/vlc/plugins", "A" to "x=y z", "EMPTY" to ""),
+            EnvironmentText.parse("VLC_PLUGIN_PATH=/app/lib/vlc/plugins\n\n# comment\n  A=x=y z  \nEMPTY="),
+        )
+        assertEquals(emptyMap<String, String>(), EnvironmentText.parse(""))
+        assertEquals(null, EnvironmentText.parse("no equals sign"))
+        assertEquals(null, EnvironmentText.parse("1BAD=x"))
+        assertEquals(null, EnvironmentText.parse("-u=PATH"))
+        assertEquals("A=1\nB=2", EnvironmentText.format(linkedMapOf("A" to "1", "B" to "2")))
     }
 
     @Test

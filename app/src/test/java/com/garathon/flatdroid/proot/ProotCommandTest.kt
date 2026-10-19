@@ -34,6 +34,7 @@ class ProotCommandTest {
                 "--bind=/cache/alpine/shm:/dev/shm",
                 "--bind=/cache/alpine/tmp:/tmp",
                 "--bind=/files/alpine/generated/resolv.conf:/etc/resolv.conf",
+                "--bind=/files/alpine/generated/resolv.conf:/run/host/monitor/resolv.conf",
                 "--bind=/files/alpine/generated/hosts:/etc/hosts",
                 "--bind=/files/alpine/generated/empty:/sys/fs/selinux",
                 "/sbin/apk", "--version",

@@ -183,11 +183,12 @@ class MainActivity : ComponentActivity() {
                     developerOptions = developerOptions,
                     onRequestMicrophone = ::requestMicrophone,
                     onSave = { new ->
-                        // Keep what the launcher manages: last opened and the Electron flags.
+                        // Keep what the launcher manages: last opened, the Electron flags and /.flatpak-info.
                         store.update { old ->
                             new.copy(
                                 lastOpened = old.lastOpened,
                                 newerElectronFlags = old.newerElectronFlags,
+                                withoutFlatpakInfo = old.withoutFlatpakInfo,
                                 wholeDev = if (developerOptions) new.wholeDev else old.wholeDev,
                             )
                         }

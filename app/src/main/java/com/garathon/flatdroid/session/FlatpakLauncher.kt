@@ -171,15 +171,20 @@ class FlatpakLauncher(private val context: Context) {
                 player.start()
             }
             var triedNewerFlags = false
+            var triedWithoutFlatpakInfo = false
             while (true) {
                 SessionController.log("[flatdroid] ${plan.command.joinToString(" ")}")
                 for ((host, guest) in plan.binds.extensions) SessionController.log("[flatdroid] extension $host -> $guest")
                 val gpuFailed = AtomicBoolean(false)
+                val kdeHostProcess = AtomicBoolean(false)
+                val killedBySignal = AtomicBoolean(false)
                 app = ProotRunner.start(
                     ProotCommand.flatpak(env.paths(), plan.binds, plan.environment, plan.command),
                     File(plan.binds.root),
                 ) { line ->
                     if (Electron.GPU_FAILURE in line) gpuFailed.set(true)
+                    if (LaunchPlanner.KDE_HOST_PROCESS_WARNING in line) kdeHostProcess.set(true)
+                    if (LaunchPlanner.PROOT_KILLED_BY_SIGNAL in line) killedBySignal.set(true)
                     SessionController.log(line)
                 }
                 SessionController.running(appId, password)
@@ -199,11 +204,31 @@ class FlatpakLauncher(private val context: Context) {
                     checkBindSources(plan)
                     continue
                 }
+                if (plan.flatpakInfo != null && kdeHostProcess.get()) {
+                    // KDE's frameworks would run processes on the host: no /.flatpak-info for this
+                    // app from now on, and if it failed (Konsole crashes), relaunch it without.
+                    settings = settings.copy(withoutFlatpakInfo = true)
+                    store.update { it.copy(withoutFlatpakInfo = true) }
+                    SessionController.log("[flatdroid] KDE tried to run processes on the host; this app runs without /.flatpak-info from now on")
+                    if ((code != 0 || killedBySignal.get()) && !triedWithoutFlatpakInfo) {
+                        triedWithoutFlatpakInfo = true
+                        SessionController.starting(appId, context.getString(R.string.session_relaunching_without_flatpak_info))
+                        plan = (planner.plan(appId, hostDirs(appId), options(appId)) as? PlanResult.Ready)?.plan
+                            ?: throw LaunchException(context.getString(R.string.launch_app_changed))
+                        prepareDirs(appId, plan)
+                        checkBindSources(plan)
+                        continue
+                    }
+                }
                 if (triedNewerFlags && (gpuFailed.get() || code != 0)) {
                     // The flags didn't fix it; don't keep them for next time.
                     store.update { it.copy(newerElectronFlags = false) }
                     SessionController.log("[flatdroid] the newer Electron flags didn't help; turned them off again")
                     throw LaunchException(context.getString(R.string.launch_newer_flags_failed, code))
+                }
+                if (code != 0 && plan.app.metadata.context.waylandOnly) {
+                    // Most likely why: the app asks only for Wayland, and Flatdroid has only X11.
+                    throw LaunchException(context.getString(R.string.launch_needs_wayland, code))
                 }
                 return true
             }
@@ -224,10 +249,14 @@ class FlatpakLauncher(private val context: Context) {
     private fun options(appId: String): LaunchOptions {
         val settings = AppData.settings(context, appId).load()
         val app = installation.app(appId)
+        // Developer settings count only while developer options are on.
+        val developerOptions = SetupController.settings(context).load()?.developerOptions == true
         return LaunchOptions(
+            environment = if (developerOptions) settings.environment else emptyMap(),
             newerElectronFlags = settings.newerElectronFlags,
             electronSwap = app?.let { electronSwap(appId).preparedFor(it) },
             wholeDev = settings.wholeDev,
+            flatpakInfo = !settings.withoutFlatpakInfo,
             audio = settings.audioAllowed(app?.metadata?.context?.sockets.orEmpty()),
         )
     }
@@ -262,6 +291,7 @@ class FlatpakLauncher(private val context: Context) {
             ),
             x11Sockets = x11Dir,
             pulseSockets = pulseDir,
+            fontDirs = launcher.fontDirs,
         )
     }
 
@@ -274,7 +304,8 @@ class FlatpakLauncher(private val context: Context) {
         for (dir in mountPoints) File(root, dir).mkdirs()
         if (!plan.binds.wholeDev) DevNodes.createMountPoints(root, plan.binds.dev + AlpineBinds.FD_LINKS.keys)
         for (name in plan.usrLinks) Os.symlink("usr/$name", File(root, name).path)
-        File(root, ".flatpak-info").writeText(plan.flatpakInfo)
+        File(root, GuestPaths.FONT_DIRS.removePrefix("/")).apply { parentFile?.mkdirs(); createNewFile() }
+        plan.flatpakInfo?.let { File(root, ".flatpak-info").writeText(it) }
 
         AndroidTarFs.deleteTree(File(AppData.appTmpDir(context), appId))
         File(plan.binds.tmp).mkdirs()

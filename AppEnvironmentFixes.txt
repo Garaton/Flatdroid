@@ -1,0 +1,11 @@
+Environment variables some Flatpaks need under Flatdroid.
+
+Set them per app: turn on Settings > Developer options, open the app's settings, and enter
+them under Launch > Environment variables, one NAME=value per line. They apply at the
+app's next launch.
+
+# VLC (org.videolan.VLC)
+```
+VLC_PLUGIN_PATH=/app/lib/vlc/plugins
+VLC_DATA_PATH=/app/share/vlc
+```
