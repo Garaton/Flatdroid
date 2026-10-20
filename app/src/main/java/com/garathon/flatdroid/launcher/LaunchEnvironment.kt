@@ -4,7 +4,7 @@ import com.garathon.flatdroid.proot.GuestPaths
 
 /**
  * The environment every Flatpak starts with. One set serves all apps: the toolkit variables are
- * harmless to apps that don't use them. Order: defaults, then the app's metadata `[Environment]`,
+ * harmless to apps that don't use them. Order: defaults, then the metadata `[Environment]`,
  * then LD_LIBRARY_PATH and the GL variables, then [overrides].
  */
 object LaunchEnvironment {

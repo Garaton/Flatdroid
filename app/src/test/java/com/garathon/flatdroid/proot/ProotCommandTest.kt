@@ -126,7 +126,7 @@ class ProotCommandTest {
         x11Sockets = "/cache/session/x11",
         pulseSockets = "/cache/session/pulse",
         home = "/files/appdata/org.xfce.mousepad/home",
-        homeOverlays = listOf("/files/appdata/org.xfce.mousepad/config" to "/home/user/.config"),
+        appDirs = listOf("/files/appdata/org.xfce.mousepad/config" to "/home/user/.config"),
         dev = listOf("/dev/null", "/dev/dri"),
         extra = listOf("/files/electron/x" to "/app/x"),
     )

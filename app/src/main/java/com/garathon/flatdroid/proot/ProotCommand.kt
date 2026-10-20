@@ -82,9 +82,9 @@ data class FlatpakBinds(
     /** Xvnc's socket directory ([GuestPaths.X11_DIR]) and PulseAudio's ([GuestPaths.PULSE_DIR]; null without sound). */
     val x11Sockets: String,
     val pulseSockets: String?,
-    /** [GuestPaths.HOME], then private directories over parts of it: host to guest path. */
+    /** [GuestPaths.HOME], then the app's own private directories over parts of it and at /var/…: host to guest path. */
     val home: String,
-    val homeOverlays: List<Pair<String, String>> = emptyList(),
+    val appDirs: List<Pair<String, String>> = emptyList(),
     /** Host /dev entries bound at the same path (see [DevNodes]), unless [wholeDev]. */
     val dev: List<String> = emptyList(),
     /** The host's whole /dev instead, Binder included: only by the app's own setting. */
@@ -94,9 +94,9 @@ data class FlatpakBinds(
 ) {
     init {
         val hosts = listOfNotNull(root, runtimeFiles, appFiles, tmp, shm, x11Sockets, pulseSockets, home) +
-            etc.values + extensions.map { it.first } + homeOverlays.map { it.first } + extra.map { it.first }
+            etc.values + extensions.map { it.first } + appDirs.map { it.first } + extra.map { it.first }
         for (path in hosts) require(path.startsWith("/") && ':' !in path) { "Unusable host path: $path" }
-        val guests = extensions.map { it.second } + homeOverlays.map { it.second } + extra.map { it.second }
+        val guests = extensions.map { it.second } + appDirs.map { it.second } + extra.map { it.second }
         for (path in guests) require(path.startsWith("/") && ':' !in path) { "Unusable guest path: $path" }
         for (name in etc.keys) require(name.isNotEmpty() && '/' !in name && ':' !in name && name != "..") { "Unusable /etc name: $name" }
         require(dev.all(DevNodes::isAllowed)) { "Unusable /dev path: $dev" }
@@ -204,7 +204,7 @@ object ProotCommand {
         argv += "--bind=${binds.x11Sockets}:${GuestPaths.X11_DIR}"
         binds.pulseSockets?.let { argv += "--bind=$it:${GuestPaths.PULSE_DIR}" }
         argv += "--bind=${binds.home}:${GuestPaths.HOME}"
-        for ((host, guest) in binds.homeOverlays) argv += "--bind=$host:$guest"
+        for ((host, guest) in binds.appDirs) argv += "--bind=$host:$guest"
         for ((host, guest) in binds.extra) argv += "--bind=$host:$guest"
         argv += prefix
         argv += "/usr/bin/env"

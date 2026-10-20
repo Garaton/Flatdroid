@@ -21,7 +21,7 @@ class LaunchPlannerTest {
         val d = File(tmp.root, "host")
         HostDirs(
             root = File(d, "root"), tmp = File(d, "tmp"), shm = File(d, "shm"), home = File(d, "home"),
-            homeOverlays = listOf(File(d, "config") to "/home/user/.config"),
+            appDirs = listOf(File(d, "config") to "/home/user/.config"),
             etc = mapOf("passwd" to File(d, "passwd")),
             x11Sockets = File(d, "x11"), pulseSockets = File(d, "pulse"), fontDirs = File(d, "font-dirs.xml"),
         )
@@ -64,6 +64,18 @@ class LaunchPlannerTest {
         )
         assertEquals("1", plan.environment["LIBGL_ALWAYS_SOFTWARE"])
         assertEquals(dirs.home.path, plan.binds.home)
+    }
+
+    @Test
+    fun runtimeEnvironmentComesFirstAndTheAppsOverridesIt() {
+        inst.runtime("org.kde.Platform", "6.10", "[Runtime]\nname=org.kde.Platform\n\n[Environment]\nQT_PLUGIN_PATH=/app/lib/plugins\nA=runtime\n")
+        val files = inst.app("org.kde.okular", metadata = appMetadata("org.kde.okular", "okular", "org.kde.Platform/aarch64/6.10", "[Environment]\nA=app\n"))
+        File(files, "bin").mkdirs()
+        File(files, "bin/okular").writeBytes(ExecutableTest.elf(0xb7))
+
+        val plan = Ready(planner.plan("org.kde.okular", dirs))
+        assertEquals("/app/lib/plugins", plan.environment["QT_PLUGIN_PATH"])
+        assertEquals("app", plan.environment["A"])
     }
 
     @Test

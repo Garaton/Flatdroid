@@ -14,14 +14,15 @@ import java.io.File
 object AppData {
     /**
      * Settings and data: `files/appdata/<ID>/`, bound over the app's .config, .local, .pki and
-     * .var/app/<ID>, and (until the shared home exists) its home itself. Kept by a reset that keeps
+     * .var/app/<ID> (whose config and data are also /var/config and /var/data), and (until the
+     * shared home exists) its home itself. Kept by a reset that keeps
      * Flatpaks, deleted by one that wipes everything.
      */
     fun root(context: Context): File = File(context.filesDir.canonicalFile, "appdata")
 
     /**
-     * Caches: `cache/appcache/<ID>/`, bound over the app's .cache and its XDG_CACHE_HOME
-     * (.var/app/<ID>/cache). Deleted by every reset.
+     * Caches: `cache/appcache/<ID>/`, bound over the app's .cache, its XDG_CACHE_HOME
+     * (.var/app/<ID>/cache) and /var/cache, with /var/tmp in it. Deleted by every reset.
      */
     fun cacheRoot(context: Context): File = File(context.cacheDir.canonicalFile, "appcache")
 

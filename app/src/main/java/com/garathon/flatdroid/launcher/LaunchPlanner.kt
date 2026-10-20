@@ -14,8 +14,8 @@ data class HostDirs(
     val tmp: File,
     val shm: File,
     val home: File,
-    /** Private directories over parts of the home: host to guest path. */
-    val homeOverlays: List<Pair<File, String>>,
+    /** The app's own private directories, over parts of the home and at Flatpak's /var ones: host to guest path. */
+    val appDirs: List<Pair<File, String>>,
     /** Generated /etc files: name to host file. */
     val etc: Map<String, File>,
     val x11Sockets: File,
@@ -144,7 +144,8 @@ class LaunchPlanner(
         val environment = LaunchEnvironment.build(
             appId = appId,
             triplet = LaunchEnvironment.triplet(arch),
-            metadataEnvironment = app.metadata.environment,
+            // As Flatpak: the runtime's (e.g. QT_PLUGIN_PATH in KDE's), then the app's over it.
+            metadataEnvironment = runtime.metadata.environment + app.metadata.environment,
             glDefault = glDefault,
             extensionLdPaths = ldPaths,
             overrides = options.environment,
@@ -161,7 +162,7 @@ class LaunchPlanner(
             x11Sockets = dirs.x11Sockets.path,
             pulseSockets = dirs.pulseSockets?.takeIf { options.audio }?.path,
             home = dirs.home.path,
-            homeOverlays = dirs.homeOverlays.map { it.first.path to it.second },
+            appDirs = dirs.appDirs.map { it.first.path to it.second },
             dev = DevNodes.forApp(devices, devExists),
             wholeDev = options.wholeDev && DevNodes.ALL in devices,
             extra = extraBinds,

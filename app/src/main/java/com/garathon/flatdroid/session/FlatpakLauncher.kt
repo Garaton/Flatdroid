@@ -274,13 +274,18 @@ class FlatpakLauncher(private val context: Context) {
             shm = File(tmpBase, "shm"),
             // A private home per app for now; the shared home (Documents/Flatdroid) comes later.
             home = File(appData, "home"),
-            homeOverlays = listOf(
+            appDirs = listOf(
                 File(appData, "config") to "$home/.config",
                 File(appData, "local") to "$home/.local",
                 File(appData, "pki") to "$home/.pki",
                 File(appData, "var") to varApp,
                 cache to "$home/.cache",
                 cache to "$varApp/cache",
+                // Where Flatpak also binds them; apps' own scripts use these paths (Ghidra's /var/config).
+                File(appData, "var/config") to "/var/config",
+                File(appData, "var/data") to "/var/data",
+                cache to "/var/cache",
+                File(cache, "tmp") to "/var/tmp",
             ),
             etc = linkedMapOf(
                 "resolv.conf" to File(etcDir, "resolv.conf"),
@@ -302,6 +307,9 @@ class FlatpakLauncher(private val context: Context) {
         val mountPoints = listOf("usr", "app", "etc", "dev", "proc", "sys", "tmp") +
             listOfNotNull(GuestPaths.PULSE_DIR.takeIf { plan.binds.pulseSockets != null }, GuestPaths.HOME).map { it.removePrefix("/") }
         for (dir in mountPoints) File(root, dir).mkdirs()
+        for ((_, guest) in plan.binds.appDirs) {
+            if (!guest.startsWith(GuestPaths.HOME + "/")) File(root, guest.removePrefix("/")).mkdirs()
+        }
         if (!plan.binds.wholeDev) DevNodes.createMountPoints(root, plan.binds.dev + AlpineBinds.FD_LINKS.keys)
         for (name in plan.usrLinks) Os.symlink("usr/$name", File(root, name).path)
         File(root, GuestPaths.FONT_DIRS.removePrefix("/")).apply { parentFile?.mkdirs(); createNewFile() }
@@ -311,7 +319,7 @@ class FlatpakLauncher(private val context: Context) {
         File(plan.binds.tmp).mkdirs()
         File(plan.binds.shm).mkdirs()
         // The app can write these, so it can replace one with a link (see checkBindSources).
-        for (dir in listOf(File(plan.binds.home)) + plan.binds.homeOverlays.map { File(it.first) }) {
+        for (dir in listOf(File(plan.binds.home)) + plan.binds.appDirs.map { File(it.first) }) {
             if (AndroidTarFs.isSymlink(dir)) dir.delete()
             dir.mkdirs()
         }
@@ -327,7 +335,7 @@ class FlatpakLauncher(private val context: Context) {
     private fun checkBindSources(plan: LaunchPlan) {
         val b = plan.binds
         val sources = listOfNotNull(b.root, b.runtimeFiles, b.appFiles, "${b.runtimeFiles}/etc", b.tmp, b.shm, b.x11Sockets, b.pulseSockets, b.home, env.paths().l2sDir) +
-            b.etc.values + b.extensions.map { it.first } + b.homeOverlays.map { it.first } + b.extra.map { it.first }
+            b.etc.values + b.extensions.map { it.first } + b.appDirs.map { it.first } + b.extra.map { it.first }
         for (path in sources) {
             val file = File(path)
             if (!file.exists() || file.canonicalPath != file.absolutePath) {
