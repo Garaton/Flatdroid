@@ -42,7 +42,7 @@
     <string name="setup_settings_continue">Continue</string>
 
     <string name="settings_title">Settings</string>
-    <string name="settings_section_Flatpak">Flatpak</string>
+    <string name="settings_section_flatpak">Flatpak</string>
     <string name="settings_languages">Only download translations for my languages (%1$s)</string>
     <string name="settings_languages_hint">Flatpak then skips translations for other languages when it installs and updates apps, which saves space.</string>
     <string name="settings_save">Save</string>
@@ -181,7 +181,7 @@
     <string name="launch_bind_replaced">%1$s was replaced by a link or is missing; not launching. Reinstalling the app recreates it.</string>
     <string name="launch_display_failed">Xvnc did not start</string>
     <string name="launch_app_changed">The app changed while it was running</string>
-    <string name="session_relaunching_without_Flatpak_info">Relaunching without /.Flatpak-info</string>
+    <string name="session_relaunching_without_flatpak_info">Relaunching without /.flatpak-info</string>
     <string name="launch_needs_wayland">This app needs Wayland, which Flatdroid doesn\'t provide yet (only X11). It exited with code %1$d.</string>
     <string name="launch_newer_flags_failed">The app failed with and without newer Electron\'s flags (exit %1$d)</string>
 
