@@ -24,7 +24,7 @@ android {
         minSdk = 24
         targetSdk = 35
         versionCode = 1
-        versionName = "0.3"
+        versionName = "0.5"
 
         buildConfigField("String", "ALPINE_BRANCH", "\"${alpine.getProperty("branch")}\"")
         buildConfigField("String", "ALPINE_VERSION", "\"${alpine.getProperty("version")}\"")
@@ -145,6 +145,8 @@ dependencies {
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.material.icons.core)
+    // Icons the core set lacks (import). Large; only the icons used remain once release builds shrink code.
+    implementation(libs.androidx.compose.material.icons.extended)
     // App icons that Flatpaks export only as SVG.
     implementation(libs.androidsvg)
     implementation(libs.androidx.compose.ui)

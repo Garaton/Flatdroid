@@ -18,6 +18,8 @@ class BrokenLinksTest {
         override fun delete(file: File) {
             Files.deleteIfExists(file.toPath())
         }
+        override fun list(dir: File): Array<String>? = dir.list()
+        override fun isDirectory(file: File) = file.isDirectory
     }
 
     private fun link(link: File, target: File) {

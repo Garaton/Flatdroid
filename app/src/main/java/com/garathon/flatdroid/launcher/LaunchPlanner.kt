@@ -23,6 +23,12 @@ data class HostDirs(
     val pulseSockets: File?,
     /** Bound at [GuestPaths.FONT_DIRS]. */
     val fontDirs: File,
+    /** Generated desktop settings (GTK, KDE), bound at [GuestPaths.XDG_CONFIG_DIR]. */
+    val desktopConfig: File,
+    /** Generated `user-dirs.dirs`, bound into the app's config directories. */
+    val userDirs: File,
+    /** Shared storage, bound at [GuestPaths.SDCARD]; null for none. */
+    val sdcard: File? = null,
 )
 
 /** Per-app choices that change a launch. */
@@ -39,6 +45,8 @@ data class LaunchOptions(
     val audio: Boolean = true,
     /** The root gets /.flatpak-info ([LaunchPlanner.flatpakInfo]). */
     val flatpakInfo: Boolean = true,
+    /** Android is in dark mode; apps are asked to follow it. */
+    val darkTheme: Boolean = false,
 )
 
 /** Everything needed to start an app: its proot binds, environment and command, and its root's layout. */
@@ -108,7 +116,15 @@ class LaunchPlanner(
         // Electron apps start through zypak, which the launcher skips.
         var command = listOf(commandPath)
         var isElectron = false
-        val extraBinds = mutableListOf(dirs.fontDirs.path to GuestPaths.FONT_DIRS)
+        val varApp = "${GuestPaths.HOME}/.var/app/$appId"
+        val extraBinds = mutableListOf(
+            dirs.fontDirs.path to GuestPaths.FONT_DIRS,
+            dirs.desktopConfig.path to GuestPaths.XDG_CONFIG_DIR,
+            // Where apps read it: XDG_CONFIG_HOME, and ~/.config for those that ignore it.
+            dirs.userDirs.path to "$varApp/config/user-dirs.dirs",
+            dirs.userDirs.path to "${GuestPaths.HOME}/.config/user-dirs.dirs",
+        )
+        dirs.sdcard?.let { extraBinds += it.path to GuestPaths.SDCARD }
         val script = (hostPath(app, commandPath)?.let { Executable.of(it) } as? Executable.Script)?.text
         val electronBinary = script?.let(Electron::zypakTarget)
         if (electronBinary != null) {
@@ -149,6 +165,8 @@ class LaunchPlanner(
             glDefault = glDefault,
             extensionLdPaths = ldPaths,
             overrides = options.environment,
+            darkTheme = options.darkTheme,
+            kdePlatformTheme = DesktopConfig.KDE_PLATFORM_THEMES.any { File(runtime.files, it).exists() },
         )
         val devices = app.metadata.context.devices
         val binds = FlatpakBinds(

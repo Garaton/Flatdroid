@@ -29,7 +29,7 @@ class UserSettingsTest {
         val all = UserSettings(
             "de;en", developerOptions = true, vncViewer = "com.gaurav.avnc", frameRate60 = true, customFrameRate = 45,
             uncappedFrameRate = true, installGpuRuntimes = true, titleBars = false, customAudioLatencyMs = 30,
-            lowLatencyAudio = true, highQualityAudio = true,
+            lowLatencyAudio = true, highQualityAudio = true, sharedHome = "/storage/emulated/0/Download/Home",
         )
         store.save(all)
         assertEquals(all, store.load())

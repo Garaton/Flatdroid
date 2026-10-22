@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import com.garathon.flatdroid.storage.TempHomes
 import java.io.File
 
 /** Setup as the UI shows it. */
@@ -31,7 +32,7 @@ data class SetupUi(
 /** Process-wide setup state: written by [SetupService], read by the UI. */
 object SetupController {
     private const val MAX_LOG_LINES = 400
-    private const val SETTINGS_FILE = "settings.properties"
+    const val SETTINGS_FILE = "settings.properties"
 
     private val _state = MutableStateFlow(SetupUi())
     val state: StateFlow<SetupUi> = _state.asStateFlow()
@@ -43,7 +44,7 @@ object SetupController {
         pendingFile = File(context.filesDir, "alpine/reset-pending"),
         installer = env.installer,
         state = store(context),
-        temporary = env.temporaryFiles() + listOf(AppData.rootsDir(context), AppData.appTmpDir(context), AppData.sessionDir(context)) +
+        temporary = env.temporaryFiles() + listOf(AppData.rootsDir(context), AppData.appTmpDir(context), AppData.sessionDir(context), TempHomes.root(context)) +
             ElectronSwap.temporaryFiles(env.cacheDir),
         appCaches = listOf(AppData.cacheRoot(context)),
         flatpakFiles = listOf(AppData.electronDir(context)),

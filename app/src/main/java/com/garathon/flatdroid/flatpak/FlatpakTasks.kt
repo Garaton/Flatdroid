@@ -13,8 +13,11 @@ import kotlinx.coroutines.flow.update
 sealed interface FlatpakTask {
     data class Install(val appId: String) : FlatpakTask
     data object UpdateAll : FlatpakTask
-    /** [deleteData] also removes the app's private settings, data and home. */
-    data class Uninstall(val appId: String, val deleteData: Boolean) : FlatpakTask
+    /**
+     * [deleteData] also removes the app's private settings, data and home; [keepRuntimes] leaves
+     * runtimes nothing uses any more for the next update to remove.
+     */
+    data class Uninstall(val appId: String, val deleteData: Boolean, val keepRuntimes: Boolean = false) : FlatpakTask
     /** The repository clean-up on its own, after an update or uninstall Flatdroid didn't see end. */
     data object Repair : FlatpakTask
 }

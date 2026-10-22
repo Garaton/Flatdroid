@@ -15,6 +15,15 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- The shared home (Documents/Flatdroid) by path: Android 10 and older need this for it. -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="29" />
+    <!-- Only through the user's All files access setting (Settings > Storage): every file in the
+         shared home becomes visible, and an app's /sdcard setting becomes available. -->
+    <uses-permission
+        android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
 
     <!-- Whether a VNC viewer is installed, to open the session's display. -->
     <queries>
@@ -32,6 +41,7 @@
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
+        android:requestLegacyExternalStorage="true"
         android:supportsRtl="true"
         android:theme="@style/Theme.Flatdroid">
         <activity
@@ -64,6 +74,24 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Runs a Linux desktop app (Flatpak) under proot with its X11 display server and audio server, while the user views it in a VNC viewer." />
         </service>
+
+        <service
+            android:name=".storage.StorageTaskService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <!-- Private homes in the Files app. MANAGE_DOCUMENTS: only Android's own Files app and
+             picker can browse it; other apps get only what the user picks. -->
+        <provider
+            android:name=".storage.HomesProvider"
+            android:authorities="com.garathon.flatdroid.homes"
+            android:exported="true"
+            android:grantUriPermissions="true"
+            android:permission="android.permission.MANAGE_DOCUMENTS">
+            <intent-filter>
+                <action android:name="android.content.action.DOCUMENTS_PROVIDER" />
+            </intent-filter>
+        </provider>
     </application>
 
 </manifest>

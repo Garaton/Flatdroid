@@ -3,7 +3,9 @@ package com.garathon.flatdroid.launcher
 import com.garathon.flatdroid.flatpak.Deployment
 import com.garathon.flatdroid.setup.TarFs
 import com.garathon.flatdroid.setup.deleteTree
+import com.garathon.flatdroid.setup.useOwnGroupTree
 import com.garathon.flatdroid.util.readTextUpTo
+import com.garathon.flatdroid.util.replaceWith
 import com.garathon.flatdroid.util.writeTextAtomically
 import java.io.File
 import java.io.IOException
@@ -93,11 +95,9 @@ class ElectronSwap(
         }
         File(work, MARKER).writeTextAtomically("deploy=${app.dir.name}\nversion=$version\narch=$arch\n")
 
-        fs.deleteTree(dir)
-        dir.parentFile?.mkdirs()
-        if (!work.renameTo(dir)) throw IOException("Could not move $work to $dir")
+        dir.replaceWith(work, fs::deleteTree)
         // Built in the cache, so its files carry the cache group; this is app data now.
-        dir.walkTopDown().onEnter { it == dir || !fs.isSymlink(it) }.forEach { fs.useOwnGroup(it) }
+        fs.useOwnGroupTree(dir)
         fs.deleteTree(downloads)
     }
 

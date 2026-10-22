@@ -45,11 +45,16 @@ class ProcessStopper(
     private val graceMillis: Long = SHORT_GRACE_MS,
     private val procDir: File = File("/proc"),
 ) {
-    /** Stops [process] (whose pid is [pid]); returns once it has exited or after the last resort. */
-    fun stop(process: Process, pid: Int) {
+    /**
+     * Stops [process] (whose pid is [pid]); returns once it has exited or after the last resort,
+     * with whether it had to be killed (SIGINT wasn't enough), which can break link2symlink's
+     * counts (see the class comment).
+     */
+    fun stop(process: Process, pid: Int): Boolean {
         interrupt(pid)
-        if (waitForExit(process, interruptGraceMillis)) return
+        if (waitForExit(process, interruptGraceMillis)) return false
         kill(process, pid)
+        return true
     }
 
     /** Ctrl-C: SIGINT to the processes under proot [pid]. Returns at once. */
@@ -68,27 +73,44 @@ class ProcessStopper(
         waitForExit(process, graceMillis)
     }
 
-    /** Processes below [pid], found through /proc (the app sees its own processes there). */
+    /**
+     * Processes below [pid], found through /proc (the app sees its own processes there): its
+     * children and theirs, and every process one of them traces. A process that went into the
+     * background (Kate) or restarted itself (Electron's relaunch) belongs to init, but proot still
+     * traces it.
+     */
     fun descendants(pid: Int): List<Int> {
-        val parents = procDir.listFiles()
-            ?.mapNotNull { dir -> dir.name.toIntOrNull()?.let { it to parentOf(dir) } }
+        val links = procDir.listFiles()
+            ?.mapNotNull { dir -> dir.name.toIntOrNull()?.let { it to linksOf(dir) } }
             ?.filter { it.second != null }
             ?.associate { it.first to it.second!! }
             ?: return emptyList()
         val found = mutableListOf<Int>()
         var frontier = listOf(pid)
         while (frontier.isNotEmpty()) {
-            val children = parents.filter { it.value in frontier }.keys.filter { it !in found }
+            val children = links.filter { (_, link) -> link.parent in frontier || link.tracer in frontier }.keys.filter { it !in found && it != pid }
             found += children
             frontier = children
         }
         return found
     }
 
-    private fun parentOf(dir: File): Int? = try {
+    /** A process's parent and tracer (0 when not traced). */
+    private class Links(val parent: Int, val tracer: Int)
+
+    private fun linksOf(dir: File): Links? = try {
+        var parent: Int? = null
+        var tracer = 0
         File(dir, "status").useLines { lines ->
-            lines.firstOrNull { it.startsWith("PPid:") }?.substringAfter(':')?.trim()?.toIntOrNull()
+            for (line in lines) {
+                when {
+                    line.startsWith("PPid:") -> parent = line.substringAfter(':').trim().toIntOrNull()
+                    line.startsWith("TracerPid:") -> tracer = line.substringAfter(':').trim().toIntOrNull() ?: 0
+                }
+                if (parent != null && line.startsWith("TracerPid:")) break
+            }
         }
+        parent?.let { Links(it, tracer) }
     } catch (_: Exception) {
         null
     }

@@ -2,12 +2,23 @@ package com.garathon.flatdroid.settings
 
 import com.garathon.flatdroid.launcher.LaunchEnvironment
 import com.garathon.flatdroid.util.writeTextAtomically
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.StringWriter
 import java.util.Properties
 
 /** The display size an app starts with: one of the defaults, or the user's own. */
 enum class DisplaySize { PORTRAIT, LANDSCAPE, CUSTOM }
+
+/** What an app gets as its home. None of them isolates the app; they change what it can reach. */
+enum class HomeMode {
+    /** The shared home (`Documents/Flatdroid` unless the user chose another folder). */
+    SHARED,
+    /** The app's own folder in Flatdroid's private storage; files come in by import. */
+    PRIVATE,
+    /** A new home, settings included, at every launch; nothing is kept after the app closes. */
+    TEMPORARY,
+}
 
 /** Flatdroid's choices for one Flatpak. */
 data class AppSettings(
@@ -42,6 +53,12 @@ data class AppSettings(
     val alwaysAllowMicrophone: Boolean = false,
     /** Developer setting: variables added to the app's environment, over Flatdroid's own. */
     val environment: Map<String, String> = emptyMap(),
+    val homeMode: HomeMode = HomeMode.SHARED,
+    /**
+     * All of shared storage at /sdcard. Shown, and bound, only while Flatdroid has access to all
+     * of it (All files access, or the storage permission on Android 10 and older).
+     */
+    val sdcard: Boolean = false,
 ) {
     /** Whether the app gets sound: its own setting, else whether its metadata asks for PulseAudio. */
     fun audioAllowed(sockets: List<String>): Boolean = audio ?: (PULSEAUDIO_SOCKET in sockets)
@@ -123,6 +140,8 @@ class AppSettingsStore(private val file: File) {
                 .filter(LaunchEnvironment::isName)
                 .sorted()
                 .associateWith { props.getProperty(KEY_ENV_PREFIX + it) },
+            homeMode = HomeMode.entries.firstOrNull { it.name.lowercase() == props.getProperty(KEY_HOME_MODE) } ?: defaults.homeMode,
+            sdcard = props.getProperty(KEY_SDCARD) == "true",
         )
     }
 
@@ -141,6 +160,8 @@ class AppSettingsStore(private val file: File) {
         if (settings.microphone) props.setProperty(KEY_MICROPHONE, "true")
         if (settings.alwaysAllowMicrophone) props.setProperty(KEY_MICROPHONE_ALWAYS, "true")
         for ((name, value) in settings.environment) props.setProperty(KEY_ENV_PREFIX + name, value)
+        props.setProperty(KEY_HOME_MODE, settings.homeMode.name.lowercase())
+        if (settings.sdcard) props.setProperty(KEY_SDCARD, "true")
         file.writeTextAtomically(StringWriter().also { props.store(it, null) }.toString())
     }
 
@@ -150,17 +171,37 @@ class AppSettingsStore(private val file: File) {
         file.delete()
     }
 
-    private companion object {
-        const val KEY_SIZE = "display.size"
-        const val KEY_WIDTH = "display.width"
-        const val KEY_HEIGHT = "display.height"
-        const val KEY_ELECTRON_NEWER = "electron.newerFlags"
-        const val KEY_NO_FLATPAK_INFO = "flatpakInfo.none"
-        const val KEY_LAST_OPENED = "lastOpened"
-        const val KEY_WHOLE_DEV = "dev.whole"
-        const val KEY_AUDIO = "permission.audio"
-        const val KEY_MICROPHONE = "permission.microphone"
-        const val KEY_MICROPHONE_ALWAYS = "permission.microphone.always"
-        const val KEY_ENV_PREFIX = "env."
+    companion object {
+        /**
+         * An app's settings file from an import, [imported], with the settings that widen what the
+         * app can reach left as they are on this device ([local], its current file, or null for
+         * none): whole /dev (with Binder), all of shared storage, the microphone without asking
+         * and its environment. A shared settings file can't turn them on.
+         */
+        fun imported(imported: ByteArray, local: ByteArray?): ByteArray {
+            fun widensReach(key: String) =
+                key == KEY_WHOLE_DEV || key == KEY_SDCARD || key == KEY_MICROPHONE_ALWAYS || key.startsWith(KEY_ENV_PREFIX)
+            val props = Properties().apply { load(imported.inputStream()) }
+            props.stringPropertyNames().filter(::widensReach).forEach { props.remove(it) }
+            if (local != null) {
+                val current = Properties().apply { load(local.inputStream()) }
+                current.stringPropertyNames().filter(::widensReach).forEach { props.setProperty(it, current.getProperty(it)) }
+            }
+            return ByteArrayOutputStream().also { props.store(it, null) }.toByteArray()
+        }
+
+        private const val KEY_SIZE = "display.size"
+        private const val KEY_WIDTH = "display.width"
+        private const val KEY_HEIGHT = "display.height"
+        private const val KEY_ELECTRON_NEWER = "electron.newerFlags"
+        private const val KEY_NO_FLATPAK_INFO = "flatpakInfo.none"
+        private const val KEY_LAST_OPENED = "lastOpened"
+        private const val KEY_WHOLE_DEV = "dev.whole"
+        private const val KEY_AUDIO = "permission.audio"
+        private const val KEY_MICROPHONE = "permission.microphone"
+        private const val KEY_MICROPHONE_ALWAYS = "permission.microphone.always"
+        private const val KEY_ENV_PREFIX = "env."
+        private const val KEY_HOME_MODE = "home.mode"
+        private const val KEY_SDCARD = "storage.sdcard"
     }
 }

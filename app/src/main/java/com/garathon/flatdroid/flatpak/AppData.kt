@@ -14,11 +14,14 @@ import java.io.File
 object AppData {
     /**
      * Settings and data: `files/appdata/<ID>/`, bound over the app's .config, .local, .pki and
-     * .var/app/<ID> (whose config and data are also /var/config and /var/data), and (until the
-     * shared home exists) its home itself. Kept by a reset that keeps
+     * .var/app/<ID> (whose config and data are also /var/config and /var/data), and its private
+     * home (`home`, used in Private Home mode). Kept by a reset that keeps
      * Flatpaks, deleted by one that wipes everything.
      */
     fun root(context: Context): File = File(context.filesDir.canonicalFile, "appdata")
+
+    /** The app's private home (Private Home mode), shown in the Files app (see HomesProvider). */
+    fun privateHome(context: Context, appId: String): File = File(root(context), "$appId/home")
 
     /**
      * Caches: `cache/appcache/<ID>/`, bound over the app's .cache, its XDG_CACHE_HOME
@@ -37,7 +40,9 @@ object AppData {
      */
     fun settingsDir(context: Context): File = File(context.filesDir.canonicalFile, "appsettings")
 
-    fun settings(context: Context, appId: String) = AppSettingsStore(File(settingsDir(context), "$appId.properties"))
+    fun settingsFile(context: Context, appId: String): File = File(settingsDir(context), "$appId.properties")
+
+    fun settings(context: Context, appId: String) = AppSettingsStore(settingsFile(context, appId))
 
     /** Electron builds prepared for apps that ship another architecture's (`files/electron/<ID>`). */
     fun electronDir(context: Context): File = File(context.filesDir.canonicalFile, "electron")

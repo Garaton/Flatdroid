@@ -24,8 +24,17 @@ class LaunchPlannerTest {
             appDirs = listOf(File(d, "config") to "/home/user/.config"),
             etc = mapOf("passwd" to File(d, "passwd")),
             x11Sockets = File(d, "x11"), pulseSockets = File(d, "pulse"), fontDirs = File(d, "font-dirs.xml"),
+            desktopConfig = File(d, "xdg"), userDirs = File(d, "user-dirs.dirs"),
         )
     }
+
+    /** The further binds every app gets. */
+    private fun baseExtra(id: String) = listOf(
+        dirs.fontDirs.path to "/run/host/font-dirs.xml",
+        dirs.desktopConfig.path to "/run/flatdroid/xdg",
+        dirs.userDirs.path to "/home/user/.var/app/$id/config/user-dirs.dirs",
+        dirs.userDirs.path to "/home/user/.config/user-dirs.dirs",
+    )
 
     private fun appMetadata(id: String, command: String, runtime: String = "org.freedesktop.Platform/aarch64/26.08", extra: String = "") =
         "[Application]\nname=$id\nruntime=$runtime\ncommand=$command\n$extra"
@@ -50,7 +59,7 @@ class LaunchPlannerTest {
 
         val plan = Ready(planner.plan("org.supertuxproject.SuperTux", dirs))
         assertEquals(listOf("/app/bin/supertux2"), plan.command)
-        assertEquals(listOf(dirs.fontDirs.path to "/run/host/font-dirs.xml"), plan.binds.extra)
+        assertEquals(baseExtra("org.supertuxproject.SuperTux"), plan.binds.extra)
         assertFalse(plan.isElectron)
         assertEquals(listOf("bin", "lib"), plan.usrLinks)
         assertEquals(
@@ -76,6 +85,24 @@ class LaunchPlannerTest {
         val plan = Ready(planner.plan("org.kde.okular", dirs))
         assertEquals("/app/lib/plugins", plan.environment["QT_PLUGIN_PATH"])
         assertEquals("app", plan.environment["A"])
+    }
+
+    @Test
+    fun sdcardDarkModeAndKdesThemeWhenAsked() {
+        val runtime = inst.runtime("org.kde.Platform", "6.10", "[Runtime]\nname=org.kde.Platform\n")
+        File(runtime, "lib/plugins/platformthemes").mkdirs()
+        File(runtime, "lib/plugins/platformthemes/KDEPlasmaPlatformTheme6.so").writeText("")
+        val files = inst.app("org.kde.kate", metadata = appMetadata("org.kde.kate", "kate", "org.kde.Platform/aarch64/6.10"))
+        File(files, "bin").mkdirs()
+        File(files, "bin/kate").writeBytes(ExecutableTest.elf(0xb7))
+        val sdcard = tmp.newFolder("sdcard")
+
+        val plain = Ready(planner.plan("org.kde.kate", dirs))
+        assertEquals("kde", plain.environment["QT_QPA_PLATFORMTHEME"])
+        assertFalse("ADW_DEBUG_COLOR_SCHEME" in plain.environment)
+        val plan = Ready(planner.plan("org.kde.kate", dirs.copy(sdcard = sdcard), LaunchOptions(darkTheme = true)))
+        assertEquals(baseExtra("org.kde.kate") + (sdcard.path to "/sdcard"), plan.binds.extra)
+        assertEquals("prefer-dark", plan.environment["ADW_DEBUG_COLOR_SCHEME"])
     }
 
     @Test
@@ -152,7 +179,7 @@ class LaunchPlannerTest {
         val swap = tmp.newFolder("swap")
         File(swap, "uhc").writeBytes(ExecutableTest.elf(0xb7))
         val plan = Ready(planner.plan(id, dirs, LaunchOptions(electronSwap = swap)))
-        assertEquals(listOf(dirs.fontDirs.path to "/run/host/font-dirs.xml", swap.path to "/app/uhc"), plan.binds.extra)
+        assertEquals(baseExtra(id) + (swap.path to "/app/uhc"), plan.binds.extra)
         assertEquals(listOf("/app/uhc/uhc") + Electron.BASE_FLAGS, plan.command)
     }
 

@@ -19,12 +19,12 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import com.garathon.flatdroid.alpine.AlpineEnvironment
@@ -40,6 +40,9 @@ import com.garathon.flatdroid.session.SessionService
 import com.garathon.flatdroid.session.SessionState
 import com.garathon.flatdroid.session.Viewer
 import com.garathon.flatdroid.settings.UserSettings
+import com.garathon.flatdroid.storage.ImportTarget
+import com.garathon.flatdroid.storage.SavedSizes
+import com.garathon.flatdroid.storage.StorageTasks
 import com.garathon.flatdroid.setup.ResetMode
 import com.garathon.flatdroid.setup.SetupController
 import com.garathon.flatdroid.setup.SetupService
@@ -58,6 +61,7 @@ import com.garathon.flatdroid.ui.SetupSettingsScreen
 import com.garathon.flatdroid.ui.TerminalScreen
 import com.garathon.flatdroid.ui.SetupScreen
 import com.garathon.flatdroid.ui.theme.FlatdroidTheme
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
@@ -89,8 +93,11 @@ class MainActivity : ComponentActivity() {
             if (appId != null) continueLaunch(PendingLaunch(appId, prepareElectron = false)) else SetupService.start(this)
         }
 
+    private val storage = StorageFlows(this, { home }, { viewModel })
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        storage.restore()
         enableEdgeToEdge()
         val languages = GuestFiles.flatpakLanguages(deviceLanguageTags())
         setContent {
@@ -146,6 +153,15 @@ class MainActivity : ComponentActivity() {
             navigate(screen.parent ?: Screen.Home)
         }
 
+        storage.Dialogs(nameOf)
+        val storageTasks by StorageTasks.ui.collectAsState()
+        // A session that ends while Flatdroid is open may leave a temporary home to ask about.
+        LaunchedEffect(sessionBusy) { if (!sessionBusy) storage.checkTempHomes() }
+
+        // Measured again after storage tasks, which change it.
+        val savedSizes by SavedSizes.updates.collectAsState()
+        // Read again after storage tasks and once sizes measured in the background are saved.
+        if (screen == Screen.Settings) LaunchedEffect(storageTasks.generation, savedSizes) { home.measureFlatdroid() }
         when (screen) {
             Screen.Settings -> SettingsScreen(
                 settings = remember { savedSettings(languages) },
@@ -153,11 +169,29 @@ class MainActivity : ComponentActivity() {
                 viewers = remember { Viewer.installed(this) },
                 applying = applying,
                 error = settingsError,
-                onSave = { viewModel.applySettings(it) { navigate(Screen.Home) } },
+                // The shared home is saved when it is changed, so keep the saved one.
+                onSave = { new -> viewModel.applySettings(new.copy(sharedHome = SetupController.settings(this).load()?.sharedHome)) { navigate(Screen.Home) } },
                 onBack = { navigate(Screen.Home); viewModel.clearSettingsError() },
                 onReset = { mode -> navigate(Screen.Home); resetAlpine(mode) },
                 onTerminal = { navigate(Screen.Terminal) },
+                sharedHome = storage.sharedHomeDisplay,
+                allFilesAccess = storage.broadAccess.takeIf { Build.VERSION.SDK_INT >= Build.VERSION_CODES.R },
+                onChangeSharedHome = storage::changeSharedHome,
+                onAllFilesAccess = storage::openAllFilesAccess,
+                storage = home.flatdroidStorage.collectAsState().value,
+                onClearAllCaches = home::clearAllCaches,
+                onClearUnusedAppData = home::clearUnusedAppData,
+                onClearUnusedHomes = home::clearUnusedHomes,
+                onExportAllHomes = storage::exportAllHomes,
+                onImportAllHomes = storage::importAllHomes,
+                onExportAllAppFiles = storage::exportAllAppFiles,
+                onImportAllAppFiles = storage::importAllAppFiles,
+                onExportSettings = storage::exportFlatdroidSettings,
+                // Back to the home screen once applied, as Save does: this screen shows the old values.
+                onImportSettings = { storage.importFlatdroidSettings { navigate(Screen.Home) } },
+                onResetSettings = { viewModel.applySettings(UserSettings.defaults(languages)) { navigate(Screen.Home) } },
                 canReset = !sessionBusy && !taskRunning,
+                storageBusy = storageTasks.running != null || storageTasks.queued.isNotEmpty(),
                 modifier = modifier,
             )
             Screen.Terminal -> TerminalScreen(output, running, viewModel::run, viewModel::cancel, onBack = { navigate(Screen.Settings) }, modifier = modifier)
@@ -172,13 +206,15 @@ class MainActivity : ComponentActivity() {
                 val store = remember(app.id) { AppData.settings(this, app.id) }
                 val userSettings = remember { savedSettings(languages) }
                 val developerOptions = userSettings.developerOptions
-                val cacheBytes by home.cacheBytes.collectAsState()
-                LaunchedEffect(app.id) { home.measureCache(app.id) }
+                val appStorage by home.storage.collectAsState()
+                // Again after every copy, export, import or reset.
+                LaunchedEffect(app.id, storageTasks.generation, savedSizes) { home.measureStorage(app.id) }
+                val appBusy = storageTasks.busyWith(app.id)
                 AppSettingsScreen(
                     app = app,
-                    cacheBytes = cacheBytes[app.id],
+                    storage = appStorage[app.id],
                     settings = remember(app.id) { store.load() },
-                    canClearCache = session.state.appIdOrNull != app.id,
+                    canChangeFiles = session.state.appIdOrNull != app.id && !appBusy,
                     canUninstall = !sessionBusy && !taskRunning,
                     developerOptions = developerOptions,
                     onRequestMicrophone = ::requestMicrophone,
@@ -195,11 +231,13 @@ class MainActivity : ComponentActivity() {
                         navigate(Screen.Home)
                     },
                     onBack = { navigate(Screen.Home) },
-                    onClearCache = { home.clearCache(app.id) },
-                    onUninstall = { deleteData ->
-                        FlatpakTaskService.start(this, FlatpakTask.Uninstall(app.id, deleteData))
+                    onUninstall = { deleteData, keepRuntimes ->
+                        FlatpakTaskService.start(this, FlatpakTask.Uninstall(app.id, deleteData, keepRuntimes))
                         navigate(Screen.Home)
                     },
+                    sharedHome = storage.sharedHomeDisplay,
+                    broadAccess = storage.broadAccess,
+                    onStorage = { action -> storage.storageAction(app.id, action) },
                     modifier = modifier,
                 )
             }
@@ -248,6 +286,8 @@ class MainActivity : ComponentActivity() {
                     onInstall = { installDialog = true },
                     onUpdateAll = { FlatpakTaskService.start(this, FlatpakTask.UpdateAll) },
                     onSettings = { navigate(Screen.Settings) },
+                    onImportFiles = { storage.importFiles(ImportTarget.Shared) },
+                    onImportZip = storage::importZipIntoSharedHome,
                     modifier = modifier,
                 ) {
                     TaskPanel(
@@ -280,10 +320,10 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** Asks the microphone question first when needed, then starts the session. */
-    private fun continueLaunch(pending: PendingLaunch) {
+    /** The storage checks (StorageFlows.beforeLaunch), then the microphone question when needed, then the session. */
+    private fun continueLaunch(pending: PendingLaunch) = storage.beforeLaunch(pending.appId, onReady = {
         if (needsMicrophoneQuestion(pending.appId)) microphoneQuestion = pending else start(pending, micAnswer = null)
-    }
+    })
 
     private fun start(pending: PendingLaunch, micAnswer: Boolean?) {
         if (pending.prepareElectron) SessionService.prepareElectronAndLaunch(this, pending.appId, micAnswer)
@@ -323,6 +363,11 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         SetupController.refresh(this)
         home.reload()
+        storage.refresh()
+        if (SetupController.state.value.isComplete && !SessionController.isBusy) {
+            storage.checkUnfinished()
+            storage.checkTempHomes()
+        }
         repairAfterKilledTask()
     }
 

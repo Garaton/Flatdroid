@@ -18,9 +18,12 @@ import com.garathon.flatdroid.MainActivity
 import com.garathon.flatdroid.R
 import com.garathon.flatdroid.alpine.AlpineEnvironment
 import com.garathon.flatdroid.launcher.ElectronSwap
+import com.garathon.flatdroid.proot.RunInterruptedException
 import com.garathon.flatdroid.session.SessionController
 import com.garathon.flatdroid.setup.AndroidTarFs
 import com.garathon.flatdroid.setup.deleteTree
+import com.garathon.flatdroid.storage.SavedSizes
+import com.garathon.flatdroid.storage.TempHomes
 import com.garathon.flatdroid.util.writeTextAtomically
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -43,6 +46,8 @@ class FlatpakTaskService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var job: Job? = null
     private var wakeLock: PowerManager.WakeLock? = null
+    /** A command of the running task had to be killed rather than ending on SIGINT. */
+    @Volatile private var killed = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -62,10 +67,12 @@ class FlatpakTaskService : Service() {
             .apply { acquire(WAKE_LOCK_TIMEOUT_MS) }
         // Installs are left out: an interrupted download is already safe (see cleanUpAfter).
         val marker = AppData.taskMarker(applicationContext).takeIf { task !is FlatpakTask.Install }
+        killed = false
         job = scope.launch {
             var error: String? = null
             try {
                 marker?.writeTextAtomically(task.toString())
+                SavedSizes.forgetAll(applicationContext)
                 runInterruptible { perform(task) }
             } catch (e: CancellationException) {
                 error = getString(R.string.task_cancelled)
@@ -75,6 +82,7 @@ class FlatpakTaskService : Service() {
                 runInterruptible { cleanUpAfter(task) }
             } finally {
                 marker?.delete()
+                SavedSizes.changedAll(applicationContext)
                 FlatpakTasks.log(error?.let { getString(R.string.task_log_failed, it) } ?: getString(R.string.task_log_done))
                 FlatpakTasks.end(task, error)
                 stopSelf()
@@ -104,7 +112,8 @@ class FlatpakTaskService : Service() {
                 // Data an earlier interrupted removal left half-deleted makes the install fail
                 // instead of downloading it again: remove it, then try once more.
                 if (!MISSING_REPO_DATA.containsMatchIn(e.message ?: "")) throw e
-                cleanRepository(env)
+                // Possibly left by a kill some time before, so the links are checked too.
+                cleanRepository(env, checkLinks = true)
                 run(env, FlatpakCommands.install(task.appId))
             }
             FlatpakTask.UpdateAll -> {
@@ -112,10 +121,11 @@ class FlatpakTaskService : Service() {
                 run(env, FlatpakCommands.uninstallUnused, getString(R.string.task_removing_unused))
                 run(env, FlatpakCommands.update)
             }
-            FlatpakTask.Repair -> cleanRepository(env)
+            // After a force stop, which kills processes anywhere.
+            FlatpakTask.Repair -> cleanRepository(env, checkLinks = true)
             is FlatpakTask.Uninstall -> {
                 run(env, FlatpakCommands.uninstall(task.appId))
-                run(env, FlatpakCommands.uninstallUnused, getString(R.string.task_removing_unused))
+                if (!task.keepRuntimes) run(env, FlatpakCommands.uninstallUnused, getString(R.string.task_removing_unused))
                 removeAppFiles(task.appId, task.deleteData)
             }
         }
@@ -127,29 +137,38 @@ class FlatpakTaskService : Service() {
      * leave a commit whose files are partly gone, and a hard kill can leave files whose content is
      * gone (see BrokenLinks); a later install then fails rather than downloading them again. Not
      * after installs: an interrupted download is already safe, and cleaning would throw away
-     * what it fetched.
+     * what it fetched. Links are checked only after a kill: a command that ended on SIGINT
+     * stopped between system calls, which leaves them whole.
      */
     private fun cleanUpAfter(task: FlatpakTask) {
         if (task is FlatpakTask.Install) return
         try {
-            cleanRepository(AlpineEnvironment.get(applicationContext))
+            cleanRepository(AlpineEnvironment.get(applicationContext), checkLinks = killed)
         } catch (e: Exception) {
             FlatpakTasks.log(getString(R.string.task_log_cleanup_failed, e.message ?: e.toString()))
         }
     }
 
-    /** Removes broken files (from outside proot, which can't), then unreferenced data. */
-    private fun cleanRepository(env: AlpineEnvironment) {
+    /** Removes broken files (from outside proot, which can't) when [checkLinks], then unreferenced data. */
+    private fun cleanRepository(env: AlpineEnvironment, checkLinks: Boolean) {
         FlatpakTasks.newCommand(getString(R.string.task_cleaning_up))
-        val removed = BrokenLinks(File(env.paths().l2sDir), AndroidLinkFs).removeUnder(env.flatpakDir)
-        if (removed > 0) FlatpakTasks.log(resources.getQuantityString(R.plurals.task_log_removed_broken, removed, removed))
+        if (checkLinks) {
+            val removed = BrokenLinks(File(env.paths().l2sDir), AndroidLinkFs).removeUnder(env.flatpakDir)
+            if (removed > 0) FlatpakTasks.log(resources.getQuantityString(R.plurals.task_log_removed_broken, removed, removed))
+        }
         run(env, FlatpakCommands.cleanRepository, getString(R.string.task_cleaning_up))
     }
 
     private fun run(env: AlpineEnvironment, command: List<String>, phase: String? = null) {
         FlatpakTasks.newCommand(phase)
         FlatpakTasks.log("$ ${command.joinToString(" ")}")
-        val result = env.run(command, timeoutSeconds = TIMEOUT_SECONDS, onLine = FlatpakTasks::log)
+        val result = try {
+            env.run(command, timeoutSeconds = TIMEOUT_SECONDS, onLine = FlatpakTasks::log)
+        } catch (e: RunInterruptedException) {
+            if (e.killed) killed = true
+            throw e
+        }
+        if (result.killed) killed = true
         when {
             result.timedOut -> throw IOException(getString(R.string.task_timed_out))
             result.exitCode != 0 -> throw IOException(
@@ -165,6 +184,7 @@ class FlatpakTaskService : Service() {
             File(AppData.cacheRoot(ctx), appId), File(AppData.rootsDir(ctx), appId), File(AppData.appTmpDir(ctx), appId),
             File(AppData.electronDir(ctx), appId), File(AlpineEnvironment.get(ctx).cacheDir, "${ElectronSwap.BUILD_DIR}/$appId"),
         )
+        if (TempHomes.owner(ctx) == appId) TempHomes.delete(ctx)
         if (deleteData) {
             remove += File(AppData.root(ctx), appId)
             AppData.settings(ctx, appId).delete()
@@ -214,6 +234,7 @@ class FlatpakTaskService : Service() {
         private const val EXTRA_TASK = "task"
         private const val EXTRA_APP_ID = "appId"
         private const val EXTRA_DELETE_DATA = "deleteData"
+        private const val EXTRA_KEEP_RUNTIMES = "keepRuntimes"
 
         /**
          * One task at a time. An install may run alongside an app (it only adds files); an update
@@ -228,7 +249,7 @@ class FlatpakTaskService : Service() {
                 FlatpakTask.UpdateAll -> intent.putExtra(EXTRA_TASK, "update")
                 FlatpakTask.Repair -> intent.putExtra(EXTRA_TASK, "repair")
                 is FlatpakTask.Uninstall -> intent.putExtra(EXTRA_TASK, "uninstall").putExtra(EXTRA_APP_ID, task.appId)
-                    .putExtra(EXTRA_DELETE_DATA, task.deleteData)
+                    .putExtra(EXTRA_DELETE_DATA, task.deleteData).putExtra(EXTRA_KEEP_RUNTIMES, task.keepRuntimes)
             }
             ContextCompat.startForegroundService(context, intent)
         }
@@ -239,7 +260,9 @@ class FlatpakTaskService : Service() {
                 "install" -> appId?.let { FlatpakTask.Install(it) }
                 "update" -> FlatpakTask.UpdateAll
                 "repair" -> FlatpakTask.Repair
-                "uninstall" -> appId?.let { FlatpakTask.Uninstall(it, intent.getBooleanExtra(EXTRA_DELETE_DATA, false)) }
+                "uninstall" -> appId?.let {
+                    FlatpakTask.Uninstall(it, intent.getBooleanExtra(EXTRA_DELETE_DATA, false), intent.getBooleanExtra(EXTRA_KEEP_RUNTIMES, false))
+                }
                 else -> null
             }
         }

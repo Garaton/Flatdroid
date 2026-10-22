@@ -19,12 +19,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -33,6 +37,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -78,9 +83,10 @@ fun List<InstalledApp>.forList(query: String, sort: AppSort, runningAppId: Strin
 }
 
 /**
- * The home screen: installed apps with search and sort, a top bar (install, update all,
- * settings), and below the list, the running session and Flatpak task. Tapping an app launches it;
- * its gear opens its settings.
+ * The home screen: installed apps with search and sort, a top bar (install, update all, import
+ * into the shared home, settings), and below the list, the running session and Flatpak task.
+ * Tapping an app launches it; its gear opens its settings. A launched app moves to the top of
+ * the list, which scrolls up to it.
  */
 @Composable
 fun HomeScreen(
@@ -94,11 +100,18 @@ fun HomeScreen(
     onInstall: () -> Unit,
     onUpdateAll: () -> Unit,
     onSettings: () -> Unit,
+    onImportFiles: () -> Unit,
+    onImportZip: () -> Unit,
     modifier: Modifier = Modifier,
     bottom: @Composable () -> Unit = {},
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     var sort by rememberSaveable { mutableStateOf(AppSort.LAST_OPENED) }
+    var importMenu by remember { mutableStateOf(false) }
+    val listState = rememberLazyListState()
+    LaunchedEffect(runningAppId) {
+        if (runningAppId != null) listState.animateScrollToItem(0)
+    }
 
     Column(modifier = modifier.fillMaxSize()) {
         Row(
@@ -112,6 +125,21 @@ fun HomeScreen(
             // Also with no apps: it removes runtimes nothing uses any more.
             IconButton(onClick = onUpdateAll, enabled = canUpdate) {
                 Icon(Icons.Filled.Refresh, contentDescription = stringResource(R.string.home_update_all))
+            }
+            Box {
+                IconButton(onClick = { importMenu = true }) {
+                    Icon(Icons.Filled.FileDownload, contentDescription = stringResource(R.string.home_import))
+                }
+                DropdownMenu(expanded = importMenu, onDismissRequest = { importMenu = false }) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.home_import_files)) },
+                        onClick = { importMenu = false; onImportFiles() },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.home_import_zip)) },
+                        onClick = { importMenu = false; onImportZip() },
+                    )
+                }
             }
             IconButton(onClick = onSettings) {
                 Icon(Icons.Filled.Settings, contentDescription = stringResource(R.string.settings_open))
@@ -140,7 +168,7 @@ fun HomeScreen(
                     textAlign = TextAlign.Center,
                 )
                 shown.isNullOrEmpty() -> Text(stringResource(R.string.home_no_match), modifier = Modifier.align(Alignment.Center))
-                else -> LazyColumn(modifier = Modifier.fillMaxSize()) {
+                else -> LazyColumn(modifier = Modifier.fillMaxSize(), state = listState) {
                     items(shown, key = { it.id }) { app ->
                         AppRow(app, running = app.id == runningAppId, enabled = canLaunch, onLaunch = { onLaunch(app) }, onSettings = { onAppSettings(app) })
                         HorizontalDivider()
@@ -272,7 +300,7 @@ private fun HomeScreenPreview() {
             canLaunch = true,
             canInstall = true,
             canUpdate = false,
-            onLaunch = {}, onAppSettings = {}, onInstall = {}, onUpdateAll = {}, onSettings = {},
+            onLaunch = {}, onAppSettings = {}, onInstall = {}, onUpdateAll = {}, onSettings = {}, onImportFiles = {}, onImportZip = {},
         )
     }
 }

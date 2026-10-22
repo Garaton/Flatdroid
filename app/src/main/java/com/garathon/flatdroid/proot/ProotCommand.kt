@@ -167,6 +167,10 @@ object ProotCommand {
      * --change-id). The guest starts `[prefix…] /usr/bin/env <environment> <command>`; [prefix]
      * is for a helper that must run before the app (empty for now). The environment goes through
      * `env` rather than proot's own, which carries only proot's settings.
+     *
+     * Without --kill-on-exit: like Flatpak, the app runs until its last process exits, so apps
+     * that restart themselves (Electron's app.relaunch(), Kate going into the background) keep
+     * running. proot then exits with the last process's status.
      */
     fun flatpak(
         paths: ProotPaths,
@@ -182,12 +186,12 @@ object ProotCommand {
         require(environment.keys.all { Regex("[A-Za-z_][A-Za-z0-9_]*").matches(it) }) { "Bad variable name in $environment" }
         val argv = mutableListOf(
             paths.proot,
-            "--kill-on-exit",
             "--sysvipc",
             "--link2symlink",
             "-L",
             "--rootfs=${binds.root}",
-            "--cwd=/",
+            // As Flatpak: apps start in the home, where file dialogs then open.
+            "--cwd=${GuestPaths.HOME}",
             // Flatpak's hard links are symlinks into .l2s, at its host path.
             "--bind=${paths.l2sDir}",
             "--bind=${binds.runtimeFiles}:/usr",

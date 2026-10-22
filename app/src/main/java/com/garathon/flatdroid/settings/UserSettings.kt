@@ -15,6 +15,14 @@ enum class AudioOutputMode {
     POWER_SAVING,
 }
 
+/** The theme Flatpak apps are asked to use (see DesktopConfig). */
+enum class FlatpakTheme {
+    /** Android's dark mode, at each launch. */
+    SYSTEM,
+    DARK,
+    LIGHT,
+}
+
 /** PulseAudio's resampler (`--resample-method`), used for apps whose rate differs from the device's. */
 enum class Resampler(val pulseName: String) {
     FAST("speex-float-0"),
@@ -50,6 +58,9 @@ data class UserSettings(
     val lowLatencyAudio: Boolean = false,
     /** PulseAudio resamples at a higher quality ([resampler]). */
     val highQualityAudio: Boolean = false,
+    /** The shared home's absolute path; null for the default, `Documents/Flatdroid`. */
+    val sharedHome: String? = null,
+    val flatpakTheme: FlatpakTheme = FlatpakTheme.SYSTEM,
 ) {
     val onlyMyLanguages: Boolean get() = flatpakLanguages != GuestFiles.ALL_LANGUAGES
 
@@ -122,6 +133,8 @@ class UserSettingsStore(private val file: File) {
             customAudioLatencyMs = props.getProperty(KEY_AUDIO_LATENCY)?.toIntOrNull()?.takeIf { it in UserSettings.AUDIO_LATENCIES_MS },
             lowLatencyAudio = props.getProperty(KEY_LOW_LATENCY_AUDIO) == "true",
             highQualityAudio = props.getProperty(KEY_HIGH_QUALITY_AUDIO) == "true",
+            sharedHome = props.getProperty(KEY_SHARED_HOME)?.takeIf { it.startsWith("/") },
+            flatpakTheme = FlatpakTheme.entries.firstOrNull { it.name.lowercase() == props.getProperty(KEY_THEME) } ?: FlatpakTheme.SYSTEM,
         )
     }
 
@@ -138,6 +151,8 @@ class UserSettingsStore(private val file: File) {
         settings.customAudioLatencyMs?.let { props.setProperty(KEY_AUDIO_LATENCY, it.toString()) }
         if (settings.lowLatencyAudio) props.setProperty(KEY_LOW_LATENCY_AUDIO, "true")
         if (settings.highQualityAudio) props.setProperty(KEY_HIGH_QUALITY_AUDIO, "true")
+        settings.sharedHome?.let { props.setProperty(KEY_SHARED_HOME, it) }
+        if (settings.flatpakTheme != FlatpakTheme.SYSTEM) props.setProperty(KEY_THEME, settings.flatpakTheme.name.lowercase())
         file.writeTextAtomically(StringWriter().also { props.store(it, null) }.toString())
     }
 
@@ -153,5 +168,7 @@ class UserSettingsStore(private val file: File) {
         const val KEY_AUDIO_LATENCY = "audio.latencyMs"
         const val KEY_LOW_LATENCY_AUDIO = "audio.lowLatency"
         const val KEY_HIGH_QUALITY_AUDIO = "audio.highQuality"
+        const val KEY_SHARED_HOME = "home.shared"
+        const val KEY_THEME = "flatpak.theme"
     }
 }

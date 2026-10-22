@@ -21,7 +21,10 @@ import com.garathon.flatdroid.flatpak.AppData
 import com.garathon.flatdroid.flatpak.FlatpakTask
 import com.garathon.flatdroid.flatpak.FlatpakTasks
 import com.garathon.flatdroid.flatpak.InstalledApps
+import com.garathon.flatdroid.settings.HomeMode
 import com.garathon.flatdroid.setup.SetupController
+import com.garathon.flatdroid.storage.SavedSizes
+import com.garathon.flatdroid.storage.TempHomePrompt
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -57,7 +60,8 @@ class SessionService : Service() {
         when (intent?.action) {
             ACTION_STOP -> {
                 job?.cancel()
-                if (job?.isActive != true) {
+                // A cancelled job is no longer active but still finishing; it stops the service itself.
+                if (job?.isCompleted != false) {
                     removeNotification()
                     stopSelf()
                 }
@@ -103,6 +107,8 @@ class SessionService : Service() {
         job = scope.launch {
             var message: String? = null
             var failed = false
+            // The app changes its own files, and an Electron swap may be prepared.
+            SavedSizes.forget(applicationContext, appId)
             try {
                 runInterruptible {
                     val launcher = FlatpakLauncher(applicationContext)
@@ -128,6 +134,11 @@ class SessionService : Service() {
                 }
                 notifications.cancel(MIC_NOTIFICATION_ID)
                 removeNotification()
+                SavedSizes.changed(applicationContext, appId)
+                // Before the session counts as ended, so Flatdroid's window doesn't ask as well.
+                if (AppData.settings(applicationContext, appId).load().homeMode == HomeMode.TEMPORARY) {
+                    TempHomePrompt.sessionEnded(applicationContext, appId)
+                }
                 // An Electron offer stays up for the UI to answer.
                 if (SessionController.ui.value.state !is SessionState.ElectronOffer) SessionController.ended(message, failed)
                 stopSelf()

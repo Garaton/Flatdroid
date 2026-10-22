@@ -31,19 +31,15 @@ fun httpDownload(url: String, dest: File, maxBytes: Long, onProgress: (bytes: Lo
             }
             else -> throw IOException("$url: HTTP ${conn.responseCode}")
         }
-        var done = if (append) have else 0L
+        val start = if (append) have else 0L
+        var done = start
         val length = conn.contentLengthLong
         val total = if (length >= 0) done + length else -1L
         if (total > maxBytes) throw IOException("$url: $total bytes is more than expected (${maxBytes shr 20} MiB)")
         conn.inputStream.use { input ->
             FileOutputStream(part, append).use { output ->
-                val buf = ByteArray(64 * 1024)
-                while (true) {
-                    if (Thread.interrupted()) throw InterruptedException()
-                    val n = input.read(buf)
-                    if (n < 0) break
-                    output.write(buf, 0, n)
-                    done += n
+                input.copyWithProgress(output) { copied ->
+                    done = start + copied
                     if (done > maxBytes) throw IOException("$url: more than ${maxBytes shr 20} MiB, more than expected")
                     onProgress(done, total)
                 }

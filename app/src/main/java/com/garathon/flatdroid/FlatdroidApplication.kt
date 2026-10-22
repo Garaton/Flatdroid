@@ -8,6 +8,7 @@ import com.garathon.flatdroid.launcher.ElectronSwap
 import com.garathon.flatdroid.launcher.Leftovers
 import com.garathon.flatdroid.proot.LeftoverProcesses
 import com.garathon.flatdroid.setup.AndroidTarFs
+import com.garathon.flatdroid.storage.SavedSizes
 import com.garathon.flatdroid.util.DebugLog
 import com.garathon.flatdroid.util.appScope
 import kotlinx.coroutines.Dispatchers
@@ -22,7 +23,10 @@ class FlatdroidApplication : Application() {
         // Before anything of this run starts: every process of Flatdroid's that is running now is left over.
         val killed = LeftoverProcesses.kill()
         if (killed > 0) DebugLog.i("Ended $killed processes left by an earlier run")
-        appScope.launch(Dispatchers.IO) { cleanLeftoverFiles() }
+        appScope.launch(Dispatchers.IO) {
+            cleanLeftoverFiles()
+            SavedSizes.measureMissing(this@FlatdroidApplication)
+        }
     }
 
     private fun cleanLeftoverFiles() {
@@ -38,7 +42,11 @@ class FlatdroidApplication : Application() {
                 ),
                 fs = AndroidTarFs,
             ).clean()
-            for (file in removed) DebugLog.i("Removed leftover ${file.path}")
+            for (file in removed) {
+                DebugLog.i("Removed leftover ${file.path}")
+                // An Electron swap counts in its app's size.
+                if (file.parentFile?.canonicalPath == AppData.electronDir(this).path) SavedSizes.changed(this, file.name)
+            }
         } catch (e: Exception) {
             DebugLog.w("Leftover clean-up failed: $e")
         }

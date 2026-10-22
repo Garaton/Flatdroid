@@ -6,8 +6,14 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 
-/** [output] holds the last [ProotRunner.MAX_OUTPUT_CHARS] of the output, from a line start. */
-data class ProcessResult(val exitCode: Int?, val output: String, val timedOut: Boolean)
+/**
+ * [output] holds the last [ProotRunner.MAX_OUTPUT_CHARS] of the output, from a line start.
+ * [killed]: a timeout had to kill it (see [ProcessStopper.stop]).
+ */
+data class ProcessResult(val exitCode: Int?, val output: String, val timedOut: Boolean, val killed: Boolean = false)
+
+/** [ProotRunner.run] was interrupted; [killed]: stopping it took more than SIGINT (see [ProcessStopper.stop]). */
+class RunInterruptedException(val killed: Boolean) : InterruptedException("Interrupted")
 
 /**
  * A started proot. Its output (stdout and stderr together) goes to the onLine callback given to
@@ -33,12 +39,13 @@ class ProotProcess internal constructor(
 
     /**
      * Stops the process and everything under it; returns once it has exited (or after the last
-     * resort). [interruptGraceMillis] is how long it gets to end on SIGINT (see ProcessStopper).
+     * resort), with whether it had to be killed. [interruptGraceMillis] is how long it gets to
+     * end on SIGINT (see ProcessStopper).
      */
-    fun stop(interruptGraceMillis: Long = ProcessStopper.SHORT_GRACE_MS) {
-        if (!isAlive) return
-        val pid = ProcessStopper.pidOf(process)
-        if (pid != null) ProcessStopper(signals, interruptGraceMillis).stop(process, pid) else process.destroy()
+    fun stop(interruptGraceMillis: Long = ProcessStopper.SHORT_GRACE_MS): Boolean {
+        if (!isAlive) return false
+        val pid = ProcessStopper.pidOf(process) ?: run { process.destroy(); return true }
+        return ProcessStopper(signals, interruptGraceMillis).stop(process, pid)
     }
 
     /** Ctrl-C only: SIGINT to the processes under proot; whether they stop is up to them. */
@@ -99,7 +106,7 @@ object ProotRunner {
     /**
      * Blocks until the process exits. [onLine] is called for each output line as it arrives, on a
      * background thread. An interrupt of the calling thread (cancelling) stops the process and is
-     * rethrown as [InterruptedException]. The timeout stops it too and returns a result with
+     * rethrown as [RunInterruptedException]. The timeout stops it too and returns a result with
      * [ProcessResult.timedOut].
      */
     fun run(
@@ -123,11 +130,12 @@ object ProotRunner {
         }
         // Process.waitFor(timeout) needs API 26; minSdk is 24.
         val timedOut = AtomicBoolean(false)
+        val killed = AtomicBoolean(false)
         val watchdog = thread(name = "proot-timeout", isDaemon = true) {
             try {
                 Thread.sleep(TimeUnit.SECONDS.toMillis(timeoutSeconds))
                 timedOut.set(true)
-                proc.stop(interruptGraceMillis)
+                killed.set(proc.stop(interruptGraceMillis))
             } catch (_: InterruptedException) {
             }
         }
@@ -135,8 +143,7 @@ object ProotRunner {
             proc.waitFor()
         } catch (e: InterruptedException) {
             watchdog.interrupt()
-            proc.stop(interruptGraceMillis)
-            throw e
+            throw RunInterruptedException(proc.stop(interruptGraceMillis))
         } finally {
             watchdog.interrupt()
         }
@@ -144,6 +151,7 @@ object ProotRunner {
             exitCode = if (timedOut.get()) null else exitCode,
             output = synchronized(output) { trimToTail(output); output.toString() },
             timedOut = timedOut.get(),
+            killed = killed.get(),
         )
     }
 

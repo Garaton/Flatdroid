@@ -19,6 +19,15 @@ interface TarFs {
 }
 
 /**
+ * Gives [dir] and everything below it the app's own group, without following symlinks: for files
+ * made in the cache that stay as app data, which Android would otherwise count as cache (by
+ * group) where clearing the cache can't reach them.
+ */
+fun TarFs.useOwnGroupTree(dir: File) {
+    dir.walkTopDown().onEnter { it == dir || !isSymlink(it) }.forEach { useOwnGroup(it) }
+}
+
+/**
  * Deletes [file] and, for a real directory, everything below it, without following symlinks.
  * Kotlin's File.deleteRecursively() follows symlinked directories, and a rootfs holds symlinks
  * with absolute targets that resolve on the host. Throws if anything is left.

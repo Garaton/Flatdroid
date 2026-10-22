@@ -2,13 +2,16 @@ package com.garathon.flatdroid.ui
 
 import android.text.format.Formatter
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -31,6 +34,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -40,6 +44,8 @@ import com.garathon.flatdroid.flatpak.InstalledApp
 import com.garathon.flatdroid.settings.AppSettings
 import com.garathon.flatdroid.settings.DisplaySize
 import com.garathon.flatdroid.settings.EnvironmentText
+import com.garathon.flatdroid.settings.HomeMode
+import com.garathon.flatdroid.storage.AppStorage
 import com.garathon.flatdroid.ui.theme.FlatdroidTheme
 
 /**
@@ -49,24 +55,30 @@ import com.garathon.flatdroid.ui.theme.FlatdroidTheme
  * [onRequestMicrophone] asks Android for its microphone permission and reports whether it was
  * granted: the microphone turns on only with it, so a notification can later allow it for a
  * session. With [developerOptions], the microphone can also be always allowed, and the app's
- * environment variables set.
+ * environment variables set. Its home is the shared one ([sharedHome], as the user knows it), a
+ * private one or a temporary one; with access to all of shared storage ([broadAccess]) it can
+ * also get /sdcard. Its Storage section shows its sizes ([storage]) and asks for copies, exports,
+ * imports and resets of its cache, private home and settings ([onStorage]), whatever its home
+ * mode.
  */
 @Composable
 fun AppSettingsScreen(
     app: InstalledApp,
     settings: AppSettings,
-    /** Size of the app's cache in bytes; null while it is being measured. */
-    cacheBytes: Long?,
-    /** False while the app runs. */
-    canClearCache: Boolean,
+    /** The app's storage; null while it is being measured. */
+    storage: AppStorage?,
+    /** False while the app runs or its files are being copied. */
+    canChangeFiles: Boolean,
     /** False while any app or a Flatpak task runs. */
     canUninstall: Boolean,
     developerOptions: Boolean,
     onRequestMicrophone: (onResult: (Boolean) -> Unit) -> Unit,
     onSave: (AppSettings) -> Unit,
     onBack: () -> Unit,
-    onClearCache: () -> Unit,
-    onUninstall: (deleteData: Boolean) -> Unit,
+    onUninstall: (deleteData: Boolean, keepRuntimes: Boolean) -> Unit,
+    sharedHome: String,
+    broadAccess: Boolean,
+    onStorage: (StorageAction) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var choice by rememberSaveable { mutableStateOf(settings.displaySize) }
@@ -78,17 +90,31 @@ fun AppSettingsScreen(
     var microphone by rememberSaveable { mutableStateOf(settings.microphone) }
     var alwaysAllowMicrophone by rememberSaveable { mutableStateOf(settings.alwaysAllowMicrophone) }
     var environment by rememberSaveable { mutableStateOf(EnvironmentText.format(settings.environment)) }
+    var homeMode by rememberSaveable { mutableStateOf(settings.homeMode) }
+    var sdcard by rememberSaveable { mutableStateOf(settings.sdcard) }
     val environmentValue = EnvironmentText.parse(environment)
     var micRefused by rememberSaveable { mutableStateOf(false) }
     val context = LocalContext.current
     var confirmUninstall by rememberSaveable { mutableStateOf(false) }
-    var cacheCleared by rememberSaveable { mutableStateOf(false) }
+    var confirm by rememberSaveable { mutableStateOf<StorageAction?>(null) }
 
     fun size(text: String) = text.toIntOrNull()?.takeIf { it in AppSettings.MIN_SIZE..AppSettings.MAX_SIZE }
     val customValid = size(width) != null && size(height) != null
 
+    confirm?.let { action ->
+        val (title, text, button) = when (action) {
+            StorageAction.IMPORT_HOME -> Triple(R.string.app_settings_import_home_title, R.string.app_settings_import_home_text, R.string.storage_import_home)
+            StorageAction.RESET_HOME -> Triple(R.string.app_settings_reset_home_title, R.string.app_settings_reset_home_text, R.string.storage_reset_home)
+            StorageAction.IMPORT_SETTINGS -> Triple(R.string.app_settings_import_settings_title, R.string.app_settings_import_settings_text, R.string.storage_import_settings)
+            else -> Triple(R.string.app_settings_reset_app_settings_title, R.string.app_settings_reset_app_settings_text, R.string.storage_reset_settings)
+        }
+        ConfirmDialog(
+            stringResource(title, app.name), stringResource(text), stringResource(button),
+            onConfirm = { confirm = null; onStorage(action) }, onDismiss = { confirm = null },
+        )
+    }
     if (confirmUninstall) {
-        UninstallDialog(app.name, onConfirm = { confirmUninstall = false; onUninstall(it) }, onDismiss = { confirmUninstall = false })
+        UninstallDialog(app.name, onConfirm = { data, runtimes -> confirmUninstall = false; onUninstall(data, runtimes) }, onDismiss = { confirmUninstall = false })
     }
 
     Column(
@@ -146,6 +172,22 @@ fun AppSettingsScreen(
             )
         }
 
+        SectionTitle(stringResource(R.string.app_settings_files))
+        Column(Modifier.selectableGroup()) {
+            HomeModeRow(homeMode == HomeMode.SHARED, { homeMode = HomeMode.SHARED },
+                stringResource(R.string.app_settings_home_shared), stringResource(R.string.app_settings_home_shared_hint, sharedHome))
+            HomeModeRow(homeMode == HomeMode.PRIVATE, { homeMode = HomeMode.PRIVATE },
+                stringResource(R.string.app_settings_home_private), stringResource(R.string.app_settings_home_private_hint))
+            HomeModeRow(homeMode == HomeMode.TEMPORARY, { homeMode = HomeMode.TEMPORARY },
+                stringResource(R.string.app_settings_home_temporary), stringResource(R.string.app_settings_home_temporary_hint))
+        }
+        if (broadAccess) {
+            SwitchRow(
+                sdcard, { sdcard = it },
+                stringResource(R.string.app_settings_sdcard), stringResource(R.string.app_settings_sdcard_hint),
+            )
+        }
+
         if (developerOptions && app.requestsAllDevices) {
             SectionTitle(stringResource(R.string.app_settings_devices))
             SwitchRow(
@@ -183,6 +225,8 @@ fun AppSettingsScreen(
                             microphone = microphone,
                             alwaysAllowMicrophone = if (developerOptions) alwaysAllowMicrophone else settings.alwaysAllowMicrophone,
                             environment = if (developerOptions) environmentValue.orEmpty() else settings.environment,
+                            homeMode = homeMode,
+                            sdcard = if (broadAccess) sdcard else settings.sdcard,
                         )
                     )
                 },
@@ -192,19 +236,63 @@ fun AppSettingsScreen(
         }
 
         SectionTitle(stringResource(R.string.app_settings_storage))
-        Text(
-            cacheBytes?.let { stringResource(R.string.app_settings_cache_size, Formatter.formatShortFileSize(LocalContext.current, it)) }
-                ?: stringResource(R.string.app_settings_cache_measuring),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        OutlinedButton(onClick = { onClearCache(); cacheCleared = true }, enabled = canClearCache && !cacheCleared) {
-            Text(stringResource(if (cacheCleared) R.string.app_settings_cache_cleared else R.string.app_settings_clear_cache))
+        val context = LocalContext.current
+        val measuring = stringResource(R.string.app_settings_measuring)
+        fun size(bytes: Long?) = bytes?.let { Formatter.formatShortFileSize(context, it) } ?: measuring
+        val hasHome = (storage?.privateHome ?: 0L) > 0L
+        Text(stringResource(R.string.app_settings_app_storage, size(storage?.total)), style = MaterialTheme.typography.titleMedium)
+
+        Text(stringResource(R.string.app_settings_cache, size(storage?.cache)))
+        OutlinedButton(onClick = { onStorage(StorageAction.CLEAR_CACHE) }, enabled = canChangeFiles && (storage?.cache ?: 0L) > 0L) {
+            Text(stringResource(R.string.app_settings_clear_cache))
+        }
+
+        Text(stringResource(R.string.app_settings_private_home, size(storage?.privateHome)))
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = { onStorage(StorageAction.COPY_INTO_HOME) }, enabled = canChangeFiles) { Text(stringResource(R.string.storage_copy_into_home)) }
+            OutlinedButton(onClick = { onStorage(StorageAction.DOWNLOAD_FROM_HOME) }, enabled = hasHome) { Text(stringResource(R.string.storage_download_from_home)) }
+        }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = { confirm = StorageAction.IMPORT_HOME }, enabled = canChangeFiles) { Text(stringResource(R.string.storage_import_home)) }
+            OutlinedButton(onClick = { onStorage(StorageAction.EXPORT_HOME) }, enabled = hasHome) { Text(stringResource(R.string.storage_export_home)) }
+            OutlinedButton(onClick = { confirm = StorageAction.RESET_HOME }, enabled = canChangeFiles && hasHome) {
+                Text(stringResource(R.string.storage_reset_home), color = MaterialTheme.colorScheme.error)
+            }
+        }
+
+        Text(stringResource(R.string.app_settings_settings, size(storage?.settings)))
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = { confirm = StorageAction.IMPORT_SETTINGS }, enabled = canChangeFiles) { Text(stringResource(R.string.storage_import_settings)) }
+            OutlinedButton(onClick = { onStorage(StorageAction.EXPORT_SETTINGS) }, enabled = (storage?.settings ?: 0L) > 0L) { Text(stringResource(R.string.storage_export_settings)) }
+            OutlinedButton(onClick = { confirm = StorageAction.RESET_SETTINGS }, enabled = canChangeFiles) {
+                Text(stringResource(R.string.storage_reset_settings), color = MaterialTheme.colorScheme.error)
+            }
         }
 
         SectionTitle(stringResource(R.string.settings_section_danger), danger = true)
         OutlinedButton(onClick = { confirmUninstall = true }, enabled = canUninstall) {
             Text(stringResource(R.string.uninstall_button), color = MaterialTheme.colorScheme.error)
+        }
+    }
+}
+
+/** What the app's Storage section asks for; the ones that replace or delete files were confirmed. */
+enum class StorageAction {
+    CLEAR_CACHE, COPY_INTO_HOME, DOWNLOAD_FROM_HOME, IMPORT_HOME, EXPORT_HOME, RESET_HOME,
+    IMPORT_SETTINGS, EXPORT_SETTINGS, RESET_SETTINGS,
+}
+
+/** A home mode with what it means below it. */
+@Composable
+private fun HomeModeRow(selected: Boolean, onSelect: () -> Unit, title: String, hint: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth().selectable(selected, role = Role.RadioButton, onClick = onSelect),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected = selected, onClick = null)
+        Column(Modifier.padding(start = 12.dp, top = 8.dp, bottom = 8.dp)) {
+            Text(title)
+            Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -222,8 +310,9 @@ private fun SizeField(value: String, label: String, modifier: Modifier, onChange
 }
 
 @Composable
-private fun UninstallDialog(name: String, onConfirm: (deleteData: Boolean) -> Unit, onDismiss: () -> Unit) {
+private fun UninstallDialog(name: String, onConfirm: (deleteData: Boolean, keepRuntimes: Boolean) -> Unit, onDismiss: () -> Unit) {
     var deleteData by rememberSaveable { mutableStateOf(false) }
+    var keepRuntimes by rememberSaveable { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.uninstall_title, name)) },
@@ -231,10 +320,11 @@ private fun UninstallDialog(name: String, onConfirm: (deleteData: Boolean) -> Un
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(stringResource(R.string.uninstall_text))
                 CheckboxRow(deleteData, { deleteData = it }, stringResource(R.string.uninstall_delete_data))
+                CheckboxRow(keepRuntimes, { keepRuntimes = it }, stringResource(R.string.uninstall_keep_runtimes))
             }
         },
         confirmButton = {
-            Button(onClick = { onConfirm(deleteData) }) { Text(stringResource(R.string.uninstall_confirm), color = MaterialTheme.colorScheme.onPrimary) }
+            Button(onClick = { onConfirm(deleteData, keepRuntimes) }) { Text(stringResource(R.string.uninstall_confirm), color = MaterialTheme.colorScheme.onPrimary) }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.reset_cancel)) } },
     )
@@ -245,8 +335,9 @@ private fun UninstallDialog(name: String, onConfirm: (deleteData: Boolean) -> Un
 private fun AppSettingsScreenPreview() {
     FlatdroidTheme {
         AppSettingsScreen(
-            InstalledApp("org.xfce.mousepad", "Mousepad", null, null), AppSettings(), cacheBytes = 12_345_678, canClearCache = true, canUninstall = true, developerOptions = true,
-            onRequestMicrophone = {}, onSave = {}, onBack = {}, onClearCache = {}, onUninstall = {},
+            InstalledApp("org.xfce.mousepad", "Mousepad", null, null), AppSettings(), storage = AppStorage(9_000_000, 12_345_678, 4_096, 65_536), canChangeFiles = true, canUninstall = true, developerOptions = true,
+            onRequestMicrophone = {}, onSave = {}, onBack = {}, onUninstall = { _, _ -> },
+            sharedHome = "Documents/Flatdroid", broadAccess = true, onStorage = {},
         )
     }
 }

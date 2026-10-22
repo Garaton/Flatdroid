@@ -20,6 +20,7 @@ class AppSettingsTest {
             DisplaySize.CUSTOM, 960, 640, newerElectronFlags = true, lastOpened = 1234L, wholeDev = true,
             audio = false, microphone = true, alwaysAllowMicrophone = true, withoutFlatpakInfo = true,
             environment = mapOf("VLC_DATA_PATH" to "/app/share/vlc", "VLC_PLUGIN_PATH" to "/app/lib/vlc/plugins"),
+            homeMode = HomeMode.TEMPORARY, sdcard = true,
         )
         store.save(saved)
         assertEquals(saved, store.load())
@@ -71,5 +72,22 @@ class AppSettingsTest {
             writeText("display.size=custom\ndisplay.width=99999\ndisplay.height=abc\nlastOpened=x\npermission.audio=maybe\npermission.microphone=always\n")
         }
         assertEquals(AppSettings(DisplaySize.CUSTOM), AppSettingsStore(broken).load())
+    }
+
+    @Test
+    fun anImportLeavesWhatWidensReachAsItIsHere() {
+        fun file(text: String) = File(tmp.root, "a.App.properties").apply { writeText(text) }
+        val imported = file(
+            "home.mode=private\ndev.whole=true\nstorage.sdcard=true\npermission.microphone=true\n" +
+                "permission.microphone.always=true\nenv.LD_PRELOAD=/home/user/x.so\n",
+        ).readBytes()
+        val local = file("home.mode=shared\ndev.whole=false\nenv.LANG=de_DE.UTF-8\n").readBytes()
+        val loaded = AppSettingsStore(file(AppSettingsStore.imported(imported, local).decodeToString())).load()
+        assertEquals(
+            AppSettings(homeMode = HomeMode.PRIVATE, microphone = true, environment = mapOf("LANG" to "de_DE.UTF-8")),
+            loaded,
+        )
+        val alone = AppSettingsStore(file(AppSettingsStore.imported(imported, null).decodeToString())).load()
+        assertEquals(AppSettings(homeMode = HomeMode.PRIVATE, microphone = true), alone)
     }
 }

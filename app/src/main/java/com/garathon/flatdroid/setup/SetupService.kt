@@ -17,6 +17,7 @@ import com.garathon.flatdroid.MainActivity
 import com.garathon.flatdroid.R
 import com.garathon.flatdroid.alpine.AlpineEnvironment
 import com.garathon.flatdroid.flatpak.AppData
+import com.garathon.flatdroid.storage.SavedSizes
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -65,6 +66,7 @@ class SetupService : Service() {
         val resetOnly = intent?.action == ACTION_RESET
         job = scope.launch {
             try {
+                SavedSizes.forgetAll(applicationContext)
                 val env = AlpineEnvironment.get(applicationContext)
                 val reset = SetupController.reset(applicationContext, env)
                 if (reset.isPending()) {
@@ -85,6 +87,7 @@ class SetupService : Service() {
                 if (e !is CancellationException) SetupController.error(e.message ?: e.toString())
             } finally {
                 withContext(NonCancellable) { progress.cancelAndJoin() }
+                SavedSizes.changedAll(applicationContext)
                 SetupController.end()
                 val ui = SetupController.state.value
                 if (!resetOnly && (ui.isComplete || ui.failed != null)) {

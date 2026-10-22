@@ -137,8 +137,8 @@ class ProotCommandTest {
         val inv = ProotCommand.flatpak(paths, flatpakBinds, linkedMapOf("PATH" to "/app/bin:/usr/bin", "A" to "x y"), listOf("/app/bin/mousepad", "--flag"))
         assertEquals(
             listOf(
-                "/lib/libproot.so", "--kill-on-exit", "--sysvipc", "--link2symlink", "-L",
-                "--rootfs=/cache/roots/org.xfce.mousepad", "--cwd=/",
+                "/lib/libproot.so", "--sysvipc", "--link2symlink", "-L",
+                "--rootfs=/cache/roots/org.xfce.mousepad", "--cwd=/home/user",
                 "--bind=/files/alpine/rootfs/.l2s",
                 "--bind=/fp/runtime/org.freedesktop.Platform/aarch64/26.08/abc/files:/usr",
                 "--bind=/fp/app/org.xfce.mousepad/aarch64/stable/def/files:/app",

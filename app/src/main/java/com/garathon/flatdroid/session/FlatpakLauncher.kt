@@ -1,6 +1,7 @@
 package com.garathon.flatdroid.session
 
 import android.content.Context
+import android.content.res.Configuration
 import android.media.AudioManager
 import android.os.Build
 import android.os.FileObserver
@@ -13,6 +14,7 @@ import com.garathon.flatdroid.audio.MicStreamer
 import com.garathon.flatdroid.flatpak.AndroidLinkFs
 import com.garathon.flatdroid.flatpak.AppData
 import com.garathon.flatdroid.flatpak.FlatpakInstallation
+import com.garathon.flatdroid.launcher.DesktopConfig
 import com.garathon.flatdroid.launcher.Electron
 import com.garathon.flatdroid.launcher.ElectronSwap
 import com.garathon.flatdroid.launcher.HostDirs
@@ -28,11 +30,20 @@ import com.garathon.flatdroid.proot.ProotCommand
 import com.garathon.flatdroid.proot.ProotProcess
 import com.garathon.flatdroid.proot.ProotRunner
 import com.garathon.flatdroid.setup.AndroidTarFs
+import com.garathon.flatdroid.settings.AppSettings
 import com.garathon.flatdroid.settings.AudioOutputMode
+import com.garathon.flatdroid.settings.FlatpakTheme
+import com.garathon.flatdroid.settings.HomeMode
 import com.garathon.flatdroid.settings.Resampler
 import com.garathon.flatdroid.settings.UserSettings
 import com.garathon.flatdroid.setup.SetupController
 import com.garathon.flatdroid.setup.deleteTree
+import com.garathon.flatdroid.storage.HomeFolders
+import com.garathon.flatdroid.storage.SharedHome
+import com.garathon.flatdroid.storage.StorageTaskService
+import com.garathon.flatdroid.storage.StorageTasks
+import com.garathon.flatdroid.storage.TempHomes
+import com.garathon.flatdroid.util.readTextUpTo
 import com.garathon.flatdroid.util.httpDownload
 import com.garathon.flatdroid.util.sha256
 import com.garathon.flatdroid.util.writeTextAtomically
@@ -60,6 +71,7 @@ class FlatpakLauncher(private val context: Context) {
     private val pulseDir = File(sessionDir, "pulse")
     private val vncDir = File(sessionDir, "vnc")
     private val etcDir = File(sessionDir, "etc")
+    private val desktopDir = File(sessionDir, "xdg")
 
     fun electronSwap(appId: String) = ElectronSwap(
         dir = File(AppData.electronDir(context), appId),
@@ -101,6 +113,10 @@ class FlatpakLauncher(private val context: Context) {
         SessionController.starting(appId, context.getString(R.string.session_reading_metadata), clearLog = true)
         val store = AppData.settings(context, appId)
         var settings = store.load()
+        // A launch in Temporary Home mode replaces the temporary home, so not while it is exported.
+        if (StorageTasks.busyWith(appId) || (settings.homeMode == HomeMode.TEMPORARY && StorageTasks.exportingTempHome(StorageTaskService.pendingTasks(context)))) {
+            throw LaunchException(context.getString(R.string.launch_storage_busy))
+        }
         var plan = when (val result = planner.plan(appId, hostDirs(appId), options(appId))) {
             is PlanResult.Ready -> result.plan
             is PlanResult.ElectronSwapNeeded -> {
@@ -121,6 +137,9 @@ class FlatpakLauncher(private val context: Context) {
         store.update { it.copy(lastOpened = System.currentTimeMillis()) }
 
         SessionController.starting(appId, context.getString(R.string.session_preparing_files))
+        val home = prepareHome(appId, settings.homeMode)
+        // Before prepareDirs, which makes the mount points by what they are bound from.
+        writeDesktopFiles(home, plan)
         prepareDirs(appId, plan)
         val userSettings = SetupController.settings(context).load()
         val password = VncPassword.random()
@@ -246,6 +265,39 @@ class FlatpakLauncher(private val context: Context) {
         context.getSystemService(AudioManager::class.java)?.getProperty(AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE)?.toIntOrNull()
             ?: DEFAULT_OUTPUT_RATE
 
+    /**
+     * The app's home for this launch: a new temporary one, the private one (created with the
+     * standard folders the first time), or the shared one (created likewise when missing).
+     */
+    private fun prepareHome(appId: String, mode: HomeMode): File = when (mode) {
+        // Flatdroid asked about the last one before this launch (see MainActivity).
+        HomeMode.TEMPORARY -> TempHomes.recreate(context, appId)
+        // create() leaves an existing home as it is.
+        HomeMode.PRIVATE -> AppData.privateHome(context, appId).also { HomeFolders.create(it) }
+        HomeMode.SHARED -> SharedHome.ensure(context)
+            ?: throw LaunchException(context.getString(R.string.storage_shared_home_missing, SharedHome.display(SharedHome.dir(context))))
+    }
+
+    /** Generated for every launch: `user-dirs.dirs` for [home], and the desktop settings ([DesktopConfig]). */
+    private fun writeDesktopFiles(home: File, plan: LaunchPlan) {
+        File(etcDir, USER_DIRS).writeTextAtomically(HomeFolders.userDirs { File(home, it).isDirectory }, durable = false)
+        val dark = isDarkTheme()
+        AndroidTarFs.deleteTree(desktopDir)
+        for (gtk in listOf("gtk-3.0", "gtk-4.0")) {
+            File(desktopDir, "$gtk/settings.ini").apply { parentFile!!.mkdirs() }.writeTextAtomically(DesktopConfig.gtkSettings(dark), durable = false)
+        }
+        // Only KDE runtimes have it.
+        val darkScheme = File(plan.runtime.files, DesktopConfig.BREEZE_DARK).takeIf { dark && it.isFile }?.let { runCatching { it.readTextUpTo() }.getOrNull() }
+        DesktopConfig.kdeglobals(dark, darkScheme)?.let { File(desktopDir, "kdeglobals").writeTextAtomically(it, durable = false) }
+    }
+
+    /** The theme setting; with System, Android's dark mode now. */
+    private fun isDarkTheme() = when (SetupController.settings(context).load()?.flatpakTheme ?: FlatpakTheme.SYSTEM) {
+        FlatpakTheme.SYSTEM -> context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
+        FlatpakTheme.DARK -> true
+        FlatpakTheme.LIGHT -> false
+    }
+
     private fun options(appId: String): LaunchOptions {
         val settings = AppData.settings(context, appId).load()
         val app = installation.app(appId)
@@ -257,13 +309,16 @@ class FlatpakLauncher(private val context: Context) {
             electronSwap = app?.let { electronSwap(appId).preparedFor(it) },
             wholeDev = settings.wholeDev,
             flatpakInfo = !settings.withoutFlatpakInfo,
+            darkTheme = isDarkTheme(),
             audio = settings.audioAllowed(app?.metadata?.context?.sockets.orEmpty()),
         )
     }
 
-    private fun hostDirs(appId: String): HostDirs {
-        val appData = File(AppData.root(context), appId)
-        val cache = File(AppData.cacheRoot(context), appId)
+    private fun hostDirs(appId: String, settings: AppSettings = AppData.settings(context, appId).load()): HostDirs {
+        val temporary = settings.homeMode == HomeMode.TEMPORARY
+        // In Temporary Home mode the app's settings and cache are new at every launch too.
+        val appData = if (temporary) TempHomes.root(context) else File(AppData.root(context), appId)
+        val cache = if (temporary) File(appData, "cache") else File(AppData.cacheRoot(context), appId)
         val tmpBase = File(AppData.appTmpDir(context), appId)
         val launcher = AppData.launcherFiles(context)
         val home = GuestPaths.HOME
@@ -272,8 +327,11 @@ class FlatpakLauncher(private val context: Context) {
             root = File(AppData.rootsDir(context), appId),
             tmp = File(tmpBase, "tmp"),
             shm = File(tmpBase, "shm"),
-            // A private home per app for now; the shared home (Documents/Flatdroid) comes later.
-            home = File(appData, "home"),
+            home = when (settings.homeMode) {
+                HomeMode.SHARED -> SharedHome.dir(context)
+                HomeMode.PRIVATE -> AppData.privateHome(context, appId)
+                HomeMode.TEMPORARY -> TempHomes.home(context)
+            },
             appDirs = listOf(
                 File(appData, "config") to "$home/.config",
                 File(appData, "local") to "$home/.local",
@@ -297,6 +355,9 @@ class FlatpakLauncher(private val context: Context) {
             x11Sockets = x11Dir,
             pulseSockets = pulseDir,
             fontDirs = launcher.fontDirs,
+            desktopConfig = desktopDir,
+            userDirs = File(etcDir, USER_DIRS),
+            sdcard = SharedHome.storageRoot().takeIf { settings.sdcard && SharedHome.broadAccess(context) },
         )
     }
 
@@ -312,7 +373,6 @@ class FlatpakLauncher(private val context: Context) {
         }
         if (!plan.binds.wholeDev) DevNodes.createMountPoints(root, plan.binds.dev + AlpineBinds.FD_LINKS.keys)
         for (name in plan.usrLinks) Os.symlink("usr/$name", File(root, name).path)
-        File(root, GuestPaths.FONT_DIRS.removePrefix("/")).apply { parentFile?.mkdirs(); createNewFile() }
         plan.flatpakInfo?.let { File(root, ".flatpak-info").writeText(it) }
 
         AndroidTarFs.deleteTree(File(AppData.appTmpDir(context), appId))
@@ -322,6 +382,14 @@ class FlatpakLauncher(private val context: Context) {
         for (dir in listOf(File(plan.binds.home)) + plan.binds.appDirs.map { File(it.first) }) {
             if (AndroidTarFs.isSymlink(dir)) dir.delete()
             dir.mkdirs()
+        }
+        // Mount points for the further binds: in the root, or in the app's own directory they fall in.
+        for ((host, guest) in plan.binds.extra) {
+            if (guest == "/app" || guest.startsWith("/app/") || guest.startsWith("/usr/")) continue
+            val owner = plan.binds.appDirs.filter { guest.startsWith(it.second + "/") }.maxByOrNull { it.second.length }
+            val target = if (owner != null) File(owner.first, guest.removePrefix(owner.second + "/")) else File(root, guest.removePrefix("/"))
+            if (target.exists()) continue
+            if (File(host).isDirectory) target.mkdirs() else target.apply { parentFile?.mkdirs() }.createNewFile()
         }
     }
 
@@ -438,5 +506,6 @@ class FlatpakLauncher(private val context: Context) {
         const val AUDIO_TIMEOUT_MS = 10_000L
         const val HELPER_CHECK_MS = 250L
         const val DEFAULT_OUTPUT_RATE = 48_000
+        const val USER_DIRS = "user-dirs.dirs"
     }
 }

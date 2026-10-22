@@ -7,6 +7,7 @@ import com.garathon.flatdroid.alpine.AlpineEnvironment
 import com.garathon.flatdroid.proot.ProotProcess
 import com.garathon.flatdroid.settings.UserSettings
 import com.garathon.flatdroid.setup.SetupController
+import com.garathon.flatdroid.storage.SavedSizes
 import com.garathon.flatdroid.util.DebugLog
 import com.garathon.flatdroid.util.LineBuffer
 import kotlinx.coroutines.flow.SharingStarted
@@ -109,6 +110,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) {
             var proc: ProotProcess? = null
             var timedOut = false
+            // A command may change anything in Alpine, Flatpak's installation included.
+            SavedSizes.forgetAll(getApplication())
             try {
                 // The user's text reaches the guest shell as one argument; the proot invocation
                 // itself is still an argument list.
@@ -137,6 +140,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: Exception) {
                 end(text(R.string.terminal_error, e))
             } finally {
+                SavedSizes.changedAll(getApplication())
                 this@MainViewModel.command = null
                 _running.value = false
             }

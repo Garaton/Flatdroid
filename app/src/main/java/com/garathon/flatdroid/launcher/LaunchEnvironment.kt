@@ -22,6 +22,10 @@ object LaunchEnvironment {
         glDefault: String?,
         extensionLdPaths: List<String> = emptyList(),
         overrides: Map<String, String> = emptyMap(),
+        /** Android is in dark mode. */
+        darkTheme: Boolean = false,
+        /** The runtime has KDE's Qt platform theme, which applies Flatdroid's kdeglobals. */
+        kdePlatformTheme: Boolean = false,
     ): LinkedHashMap<String, String> {
         val varApp = "${GuestPaths.HOME}/.var/app/$appId"
         val env = linkedMapOf(
@@ -38,6 +42,8 @@ object LaunchEnvironment {
             "XDG_STATE_HOME" to "$varApp/.local/state",
             // GTK4 apps abort without their GSettings schemas.
             "XDG_DATA_DIRS" to "/app/share:/usr/share:/usr/share/runtime/share",
+            // Flatpak's, then Flatdroid's desktop settings last, so the runtime's and the app's win.
+            "XDG_CONFIG_DIRS" to "/app/etc/xdg:/etc/xdg:${GuestPaths.XDG_CONFIG_DIR}",
             "DISPLAY" to DISPLAY,
             "PULSE_SERVER" to "unix:${GuestPaths.PULSE_DIR}/native",
             "GTK_USE_PORTAL" to "0",
@@ -57,6 +63,9 @@ object LaunchEnvironment {
             "SDL_VIDEO_X11_FORCE_EGL" to "1",
             "ALSOFT_DRIVERS" to "pulse",
         )
+        // libadwaita follows only the settings portal, or this (portals are off).
+        if (darkTheme) env["ADW_DEBUG_COLOR_SCHEME"] = "prefer-dark"
+        if (kdePlatformTheme) env["QT_QPA_PLATFORMTHEME"] = "kde"
         for ((key, value) in metadataEnvironment) {
             if (key != "LD_LIBRARY_PATH" && isName(key)) env[key] = value
         }
