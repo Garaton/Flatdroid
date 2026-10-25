@@ -19,7 +19,9 @@ class LaunchEnvironmentTest {
         assertEquals("unix:/run/pulse/native", env["PULSE_SERVER"])
         assertEquals("/app/lib:/usr/lib/aarch64-linux-gnu", env["LD_LIBRARY_PATH"])
         assertFalse("LIBGL_ALWAYS_SOFTWARE" in env)
-        assertEquals(29, env.size)
+        // Flutter apps draw in software: GTK3 gets no GL context from Xvnc.
+        assertEquals("software", env["FLUTTER_LINUX_RENDERER"])
+        assertEquals(30, env.size)
     }
 
     @Test

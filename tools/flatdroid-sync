@@ -1,0 +1,235 @@
+#!/bin/sh
+# flatdroid-sync: moves Flatpak app settings between Flatdroid's settings zips and a Linux PC.
+#
+# Zip layout (Flatdroid's): one app's zip holds its home-relative paths at the top
+# (.config/ .local/ .pki/ .var/app/<ID>/); a zip of several apps holds the same under <ID>/.
+# Exports leave out the app's cache/ and user-dirs.dirs, as Flatdroid's do, and links.
+#
+# On a PC, ~/.var/app/<ID>/ is the same folder as in the zip. Flatdroid's per-app .config,
+# .local and .pki would be the PC's shared home folders, so an import only merges them in with
+# --home, never replacing a file that's there, and an export doesn't include them (Flatdroid
+# then leaves the app's own as they are).
+#
+# Needs a POSIX shell, the usual tools, zip and unzip.
+set -eu
+
+PROG=flatdroid-sync
+VAR_APP="$HOME/.var/app"
+ID_RE='^[A-Za-z_][A-Za-z0-9_-]*(\.[A-Za-z_][A-Za-z0-9_-]*)+$'
+
+usage() {
+    cat <<EOF
+Usage:
+  $PROG -i ZIP...            apply the settings in each zip to this PC's Flatpak apps
+  $PROG -x [ID...]           export apps' settings (all apps with settings if no ID)
+Options:
+  -o FILE        name of the exported zip
+  -b [FILE]      with -i: first save this PC's current settings of those apps to FILE
+                 (a zip -i can apply back)
+  -H, --home     with -i: also merge the zip's .config, .local and .pki into your home
+                 folders, without replacing files already there
+  -y             don't ask before replacing settings
+  -n             only show what would be done
+  -h             this help
+EOF
+}
+
+die() { echo "$PROG: $*" >&2; exit 1; }
+note() { echo "$PROG: $*" >&2; }
+valid_id() { printf '%s\n' "$1" | grep -Eq "$ID_RE"; }
+stamp() { date '+%Y-%m-%d %H-%M'; }
+have() { command -v "$1" >/dev/null 2>&1; }
+absolute() { case "$1" in /*) echo "$1" ;; *) echo "$PWD/$1" ;; esac; }
+
+mode= ; out= ; backup= ; want_backup=0 ; home=0 ; yes=0 ; dry=0
+ids= ; zips=
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -i) mode=import ;;
+        -x) mode=export ;;
+        -o) [ $# -ge 2 ] || die "-o needs a file name"; out=$2; shift ;;
+        -b) want_backup=1
+            case "${2-}" in ''|-*) ;; *) backup=$2; shift ;; esac ;;
+        -H|--home) home=1 ;;
+        -y) yes=1 ;;
+        -n) dry=1 ;;
+        -h|--help) usage; exit 0 ;;
+        -*) die "unknown option $1 (see -h)" ;;
+        *)  case "$mode" in
+                import) zips="$zips
+$(absolute "$1")" ;;
+                export) valid_id "$1" || die "not an app ID: $1"; ids="$ids $1" ;;
+                *) die "$1: give -i or -x first (see -h)" ;;
+            esac ;;
+    esac
+    shift
+done
+[ -n "$mode" ] || { usage; exit 1; }
+
+for tool in zip unzip; do have "$tool" || die "needs '$tool' (from your distribution's packages)"; done
+
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/$PROG.XXXXXX")
+trap 'rm -rf "$tmp"' EXIT INT TERM
+
+# Zips the top-level names $3... of folder $2 into $1 (a new file).
+archive() {
+    a_target=$1 a_dir=$2; shift 2
+    (cd "$a_dir" && zip -q -r -1 "$a_target" "$@")
+}
+
+# Extracts zip $1 into folder $2; unzip refuses entries that would leave it (../, /...).
+extract() { unzip -qq -o "$1" -d "$2"; }
+
+# Copies $VAR_APP/$1 into $2 as the zip has it: folders and files only, without the cache and
+# user-dirs.dirs. Files are hard links where the folders allow it (no second copy on disk).
+stage_app() {
+    s_src="$VAR_APP/$1" s_dst=$2
+    mkdir -p "$s_dst"
+    (
+        cd "$s_src"
+        find . \( -path ./cache -o -path ./config/user-dirs.dirs \) -prune \
+            -o -type d -exec sh -c 'for d; do mkdir -p "$0/$d"; done' "$s_dst" {} + \
+            -o -type f -exec sh -c 'for f; do mkdir -p "$0/${f%/*}"; ln "$f" "$0/$f" 2>/dev/null || cp -p "$f" "$0/$f"; done' "$s_dst" {} +
+    )
+}
+
+# Writes a zip of apps $3... to $1: one app's layout for $2 = single, else each under <ID>/.
+write_zip() {
+    w_name=$1 w_target=$(absolute "$1") w_layout=$2; shift 2
+    w_stage="$tmp/stage"
+    rm -rf "$w_stage"; mkdir -p "$w_stage"
+    w_names=
+    for w_id in "$@"; do
+        if [ ! -d "$VAR_APP/$w_id" ]; then note "no settings for $w_id in $VAR_APP; left out"; continue; fi
+        if [ "$w_layout" = single ]; then
+            stage_app "$w_id" "$w_stage/.var/app/$w_id"; w_names=.var
+        else
+            stage_app "$w_id" "$w_stage/$w_id/.var/app/$w_id"; w_names="$w_names $w_id"
+        fi
+    done
+    [ -n "$w_names" ] || die "nothing to export"
+    if [ "$dry" = 1 ]; then echo "would write $w_name with:$w_names"; return; fi
+    rm -f "$w_target.part"
+    # shellcheck disable=SC2086 # app IDs or .var, no spaces
+    archive "$w_target.part" "$w_stage" $w_names || die "couldn't write $w_name"
+    mv -f "$w_target.part" "$w_target"
+    echo "wrote $w_name"
+}
+
+confirm() {
+    if [ "$yes" = 1 ] || [ "$dry" = 1 ] || [ ! -t 0 ]; then return 0; fi
+    printf '%s [y/N] ' "$1" >&2
+    read -r answer || answer=
+    case "$answer" in y|Y|yes) return 0 ;; *) die "cancelled" ;; esac
+}
+
+# Only with Flatpak's own tool; without it, nothing is known to be running.
+running() { have flatpak && flatpak ps --columns=application 2>/dev/null | grep -qx "$1"; }
+
+if [ "$mode" = export ]; then
+    [ "$want_backup" = 0 ] || die "-b goes with -i (an export changes nothing here)"
+    if [ -z "$ids" ]; then
+        for d in "$VAR_APP"/*/; do
+            [ -d "$d" ] || continue
+            id=$(basename "$d")
+            if valid_id "$id"; then ids="$ids $id"; fi
+        done
+        [ -n "$ids" ] || die "no apps with settings in $VAR_APP"
+        layout=multi
+    else
+        # shellcheck disable=SC2086
+        set -- $ids
+        if [ $# -eq 1 ]; then layout=single; else layout=multi; fi
+    fi
+    # shellcheck disable=SC2086
+    set -- $ids
+    if [ -z "$out" ]; then
+        if [ "$layout" = single ]; then out="$1 settings $(stamp).zip"; else out="Flatdroid Flatpak settings $(stamp).zip"; fi
+    fi
+    write_zip "$out" "$layout" "$@"
+    exit 0
+fi
+
+# Import: unpack each zip and find its apps.
+[ -n "$zips" ] || die "-i needs at least one zip"
+apps="$tmp/apps"; : > "$apps"
+n=0
+printf '%s\n' "$zips" | grep -v '^$' > "$tmp/zips"
+while read -r z; do
+    [ -f "$z" ] || die "no such zip: $z"
+    n=$((n + 1)); dir="$tmp/zip$n"; mkdir -p "$dir"
+    extract "$z" "$dir" || die "couldn't read $z"
+    if [ -d "$dir/.var/app" ]; then
+        found=
+        for d in "$dir"/.var/app/*/; do [ -d "$d" ] && found="$found $(basename "$d")"; done
+        # shellcheck disable=SC2086
+        set -- $found
+        if [ $# -ne 1 ] || ! valid_id "$1"; then die "$z: one app's zip should hold exactly one .var/app/<ID>/"; fi
+        printf '%s\t%s\n' "$1" "$dir" >> "$apps"
+    else
+        for d in "$dir"/*/; do
+            [ -d "$d" ] || continue
+            id=$(basename "$d")
+            if valid_id "$id"; then printf '%s\t%s\n' "$id" "$dir/$id" >> "$apps"; else note "$z: $id isn't an app ID; left out"; fi
+        done
+    fi
+done < "$tmp/zips"
+[ -s "$apps" ] || die "no apps in the zip(s)"
+twice=$(cut -f1 "$apps" | sort | uniq -d | tr '\n' ' ')
+[ -z "$twice" ] || die "in more than one zip: $twice"
+
+# Only apps installed here (as the user's or the system's Flatpaks) get settings.
+have flatpak || die "needs 'flatpak' to know which apps are installed"
+installed=$(flatpak list --app --columns=application 2>/dev/null) || die "couldn't list the installed Flatpak apps"
+: > "$apps.kept"
+while IFS="$(printf '\t')" read -r id src; do
+    if printf '%s\n' "$installed" | grep -qx "$id"; then printf '%s\t%s\n' "$id" "$src" >> "$apps.kept"
+    else note "$id isn't installed here; left out"; fi
+done < "$apps"
+mv -f "$apps.kept" "$apps"
+[ -s "$apps" ] || die "none of the zip's apps is installed here"
+ids=$(cut -f1 "$apps" | sort | tr '\n' ' ')
+for id in $ids; do
+    if running "$id"; then die "$id is running; close it first (it could write its old settings back)"; fi
+done
+
+echo "Settings to replace in $VAR_APP: $ids"
+if [ "$home" = 1 ]; then echo "Also merged into $HOME, keeping files already there: .config, .local, .pki"; fi
+confirm "Replace these apps' settings?"
+
+if [ "$want_backup" = 1 ]; then
+    [ -n "$backup" ] || backup="flatdroid-sync backup $(stamp).zip"
+    existing=
+    for id in $ids; do if [ -d "$VAR_APP/$id" ]; then existing="$existing $id"; fi; done
+    if [ -n "$existing" ]; then
+        # Always the several-apps layout, so -i applies it back whatever it holds.
+        # shellcheck disable=SC2086
+        write_zip "$backup" multi $existing
+    else
+        note "none of these apps has settings here yet; no backup needed"
+    fi
+fi
+
+tab=$(printf '\t')
+while IFS="$tab" read -r id src; do
+    dest="$VAR_APP/$id"
+    if [ "$dry" = 1 ]; then echo "would replace $dest (its cache/ kept)"; continue; fi
+    if [ -d "$src/.var/app/$id" ]; then
+        mkdir -p "$dest"
+        # As in Flatdroid: the zip is the whole of the app's settings; only its cache stays.
+        find "$dest" -mindepth 1 -maxdepth 1 ! -name cache -exec rm -rf {} +
+        cp -R "$src/.var/app/$id/." "$dest/"
+    else
+        note "$id: the zip has no .var/app/$id; left as it is"
+    fi
+    if [ "$home" = 1 ]; then
+        for d in .config .local .pki; do
+            [ -d "$src/$d" ] || continue
+            mkdir -p "$HOME/$d"
+            # Only files not there yet: these folders are shared by everything on the PC.
+            (cd "$src/$d" && find . -type d -exec sh -c 'for x; do mkdir -p "$0/$x"; done' "$HOME/$d" {} + \
+                -o -type f -exec sh -c 'for x; do mkdir -p "$0/${x%/*}"; [ -e "$0/$x" ] || cp -p "$x" "$0/$x"; done' "$HOME/$d" {} +)
+        done
+    fi
+    echo "applied $id"
+done < "$apps"

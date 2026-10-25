@@ -118,9 +118,11 @@ object ProotCommand {
      * Runs [command] (absolute guest path first) in the Alpine rootfs as fake root. Only the
      * rootfs and [binds] are visible; nothing from shared storage. The display helpers need fake
      * root too: Xvnc runs xkbcomp only after setgid()/setuid(), which Android refuses to an app
-     * unless proot fakes them.
+     * unless proot fakes them. [ids] ("uid:gid") are the IDs proot reports; the helpers get the
+     * app's own, so a client in another proot and the helpers that answer it agree on who it is
+     * (D-Bus's EXTERNAL authentication compares them), and proot still answers setgid()/setuid().
      */
-    fun alpine(paths: ProotPaths, binds: AlpineBinds, command: List<String>, cwd: String = "/root"): ProotInvocation {
+    fun alpine(paths: ProotPaths, binds: AlpineBinds, command: List<String>, cwd: String = "/root", ids: String = "0:0"): ProotInvocation {
         require(command.isNotEmpty() && command[0].startsWith("/")) {
             "Guest command must start with an absolute path: $command"
         }
@@ -130,7 +132,7 @@ object ProotCommand {
             "--link2symlink",
             "--sysvipc",
             "-L",
-            "--change-id=0:0",
+            "--change-id=$ids",
             "--rootfs=${paths.rootfs}",
             "--cwd=$cwd",
         )
@@ -157,6 +159,39 @@ object ProotCommand {
             "PROOT_L2S_DIR" to paths.l2sDir,
             "PATH" to GUEST_PATH,
             "HOME" to "/root",
+            "LANG" to "C.UTF-8",
+            "FLATPAK_BWRAP" to GuestPaths.BWRAP_STAND_IN,
+        )
+        return ProotInvocation(argv, env)
+    }
+
+    /**
+     * Runs a deployment's `/app/bin/apply_extra` as Flatpak would through bwrap: [runtimeFiles]
+     * (null for none) on /usr, [appFiles] on /app, its `extra` directory (where Flatpak put the
+     * downloaded files) the working directory and the only place meant to change. [root] holds the
+     * mount points and the /usr links; no Alpine, no home, no network configuration.
+     */
+    fun applyExtra(paths: ProotPaths, root: String, runtimeFiles: String?, appFiles: String, tmp: String): ProotInvocation {
+        val argv = mutableListOf(
+            paths.proot,
+            "--kill-on-exit",
+            "--link2symlink",
+            "-L",
+            "--rootfs=$root",
+            "--cwd=/app/extra",
+            "--bind=${paths.l2sDir}",
+        )
+        if (runtimeFiles != null) argv += "--bind=$runtimeFiles:/usr"
+        argv += listOf("--bind=$appFiles:/app", "--bind=$tmp:/tmp")
+        for (dev in listOf("/dev/null", "/dev/zero", "/dev/urandom")) argv += "--bind=$dev"
+        // Started directly, with its environment from proot's: without a runtime there's no /usr/bin/env.
+        argv += "/app/bin/apply_extra"
+        val env = linkedMapOf(
+            "PROOT_LOADER" to paths.loader,
+            "PROOT_TMP_DIR" to paths.tmpDir,
+            "PROOT_L2S_DIR" to paths.l2sDir,
+            "PATH" to "/app/bin:/usr/bin",
+            "HOME" to "/tmp",
             "LANG" to "C.UTF-8",
         )
         return ProotInvocation(argv, env)

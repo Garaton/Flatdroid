@@ -53,6 +53,15 @@ class FlatpakMetadata(private val keyfile: Keyfile) {
     /** The runtime an app runs on. */
     val runtime: FlatpakRef? get() = keyfile.string(APPLICATION, "runtime")?.let(FlatpakRef::parse)
 
+    /**
+     * The runtime `apply_extra` runs with: the app's or extension's `runtime`, else for an
+     * extension the runtime it extends (`[ExtensionOf] ref`); null for `[Extra Data] NoRuntime=true`.
+     */
+    val extraDataRuntime: FlatpakRef?
+        get() = if (keyfile.boolean(EXTRA_DATA, "NoRuntime") == true) null
+        else (keyfile.string(APPLICATION, "runtime") ?: keyfile.string(RUNTIME, "runtime") ?: keyfile.string(EXTENSION_OF, "ref"))
+            ?.let(FlatpakRef::parse)
+
     /** The command in /app/bin the app starts with. */
     val command: String? get() = keyfile.string(APPLICATION, "command")
 
@@ -68,6 +77,10 @@ class FlatpakMetadata(private val keyfile: Keyfile) {
             filesystems = keyfile.list(CONTEXT, "filesystems"),
             persistent = keyfile.list(CONTEXT, "persistent"),
         )
+
+    /** `[Session Bus Policy]`: bus names (a `.*` suffix for the name and those below it) to `see`, `talk`, `own` or `none`. */
+    val sessionBusPolicy: Map<String, String>
+        get() = keyfile.group(SESSION_BUS_POLICY).keys.associateWith { keyfile.string(SESSION_BUS_POLICY, it)!!.trim() }
 
     val extensionPoints: List<ExtensionPoint>
         get() = keyfile.groupNames.filter { it.startsWith(EXTENSION) }.mapNotNull { group ->
@@ -87,6 +100,9 @@ class FlatpakMetadata(private val keyfile: Keyfile) {
         private const val RUNTIME = "Runtime"
         private const val ENVIRONMENT = "Environment"
         private const val CONTEXT = "Context"
+        private const val EXTRA_DATA = "Extra Data"
+        private const val EXTENSION_OF = "ExtensionOf"
+        private const val SESSION_BUS_POLICY = "Session Bus Policy"
         private const val EXTENSION = "Extension "
 
         fun parse(text: String) = FlatpakMetadata(Keyfile.parse(text))

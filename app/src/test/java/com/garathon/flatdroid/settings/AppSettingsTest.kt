@@ -20,7 +20,7 @@ class AppSettingsTest {
             DisplaySize.CUSTOM, 960, 640, newerElectronFlags = true, lastOpened = 1234L, wholeDev = true,
             audio = false, microphone = true, alwaysAllowMicrophone = true, withoutFlatpakInfo = true,
             environment = mapOf("VLC_DATA_PATH" to "/app/share/vlc", "VLC_PLUGIN_PATH" to "/app/lib/vlc/plugins"),
-            homeMode = HomeMode.TEMPORARY, sdcard = true,
+            homeMode = HomeMode.TEMPORARY, sdcard = true, camera = true, cameraResolution = 1080, cameraFrameRate = 15,
         )
         store.save(saved)
         assertEquals(saved, store.load())
@@ -34,9 +34,11 @@ class AppSettingsTest {
     @Test
     fun defaultSizesAreNotPinned() {
         val file = File(tmp.root, "b.properties")
-        AppSettingsStore(file).save(AppSettings(DisplaySize.LANDSCAPE, lastOpened = 5L))
-        assertFalse("display.width" in file.readText())
-        assertEquals("1600x1000", AppSettingsStore(file).load().geometry)
+        // A custom size is kept for later, but landscape still follows Flatdroid's default.
+        AppSettingsStore(file).save(AppSettings(DisplaySize.LANDSCAPE, customWidth = 480, customHeight = 720, lastOpened = 5L))
+        val loaded = AppSettingsStore(file).load()
+        assertEquals("1600x1000", loaded.geometry)
+        assertEquals("480x720", loaded.copy(displaySize = DisplaySize.CUSTOM).geometry)
     }
 
     @Test
@@ -78,7 +80,7 @@ class AppSettingsTest {
     fun anImportLeavesWhatWidensReachAsItIsHere() {
         fun file(text: String) = File(tmp.root, "a.App.properties").apply { writeText(text) }
         val imported = file(
-            "home.mode=private\ndev.whole=true\nstorage.sdcard=true\npermission.microphone=true\n" +
+            "home.mode=private\ndev.whole=true\nstorage.sdcard=true\npermission.microphone=true\npermission.camera=true\n" +
                 "permission.microphone.always=true\nenv.LD_PRELOAD=/home/user/x.so\n",
         ).readBytes()
         val local = file("home.mode=shared\ndev.whole=false\nenv.LANG=de_DE.UTF-8\n").readBytes()

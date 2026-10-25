@@ -20,6 +20,7 @@ import com.garathon.flatdroid.alpine.AlpineEnvironment
 import com.garathon.flatdroid.launcher.ElectronSwap
 import com.garathon.flatdroid.proot.RunInterruptedException
 import com.garathon.flatdroid.session.SessionController
+import com.garathon.flatdroid.setup.AlpineSetup
 import com.garathon.flatdroid.setup.AndroidTarFs
 import com.garathon.flatdroid.setup.deleteTree
 import com.garathon.flatdroid.storage.SavedSizes
@@ -103,6 +104,42 @@ class FlatpakTaskService : Service() {
         stopSelf()
     }
 
+    /**
+     * Runs the extra-data scripts Flatpak's CLI left to Flatdroid ([ExtraData]). An app whose
+     * script failed can't run, so the task fails; an extension's failure is only logged.
+     */
+    private fun applyExtraData(env: AlpineEnvironment) {
+        val extraData = ExtraData(env, File(filesDir, "extra-data-applied"), File(cacheDir, "extra-data"))
+        if (extraData.pending().isEmpty()) return
+        FlatpakTasks.newCommand(getString(R.string.task_extra_data))
+        val failedApp = extraData.applyAll(FlatpakTasks::log).firstOrNull { it.isApp && it.exitCode != 0 }
+        if (failedApp != null) {
+            throw IOException(getString(R.string.task_extra_data_failed, failedApp.deployment.parentFile!!.parentFile!!.parentFile!!.name, failedApp.exitCode))
+        }
+    }
+
+    /**
+     * Alpine's packages: upgraded, then setup's list installed, which adds any package setup gained
+     * since this Alpine was set up. A failure is only logged: Flatpak's update doesn't depend on it.
+     */
+    private fun updateAlpine(env: AlpineEnvironment) {
+        val cache = File(cacheDir, "apk-cache").apply { mkdirs() }
+        try {
+            for (args in listOf(listOf("upgrade"), listOf("add") + AlpineSetup.PACKAGES)) {
+                val command = AlpineSetup.apkCommand(args)
+                FlatpakTasks.newCommand(getString(R.string.task_updating_alpine))
+                FlatpakTasks.log("$ ${command.joinToString(" ")}")
+                val result = env.run(command, ALPINE_TIMEOUT_SECONDS, extraBinds = listOf(cache.path to AlpineSetup.APK_CACHE), onLine = FlatpakTasks::log)
+                if (result.timedOut || result.exitCode != 0) {
+                    FlatpakTasks.log(getString(R.string.task_alpine_failed, result.output.lineSequence().lastOrNull { it.isNotBlank() } ?: "exit ${result.exitCode}"))
+                    return
+                }
+            }
+        } finally {
+            AndroidTarFs.deleteTree(cache)
+        }
+    }
+
     private fun perform(task: FlatpakTask) {
         val env = AlpineEnvironment.get(applicationContext)
         when (task) {
@@ -115,11 +152,13 @@ class FlatpakTaskService : Service() {
                 // Possibly left by a kill some time before, so the links are checked too.
                 cleanRepository(env, checkLinks = true)
                 run(env, FlatpakCommands.install(task.appId))
-            }
+            }.also { applyExtraData(env) }
             FlatpakTask.UpdateAll -> {
+                updateAlpine(env)
                 // Unused runtimes first, so they aren't downloaded again only to be removed.
                 run(env, FlatpakCommands.uninstallUnused, getString(R.string.task_removing_unused))
                 run(env, FlatpakCommands.update)
+                applyExtraData(env)
             }
             // After a force stop, which kills processes anywhere.
             FlatpakTask.Repair -> cleanRepository(env, checkLinks = true)
@@ -227,6 +266,7 @@ class FlatpakTaskService : Service() {
         private const val NOTIFICATION_ID = 20
         private const val ACTION_CANCEL = "com.garathon.flatdroid.action.CANCEL_TASK"
         private const val TIMEOUT_SECONDS = 2 * 60 * 60L
+        private const val ALPINE_TIMEOUT_SECONDS = 60 * 60L
         /** How flatpak reports repository data that is referenced but missing. */
         private val MISSING_REPO_DATA = Regex("No such metadata object|While trying to checkout|Opening content object|Failed to read commit")
         private const val WAKE_LOCK_TIMEOUT_MS = TIMEOUT_SECONDS * 1000

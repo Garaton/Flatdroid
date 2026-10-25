@@ -26,6 +26,8 @@ data class FlatpakTaskUi(
     val running: FlatpakTask? = null,
     /** The operation in progress (which runtime or app, its percent), when flatpak reports one. */
     val step: FlatpakProgress.Step? = null,
+    /** Flatpak finished its steps and is cleaning up ([FlatpakProgress.finishing]). */
+    val finishing: Boolean = false,
     /** The last non-blank output line. */
     val status: String? = null,
     /** What the running task is doing when that differs from the task itself (removing unused runtimes). */
@@ -55,7 +57,7 @@ object FlatpakTasks {
         _ui.update {
             if (it.running != null) it else {
                 started = true
-                it.copy(running = task, step = null, status = null, finished = null, error = null, cancelling = false)
+                it.copy(running = task, step = null, finishing = false, status = null, finished = null, error = null, cancelling = false)
             }
         }
         if (started) logBuffer.clear()
@@ -67,7 +69,7 @@ object FlatpakTasks {
         val isProgress = progress.feed(line)
         // Each step reports its progress many times: keep only its latest line.
         logBuffer.add(line) { last -> isProgress && FlatpakProgress.sameStep(last, line) }
-        _ui.update { it.copy(step = progress.current, status = if (line.isNotBlank()) line else it.status) }
+        _ui.update { it.copy(step = progress.current, finishing = progress.finishing, status = if (line.isNotBlank()) line else it.status) }
     }
 
     internal fun cancelling(phase: String) = _ui.update { it.copy(phase = phase, cancelling = true) }
@@ -75,7 +77,7 @@ object FlatpakTasks {
     /** Starts following a new flatpak command's output; [phase] describes it, if not the task itself. */
     internal fun newCommand(phase: String?) {
         progress = FlatpakProgress()
-        _ui.update { it.copy(step = null, phase = phase) }
+        _ui.update { it.copy(step = null, finishing = false, phase = phase) }
     }
 
     internal fun end(task: FlatpakTask, error: String?) =

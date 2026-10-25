@@ -6,6 +6,7 @@ import android.os.SystemClock
 import android.system.Os
 import com.garathon.flatdroid.proot.AlpineBinds
 import com.garathon.flatdroid.proot.DevNodes
+import com.garathon.flatdroid.proot.GuestPaths
 import com.garathon.flatdroid.proot.ProcessResult
 import com.garathon.flatdroid.proot.ProcessStopper
 import com.garathon.flatdroid.proot.ProotProcess
@@ -15,6 +16,7 @@ import com.garathon.flatdroid.proot.ProotRunner
 import com.garathon.flatdroid.setup.AndroidTarFs
 import com.garathon.flatdroid.setup.RootfsInstaller
 import com.garathon.flatdroid.util.writeTextAtomically
+import com.garathon.flatdroid.util.readTextUpTo
 import java.io.File
 import java.io.FileInputStream
 
@@ -77,10 +79,19 @@ class AlpineEnvironment private constructor(private val context: Context) {
     fun start(
         command: List<String>,
         extraBinds: List<Pair<String, String>> = emptyList(),
+        /** As the app's own user IDs instead of root ([ProotCommand.alpine]'s ids). */
+        asAppUser: Boolean = false,
         onLine: (String) -> Unit = {},
     ): ProotProcess {
         check(isInstalled()) { "The Alpine rootfs is not installed" }
-        val invocation = ProotCommand.alpine(paths(), prepareBinds(extraBinds), command)
+        val uid = Os.getuid()
+        val gid = Os.getgid()
+        val ids = if (asAppUser) "$uid:$gid" else "0:0"
+        val binds = if (!asAppUser) extraBinds else extraBinds + listOf(
+            write("passwd", GuestFiles.passwdWith(rootfsFile("etc/passwd"), uid, gid)).path to "/etc/passwd",
+            write("group", GuestFiles.groupWith(rootfsFile("etc/group"), gid)).path to "/etc/group",
+        )
+        val invocation = ProotCommand.alpine(paths(), prepareBinds(binds), command, ids = ids)
         return ProotRunner.start(invocation, alpineDir, onLine = onLine)
     }
 
@@ -119,6 +130,8 @@ class AlpineEnvironment private constructor(private val context: Context) {
             fakeProc[guest] = write("proc/$name", content).path
         }
 
+        val bwrap = write("bwrap", GuestFiles.BWRAP_STAND_IN).also { Os.chmod(it.path, 0x1ed) } // 0755
+
         val dev = DevNodes.forAlpine(DevNodes::hostHas)
         DevNodes.createMountPoints(installer.rootfs, dev + AlpineBinds.FD_LINKS.keys)
 
@@ -130,9 +143,13 @@ class AlpineEnvironment private constructor(private val context: Context) {
             emptyDir = dir(File(generatedDir, "empty")).path,
             fakeProc = fakeProc,
             dev = dev,
-            extra = extra,
+            extra = extra + (bwrap.path to GuestPaths.BWRAP_STAND_IN),
         )
     }
+
+    /** A small file of the rootfs, or empty when it can't be read. */
+    private fun rootfsFile(path: String): String =
+        runCatching { File(installer.rootfs, path).readTextUpTo() }.getOrNull().orEmpty()
 
     private fun write(name: String, content: String): File {
         val file = File(generatedDir, name)

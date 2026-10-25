@@ -66,7 +66,19 @@ class ProotCommandTest {
         assertEquals("/cache/proot-tmp", env["PROOT_TMP_DIR"])
         assertEquals("/files/alpine/rootfs/.l2s", env["PROOT_L2S_DIR"])
         assertEquals(ProotCommand.GUEST_PATH, env["PATH"])
-        assertEquals(setOf("PROOT_LOADER", "PROOT_TMP_DIR", "PROOT_L2S_DIR", "PATH", "HOME", "LANG"), env.keys)
+        assertEquals(setOf("PROOT_LOADER", "PROOT_TMP_DIR", "PROOT_L2S_DIR", "PATH", "HOME", "LANG", "FLATPAK_BWRAP"), env.keys)
+        assertEquals("/run/flatdroid/bwrap", env["FLATPAK_BWRAP"])
+    }
+
+    @Test
+    fun applyExtraSeesOnlyTheRuntimeAndItsOwnFiles() {
+        val inv = ProotCommand.applyExtra(paths, "/cache/extra-data/root", "/rt/files", "/deploy/files", "/cache/extra-data/tmp")
+        assertTrue("--bind=/rt/files:/usr" in inv.argv && "--bind=/deploy/files:/app" in inv.argv && "--cwd=/app/extra" in inv.argv)
+        assertTrue(inv.argv.none { it.contains("/home") || it.contains("sdcard") || it == "--change-id=0:0" || it == "-0" })
+        assertEquals("/app/bin/apply_extra", inv.argv.last())
+        assertEquals("/app/bin:/usr/bin", inv.env["PATH"])
+        // No runtime ([Extra Data] NoRuntime=true): nothing on /usr.
+        assertTrue(ProotCommand.applyExtra(paths, "/r", null, "/d", "/t").argv.none { it.endsWith(":/usr") })
     }
 
     @Test

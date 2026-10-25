@@ -5,7 +5,8 @@ import java.io.InputStream
 
 /**
  * Electron apps on Flathub start through zypak (a Chromium sandbox helper that needs Flatpak's
- * sandbox). The launcher skips it and runs the Electron binary the command script names, with
+ * sandbox), and some Chromium browsers through cobalt, which asks Flatpak's portal before
+ * handing the browser to zypak. The launcher skips both and runs the binary itself, with
  * Chromium's sandboxes and GPU off.
  */
 object Electron {
@@ -22,6 +23,7 @@ object Electron {
     const val GPU_FAILURE = "GPU process isn't usable"
 
     private const val ZYPAK = "zypak-wrapper"
+    private const val COBALT = "cobalt"
 
     /**
      * The binary a command script hands to zypak, e.g. `exec zypak-wrapper.sh /app/obsidian "$@"`
@@ -36,6 +38,21 @@ object Electron {
             return words.drop(at + 1).firstOrNull { it.startsWith("/") }
         }
         return null
+    }
+
+    /**
+     * The browser a command script hands to cobalt (`exec cobalt "$@"`): cobalt's own entry
+     * point, `/app/extra/<name>` with the name from the app ID's last part (`chrome` for
+     * `com.google.Chrome`), when [exists] finds it. Null if the script doesn't use cobalt.
+     */
+    fun cobaltTarget(script: String, appId: String, exists: (String) -> Boolean): String? {
+        val usesCobalt = script.lineSequence().any { line ->
+            line.substringBefore('#').trim().split(Regex("\\s+")).map { it.trim('"', '\'') }
+                .any { it.substringAfterLast('/') == COBALT }
+        }
+        if (!usesCobalt) return null
+        val name = appId.substringAfterLast('.').lowercase()
+        return listOf("/app/extra/$name", "/app/extra/$name/$name").firstOrNull(exists)
     }
 
     /** The Electron version a binary was built as (its user agent's `Electron/<version>`). */

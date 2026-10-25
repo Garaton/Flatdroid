@@ -17,6 +17,7 @@ import androidx.core.content.ContextCompat
 import com.garathon.flatdroid.MainActivity
 import com.garathon.flatdroid.R
 import com.garathon.flatdroid.audio.MicStreamer
+import com.garathon.flatdroid.camera.AndroidCameras
 import com.garathon.flatdroid.flatpak.AppData
 import com.garathon.flatdroid.flatpak.FlatpakTask
 import com.garathon.flatdroid.flatpak.FlatpakTasks
@@ -46,12 +47,14 @@ import kotlinx.coroutines.runInterruptible
  * doesn't stop it while the user is in the VNC viewer. specialUse: dataSync is limited to 6 hours
  * a day on Android 15. With the microphone type too when the app may use the microphone: Android
  * lets a service record in the background only with that type, given while Flatdroid is in the
- * foreground (at launch, or when the user allows it in Flatdroid).
+ * foreground (at launch, or when the user allows it in Flatdroid). The camera type likewise, at
+ * launch, when the app may use the camera.
  */
 class SessionService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var job: Job? = null
     private var microphoneType = false
+    private var cameraType = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -81,7 +84,10 @@ class SessionService : Service() {
                 return START_NOT_STICKY
             }
         }
-        if (job?.isActive != true && appId != null && InstalledApps.isValidId(appId)) microphoneType = mayRecord(appId)
+        if (job?.isActive != true && appId != null && InstalledApps.isValidId(appId)) {
+            microphoneType = mayRecord(appId)
+            cameraType = AppData.settings(this, appId).load().camera && AndroidCameras.hasPermission(this)
+        }
         startInForeground(notification(SessionController.ui.value.state))
         if (job?.isActive == true) return START_NOT_STICKY
         if (appId == null || !InstalledApps.isValidId(appId)) {
@@ -176,6 +182,7 @@ class SessionService : Service() {
     private fun startInForeground(notification: Notification) {
         var type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0
         if (microphoneType && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+        if (cameraType && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
         ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, type)
     }
 

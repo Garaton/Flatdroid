@@ -1,5 +1,6 @@
 package com.garathon.flatdroid.settings
 
+import com.garathon.flatdroid.camera.AndroidCameras
 import com.garathon.flatdroid.launcher.LaunchEnvironment
 import com.garathon.flatdroid.util.writeTextAtomically
 import java.io.ByteArrayOutputStream
@@ -49,8 +50,22 @@ data class AppSettings(
      * answer holds for that session.
      */
     val microphone: Boolean = false,
-    /** Developer setting: with [microphone] on, record whenever the app does, without asking. */
+    /** With [microphone] on, record whenever the app does, without asking. */
     val alwaysAllowMicrophone: Boolean = false,
+    /**
+     * Android's cameras through Flatpak's camera portal. Off by default; on, the app may use them
+     * whenever it runs (Flatdroid can't ask at the moment of use), and Android's camera runs only
+     * while the app takes its picture.
+     */
+    val camera: Boolean = false,
+    /**
+     * With [camera] on, the frames' short side, one of [AndroidCameras.RESOLUTIONS] or
+     * [AndroidCameras.FULL_RESOLUTION] (each camera's largest size); a camera without it takes
+     * its largest size below.
+     */
+    val cameraResolution: Int = AndroidCameras.DEFAULT_RESOLUTION,
+    /** With [camera] on, frames per second, as the device's cameras offer them; a camera that can't takes the nearest it can. */
+    val cameraFrameRate: Int = AndroidCameras.DEFAULT_FRAME_RATE,
     /** Developer setting: variables added to the app's environment, over Flatdroid's own. */
     val environment: Map<String, String> = emptyMap(),
     val homeMode: HomeMode = HomeMode.SHARED,
@@ -133,6 +148,12 @@ class AppSettingsStore(private val file: File) {
             wholeDev = props.getProperty(KEY_WHOLE_DEV) == "true",
             audio = props.getProperty(KEY_AUDIO)?.toBooleanStrictOrNull(),
             microphone = props.getProperty(KEY_MICROPHONE) == "true",
+            camera = props.getProperty(KEY_CAMERA) == "true",
+            cameraResolution = props.getProperty(KEY_CAMERA_RESOLUTION)?.toIntOrNull()
+                ?.takeIf { it in AndroidCameras.RESOLUTIONS || it == AndroidCameras.FULL_RESOLUTION }
+                ?: AndroidCameras.DEFAULT_RESOLUTION,
+            cameraFrameRate = props.getProperty(KEY_CAMERA_FRAME_RATE)?.toIntOrNull()?.takeIf { it in 1..AndroidCameras.MAX_FRAME_RATE }
+                ?: AndroidCameras.DEFAULT_FRAME_RATE,
             alwaysAllowMicrophone = props.getProperty(KEY_MICROPHONE_ALWAYS) == "true",
             environment = props.stringPropertyNames()
                 .filter { it.startsWith(KEY_ENV_PREFIX) }
@@ -148,10 +169,9 @@ class AppSettingsStore(private val file: File) {
     fun save(settings: AppSettings) {
         val props = Properties()
         props.setProperty(KEY_SIZE, settings.displaySize.name.lowercase())
-        if (settings.displaySize == DisplaySize.CUSTOM) {
-            props.setProperty(KEY_WIDTH, settings.customWidth.toString())
-            props.setProperty(KEY_HEIGHT, settings.customHeight.toString())
-        }
+        // Kept while another size is chosen, so switching back finds them.
+        props.setProperty(KEY_WIDTH, settings.customWidth.toString())
+        props.setProperty(KEY_HEIGHT, settings.customHeight.toString())
         props.setProperty(KEY_ELECTRON_NEWER, settings.newerElectronFlags.toString())
         if (settings.withoutFlatpakInfo) props.setProperty(KEY_NO_FLATPAK_INFO, "true")
         settings.lastOpened?.let { props.setProperty(KEY_LAST_OPENED, it.toString()) }
@@ -159,6 +179,9 @@ class AppSettingsStore(private val file: File) {
         settings.audio?.let { props.setProperty(KEY_AUDIO, it.toString()) }
         if (settings.microphone) props.setProperty(KEY_MICROPHONE, "true")
         if (settings.alwaysAllowMicrophone) props.setProperty(KEY_MICROPHONE_ALWAYS, "true")
+        if (settings.camera) props.setProperty(KEY_CAMERA, "true")
+        props.setProperty(KEY_CAMERA_RESOLUTION, settings.cameraResolution.toString())
+        props.setProperty(KEY_CAMERA_FRAME_RATE, settings.cameraFrameRate.toString())
         for ((name, value) in settings.environment) props.setProperty(KEY_ENV_PREFIX + name, value)
         props.setProperty(KEY_HOME_MODE, settings.homeMode.name.lowercase())
         if (settings.sdcard) props.setProperty(KEY_SDCARD, "true")
@@ -175,12 +198,12 @@ class AppSettingsStore(private val file: File) {
         /**
          * An app's settings file from an import, [imported], with the settings that widen what the
          * app can reach left as they are on this device ([local], its current file, or null for
-         * none): whole /dev (with Binder), all of shared storage, the microphone without asking
-         * and its environment. A shared settings file can't turn them on.
+         * none): whole /dev (with Binder), all of shared storage, the microphone without asking,
+         * the camera and its environment. A shared settings file can't turn them on.
          */
         fun imported(imported: ByteArray, local: ByteArray?): ByteArray {
             fun widensReach(key: String) =
-                key == KEY_WHOLE_DEV || key == KEY_SDCARD || key == KEY_MICROPHONE_ALWAYS || key.startsWith(KEY_ENV_PREFIX)
+                key == KEY_WHOLE_DEV || key == KEY_SDCARD || key == KEY_MICROPHONE_ALWAYS || key == KEY_CAMERA || key.startsWith(KEY_ENV_PREFIX)
             val props = Properties().apply { load(imported.inputStream()) }
             props.stringPropertyNames().filter(::widensReach).forEach { props.remove(it) }
             if (local != null) {
@@ -200,6 +223,9 @@ class AppSettingsStore(private val file: File) {
         private const val KEY_AUDIO = "permission.audio"
         private const val KEY_MICROPHONE = "permission.microphone"
         private const val KEY_MICROPHONE_ALWAYS = "permission.microphone.always"
+        private const val KEY_CAMERA = "permission.camera"
+        private const val KEY_CAMERA_RESOLUTION = "camera.resolution"
+        private const val KEY_CAMERA_FRAME_RATE = "camera.frameRate"
         private const val KEY_ENV_PREFIX = "env."
         private const val KEY_HOME_MODE = "home.mode"
         private const val KEY_SDCARD = "storage.sdcard"

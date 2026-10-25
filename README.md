@@ -40,12 +40,45 @@ Placeholder to be made when hardening milestone is done, with apk download infor
 
 Placeholder
 
+### Placeholder more sub-sections
+
+### Export/Import Flatdroid Data
+
+### flatdroid-sync
+
+`tools/flatdroid-sync` is a shell utility that can transfer Flatpak settings between your PC and Flatdroid. It works by taking a Flatdroid compliant zip and pushing it's correlated Flatpak settings to your PC, or taking your PC's Flatpak settings and forming them into Flatdroid compliant zips.
+
+Example Usage:
+```
+# Imports the individual app settings the specified app
+flatdroid-sync -i "UnofficialHomestuckCollection_settings.zip"
+
+# Imports while taking a backup of app current settings
+flatdroid-sync -b backup_hs.zip -i "UnofficialHomestuckCollection_settings.zip"
+
+# Imports all app settings found within this zip that are tracked by flatpak on
+# this system, whilst backuping up the current settings
+flatdroid-sync -b -i "Flatdroid Flatpak settings 2026-10-24 22-34.zip"
+
+# Exports all Flatpak settings to the specified zip
+flatdroid-sync -o all_settings.zip -x
+
+# Exports the Flatpak settings for org.ex.app1 and com.ex.app2
+flatdroid-sync -o app1_app2_settings.zip -x org.ex.app1 com.ex.app2
+
+# Exports the Flatpak settings for only com.example.flat
+flatdroid-sync -x com.example.flat
+```
+
+Dependencies: `zip`, `unzip`.
+
 ## Building
 
 - Requirements: Android SDK platform-tools, platforms;android-35, build-tools 35, NDK 30, JDK 21, CMake 3.22.1, make, git, curl, gawk, readelf.
 - Clone the repository: `git clone https://github.com/Garaton/flatdroid.git`.
 - Build: In the base directory: `./gradlew assemble[architecture]["Release" or "Debug"]`.
   - ex: `./gradlew assembleArm64Debug`
+  - Built APKs are found in `app/build/outputs/apk`.
 - Architectures: Arm64, X86_64, Universal (only 64-bit systems are supported).
 
 ## Methodology

@@ -26,6 +26,8 @@ object LaunchEnvironment {
         darkTheme: Boolean = false,
         /** The runtime has KDE's Qt platform theme, which applies Flatdroid's kdeglobals. */
         kdePlatformTheme: Boolean = false,
+        /** The app's session bus is bound at [GuestPaths.SESSION_BUS_DIR]. */
+        sessionBus: Boolean = false,
     ): LinkedHashMap<String, String> {
         val varApp = "${GuestPaths.HOME}/.var/app/$appId"
         val env = linkedMapOf(
@@ -50,7 +52,9 @@ object LaunchEnvironment {
             // GTK4 uses portals because of /.flatpak-info, and can't save without them otherwise.
             "GDK_DEBUG" to "no-portals",
             "GDK_BACKEND" to "x11",
-            "GSK_RENDERER" to "cairo",
+            // GTK4's GL renderer in software (Mesa): camera video much smoother than cairo, which
+            // let frames pile up and froze; needs nothing from Xvnc (no GLX).
+            "GSK_RENDERER" to "gl",
             // New glycin; old glycin is turned off by /.flatpak-info.
             "GLYCIN_DISABLE_SANDBOX" to "i-know-the-risks",
             "WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS" to "1",
@@ -61,11 +65,15 @@ object LaunchEnvironment {
             "SDL_VIDEODRIVER" to "x11",
             "SDL_AUDIODRIVER" to "pulseaudio",
             "SDL_VIDEO_X11_FORCE_EGL" to "1",
+            // Flutter's GTK embedder draws through a GTK3 GL context, which needs GLX (Xvnc has
+            // none): without this its window stays black. Only Flutter reads it.
+            "FLUTTER_LINUX_RENDERER" to "software",
             "ALSOFT_DRIVERS" to "pulse",
         )
         // libadwaita follows only the settings portal, or this (portals are off).
         if (darkTheme) env["ADW_DEBUG_COLOR_SCHEME"] = "prefer-dark"
         if (kdePlatformTheme) env["QT_QPA_PLATFORMTHEME"] = "kde"
+        if (sessionBus) env["DBUS_SESSION_BUS_ADDRESS"] = "unix:path=${GuestPaths.SESSION_BUS_DIR}/${GuestPaths.SESSION_BUS_SOCKET}"
         for ((key, value) in metadataEnvironment) {
             if (key != "LD_LIBRARY_PATH" && isName(key)) env[key] = value
         }

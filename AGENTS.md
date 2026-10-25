@@ -43,6 +43,7 @@ Android app (`com.garathon.flatdroid`, Kotlin, GPL-3.0-or-later) that installs F
 - Every launch: non-dumpable proot, `fdsec` run first inside the root (before `/usr/bin/env`), refuse to launch if `Seccomp_filters` shows no filter.
 - Keep architecture strings (`aarch64`, `aarch64-linux-gnu`) parameterised.
 - Avoid referencing documents outside of the repository outside of the README. Comments shouldn't refer to "section 13", or "DocumentNotInRepository.md". Avoid referencing prompts in comments (e.g. "applied the requested change to optimize the file storage process", etc).
+- No device- or app-specific code or comments: no test device names ("faster on the T607"), no Flatpak app IDs or app names in app code; describe the general case ("on a Cortex-A53", "apps that use the camera portal"). App IDs in unit tests as example data are fine.
 
 ## Suggested first milestones
 
@@ -57,5 +58,5 @@ Android app (`com.garathon.flatdroid`, Kotlin, GPL-3.0-or-later) that installs F
 7. **Xvnc build:** GitHub Actions workflow (arm64 and x86_64 runners, `alpine:3.24` container) applying the verified `--disable-glx` APKBUILD change and packaging the archive (decision doc section 5). Replaces Alpine's `tigervnc` in setup.
 8. **UI:** if not fully done yet, it should be done here. It is expected that by this point most UI will already be done, and the UI Document has already been requested. Possible version number `0.7`.
 9. **Feature cleanup:** It is expected that some requested features will be missed as they have not fully pertained to what was needed in the previous milestones, this milestone is aimed at getting ther est of the features that could have been missed. Also handle links using possibly OpenURI portal and/or `xdg-open` stand-in. Also at this point with a mostly working app we consider what else might be nice before initial release. Possible version number `0.9`.
-10. **Testing:** experiment 9 (background survival and child-process limits). Possible version number `1.0`. Also handle release aspects here like signing.
+10. **Testing:** experiment 9 (background survival and child-process limits); a review of the codebase for device- or app-specific code and comments, removed or made general. Possible version number `1.0`. Also handle release aspects here like signing.
 

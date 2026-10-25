@@ -153,14 +153,17 @@ fun TaskPanel(task: FlatpakTaskUi, describe: (FlatpakTask) -> String, onCancel: 
                 val step = task.step
                 if (step != null) {
                     Text(
-                        stringResource(R.string.task_step, step.verb, step.index, step.total, step.ref ?: ""),
+                        stringResource(if (step.deploying) R.string.task_step_deploying else R.string.task_step, step.verb, step.index, step.total, step.ref ?: ""),
                         style = MaterialTheme.typography.bodySmall,
                         maxLines = 2,
                     )
+                } else if (task.finishing) {
+                    Text(stringResource(R.string.task_finishing), style = MaterialTheme.typography.bodySmall, maxLines = 2)
                 } else {
                     task.status?.let { Text(it, style = MaterialTheme.typography.bodySmall, maxLines = 2) }
                 }
-                val percent = step?.percent
+                // Deploying reports nothing, so a full bar would look stuck.
+                val percent = step?.percent?.takeIf { !step.deploying }
                 if (percent != null) {
                     LinearProgressIndicator(progress = { percent / 100f }, modifier = Modifier.fillMaxWidth())
                 } else {

@@ -24,7 +24,7 @@ android {
         minSdk = 24
         targetSdk = 35
         versionCode = 1
-        versionName = "0.5"
+        versionName = "0.5.5"
 
         buildConfigField("String", "ALPINE_BRANCH", "\"${alpine.getProperty("branch")}\"")
         buildConfigField("String", "ALPINE_VERSION", "\"${alpine.getProperty("version")}\"")

@@ -2,15 +2,21 @@ package com.garathon.flatdroid.session
 
 import android.content.Context
 import android.content.res.Configuration
+import android.hardware.display.DisplayManager
 import android.media.AudioManager
 import android.os.Build
 import android.os.FileObserver
 import android.system.Os
+import android.view.Display
+import android.view.Surface
 import com.garathon.flatdroid.R
 import com.garathon.flatdroid.alpine.AlpineEnvironment
 import com.garathon.flatdroid.alpine.GuestFiles
 import com.garathon.flatdroid.audio.AudioPlayer
 import com.garathon.flatdroid.audio.MicStreamer
+import com.garathon.flatdroid.camera.AndroidCameras
+import com.garathon.flatdroid.camera.CameraScript
+import com.garathon.flatdroid.camera.CameraStreamer
 import com.garathon.flatdroid.flatpak.AndroidLinkFs
 import com.garathon.flatdroid.flatpak.AppData
 import com.garathon.flatdroid.flatpak.FlatpakInstallation
@@ -46,6 +52,7 @@ import com.garathon.flatdroid.storage.TempHomes
 import com.garathon.flatdroid.util.readTextUpTo
 import com.garathon.flatdroid.util.httpDownload
 import com.garathon.flatdroid.util.sha256
+import com.garathon.flatdroid.util.writeAtomically
 import com.garathon.flatdroid.util.writeTextAtomically
 import java.io.File
 import java.io.IOException
@@ -72,6 +79,12 @@ class FlatpakLauncher(private val context: Context) {
     private val vncDir = File(sessionDir, "vnc")
     private val etcDir = File(sessionDir, "etc")
     private val desktopDir = File(sessionDir, "xdg")
+    // The daemon's socket stays among the helpers; the app's root gets only the proxy's directory.
+    private val busDaemonDir = File(sessionDir, "dbus")
+    private val busProxyDir = File(sessionDir, "bus")
+    private val pipewireDir = File(sessionDir, "pipewire")
+    private val cameraPipeDir = File(sessionDir, "camera")
+    private val cameraConfigDir = File(sessionDir, "camera-config")
 
     fun electronSwap(appId: String) = ElectronSwap(
         dir = File(AppData.electronDir(context), appId),
@@ -152,11 +165,26 @@ class FlatpakLauncher(private val context: Context) {
             SessionController.log("[flatdroid] Android's microphone permission was revoked; the app's microphone is off")
         }
         val microphone = audio && settings.microphone
+        if (settings.camera && !AndroidCameras.hasPermission(context)) {
+            // As for the microphone: Android's permission was revoked since the camera was turned on.
+            settings = settings.copy(camera = false)
+            store.update { it.copy(camera = false) }
+            SessionController.log("[flatdroid] Android's camera permission was revoked; the app's camera is off")
+        }
+        val cameras = if (settings.camera) AndroidCameras.list(context, settings.cameraResolution, settings.cameraFrameRate) else emptyList()
+        if (settings.camera && cameras.isEmpty()) SessionController.log("[flatdroid] the app's camera is on, but Android has no camera Flatdroid can use")
+        // Upright for the app's display: a landscape display as the device held landscape, a
+        // portrait one as held portrait (Flatdroid itself is in portrait at launch whatever the app).
+        val displayRotation = displayRotation(landscape = settings.width > settings.height)
+        val cameraRotations = cameras.map { it.rotation(displayRotation) }
+        val cameraNodes = cameraNodes(cameras, cameraRotations)
         val outputRate = outputRate()
         val micRate = MicStreamer.rate()
         writeSessionFiles(
             password, titleBars = userSettings?.windowTitleBars ?: true,
             pulseScript = if (audio) PulseScript.text(outputRate, microphone, micRate) else null,
+            busArgs = SessionBus.proxyArgs(appId, plan.app.metadata.sessionBusPolicy, camera = cameraNodes.isNotEmpty()),
+            cameraNodes = cameraNodes,
         )
         // After both, which create the directories it checks: they live in the cache, which Android may
         // clear at any time, and a fresh install has none yet.
@@ -165,18 +193,29 @@ class FlatpakLauncher(private val context: Context) {
         SessionController.starting(appId, context.getString(R.string.session_starting_display))
         val frameRate = userSettings?.frameRate ?: UserSettings.DEFAULT_FRAME_RATE
         val mic = if (!microphone) null else {
-            val alwaysAllowed = settings.alwaysAllowMicrophone && userSettings?.developerOptions == true
-            MicrophoneSession(context, appId, File(pulseDir, PulseScript.MIC_SOCKET), micRate, alwaysAllowed, micAnswer)
+            MicrophoneSession(context, appId, File(pulseDir, PulseScript.MIC_PIPE), micRate, settings.alwaysAllowMicrophone, micAnswer)
         }
         SessionController.onMicrophoneAnswer = mic?.let { it::answer }
         val resampler = userSettings?.resampler ?: Resampler.FAST
-        val helpers = startHelpers(SessionScript.command(settings.geometry, frameRate, audio, microphone = mic != null, resampler), audio) { line ->
+        val helpers = startHelpers(
+            SessionScript.command(settings.geometry, frameRate, audio, microphone = mic != null, resampler, sessionBus = true, camera = cameraNodes.isNotEmpty()),
+            audio,
+        ) { line ->
             SessionScript.micUsers(line)?.let { mic?.onUsers(it) }
         }
         var app: ProotProcess? = null
         var player: AudioPlayer? = null
+        var cameraHelpers: ProotProcess? = null
+        val streamers = cameraNodes.indices.associate {
+            cameraNodes[it].name to CameraStreamer(context, cameras[it], File(cameraPipeDir, cameraNodes[it].name), cameraRotations[it])
+        }
         try {
             waitForFile(File(x11Dir, SessionScript.X_SOCKET), helpers, DISPLAY_TIMEOUT_MS, context.getString(R.string.launch_display_failed))
+            if (!waitForFile(File(busProxyDir, SessionBus.SOCKET), helpers, BUS_TIMEOUT_MS, null)) {
+                SessionController.log("[flatdroid] the session bus did not start; the app has none")
+            } else if (streamers.isNotEmpty()) {
+                cameraHelpers = startCamera(helpers, streamers)
+            }
             if (!audio) {
                 SessionController.log("[flatdroid] sound is off for this app; PulseAudio isn't started")
             } else if (!waitForFile(File(pulseDir, PulseScript.NATIVE_SOCKET), helpers, AUDIO_TIMEOUT_MS, null)) {
@@ -255,9 +294,80 @@ class FlatpakLauncher(private val context: Context) {
             app?.stop()
             player?.stop()
             mic?.stop()
+            // The helpers first, so a streamer still writing to its pipe fails instead of waiting.
+            cameraHelpers?.stop()
+            streamers.values.forEach { it.close() }
             SessionController.onMicrophoneAnswer = null
             helpers.stop()
         }
+    }
+
+    /**
+     * How far the device would be turned from its natural orientation to be [landscape] (or
+     * portrait), in degrees: 0 or 90 for a phone (naturally portrait), 0 or 270 for a tablet.
+     */
+    private fun displayRotation(landscape: Boolean): Int {
+        val display = context.getSystemService(DisplayManager::class.java)?.getDisplay(Display.DEFAULT_DISPLAY)
+        val turned = (display?.rotation ?: Surface.ROTATION_0) % 2 == 1
+        val landscapeNow = context.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val naturallyLandscape = landscapeNow != turned
+        return when {
+            landscape == naturallyLandscape -> 0
+            naturallyLandscape -> 270
+            else -> 90
+        }
+    }
+
+    /** Each camera as a node at its turned size and its rate, described by where it faces ("Back camera", "Front camera 2"). */
+    private fun cameraNodes(cameras: List<AndroidCameras.Camera>, rotations: List<Int>): List<CameraScript.Node> {
+        val labels = cameras.map {
+            context.getString(
+                when (it.facing) {
+                    AndroidCameras.Facing.BACK -> R.string.camera_back
+                    AndroidCameras.Facing.FRONT -> R.string.camera_front
+                    AndroidCameras.Facing.EXTERNAL -> R.string.camera_external
+                }
+            )
+        }
+        return cameras.mapIndexed { index, camera ->
+            val same = labels.indices.filter { labels[it] == labels[index] }
+            val label = if (same.size > 1) "${labels[index]} ${same.indexOf(index) + 1}" else labels[index]
+            val (width, height) = camera.turnedSize(rotations[index])
+            val location = when (camera.facing) {
+                AndroidCameras.Facing.BACK -> CameraScript.Location.BACK
+                AndroidCameras.Facing.FRONT -> CameraScript.Location.FRONT
+                AndroidCameras.Facing.EXTERNAL -> CameraScript.Location.EXTERNAL
+            }
+            CameraScript.Node(CameraScript.nodeName(index), label, width, height, camera.frameRate, location)
+        }
+    }
+
+    /**
+     * Starts the camera's helpers ([CameraScript]) in a proot of their own once PipeWire runs, and
+     * the [streamers] writing to their pipes; waits until the nodes exist and the portal has
+     * started, so the app sees its cameras from the start. Null when PipeWire didn't start.
+     */
+    private fun startCamera(helpers: ProotProcess, streamers: Map<String, CameraStreamer>): ProotProcess? {
+        if (!waitForFile(File(pipewireDir, CameraScript.PIPEWIRE_SOCKET), helpers, CAMERA_TIMEOUT_MS, null)) {
+            SessionController.log("[flatdroid] PipeWire did not start; the app has no camera")
+            return null
+        }
+        val ready = CountDownLatch(1)
+        val binds = listOf(
+            File(sessionDir, "camera.sh").path to CameraScript.GUEST_SCRIPT,
+            pipewireDir.path to CameraScript.GUEST_PIPEWIRE_DIR,
+            cameraPipeDir.path to CameraScript.GUEST_PIPE_DIR,
+            cameraConfigDir.path to CameraScript.GUEST_CONFIG_DIR,
+            busDaemonDir.path to SessionBus.GUEST_DAEMON_DIR,
+        )
+        val process = env.start(listOf("/bin/sh", CameraScript.GUEST_SCRIPT), binds, asAppUser = true) { line ->
+            CameraScript.users(line)?.let { (node, count) -> streamers[node]?.setUsers(count) }
+            if (line == CameraScript.READY) ready.countDown()
+            SessionController.log("[camera] $line")
+        }
+        streamers.values.forEach { it.open() }
+        if (!ready.await(CAMERA_TIMEOUT_MS, TimeUnit.MILLISECONDS)) SessionController.log("[flatdroid] the camera's helpers did not get ready in time")
+        return process
     }
 
     /** The rate Android's mixer runs at, so PulseAudio's output needs no second resampling. */
@@ -355,9 +465,11 @@ class FlatpakLauncher(private val context: Context) {
             x11Sockets = x11Dir,
             pulseSockets = pulseDir,
             fontDirs = launcher.fontDirs,
+            hostFonts = ANDROID_FONTS.takeIf { it.isDirectory },
             desktopConfig = desktopDir,
             userDirs = File(etcDir, USER_DIRS),
             sdcard = SharedHome.storageRoot().takeIf { settings.sdcard && SharedHome.broadAccess(context) },
+            sessionBus = busProxyDir,
         )
     }
 
@@ -415,14 +527,15 @@ class FlatpakLauncher(private val context: Context) {
     /**
      * Files every launch gets fresh: the shared /etc files (an app could have changed them, since
      * binds are writable), a copy of the machine-id, resolv.conf for the current network, and the
-     * VNC password file, and the helpers' scripts ([pulseScript] only with sound). Old sockets are removed.
+     * VNC password file, and the helpers' scripts ([pulseScript] only with sound) and the session
+     * bus's configuration and proxy arguments ([busArgs]). Old sockets are removed.
      */
-    private fun writeSessionFiles(password: String, titleBars: Boolean, pulseScript: String?) {
+    private fun writeSessionFiles(password: String, titleBars: Boolean, pulseScript: String?, busArgs: List<String>, cameraNodes: List<CameraScript.Node>) {
         val launcher = AppData.launcherFiles(context)
         launcher.write()
         File(etcDir, "machine-id").writeTextAtomically(launcher.machineId.readText(), durable = false)
         File(etcDir, "resolv.conf").writeTextAtomically(env.resolvConf(), durable = false)
-        for (dir in listOf(x11Dir, pulseDir, vncDir)) {
+        for (dir in listOf(x11Dir, pulseDir, vncDir, busDaemonDir, busProxyDir, pipewireDir, cameraPipeDir, cameraConfigDir)) {
             AndroidTarFs.deleteTree(dir)
             dir.mkdirs()
         }
@@ -434,6 +547,18 @@ class FlatpakLauncher(private val context: Context) {
         File(sessionDir, "openbox-rc.xml").writeTextAtomically(GuestFiles.openboxRc(titleBars), durable = false)
         val pulseFile = File(sessionDir, "pulse.pa")
         if (pulseScript != null) pulseFile.writeTextAtomically(pulseScript, durable = false) else pulseFile.delete()
+        File(sessionDir, "dbus.conf").writeTextAtomically(SessionBus.CONFIG, durable = false)
+        File(sessionDir, "proxy.args").writeAtomically(durable = false) { it.write(SessionBus.argsFile(busArgs)) }
+        val cameraScript = File(sessionDir, "camera.sh")
+        if (cameraNodes.isEmpty()) {
+            cameraScript.delete()
+        } else {
+            cameraScript.writeTextAtomically(CameraScript.text(cameraNodes), durable = false)
+            for ((path, text) in CameraScript.CONFIG_FILES) {
+                File(cameraConfigDir, path).apply { parentFile!!.mkdirs() }.writeTextAtomically(text, durable = false)
+            }
+            for (node in cameraNodes) Os.mkfifo(File(cameraPipeDir, node.name).path, 0x180) // 0600
+        }
     }
 
     /**
@@ -447,8 +572,13 @@ class FlatpakLauncher(private val context: Context) {
             vncDir.path to SessionScript.GUEST_VNC_DIR,
             File(sessionDir, "session.sh").path to SessionScript.GUEST_SCRIPT,
             File(sessionDir, "openbox-rc.xml").path to SessionScript.GUEST_OPENBOX_RC,
+            busDaemonDir.path to SessionBus.GUEST_DAEMON_DIR,
+            busProxyDir.path to SessionBus.GUEST_PROXY_DIR,
+            pipewireDir.path to CameraScript.GUEST_PIPEWIRE_DIR,
+            File(sessionDir, "dbus.conf").path to SessionBus.GUEST_CONFIG,
+            File(sessionDir, "proxy.args").path to SessionBus.GUEST_PROXY_ARGS,
         ) + if (sound) listOf(File(sessionDir, "pulse.pa").path to SessionScript.GUEST_PULSE_SCRIPT) else emptyList()
-        return env.start(command, binds) { line ->
+        return env.start(command, binds, asAppUser = true) { line ->
             onLine(line)
             SessionController.log("[display] $line")
         }
@@ -502,8 +632,12 @@ class FlatpakLauncher(private val context: Context) {
     }
 
     private companion object {
+        /** Android's own fonts, readable by every app. */
+        val ANDROID_FONTS = File("/system/fonts")
         const val DISPLAY_TIMEOUT_MS = 30_000L
         const val AUDIO_TIMEOUT_MS = 10_000L
+        const val BUS_TIMEOUT_MS = 10_000L
+        const val CAMERA_TIMEOUT_MS = 20_000L
         const val HELPER_CHECK_MS = 250L
         const val DEFAULT_OUTPUT_RATE = 48_000
         const val USER_DIRS = "user-dirs.dirs"

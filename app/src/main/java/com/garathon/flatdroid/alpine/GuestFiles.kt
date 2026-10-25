@@ -23,7 +23,44 @@ object GuestFiles {
         return usable.joinToString("") { "nameserver $it\n" }
     }
 
+    /**
+     * Flatpak's CLI runs an app's or extension's `/app/bin/apply_extra` through bwrap, which can't
+     * run under proot; this answers that call as done, and Flatdroid runs the script itself
+     * afterwards ([com.garathon.flatdroid.flatpak.ExtraData]). Every other call goes to bwrap.
+     * Flatpak may pass the arguments in a file descriptor (`--args`).
+     */
+    val BWRAP_STAND_IN = """
+        |#!/bin/sh
+        |previous=
+        |for arg in "$@"; do
+        |  [ "${'$'}arg" = /app/bin/apply_extra ] && exit 0
+        |  if [ "${'$'}previous" = --args ] && tr '\0' '\n' < /proc/self/fd/"${'$'}arg" 2>/dev/null | grep -qx /app/bin/apply_extra; then
+        |    exit 0
+        |  fi
+        |  previous=${'$'}arg
+        |done
+        |exec /usr/bin/bwrap "$@"
+        |""".trimMargin()
+
     fun hosts(): String = "127.0.0.1 localhost\n::1 localhost\n"
+
+    /**
+     * Alpine's passwd ([base]) with an entry for [uid] if it has none, home /root: processes that
+     * run as the app's own IDs look themselves up (Openbox crashes without an entry).
+     */
+    fun passwdWith(base: String, uid: Int, gid: Int): String =
+        withEntry(base, uid, "$APP_USER:x:$uid:$gid:Flatdroid:/root:/bin/sh")
+
+    /** Alpine's group ([base]) with an entry for [gid] if it has none. */
+    fun groupWith(base: String, gid: Int): String = withEntry(base, gid, "$APP_USER:x:$gid:")
+
+    private fun withEntry(base: String, id: Int, entry: String): String {
+        val lines = base.lines().filter { it.isNotBlank() }
+        if (lines.any { it.split(':').getOrNull(2) == id.toString() }) return lines.joinToString("\n", postfix = "\n")
+        return (lines + entry).joinToString("\n", postfix = "\n")
+    }
+
+    private const val APP_USER = "flatdroid"
 
     /** An empty Fontconfig file for [com.garathon.flatdroid.proot.GuestPaths.FONT_DIRS]: no host font directories. */
     fun fontDirs(): String =

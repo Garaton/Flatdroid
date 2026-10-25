@@ -14,6 +14,8 @@ data class InstalledApp(
     val name: String,
     val icon: File?,
     val lastOpened: Long?,
+    /** When it was installed; null if unknown. */
+    val installed: Long? = null,
     /** Its metadata asks for all devices (`devices=all`). */
     val requestsAllDevices: Boolean = false,
     /** Its metadata asks for sound (`sockets=pulseaudio`). */
@@ -32,6 +34,7 @@ class InstalledApps(private val context: Context) {
             name = desktopName(app, id) ?: id,
             icon = icon(app, id),
             lastOpened = AppData.settings(context, id).load().lastOpened,
+            installed = installation.installed(id),
             requestsAllDevices = DevNodes.ALL in app.metadata.context.devices,
             requestsAudio = AppSettings.PULSEAUDIO_SOCKET in app.metadata.context.sockets,
         )

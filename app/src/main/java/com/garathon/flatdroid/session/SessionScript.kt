@@ -1,5 +1,6 @@
 package com.garathon.flatdroid.session
 
+import com.garathon.flatdroid.camera.CameraScript
 import com.garathon.flatdroid.proot.GuestPaths
 import com.garathon.flatdroid.settings.Resampler
 
@@ -26,20 +27,25 @@ object SessionScript {
 
     /**
      * The helpers' command: [TEXT] at [GUEST_SCRIPT] with its arguments. Without [sound],
-     * PulseAudio doesn't start, and so neither does the microphone.
+     * PulseAudio doesn't start, and so neither does the microphone. With [sessionBus], the app's
+     * bus and its proxy ([SessionBus]) start too, and with [camera] PipeWire, for the camera's
+     * own helpers ([CameraScript]).
      */
-    fun command(geometry: String, frameRate: Int, sound: Boolean, microphone: Boolean, resampler: Resampler): List<String> =
+    fun command(
+        geometry: String, frameRate: Int, sound: Boolean, microphone: Boolean, resampler: Resampler, sessionBus: Boolean,
+        camera: Boolean = false,
+    ): List<String> =
         listOf(
             "/bin/sh", GUEST_SCRIPT, geometry, VNC_PORT.toString(), frameRate.toString(),
-            onOff(sound), onOff(sound && microphone), resampler.pulseName,
+            onOff(sound), onOff(sound && microphone), resampler.pulseName, onOff(sessionBus), onOff(sessionBus && camera),
         )
 
     private fun onOff(value: Boolean) = if (value) "on" else "off"
 
     /**
      * Arguments: geometry (WxH), VNC port, frame rate, "on" when the app gets sound (PulseAudio
-     * starts only then), "on" when it may use the microphone, and PulseAudio's resample method
-     * ([command] builds them). Exits when Xvnc does; Flatdroid ends the session by stopping this proot.
+     * starts only then), "on" when it may use the microphone, PulseAudio's resample method, "on"
+     * for the session bus, and "on" for PipeWire ([command] builds them). Exits when Xvnc does; Flatdroid ends the session by stopping this proot.
      * `-extension GLX` turns GLX off in Alpine's Xvnc, which still has it (apps use EGL);
      * Flatdroid's own Xvnc build won't need it. `-nolisten local` drops the abstract socket
      * `@/tmp/.X11-unix/X1`: proot doesn't translate abstract names, so it would be open to other
@@ -49,7 +55,8 @@ object SessionScript {
      * `--use-pid-file=no`: proot shares the process list, so a stale PID file can match a live
      * process. PulseAudio's modules are in [PulseScript]. With the microphone on, `pactl
      * subscribe` reports how many streams record from it ([MIC_USERS_PREFIX]), so Flatdroid
-     * records from Android's microphone only meanwhile.
+     * records from Android's microphone only meanwhile. The session bus's proxy reads its
+     * arguments from a file ([SessionBus.proxyArgs]), so none pass through the shell.
      */
     val TEXT = """
         |#!/bin/sh
@@ -59,6 +66,8 @@ object SessionScript {
         |sound=$4
         |microphone=$5
         |resampler=$6
+        |session_bus=$7
+        |camera=$8
         |rm -f /tmp/.X1-lock ${GuestPaths.X11_DIR}/$X_SOCKET ${GuestPaths.PULSE_DIR}/*
         |
         |Xvnc :1 -geometry "${'$'}geometry" -depth 24 -rfbport "${'$'}port" -localhost \
@@ -74,6 +83,25 @@ object SessionScript {
         |done
         |
         |DISPLAY=:1 openbox &
+        |if [ "${'$'}session_bus" = on ]; then
+        |  rm -f ${SessionBus.GUEST_DAEMON_DIR}/${SessionBus.SOCKET} ${SessionBus.GUEST_PROXY_DIR}/${SessionBus.SOCKET}
+        |  dbus-daemon --config-file=${SessionBus.GUEST_CONFIG} --nofork --nopidfile --nosyslog &
+        |  i=0
+        |  while [ ! -S ${SessionBus.GUEST_DAEMON_DIR}/${SessionBus.SOCKET} ] && [ "${'$'}i" -le 100 ]; do
+        |    i=${'$'}((i + 1))
+        |    sleep 0.1
+        |  done
+        |  if [ -S ${SessionBus.GUEST_DAEMON_DIR}/${SessionBus.SOCKET} ]; then
+        |    xdg-dbus-proxy --args=3 3< ${SessionBus.GUEST_PROXY_ARGS} &
+        |    if [ "${'$'}camera" = on ]; then
+        |      rm -f ${CameraScript.GUEST_PIPEWIRE_DIR}/*
+        |      XDG_RUNTIME_DIR=${CameraScript.GUEST_PIPEWIRE_DIR} \
+        |        DBUS_SESSION_BUS_ADDRESS=unix:path=${SessionBus.GUEST_DAEMON_DIR}/${SessionBus.SOCKET} pipewire &
+        |    fi
+        |  else
+        |    echo "flatdroid: the session bus did not start"
+        |  fi
+        |fi
         |if [ "${'$'}sound" = on ]; then
         |  pulseaudio -n --use-pid-file=no --daemonize=no --exit-idle-time=-1 --disable-shm=yes \
         |    --resample-method="${'$'}resampler" -F $GUEST_PULSE_SCRIPT &

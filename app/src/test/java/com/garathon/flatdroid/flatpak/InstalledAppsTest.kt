@@ -59,6 +59,9 @@ class InstalledAppsTest {
         assertEquals(listOf("Gamma"), apps.forList("GAM", AppSort.NAME).map { it.name })
         // The running app comes first.
         assertEquals(listOf("beta", "Alpha", "Gamma"), apps.forList("", AppSort.NAME, runningAppId = "b.B").map { it.name })
+        // A newly installed app, never opened, comes before those opened earlier.
+        val installed = apps + InstalledApp("d.D", "Delta", null, null, installed = 300L)
+        assertEquals(listOf("Delta", "Gamma", "Alpha", "beta"), installed.forList("", AppSort.LAST_OPENED).map { it.name })
         // IDs aren't searched.
         assertEquals(emptyList<String>(), apps.forList("c.C", AppSort.NAME).map { it.name })
     }

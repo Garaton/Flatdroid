@@ -24,6 +24,13 @@ class FlatpakInstallation(root: File, private val arch: String) {
     fun appIds(): List<String> =
         File(root, "app").listFiles { f -> f.isDirectory }?.map { it.name }?.filter(::isValidId)?.sorted() ?: emptyList()
 
+    /**
+     * When the app was installed, in milliseconds since the epoch: its directory changes only when
+     * a branch or architecture is added, not on updates; null if it isn't installed.
+     */
+    fun installed(id: String): Long? =
+        if (isValidId(id)) File(root, "app/$id").lastModified().takeIf { it > 0 } else null
+
     /** The app's current deployment (the branch Flatpak marks as current, else the only one). */
     fun app(id: String): Deployment? {
         if (!isValidId(id)) return null

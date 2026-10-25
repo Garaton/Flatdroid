@@ -40,6 +40,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.garathon.flatdroid.R
 import com.garathon.flatdroid.audio.MicStreamer
+import com.garathon.flatdroid.camera.AndroidCameras
 import com.garathon.flatdroid.flatpak.InstalledApp
 import com.garathon.flatdroid.settings.AppSettings
 import com.garathon.flatdroid.settings.DisplaySize
@@ -54,8 +55,11 @@ import com.garathon.flatdroid.ui.theme.FlatdroidTheme
  * /dev. Sound left at its default is saved as unset, so it follows the app's metadata.
  * [onRequestMicrophone] asks Android for its microphone permission and reports whether it was
  * granted: the microphone turns on only with it, so a notification can later allow it for a
- * session. With [developerOptions], the microphone can also be always allowed, and the app's
- * environment variables set. Its home is the shared one ([sharedHome], as the user knows it), a
+ * session, unless it is always allowed. The camera likewise ([onRequestCamera]), when the device
+ * has one ([hasCamera]), at a frame rate its cameras can run at and a size they give at that
+ * rate ([cameraResolutions], by rate; empty while still asked). A setting that
+ * needs another one is shown only while that one is on. With [developerOptions], the app's
+ * environment variables can be set. Its home is the shared one ([sharedHome], as the user knows it), a
  * private one or a temporary one; with access to all of shared storage ([broadAccess]) it can
  * also get /sdcard. Its Storage section shows its sizes ([storage]) and asks for copies, exports,
  * imports and resets of its cache, private home and settings ([onStorage]), whatever its home
@@ -73,6 +77,9 @@ fun AppSettingsScreen(
     canUninstall: Boolean,
     developerOptions: Boolean,
     onRequestMicrophone: (onResult: (Boolean) -> Unit) -> Unit,
+    hasCamera: Boolean,
+    cameraResolutions: Map<Int, List<AndroidCameras.Resolution>>,
+    onRequestCamera: (onResult: (Boolean) -> Unit) -> Unit,
     onSave: (AppSettings) -> Unit,
     onBack: () -> Unit,
     onUninstall: (deleteData: Boolean, keepRuntimes: Boolean) -> Unit,
@@ -89,6 +96,10 @@ fun AppSettingsScreen(
     var audio by rememberSaveable { mutableStateOf(settings.audio ?: audioDefault) }
     var microphone by rememberSaveable { mutableStateOf(settings.microphone) }
     var alwaysAllowMicrophone by rememberSaveable { mutableStateOf(settings.alwaysAllowMicrophone) }
+    var camera by rememberSaveable { mutableStateOf(settings.camera) }
+    var cameraResolution by rememberSaveable { mutableStateOf(settings.cameraResolution) }
+    var cameraFrameRate by rememberSaveable { mutableStateOf(settings.cameraFrameRate) }
+    var cameraRefused by rememberSaveable { mutableStateOf(false) }
     var environment by rememberSaveable { mutableStateOf(EnvironmentText.format(settings.environment)) }
     var homeMode by rememberSaveable { mutableStateOf(settings.homeMode) }
     var sdcard by rememberSaveable { mutableStateOf(settings.sdcard) }
@@ -138,9 +149,16 @@ fun AppSettingsScreen(
         }
         if (choice == DisplaySize.CUSTOM) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                SizeField(width, stringResource(R.string.app_settings_width), Modifier.width(120.dp)) { width = it }
+                SizeField(width, stringResource(R.string.app_settings_width), size(width) == null, Modifier.width(120.dp)) { width = it }
                 Text("×")
-                SizeField(height, stringResource(R.string.app_settings_height), Modifier.width(120.dp)) { height = it }
+                SizeField(height, stringResource(R.string.app_settings_height), size(height) == null, Modifier.width(120.dp)) { height = it }
+            }
+            if (!customValid) {
+                Text(
+                    stringResource(R.string.app_settings_custom_invalid, AppSettings.MIN_SIZE, AppSettings.MAX_SIZE),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
             }
         }
 
@@ -150,7 +168,7 @@ fun AppSettingsScreen(
             stringResource(R.string.app_settings_audio),
             stringResource(if (app.requestsAudio) R.string.app_settings_audio_requested else R.string.app_settings_audio_not_requested),
         )
-        SwitchRow(
+        if (audio) SwitchRow(
             microphone,
             { on ->
                 micRefused = false
@@ -162,13 +180,67 @@ fun AppSettingsScreen(
             },
             stringResource(R.string.app_settings_microphone),
             stringResource(if (micRefused) R.string.app_settings_microphone_android_denied else R.string.app_settings_microphone_hint),
-            enabled = audio,
         )
-        if (developerOptions) {
+        if (audio && microphone) {
             SwitchRow(
                 alwaysAllowMicrophone, { alwaysAllowMicrophone = it },
                 stringResource(R.string.app_settings_always_allow_microphone), stringResource(R.string.app_settings_always_allow_microphone_hint),
-                enabled = audio && microphone, developer = true,
+            )
+        }
+        SwitchRow(
+            camera,
+            { on ->
+                cameraRefused = false
+                if (!on || AndroidCameras.hasPermission(context)) {
+                    camera = on
+                } else {
+                    onRequestCamera { granted -> if (granted) camera = true else cameraRefused = true }
+                }
+            },
+            stringResource(R.string.app_settings_camera),
+            stringResource(
+                when {
+                    !hasCamera -> R.string.app_settings_camera_none
+                    cameraRefused -> R.string.app_settings_camera_android_denied
+                    else -> R.string.app_settings_camera_hint
+                }
+            ),
+            enabled = hasCamera,
+        )
+        if (camera) {
+            DropdownRow(
+                selected = cameraFrameRate,
+                options = cameraResolutions.keys.sortedDescending().ifEmpty { listOf(cameraFrameRate) },
+                onSelect = { rate ->
+                    cameraFrameRate = rate
+                    // A size the cameras don't give at the new rate: the largest they do below it
+                    // (the largest they do for full resolution).
+                    val sides = cameraResolutions[rate].orEmpty().map { it.shortSide }
+                    if (sides.isNotEmpty() && cameraResolution !in sides) {
+                        cameraResolution = if (cameraResolution == AndroidCameras.FULL_RESOLUTION) sides.first()
+                        else sides.firstOrNull { it != AndroidCameras.FULL_RESOLUTION && it < cameraResolution } ?: sides.last()
+                    }
+                },
+                label = { context.getString(R.string.app_settings_camera_frame_rate_value, it) },
+                title = stringResource(R.string.app_settings_camera_frame_rate),
+                hint = stringResource(R.string.app_settings_camera_frame_rate_hint) +
+                    if (cameraFrameRate > AndroidCameras.COMMON_MAX_FRAME_RATE) " " + stringResource(R.string.app_settings_camera_frame_rate_high) else "",
+            )
+            val resolutions = cameraResolutions[cameraFrameRate].orEmpty()
+            DropdownRow(
+                selected = cameraResolution,
+                options = resolutions.map { it.shortSide }.ifEmpty { listOf(cameraResolution) },
+                onSelect = { cameraResolution = it },
+                label = { side ->
+                    if (side == AndroidCameras.FULL_RESOLUTION) {
+                        val sizes = resolutions.firstOrNull { it.shortSide == side }?.fullSizes.orEmpty()
+                        context.getString(R.string.app_settings_camera_resolution_full, sizes.joinToString(", ") { "${it.width}×${it.height}" })
+                    } else {
+                        context.getString(R.string.app_settings_camera_resolution_value, side)
+                    }
+                },
+                title = stringResource(R.string.app_settings_camera_resolution),
+                hint = stringResource(R.string.app_settings_camera_resolution_hint),
             )
         }
 
@@ -214,16 +286,19 @@ fun AppSettingsScreen(
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
                 onClick = {
-                    val custom = choice == DisplaySize.CUSTOM
                     onSave(
                         settings.copy(
                             displaySize = choice,
-                            customWidth = if (custom) size(width)!! else settings.customWidth,
-                            customHeight = if (custom) size(height)!! else settings.customHeight,
+                            // Valid typed values are kept even while another size is chosen.
+                            customWidth = size(width) ?: settings.customWidth,
+                            customHeight = size(height) ?: settings.customHeight,
                             wholeDev = wholeDev,
                             audio = audio.takeIf { it != audioDefault },
                             microphone = microphone,
-                            alwaysAllowMicrophone = if (developerOptions) alwaysAllowMicrophone else settings.alwaysAllowMicrophone,
+                            alwaysAllowMicrophone = alwaysAllowMicrophone,
+                            camera = camera,
+                            cameraResolution = cameraResolution,
+                            cameraFrameRate = cameraFrameRate,
                             environment = if (developerOptions) environmentValue.orEmpty() else settings.environment,
                             homeMode = homeMode,
                             sdcard = if (broadAccess) sdcard else settings.sdcard,
@@ -298,11 +373,12 @@ private fun HomeModeRow(selected: Boolean, onSelect: () -> Unit, title: String, 
 }
 
 @Composable
-private fun SizeField(value: String, label: String, modifier: Modifier, onChange: (String) -> Unit) {
+private fun SizeField(value: String, label: String, isError: Boolean, modifier: Modifier, onChange: (String) -> Unit) {
     OutlinedTextField(
         value = value,
         onValueChange = { onChange(it.filter(Char::isDigit).take(4)) },
         label = { Text(label) },
+        isError = isError,
         singleLine = true,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
         modifier = modifier,
@@ -336,7 +412,7 @@ private fun AppSettingsScreenPreview() {
     FlatdroidTheme {
         AppSettingsScreen(
             InstalledApp("org.xfce.mousepad", "Mousepad", null, null), AppSettings(), storage = AppStorage(9_000_000, 12_345_678, 4_096, 65_536), canChangeFiles = true, canUninstall = true, developerOptions = true,
-            onRequestMicrophone = {}, onSave = {}, onBack = {}, onUninstall = { _, _ -> },
+            onRequestMicrophone = {}, hasCamera = true, cameraResolutions = mapOf(15 to listOf(AndroidCameras.Resolution(720)), 30 to listOf(AndroidCameras.Resolution(720))), onRequestCamera = {}, onSave = {}, onBack = {}, onUninstall = { _, _ -> },
             sharedHome = "Documents/Flatdroid", broadAccess = true, onStorage = {},
         )
     }

@@ -202,8 +202,8 @@ class StorageTaskService : Service() {
             val apps = stagedApps(staging)
             for (appId in apps) {
                 val appData = appData(appId).apply { mkdirs() }
-                // As for one app: a directory the zip doesn't have becomes empty.
-                for ((dir, _) in AppFiles.layout(appId)) putInPlace(File(staging, "$appId/$dir").apply { mkdirs() }, File(appData, dir))
+                // As for one app: only the directories the zip has.
+                for ((dir, _) in AppFiles.layout(appId)) File(staging, "$appId/$dir").takeIf { it.isDirectory }?.let { putInPlace(it, File(appData, dir)) }
             }
             AndroidTarFs.deleteTree(staging)
             getString(R.string.storage_imported_title) to resources.getQuantityString(R.plurals.storage_imported_all_settings, apps.size, apps.size)
@@ -223,9 +223,14 @@ class StorageTaskService : Service() {
         is StorageTask.ImportAppFiles -> {
             val staging = staging(task)
             extractFrom(task, uris.single(), staging) { AppFiles.destination(staging, task.appId, it) }
+            if (AppFiles.layout(task.appId).none { File(staging, it.first).isDirectory }) {
+                throw IOException(getString(R.string.storage_no_settings_in_zip, task.appId))
+            }
             val appData = appData(task.appId)
-            // A directory the zip doesn't have becomes empty: the zip is the whole of them.
-            for ((dir, _) in AppFiles.layout(task.appId)) putInPlace(File(staging, dir).apply { mkdirs() }, File(appData, dir))
+            // Each directory the zip has replaces the app's whole; one it doesn't have stays as it
+            // is. Flatdroid's own exports have all of them; a desktop's (from ~/.var/app/<ID>) has
+            // only .var, which then leaves the app's own .config, .local and .pki here alone.
+            for ((dir, _) in AppFiles.layout(task.appId)) File(staging, dir).takeIf { it.isDirectory }?.let { putInPlace(it, File(appData, dir)) }
             AndroidTarFs.deleteTree(staging)
             getString(R.string.storage_imported_title) to getString(R.string.storage_imported_settings, label(task.appId))
         }

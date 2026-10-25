@@ -13,6 +13,10 @@
     <!-- A Flatpak allowed to use the microphone records through Android's, while it records. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <!-- A Flatpak allowed to use the camera gets Android's, while it takes its picture. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- The shared home (Documents/Flatdroid) by path: Android 10 and older need this for it. -->
@@ -69,7 +73,7 @@
         <service
             android:name=".session.SessionService"
             android:exported="false"
-            android:foregroundServiceType="specialUse|microphone">
+            android:foregroundServiceType="specialUse|microphone|camera">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Runs a Linux desktop app (Flatpak) under proot with its X11 display server and audio server, while the user views it in a VNC viewer." />

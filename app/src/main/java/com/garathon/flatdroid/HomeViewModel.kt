@@ -68,7 +68,8 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     fun measureStorage(appId: String) {
         viewModelScope.launch(Dispatchers.IO) {
             val context = getApplication<Application>()
-            val saved = SavedSizes.app(context, appId)
+            // Not while a Flatpak task or setup changes everything; measured again once it ends.
+            val saved = SavedSizes.app(context, appId) ?: return@launch _storage.update { it - appId }
             val measured = AppStorage(
                 app = saved.app,
                 cache = StorageSizes.contents(File(AppData.cacheRoot(context), appId)),
@@ -83,9 +84,9 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) {
             val context = getApplication<Application>()
             val installed = installedIds()
-            val apps = SavedSizes.appIds(context).associateWith { SavedSizes.app(context, it) }
+            val apps = SavedSizes.appIds(context).associateWith { SavedSizes.app(context, it) ?: return@launch run { _flatdroidStorage.value = null } }
             val unused = apps.filterKeys { it !in installed }.values
-            val shared = SavedSizes.shared(context)
+            val shared = SavedSizes.shared(context) ?: return@launch run { _flatdroidStorage.value = null }
             _flatdroidStorage.value = FlatdroidStorage(
                 runtimes = shared.runtimes,
                 apps = apps.values.sumOf { it.app },

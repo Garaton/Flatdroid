@@ -99,7 +99,7 @@ class AlpineSetup(
     private fun apk(args: List<String>, cache: File, reporter: SetupReporter): ApkSummary {
         val output = mutableListOf<String>()
         run(
-            listOf("/sbin/apk") + args + listOf("--no-progress", "--cache-dir", APK_CACHE),
+            apkCommand(args),
             reporter,
             timeoutSeconds = 60 * 60,
             extraBinds = listOf(cache.path to APK_CACHE),
@@ -176,10 +176,20 @@ class AlpineSetup(
          * Alpine's tigervnc stays until our own Xvnc build replaces it. Openbox needs a font: without
          * one its title bars collapse to a few pixels. ostree repairs the Flatpak repository after
          * an interrupted removal (FlatpakTaskService). pulseaudio-utils has `pactl`, which tells
-         * when an app records (SessionScript).
+         * when an app records (SessionScript). dbus and xdg-dbus-proxy give apps their session bus
+         * (SessionBus); PipeWire, WirePlumber, the portal and GStreamer's PipeWire elements carry
+         * the camera (gst-plugins-good to split its JPEG frames), and pipewire-tools tells when an app uses it.
          */
-        val PACKAGES = listOf("flatpak", "ostree", "tigervnc", "openbox", "font-cantarell", "pulseaudio", "pulseaudio-utils", "ca-certificates")
-        private const val APK_CACHE = "/var/cache/apk"
+        val PACKAGES = listOf(
+            "flatpak", "ostree", "tigervnc", "openbox", "font-cantarell", "pulseaudio", "pulseaudio-utils", "ca-certificates",
+            "dbus", "xdg-dbus-proxy", "pipewire", "wireplumber", "xdg-desktop-portal", "gst-plugin-pipewire", "gstreamer-tools", "gst-plugins-good",
+            "pipewire-tools",
+        )
+        /** Where apk's package cache is bound: a directory in Flatdroid's cache, deleted afterwards. */
+        const val APK_CACHE = "/var/cache/apk"
+
+        /** An apk command with [args], its cache at [APK_CACHE], without progress bars. */
+        fun apkCommand(args: List<String>) = listOf("/sbin/apk") + args + listOf("--no-progress", "--cache-dir", APK_CACHE)
         /** Free space setup needs: the minirootfs, and the package cache plus installed packages. */
         private const val ROOTFS_BYTES = 20L shl 20
         private const val PACKAGES_BYTES = 600L shl 20

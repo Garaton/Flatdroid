@@ -18,30 +18,44 @@ data class AppStorage(
     val total: Long get() = app + cache + privateHome + settings
 }
 
-/** Disk space as `du` counts it: allocated blocks of every entry, directories included. */
+/** Thrown by a measurement whose [StorageSizes] stop check said to end it. */
+class MeasureStopped : Exception("Measuring stopped")
+
+/**
+ * Disk space as `du` counts it: allocated blocks of every entry, directories included. [stop] is
+ * checked at each directory; when it is true the walk ends with [MeasureStopped].
+ */
 object StorageSizes {
     /** Under [file], without following links. */
-    fun of(file: File): Long {
-        val stat = lstat(file) ?: return 0L
-        val own = stat.st_blocks * 512
-        return if (OsConstants.S_ISDIR(stat.st_mode)) own + (file.listFiles()?.sumOf(::of) ?: 0L) else own
+    fun of(file: File, stop: () -> Boolean = { false }): Long {
+        fun walk(entry: File): Long {
+            val stat = lstat(entry) ?: return 0L
+            val own = stat.st_blocks * 512
+            if (!OsConstants.S_ISDIR(stat.st_mode)) return own
+            if (stop()) throw MeasureStopped()
+            return own + (entry.listFiles()?.sumOf(::walk) ?: 0L)
+        }
+        return walk(file)
     }
 
     /** What [dir] holds, without the directory itself. */
-    fun contents(dir: File): Long = dir.listFiles()?.sumOf(::of) ?: 0L
+    fun contents(dir: File): Long = dir.listFiles()?.sumOf { of(it) } ?: 0L
 
     /**
      * Under [files], counting each link into [l2sDir] as itself (a long link takes a block) and
      * the content it leads to (Flatpak's files are such links), each content once however many
      * links lead to it: Flatpak keeps one copy of identical files, and deployments share them.
      */
-    fun following(files: List<File>, l2sDir: File): Long {
+    fun following(files: List<File>, l2sDir: File, stop: () -> Boolean = { false }): Long {
         val prefix = l2sDir.path + "/"
         val seen = HashSet<Long>()
         fun walk(entry: File): Long {
             val stat = lstat(entry) ?: return 0L
             return when {
-                OsConstants.S_ISDIR(stat.st_mode) -> stat.st_blocks * 512 + (entry.listFiles()?.sumOf(::walk) ?: 0L)
+                OsConstants.S_ISDIR(stat.st_mode) -> {
+                    if (stop()) throw MeasureStopped()
+                    stat.st_blocks * 512 + (entry.listFiles()?.sumOf(::walk) ?: 0L)
+                }
                 OsConstants.S_ISLNK(stat.st_mode) -> {
                     val target = try { Os.readlink(entry.path) } catch (_: ErrnoException) { null }
                     if (target != null && target.startsWith(prefix)) {

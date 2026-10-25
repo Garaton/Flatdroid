@@ -11,14 +11,16 @@ class SessionAudioTest {
     fun pulseScriptSetsDefaultsBeforeTheAppsSocket() {
         val on = PulseScript.text(outputRate = 44_100, microphone = true, micRate = 48_000).lines()
         assertTrue(on.first().startsWith("load-module module-null-sink sink_name=out rate=44100"))
-        assertTrue(on.any { it.startsWith("load-module module-simple-protocol-unix socket=/run/pulse/mic ") && "rate=48000" in it })
-        assertTrue(on.any { it.startsWith("load-module module-remap-source source_name=mic master=mic_in.monitor") })
+        // The microphone straight from Flatdroid's pipe, with no sink and monitor to hold it back.
+        assertTrue(on.any { it.startsWith("load-module module-pipe-source source_name=mic file=/run/pulse/mic format=s16le rate=48000 channels=1 ") })
+        assertTrue(on.none { "mic_in" in it || "module-simple-protocol-unix socket=/run/pulse/mic" in it })
         val native = on.indexOfFirst { "module-native-protocol-unix" in it }
         assertTrue(native > on.indexOf("set-default-source mic") && native > on.indexOf("set-default-sink out"))
 
         // Without the microphone, the default source is silent, never the output's monitor.
         val off = PulseScript.text(outputRate = 48_000, microphone = false, micRate = 48_000)
-        assertTrue("module-null-source source_name=mic " in off)
+        // module-null-source takes description=, not source_properties= (which fails to load).
+        assertTrue("load-module module-null-source source_name=mic description=Microphone\n" in off)
         assertTrue("/run/pulse/mic" !in off)
         assertTrue("set-default-source mic" in off)
     }
@@ -26,13 +28,14 @@ class SessionAudioTest {
     @Test
     fun helpersGetSoundMicrophoneAndResampler() {
         assertEquals(
-            listOf("/bin/sh", SessionScript.GUEST_SCRIPT, "1000x1400", "14400", "30", "on", "on", "speex-float-0"),
-            SessionScript.command("1000x1400", 30, sound = true, microphone = true, Resampler.FAST),
+            listOf("/bin/sh", SessionScript.GUEST_SCRIPT, "1000x1400", "14400", "30", "on", "on", "speex-float-0", "on", "on"),
+            SessionScript.command("1000x1400", 30, sound = true, microphone = true, Resampler.FAST, sessionBus = true, camera = true),
         )
         // Without sound there is no PulseAudio, so no microphone either.
         assertEquals(
-            listOf("off", "off", "speex-float-1"),
-            SessionScript.command("1000x1400", 30, sound = false, microphone = true, Resampler.STANDARD).takeLast(3),
+            // PipeWire only with the bus, which the camera's portal needs.
+            listOf("off", "off", "speex-float-1", "off", "off"),
+            SessionScript.command("1000x1400", 30, sound = false, microphone = true, Resampler.STANDARD, sessionBus = false, camera = true).takeLast(5),
         )
     }
 

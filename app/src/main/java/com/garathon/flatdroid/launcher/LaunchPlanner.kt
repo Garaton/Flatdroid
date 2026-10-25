@@ -23,12 +23,16 @@ data class HostDirs(
     val pulseSockets: File?,
     /** Bound at [GuestPaths.FONT_DIRS]. */
     val fontDirs: File,
+    /** Android's fonts, bound at [GuestPaths.HOST_FONTS]; null for none. */
+    val hostFonts: File? = null,
     /** Generated desktop settings (GTK, KDE), bound at [GuestPaths.XDG_CONFIG_DIR]. */
     val desktopConfig: File,
     /** Generated `user-dirs.dirs`, bound into the app's config directories. */
     val userDirs: File,
     /** Shared storage, bound at [GuestPaths.SDCARD]; null for none. */
     val sdcard: File? = null,
+    /** Holds the session bus proxy's socket, bound at [GuestPaths.SESSION_BUS_DIR]; null for no bus. */
+    val sessionBus: File? = null,
 )
 
 /** Per-app choices that change a launch. */
@@ -61,6 +65,7 @@ data class LaunchPlan(
     val flatpakInfo: String?,
     /** Top-level names that are links into /usr (bin, lib, …), as Flatpak makes them. */
     val usrLinks: List<String>,
+    /** Electron or a Chromium browser, started without zypak or cobalt ([Electron]). */
     val isElectron: Boolean,
 )
 
@@ -113,7 +118,7 @@ class LaunchPlanner(
         }?.second?.guestPath
         val ldPaths = extensions.mapNotNull { (base, ext) -> ext.addLdPath?.let { "$base/${ext.guestPath}/$it" } }
 
-        // Electron apps start through zypak, which the launcher skips.
+        // Electron apps start through zypak, and some Chromium browsers through cobalt: both skipped.
         var command = listOf(commandPath)
         var isElectron = false
         val varApp = "${GuestPaths.HOME}/.var/app/$appId"
@@ -124,9 +129,13 @@ class LaunchPlanner(
             dirs.userDirs.path to "$varApp/config/user-dirs.dirs",
             dirs.userDirs.path to "${GuestPaths.HOME}/.config/user-dirs.dirs",
         )
+        dirs.hostFonts?.let { extraBinds += it.path to GuestPaths.HOST_FONTS }
         dirs.sdcard?.let { extraBinds += it.path to GuestPaths.SDCARD }
+        dirs.sessionBus?.let { extraBinds += it.path to GuestPaths.SESSION_BUS_DIR }
         val script = (hostPath(app, commandPath)?.let { Executable.of(it) } as? Executable.Script)?.text
         val electronBinary = script?.let(Electron::zypakTarget)
+        val cobaltBrowser = if (electronBinary != null) null
+            else script?.let { Electron.cobaltTarget(it, appId) { path -> hostPath(app, path)?.isFile == true } }
         if (electronBinary != null) {
             isElectron = true
             val host = hostPath(app, electronBinary) ?: return PlanResult.NoCommand(appId)
@@ -151,6 +160,12 @@ class LaunchPlanner(
             }
             command = listOf(electronBinary) + Electron.BASE_FLAGS +
                 (if (options.newerElectronFlags) Electron.NEWER_FLAGS else emptyList())
+        } else if (cobaltBrowser != null) {
+            isElectron = true
+            val binaryArch = (hostPath(app, cobaltBrowser)?.let(Executable::of) as? Executable.Elf)?.arch
+            if (binaryArch != null && binaryArch != arch) return PlanResult.WrongArchitecture(cobaltBrowser, binaryArch)
+            command = listOf(cobaltBrowser) + Electron.BASE_FLAGS +
+                (if (options.newerElectronFlags) Electron.NEWER_FLAGS else emptyList())
         } else {
             val binaryArch = (hostPath(app, commandPath)?.let(Executable::of) as? Executable.Elf)?.arch
             if (binaryArch != null && binaryArch != arch) return PlanResult.WrongArchitecture(commandPath, binaryArch)
@@ -167,6 +182,7 @@ class LaunchPlanner(
             overrides = options.environment,
             darkTheme = options.darkTheme,
             kdePlatformTheme = DesktopConfig.KDE_PLATFORM_THEMES.any { File(runtime.files, it).exists() },
+            sessionBus = dirs.sessionBus != null,
         )
         val devices = app.metadata.context.devices
         val binds = FlatpakBinds(

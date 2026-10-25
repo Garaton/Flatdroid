@@ -21,6 +21,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.Saver
@@ -30,6 +31,7 @@ import androidx.core.content.ContextCompat
 import com.garathon.flatdroid.alpine.AlpineEnvironment
 import com.garathon.flatdroid.alpine.GuestFiles
 import com.garathon.flatdroid.audio.MicStreamer
+import com.garathon.flatdroid.camera.AndroidCameras
 import com.garathon.flatdroid.flatpak.AppData
 import com.garathon.flatdroid.flatpak.FlatpakTask
 import com.garathon.flatdroid.flatpak.FlatpakTaskService
@@ -61,7 +63,9 @@ import com.garathon.flatdroid.ui.SetupSettingsScreen
 import com.garathon.flatdroid.ui.TerminalScreen
 import com.garathon.flatdroid.ui.SetupScreen
 import com.garathon.flatdroid.ui.theme.FlatdroidTheme
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
@@ -73,13 +77,13 @@ class MainActivity : ComponentActivity() {
     /** A launch waiting for the microphone question ([needsMicrophoneQuestion]). */
     private var microphoneQuestion by mutableStateOf<PendingLaunch?>(null)
 
-    /** Called with Android's answer to the microphone permission request in flight. */
-    private var onMicrophoneResult: ((Boolean) -> Unit)? = null
+    /** Called with Android's answer to the microphone or camera permission request in flight. */
+    private var onPermissionResult: ((Boolean) -> Unit)? = null
 
-    private val microphonePermission =
+    private val permissionRequest =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-            onMicrophoneResult?.invoke(granted)
-            onMicrophoneResult = null
+            onPermissionResult?.invoke(granted)
+            onPermissionResult = null
         }
 
     /**
@@ -218,6 +222,12 @@ class MainActivity : ComponentActivity() {
                     canUninstall = !sessionBusy && !taskRunning,
                     developerOptions = developerOptions,
                     onRequestMicrophone = ::requestMicrophone,
+                    hasCamera = remember { AndroidCameras.present(this) },
+                    // Asks the camera service, so off the main thread; none until it answers.
+                    cameraResolutions = produceState(emptyMap<Int, List<AndroidCameras.Resolution>>()) {
+                        value = withContext(Dispatchers.IO) { AndroidCameras.resolutions(this@MainActivity) }
+                    }.value,
+                    onRequestCamera = ::requestCamera,
                     onSave = { new ->
                         // Keep what the launcher manages: last opened, the Electron flags and /.flatpak-info.
                         store.update { old ->
@@ -336,8 +346,7 @@ class MainActivity : ComponentActivity() {
      */
     private fun needsMicrophoneQuestion(appId: String): Boolean {
         val settings = AppData.settings(this, appId).load()
-        val developerOptions = SetupController.settings(this).load()?.developerOptions == true
-        return settings.microphone && !(settings.alwaysAllowMicrophone && developerOptions) &&
+        return settings.microphone && !settings.alwaysAllowMicrophone &&
             MicStreamer.hasPermission(this) && !SessionService.canAskInNotification(this) &&
             settings.audioAllowed(InstalledApps(this).sockets(appId))
     }
@@ -345,8 +354,14 @@ class MainActivity : ComponentActivity() {
     /** Asks Android for the microphone permission, then calls [onResult] with the answer. */
     private fun requestMicrophone(onResult: (Boolean) -> Unit) {
         if (MicStreamer.hasPermission(this)) return onResult(true)
-        onMicrophoneResult = onResult
-        microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
+        onPermissionResult = onResult
+        permissionRequest.launch(Manifest.permission.RECORD_AUDIO)
+    }
+
+    private fun requestCamera(onResult: (Boolean) -> Unit) {
+        if (AndroidCameras.hasPermission(this)) return onResult(true)
+        onPermissionResult = onResult
+        permissionRequest.launch(Manifest.permission.CAMERA)
     }
 
     private fun openViewer(password: String) {

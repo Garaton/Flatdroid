@@ -7,7 +7,7 @@ import com.garathon.flatdroid.flatpak.FlatpakInstallation
 import com.garathon.flatdroid.flatpak.InstalledApps
 import com.garathon.flatdroid.util.DebugLog
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -15,6 +15,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Sizes measured once and saved, one file per name in [dir], so storage isn't walked again every
@@ -103,8 +105,10 @@ class SizeStore(private val dir: File, private val onMeasured: (name: String, mi
  *
  * A change [forget]s what it changes before it starts, and once done reports it as [changed]
  * (or [changedApps], [changedAll]): the sizes are then measured again in the background, one at
- * a time and without a notification, so a screen showing them only reads files. What a stop cut
- * short is measured at the next start ([measureMissing]) or when shown.
+ * a time, at the lowest priority and without a notification, so a screen showing them only reads
+ * files. What a stop cut short is measured at the next start ([measureMissing]) or when shown.
+ * Between [forgetAll] and the last [changedAll] nothing is measured: those changes (Flatpak tasks, setup,
+ * the terminal) touch everything, so a measurement would be wasted and would slow them down.
  */
 object SavedSizes {
     private const val SHARED = "shared"
@@ -113,7 +117,10 @@ object SavedSizes {
     /** Bumped each time background measuring has caught up, so screens read the sizes again. */
     val updates: StateFlow<Int> = _updates.asStateFlow()
 
-    private val background = CoroutineScope(SupervisorJob() + Dispatchers.IO.limitedParallelism(1))
+    private val background = CoroutineScope(
+        SupervisorJob() + Executors.newSingleThreadExecutor { Thread(it, "SavedSizes").apply { priority = Thread.MIN_PRIORITY; isDaemon = true } }
+            .asCoroutineDispatcher(),
+    )
     /** Names waiting to be measured in the background (not yet started). */
     private val queued = LinkedHashSet<String>()
 
@@ -135,42 +142,60 @@ object SavedSizes {
 
     @Volatile private var store: SizeStore? = null
 
+    /** How many [forgetAll]s have no [changedAll] yet (a task and the terminal may overlap); also ends a measurement under way. */
+    private val changingAll = AtomicInteger()
+    private val stop = { changingAll.get() > 0 }
+
     private fun store(context: Context): SizeStore =
         store ?: synchronized(this) { store ?: SizeStore(File(context.filesDir, "storage-sizes")) { name, millis -> DebugLog.i("Measured $name in $millis ms") }
             .also { store = it } }
 
-    fun app(context: Context, appId: String): App {
+    /** Null while everything is changing ([forgetAll]). */
+    fun app(context: Context, appId: String): App? {
         require(InstalledApps.isValidId(appId))
-        val sizes = store(context).get(appId, setOf("app", "home", "settings")) {
-            val env = AlpineEnvironment.get(context)
-            val l2s = File(env.paths().l2sDir)
-            mapOf(
-                "app" to StorageSizes.following(flatpakFiles(env, appId) + File(AppData.electronDir(context), appId), l2s),
-                "home" to StorageSizes.of(AppData.privateHome(context, appId)),
-                "settings" to AppFiles.dirs(File(AppData.root(context), appId), appId).sumOf(StorageSizes::of) +
-                    StorageSizes.of(AppData.settingsFile(context, appId)),
-            )
-        }
+        val sizes = measuring {
+            store(context).get(appId, setOf("app", "home", "settings")) {
+                val env = AlpineEnvironment.get(context)
+                val l2s = File(env.paths().l2sDir)
+                mapOf(
+                    "app" to StorageSizes.following(flatpakFiles(env, appId) + File(AppData.electronDir(context), appId), l2s, stop),
+                    "home" to StorageSizes.of(AppData.privateHome(context, appId), stop),
+                    "settings" to AppFiles.dirs(File(AppData.root(context), appId), appId).sumOf { StorageSizes.of(it, stop) } +
+                        StorageSizes.of(AppData.settingsFile(context, appId)),
+                )
+            }
+        } ?: return null
         return App(sizes.getValue("app"), sizes.getValue("home"), sizes.getValue("settings"))
     }
 
-    fun shared(context: Context): Shared {
-        val sizes = store(context).get(SHARED, setOf("runtimes", "other")) {
+    /** Null while everything is changing ([forgetAll]). */
+    fun shared(context: Context): Shared? {
+        val sizes = measuring { store(context).get(SHARED, setOf("runtimes", "other")) {
             val env = AlpineEnvironment.get(context)
             val l2s = File(env.paths().l2sDir)
             val apps = FlatpakInstallation(env.flatpakDir, env.arch).appIds()
             val runtimes = StorageSizes.following(
-                File(env.flatpakDir, "runtime").listFiles().orEmpty().filter { dir -> apps.none { dir.name.startsWith("$it.") } }, l2s,
+                File(env.flatpakDir, "runtime").listFiles().orEmpty().filter { dir -> apps.none { dir.name.startsWith("$it.") } }, l2s, stop,
             )
             // As each app's own size counts them, so that the rest is what neither counts.
-            val appFiles = apps.sumOf { id -> StorageSizes.following(flatpakFiles(env, id), l2s) }
+            val appFiles = apps.sumOf { id -> StorageSizes.following(flatpakFiles(env, id), l2s, stop) }
             // Measured per app instead: their data, settings and Electron swaps, and these sizes.
             val perApp = setOf(AppData.root(context), AppData.electronDir(context), AppData.settingsDir(context), File(context.filesDir, "storage-sizes"))
                 .map { it.canonicalPath }
-            val files = context.filesDir.canonicalFile.listFiles().orEmpty().filter { it.canonicalPath !in perApp }.sumOf(StorageSizes::of)
+            val files = context.filesDir.canonicalFile.listFiles().orEmpty().filter { it.canonicalPath !in perApp }.sumOf { StorageSizes.of(it, stop) }
             mapOf("runtimes" to runtimes, "other" to (files - runtimes - appFiles).coerceAtLeast(0))
-        }
+        } } ?: return null
         return Shared(sizes.getValue("runtimes"), sizes.getValue("other"))
+    }
+
+    /** [measure], or null while everything is changing or when that began during it. */
+    private fun <T> measuring(measure: () -> T): T? {
+        if (stop()) return null
+        return try {
+            measure()
+        } catch (_: MeasureStopped) {
+            null
+        }
     }
 
     /** Before anything that changes [appId]'s files. */
@@ -181,8 +206,11 @@ object SavedSizes {
     /** Before anything that changes apps' files, but not Alpine, Flatpak or runtimes. */
     fun forgetApps(context: Context) = store(context).forgetAll(keep = SHARED)
 
-    /** Before anything that may change any of it: Flatpak tasks, setup, the terminal. */
-    fun forgetAll(context: Context) = store(context).forgetAll()
+    /** Before anything that may change any of it: Flatpak tasks, setup, the terminal. Nothing is measured until [changedAll]. */
+    fun forgetAll(context: Context) {
+        changingAll.incrementAndGet()
+        store(context).forgetAll()
+    }
 
     /** After [appId]'s files changed: forgotten, and measured again in the background. */
     fun changed(context: Context, appId: String) {
@@ -198,7 +226,8 @@ object SavedSizes {
 
     /** After a change that may touch any of it: everything forgotten and measured again in the background. */
     fun changedAll(context: Context) {
-        forgetAll(context)
+        store(context).forgetAll()
+        if (changingAll.updateAndGet { maxOf(0, it - 1) } > 0) return
         measureLater(context, appIds(context) + SHARED)
     }
 

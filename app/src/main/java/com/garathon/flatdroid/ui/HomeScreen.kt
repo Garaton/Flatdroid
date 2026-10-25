@@ -76,8 +76,9 @@ fun List<InstalledApp>.forList(query: String, sort: AppSort, runningAppId: Strin
     val byName = compareBy<InstalledApp, String>(String.CASE_INSENSITIVE_ORDER) { it.name }.thenBy { it.id }
     val order = when (sort) {
         AppSort.NAME -> byName
-        // Most recent first; never-opened apps last, by name.
-        AppSort.LAST_OPENED -> compareByDescending<InstalledApp> { it.lastOpened ?: Long.MIN_VALUE }.then(byName)
+        // Most recently opened or installed first, so a new app starts at the top; then by name.
+        AppSort.LAST_OPENED -> compareByDescending<InstalledApp> { maxOf(it.lastOpened ?: Long.MIN_VALUE, it.installed ?: Long.MIN_VALUE) }
+            .then(byName)
     }
     return matching.sortedWith(compareBy<InstalledApp> { it.id != runningAppId }.then(order))
 }
@@ -85,8 +86,8 @@ fun List<InstalledApp>.forList(query: String, sort: AppSort, runningAppId: Strin
 /**
  * The home screen: installed apps with search and sort, a top bar (install, update all, import
  * into the shared home, settings), and below the list, the running session and Flatpak task.
- * Tapping an app launches it; its gear opens its settings. A launched app moves to the top of
- * the list, which scrolls up to it.
+ * Tapping an app launches it; its gear opens its settings. A launched or newly installed app
+ * moves to the top of the list, which scrolls up to it.
  */
 @Composable
 fun HomeScreen(
@@ -111,6 +112,14 @@ fun HomeScreen(
     val listState = rememberLazyListState()
     LaunchedEffect(runningAppId) {
         if (runningAppId != null) listState.animateScrollToItem(0)
+    }
+    // A newly installed app starts at the top of the Last opened order: scroll up to show it.
+    var knownIds by remember { mutableStateOf<Set<String>?>(null) }
+    LaunchedEffect(apps) {
+        val ids = apps?.map { it.id }?.toSet() ?: return@LaunchedEffect
+        val known = knownIds
+        knownIds = ids
+        if (known != null && (ids - known).isNotEmpty()) listState.animateScrollToItem(0)
     }
 
     Column(modifier = modifier.fillMaxSize()) {

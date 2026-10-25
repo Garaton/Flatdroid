@@ -40,12 +40,12 @@ enum class MicAction {
 class MicrophoneSession(
     context: Context,
     private val appId: String,
-    socket: File,
+    pipe: File,
     rate: Int,
     private val alwaysAllowed: Boolean,
     initialAnswer: Boolean? = null,
 ) {
-    private val streamer = MicStreamer(context.applicationContext, socket, rate)
+    private val streamer = MicStreamer(context.applicationContext, pipe, rate)
     private var users = 0
     private var answer: Boolean? = initialAnswer
     private val timer = Timer("microphone-ask", true)
@@ -72,7 +72,7 @@ class MicrophoneSession(
     fun stop() {
         stopped = true
         timer.cancel()
-        streamer.stop()
+        streamer.close()
         SessionController.requestMicrophone(null)
     }
 

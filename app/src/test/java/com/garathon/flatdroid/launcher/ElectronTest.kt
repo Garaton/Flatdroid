@@ -26,6 +26,15 @@ class ElectronTest {
     }
 
     @Test
+    fun findsTheBrowserCobaltRuns() {
+        val script = "#!/usr/bin/bash\ntouch \"\${XDG_CONFIG_HOME}/x\"\nexec cobalt \"\$@\"\n"
+        assertEquals("/app/extra/chrome", Electron.cobaltTarget(script, "com.google.Chrome") { it == "/app/extra/chrome" })
+        assertEquals("/app/extra/edge/edge", Electron.cobaltTarget(script, "com.example.Edge") { it == "/app/extra/edge/edge" })
+        assertNull(Electron.cobaltTarget(script, "com.google.Chrome") { false })
+        assertNull(Electron.cobaltTarget("#!/bin/sh\n# cobalt\nexec /app/bin/real\n", "com.google.Chrome") { true })
+    }
+
+    @Test
     fun readsTheVersionFromTheBinary() {
         val binary = ByteArray(200_000) { 'x'.code.toByte() }
         val ua = "Mozilla/5.0 Chrome/83.0.4103.122 Electron/9.4.4 Safari/537.36".toByteArray()

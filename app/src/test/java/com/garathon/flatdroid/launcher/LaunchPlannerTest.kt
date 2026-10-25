@@ -106,6 +106,28 @@ class LaunchPlannerTest {
     }
 
     @Test
+    fun androidsFontsAreBoundWhereFlatpakPutsTheHosts() {
+        runtimeWithGl()
+        File(inst.app("a.App", metadata = appMetadata("a.App", "a")), "bin").mkdirs()
+        val fonts = tmp.newFolder("fonts")
+        assertEquals(baseExtra("a.App") + (fonts.path to "/run/host/fonts"), Ready(planner.plan("a.App", dirs.copy(hostFonts = fonts))).binds.extra)
+    }
+
+    @Test
+    fun theSessionBusIsBoundWithItsAddress() {
+        inst.runtime("org.kde.Platform", "6.10", "[Runtime]\nname=org.kde.Platform\n")
+        val files = inst.app("org.kde.kmines", metadata = appMetadata("org.kde.kmines", "kmines", "org.kde.Platform/aarch64/6.10"))
+        File(files, "bin").mkdirs()
+        File(files, "bin/kmines").writeBytes(ExecutableTest.elf(0xb7))
+        val bus = tmp.newFolder("bus")
+
+        assertFalse("DBUS_SESSION_BUS_ADDRESS" in Ready(planner.plan("org.kde.kmines", dirs)).environment)
+        val plan = Ready(planner.plan("org.kde.kmines", dirs.copy(sessionBus = bus)))
+        assertEquals(baseExtra("org.kde.kmines") + (bus.path to "/run/flatpak"), plan.binds.extra)
+        assertEquals("unix:path=/run/flatpak/bus", plan.environment["DBUS_SESSION_BUS_ADDRESS"])
+    }
+
+    @Test
     fun missingRuntimeAndCommandAreReported() {
         inst.app("a.App", metadata = appMetadata("a.App", "a"))
         assertEquals(PlanResult.RuntimeMissing("org.freedesktop.Platform/aarch64/26.08"), planner.plan("a.App", dirs))
@@ -156,6 +178,23 @@ class LaunchPlannerTest {
 
         val newer = Ready(planner.plan("md.obsidian.Obsidian", dirs, LaunchOptions(newerElectronFlags = true)))
         assertEquals(listOf("/app/obsidian") + Electron.BASE_FLAGS + Electron.NEWER_FLAGS, newer.command)
+    }
+
+    @Test
+    fun cobaltBrowserRunsWithoutCobalt() {
+        runtimeWithGl()
+        val files = inst.app("com.google.Chrome", metadata = appMetadata("com.google.Chrome", "chrome"))
+        File(files, "bin").mkdirs()
+        File(files, "bin/chrome").writeText("#!/usr/bin/bash\nexec cobalt \"\$@\"\n")
+        File(files, "extra").mkdirs()
+        File(files, "extra/chrome").writeBytes(ExecutableTest.elf(0xb7))
+
+        val plan = Ready(planner.plan("com.google.Chrome", dirs))
+        assertTrue(plan.isElectron)
+        assertEquals(listOf("/app/extra/chrome") + Electron.BASE_FLAGS, plan.command)
+        // Its extra data downloaded for another architecture.
+        File(files, "extra/chrome").writeBytes(ExecutableTest.elf(0x3e))
+        assertEquals(PlanResult.WrongArchitecture("/app/extra/chrome", "x86_64"), planner.plan("com.google.Chrome", dirs))
     }
 
     @Test

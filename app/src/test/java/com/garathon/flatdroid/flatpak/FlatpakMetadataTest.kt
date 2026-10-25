@@ -92,4 +92,36 @@ class FlatpakMetadataTest {
         assertNull(FlatpakRef.parse("a/b"))
         assertNull(FlatpakRef.parse("a/../c"))
     }
+
+    @Test
+    fun readsTheSessionBusPolicy() {
+        val m = FlatpakMetadata.parse(
+            """
+            [Application]
+            name=org.kde.kmines
+
+            [Session Bus Policy]
+            org.kde.StatusNotifierWatcher=talk
+            org.freedesktop.Notifications = talk
+            com.example.Own.*=own
+            """.trimIndent()
+        )
+        assertEquals(
+            mapOf("org.kde.StatusNotifierWatcher" to "talk", "org.freedesktop.Notifications" to "talk", "com.example.Own.*" to "own"),
+            m.sessionBusPolicy,
+        )
+        assertEquals(emptyMap<String, String>(), FlatpakMetadata.parse("[Application]\nname=a.b\n").sessionBusPolicy)
+    }
+
+    @Test
+    fun extraDataRunsWithTheAppsOrExtensionsRuntime() {
+        val app = FlatpakMetadata.parse("[Application]\nname=com.visualstudio.code\nruntime=org.freedesktop.Sdk/aarch64/25.08\n\n[Extra Data]\nname=code.tgz\n")
+        assertEquals(FlatpakRef("org.freedesktop.Sdk", "aarch64", "25.08"), app.extraDataRuntime)
+        val ext = FlatpakMetadata.parse("[Runtime]\nname=org.freedesktop.Platform.openh264\nruntime=org.freedesktop.Platform/aarch64/26.08\n")
+        assertEquals(FlatpakRef("org.freedesktop.Platform", "aarch64", "26.08"), ext.extraDataRuntime)
+        assertNull(FlatpakMetadata.parse("[Runtime]\nname=a.b\nruntime=a.c/x/1\n\n[Extra Data]\nNoRuntime=true\n").extraDataRuntime)
+        // An extension naming no runtime runs with the one it extends.
+        val extension = FlatpakMetadata.parse("[Runtime]\nname=a.b.ext\n\n[ExtensionOf]\nref=runtime/a.b/aarch64/26.08\n")
+        assertEquals(FlatpakRef("a.b", "aarch64", "26.08"), extension.extraDataRuntime)
+    }
 }

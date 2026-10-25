@@ -3,29 +3,48 @@ package com.garathon.flatdroid.flatpak
 /**
  * Follows `flatpak install/update/uninstall -y` output (not on a terminal): first a table of
  * what it will do (` 1.  <ID>  <branch>  <op>  <remote>  <size>`, tab-separated), then lines
- * such as `Installing 2/4… ███  45%  1.2 MB/s` while each one runs.
+ * such as `Installing 2/4… ███  45%  1.2 MB/s` while each one runs (`Installing… ███  45%` when
+ * there is only one).
  */
 class FlatpakProgress {
     /** The operation running: [verb] as flatpak prints it, which of [total], its ref, and its percent. */
-    data class Step(val verb: String, val index: Int, val total: Int, val ref: String?, val percent: Int?)
+    data class Step(val verb: String, val index: Int, val total: Int, val ref: String?, val percent: Int?) {
+        /**
+         * Downloaded; flatpak now writes the files into place (each through proot and
+         * link2symlink, minutes for a large runtime) and prints nothing until the next step.
+         */
+        val deploying: Boolean get() = percent == 100
+    }
 
     private val refs = mutableMapOf<Int, String>()
 
     var current: Step? = null
         private set
 
+    /**
+     * Every step is done ("Changes complete."); flatpak still removes old files and unused
+     * repository objects, printing nothing.
+     */
+    var finishing = false
+        private set
+
     /** Reads one output line; returns true if it was a progress line. */
     fun feed(line: String): Boolean {
+        if (COMPLETE.containsMatchIn(line)) {
+            current = null
+            finishing = true
+            return false
+        }
         TABLE_ROW.find(line)?.let { row ->
             refs[row.groupValues[1].toInt()] = "${row.groupValues[2]} ${row.groupValues[3]}"
             return false
         }
         val progress = PROGRESS.find(line) ?: return false
-        val index = progress.groupValues[2].toInt()
+        val index = progress.groupValues[2].toIntOrNull() ?: 1
         current = Step(
             verb = progress.groupValues[1],
             index = index,
-            total = progress.groupValues[3].toInt(),
+            total = progress.groupValues[3].toIntOrNull() ?: 1,
             ref = refs[index],
             percent = progress.groupValues[4].toIntOrNull()?.coerceIn(0, 100),
         )
@@ -34,7 +53,8 @@ class FlatpakProgress {
 
     companion object {
         private val TABLE_ROW = Regex("""^\s*(\d+)\.\s+([A-Za-z0-9_.-]+)\s+(\S+)\s+[a-z]\b""")
-        private val PROGRESS = Regex("""^(\p{L}+) (\d+)/(\d+)…(?:.*?(\d+)%)?""")
+        private val PROGRESS = Regex("""^(\p{L}+)(?: (\d+)/(\d+))?…(?:.*?(\d+)%)?""")
+        private val COMPLETE = Regex("""^(Changes|Installation|Uninstall) complete\.""")
         /** True if [a] and [b] report the same operation, so [b] can replace [a] in a log. */
         fun sameStep(a: String, b: String): Boolean {
             val x = PROGRESS.find(a) ?: return false
