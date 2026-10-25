@@ -23,7 +23,48 @@ object GuestFiles {
         return usable.joinToString("") { "nameserver $it\n" }
     }
 
+    /**
+     * Flatpak's CLI runs an app's or extension's `/app/bin/apply_extra` through bwrap, which can't
+     * run under proot; this answers that call as done, and Flatdroid runs the script itself
+     * afterwards ([com.garathon.flatdroid.flatpak.ExtraData]). Every other call goes to bwrap.
+     * Flatpak may pass the arguments in a file descriptor (`--args`).
+     */
+    val BWRAP_STAND_IN = """
+        |#!/bin/sh
+        |previous=
+        |for arg in "$@"; do
+        |  [ "${'$'}arg" = /app/bin/apply_extra ] && exit 0
+        |  if [ "${'$'}previous" = --args ] && tr '\0' '\n' < /proc/self/fd/"${'$'}arg" 2>/dev/null | grep -qx /app/bin/apply_extra; then
+        |    exit 0
+        |  fi
+        |  previous=${'$'}arg
+        |done
+        |exec /usr/bin/bwrap "$@"
+        |""".trimMargin()
+
     fun hosts(): String = "127.0.0.1 localhost\n::1 localhost\n"
+
+    /**
+     * Alpine's passwd ([base]) with an entry for [uid] if it has none, home /root: processes that
+     * run as the app's own IDs look themselves up (Openbox crashes without an entry).
+     */
+    fun passwdWith(base: String, uid: Int, gid: Int): String =
+        withEntry(base, uid, "$APP_USER:x:$uid:$gid:Flatdroid:/root:/bin/sh")
+
+    /** Alpine's group ([base]) with an entry for [gid] if it has none. */
+    fun groupWith(base: String, gid: Int): String = withEntry(base, gid, "$APP_USER:x:$gid:")
+
+    private fun withEntry(base: String, id: Int, entry: String): String {
+        val lines = base.lines().filter { it.isNotBlank() }
+        if (lines.any { it.split(':').getOrNull(2) == id.toString() }) return lines.joinToString("\n", postfix = "\n")
+        return (lines + entry).joinToString("\n", postfix = "\n")
+    }
+
+    private const val APP_USER = "flatdroid"
+
+    /** An empty Fontconfig file for [com.garathon.flatdroid.proot.GuestPaths.FONT_DIRS]: no host font directories. */
+    fun fontDirs(): String =
+        "<?xml version=\"1.0\"?>\n<!DOCTYPE fontconfig SYSTEM \"urn:fontconfig:fonts.dtd\">\n<fontconfig>\n</fontconfig>\n"
 
     /** A new random machine-id: 32 lowercase hex digits. */
     fun machineId(random: java.util.Random = java.security.SecureRandom()): String =
@@ -36,12 +77,47 @@ object GuestFiles {
     fun group(gid: Int): String = "root:x:0:\nuser:x:$gid:\n"
 
     /**
-     * Openbox: maximise normal windows and keep their title bars (GTK3/Qt windows need them to
-     * close). Written outside the rootfs at setup, to be bound into Alpine when Openbox starts.
+     * Openbox's whole configuration (a user rc.xml replaces Openbox's defaults, it isn't merged):
+     * normal windows maximised with their title bars kept (GTK3/Qt windows need them to close);
+     * no minimise button, since there is no taskbar to bring a window back; tapping the empty
+     * desktop lists the windows, minimised ones included (apps can still minimise themselves);
+     * close and maximise buttons, moving and resizing. Without [titleBars] windows have no
+     * decorations at all (apps then close through their own menus). Written for every session and
+     * bound into Alpine when Openbox starts.
      */
-    fun openboxRc(): String =
-        "<openbox_config><applications><application class=\"*\" type=\"normal\">" +
-            "<maximized>yes</maximized></application></applications></openbox_config>\n"
+    fun openboxRc(titleBars: Boolean = true): String {
+        fun bind(button: String, event: String, actions: String) =
+            "<mousebind button=\"$button\" action=\"$event\">$actions</mousebind>"
+        val focus = "<action name=\"Focus\"/><action name=\"Raise\"/>"
+        val windowList = "<action name=\"ShowMenu\"><menu>client-list-combined-menu</menu></action>"
+        val resize = listOf("Top", "Bottom", "Left", "Right", "TLCorner", "TRCorner", "BLCorner", "BRCorner")
+            .joinToString("") { "<context name=\"$it\">${bind("Left", "Drag", "<action name=\"Resize\"/>")}</context>" }
+        return """
+            |<?xml version="1.0" encoding="UTF-8"?>
+            |<openbox_config xmlns="http://openbox.org/3.4/rc">
+            |<focus><focusNew>yes</focusNew><followMouse>no</followMouse></focus>
+            |<placement><policy>Smart</policy><center>yes</center></placement>
+            |<theme><titleLayout>NLMC</titleLayout><keepBorder>yes</keepBorder><animateIconify>no</animateIconify></theme>
+            |<desktops><number>1</number></desktops>
+            |<keyboard>
+            |<keybind key="A-F4"><action name="Close"/></keybind>
+            |<keybind key="A-Tab"><action name="NextWindow"/></keybind>
+            |</keyboard>
+            |<mouse>
+            |<dragThreshold>8</dragThreshold>
+            |<doubleClickTime>500</doubleClickTime>
+            |<context name="Frame">${bind("A-Left", "Drag", "<action name=\"Move\"/>")}</context>
+            |$resize
+            |<context name="Titlebar">${bind("Left", "Press", focus)}${bind("Left", "Drag", "<action name=\"Move\"/>")}${bind("Left", "DoubleClick", "<action name=\"ToggleMaximize\"/>")}</context>
+            |<context name="Client">${bind("Left", "Press", focus)}${bind("Middle", "Press", focus)}${bind("Right", "Press", focus)}</context>
+            |<context name="Close">${bind("Left", "Click", "<action name=\"Close\"/>")}</context>
+            |<context name="Maximize">${bind("Left", "Click", "<action name=\"ToggleMaximize\"/>")}</context>
+            |<context name="Root">${bind("Left", "Press", windowList)}${bind("Right", "Press", windowList)}</context>
+            |</mouse>
+            |<applications><application class="*" type="normal"><maximized>yes</maximized>${if (titleBars) "" else "<decor>no</decor>"}</application></applications>
+            |</openbox_config>
+            |""".trimMargin()
+    }
 
     /**
      * Flatpak's `languages` value: the device's languages (BCP 47 tags, most preferred first)

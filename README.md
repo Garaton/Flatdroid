@@ -17,7 +17,7 @@ This is an almost entirely vibe-coded app in order to train my agentic coding sk
 - [Building](#building)
 - [Methodology](#methodology)
 - [Security](#security)
-- [Acknowledgements](#acknowledgements)
+- [Acknowledgments](#acknowledgments)
 
 ## Overview
 
@@ -30,15 +30,47 @@ The app uses `Documents/Flatdroid` as its home directory, any files it creates a
 - Version and Architecture: Android 7+ (minSdk 24), arm64-v8a or x86_64.
 - Internet: For initial setup, and Flatpak downloading.
 - Storage Space: ~400 MB for initial required packages, and 0.4-1 GB per Flatpak runtime.
-- VNC Viewer: AVNC, bVNC, etc.
+- VNC Viewer App: AVNC, bVNC, etc.
 
 ## Installation
 
-Placeholder to be made when building is done
+Placeholder to be made when hardening milestone is done, with apk download information, and setup option information
 
 ## Features
 
 Placeholder
+
+### Placeholder more sub-sections
+
+### Export/Import Flatdroid Data
+
+### flatdroid-sync
+
+`tools/flatdroid-sync` is a shell utility that can transfer Flatpak settings between your PC and Flatdroid. It works by taking a Flatdroid compliant zip and pushing it's correlated Flatpak settings to your PC, or taking your PC's Flatpak settings and forming them into Flatdroid compliant zips.
+
+Example Usage:
+```
+# Imports the individual app settings the specified app
+flatdroid-sync -i "UnofficialHomestuckCollection_settings.zip"
+
+# Imports while taking a backup of app current settings
+flatdroid-sync -b backup_hs.zip -i "UnofficialHomestuckCollection_settings.zip"
+
+# Imports all app settings found within this zip that are tracked by flatpak on
+# this system, whilst backuping up the current settings
+flatdroid-sync -b -i "Flatdroid Flatpak settings 2026-10-24 22-34.zip"
+
+# Exports all Flatpak settings to the specified zip
+flatdroid-sync -o all_settings.zip -x
+
+# Exports the Flatpak settings for org.ex.app1 and com.ex.app2
+flatdroid-sync -o app1_app2_settings.zip -x org.ex.app1 com.ex.app2
+
+# Exports the Flatpak settings for only com.example.flat
+flatdroid-sync -x com.example.flat
+```
+
+Dependencies: `zip`, `unzip`.
 
 ## Building
 
@@ -46,6 +78,7 @@ Placeholder
 - Clone the repository: `git clone https://github.com/Garaton/flatdroid.git`.
 - Build: In the base directory: `./gradlew assemble[architecture]["Release" or "Debug"]`.
   - ex: `./gradlew assembleArm64Debug`
+  - Built APKs are found in `app/build/outputs/apk`.
 - Architectures: Arm64, X86_64, Universal (only 64-bit systems are supported).
 
 ## Methodology
@@ -82,8 +115,9 @@ Hardening:
 - Every Flatpak launch runs with a seccomp filter and non-dumpable proot. This prevents Flatpaks from reaching the extent of Flatdroid's permissions (a process only has access to what is bound to proot).
 - Different "Home Modes" to limit accessible files even more.
 - Per-Flatpak permissions, with the ability to also disable permissions.
+- Other miscellaneous low cost hardening.
 
-## Acknowledgements
+## Acknowledgments
 
 Flatdroid builds on and uses these projects:
 
@@ -97,6 +131,7 @@ Flatdroid builds on and uses these projects:
 - [PulseAudio](https://www.freedesktop.org/wiki/Software/PulseAudio/): LGPL-2.1
 
 ## License
+
 Licensed under the GNU General Public License v3.0 or later (GPL-3.0-or-later). See LICENSE.
 
 ## DISCLAIMER

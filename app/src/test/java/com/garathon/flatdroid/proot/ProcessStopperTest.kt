@@ -42,7 +42,7 @@ class ProcessStopperTest {
         val (process, pid) = start("sleep 30; true")
         val child = ProcessStopper(HostSignals).descendants(pid).single()
         val started = System.nanoTime()
-        ProcessStopper(HostSignals, graceMillis = 3_000).stop(process, pid)
+        assertFalse(ProcessStopper(HostSignals, interruptGraceMillis = 3_000, graceMillis = 3_000).stop(process, pid))
         assertTrue(ProcessStopper.waitForExit(process, 0))
         assertFalse(alive(child))
         assertTrue(System.nanoTime() - started < 2_000_000_000) // no need for the later stages
@@ -52,7 +52,8 @@ class ProcessStopperTest {
     fun quitStopsAParentThatIgnoresInterrupts() {
         // Like proot: the parent ignores SIGINT; its child (inheriting that) does too.
         val (process, pid) = start("trap '' INT; sleep 30; true")
-        ProcessStopper(HostSignals, graceMillis = 500).stop(process, pid)
+        // Killed, which the caller is told: link2symlink's counts may be off.
+        assertTrue(ProcessStopper(HostSignals, interruptGraceMillis = 500, graceMillis = 500).stop(process, pid))
         assertTrue(ProcessStopper.waitForExit(process, 0))
     }
 
@@ -60,10 +61,21 @@ class ProcessStopperTest {
     fun killIsTheLastResortAndTakesTheChildrenToo() {
         val (process, pid) = start("trap '' INT QUIT; sleep 30; true")
         val child = ProcessStopper(HostSignals).descendants(pid).single()
-        ProcessStopper(HostSignals, graceMillis = 500).stop(process, pid)
+        ProcessStopper(HostSignals, interruptGraceMillis = 500, graceMillis = 500).stop(process, pid)
         assertTrue(ProcessStopper.waitForExit(process, 0))
         Thread.sleep(200)
         assertFalse(alive(child))
+    }
+
+    @Test
+    fun interruptAloneNeverEscalatesAndKillThenStopsIt() {
+        // The terminal's ✕: the first press only interrupts, the second kills.
+        val (process, pid) = start("trap '' INT; sleep 30; true")
+        val stopper = ProcessStopper(HostSignals, graceMillis = 500)
+        stopper.interrupt(pid)
+        assertFalse(ProcessStopper.waitForExit(process, 1_500))
+        stopper.kill(process, pid)
+        assertTrue(ProcessStopper.waitForExit(process, 0))
     }
 
     @Test
@@ -71,5 +83,21 @@ class ProcessStopperTest {
         val process = ProcessBuilder("/bin/true").start()
         assertEquals(true, ProcessStopper.pidOf(process)?.let { it > 0 })
         process.waitFor()
+    }
+
+    @Test
+    fun descendantsIncludeWhatProotTracesWhateverTheirParent() {
+        val proc = kotlin.io.path.createTempDirectory("proc").toFile()
+        fun process(pid: Int, parent: Int, tracer: Int) =
+            File(proc, "$pid").apply { mkdirs() }.resolve("status").writeText("Name:\tx\nPPid:\t$parent\nTracerPid:\t$tracer\n")
+        process(50, 1, 0)      // proot
+        process(101, 50, 50)   // the app
+        process(102, 1, 50)    // gone into the background: init's child, still traced
+        process(103, 102, 50)  // its child
+        process(104, 1, 0)     // unrelated
+        process(105, 1, 60)    // traced by another proot
+        val found = ProcessStopper(HostSignals, procDir = proc).descendants(50)
+        assertEquals(setOf(101, 102, 103), found.toSet())
+        proc.deleteRecursively()
     }
 }

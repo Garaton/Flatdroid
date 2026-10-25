@@ -3,6 +3,7 @@ package com.garathon.flatdroid.flatpak
 import android.content.Context
 import android.os.Process
 import android.system.Os
+import com.garathon.flatdroid.settings.AppSettingsStore
 import java.io.File
 
 /**
@@ -12,14 +13,19 @@ import java.io.File
  */
 object AppData {
     /**
-     * Settings and data: `files/appdata/<ID>/`, to be bound over the app's .config, .local and
-     * .var/app/<ID>. Kept by a reset that keeps Flatpaks, deleted by one that wipes everything.
+     * Settings and data: `files/appdata/<ID>/`, bound over the app's .config, .local, .pki and
+     * .var/app/<ID> (whose config and data are also /var/config and /var/data), and its private
+     * home (`home`, used in Private Home mode). Kept by a reset that keeps
+     * Flatpaks, deleted by one that wipes everything.
      */
     fun root(context: Context): File = File(context.filesDir.canonicalFile, "appdata")
 
+    /** The app's private home (Private Home mode), shown in the Files app (see HomesProvider). */
+    fun privateHome(context: Context, appId: String): File = File(root(context), "$appId/home")
+
     /**
-     * Caches: `cache/appcache/<ID>/`, to be bound over the app's .cache and its XDG_CACHE_HOME
-     * (.var/app/<ID>/cache). Deleted by every reset.
+     * Caches: `cache/appcache/<ID>/`, bound over the app's .cache, its XDG_CACHE_HOME
+     * (.var/app/<ID>/cache) and /var/cache, with /var/tmp in it. Deleted by every reset.
      */
     fun cacheRoot(context: Context): File = File(context.cacheDir.canonicalFile, "appcache")
 
@@ -27,4 +33,31 @@ object AppData {
     fun launcherDir(context: Context): File = File(context.filesDir.canonicalFile, "launcher")
 
     fun launcherFiles(context: Context) = LauncherFiles(File(launcherDir(context), "etc"), Process.myUid(), Os.getgid())
+
+    /**
+     * Flatdroid's own per-app settings (`files/appsettings/<ID>.properties`). Not in [root]: the
+     * app can write there, and these choose how it is launched.
+     */
+    fun settingsDir(context: Context): File = File(context.filesDir.canonicalFile, "appsettings")
+
+    fun settingsFile(context: Context, appId: String): File = File(settingsDir(context), "$appId.properties")
+
+    fun settings(context: Context, appId: String) = AppSettingsStore(settingsFile(context, appId))
+
+    /** Electron builds prepared for apps that ship another architecture's (`files/electron/<ID>`). */
+    fun electronDir(context: Context): File = File(context.filesDir.canonicalFile, "electron")
+
+    /** Rebuilt for every launch, so they live in the cache: each app's root and private /tmp. */
+    fun rootsDir(context: Context): File = File(context.cacheDir.canonicalFile, "roots")
+    fun appTmpDir(context: Context): File = File(context.cacheDir.canonicalFile, "apptmp")
+
+    /**
+     * Present while an update, uninstall or repair runs; removed when it ends. Still there at the
+     * next start, it means the process was killed in the middle (a force-stop), so the repository
+     * is cleaned up before anything else (see FlatpakTask.Repair).
+     */
+    fun taskMarker(context: Context): File = File(context.filesDir.canonicalFile, "flatpak-task-running")
+
+    /** The running session's sockets, VNC password file and generated /etc files. */
+    fun sessionDir(context: Context): File = File(context.cacheDir.canonicalFile, "session")
 }

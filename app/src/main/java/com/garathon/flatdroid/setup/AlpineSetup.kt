@@ -1,18 +1,21 @@
 package com.garathon.flatdroid.setup
 
+import android.content.Context
 import android.os.StatFs
 import com.garathon.flatdroid.BuildConfig
+import com.garathon.flatdroid.R
 import com.garathon.flatdroid.alpine.AlpineEnvironment
-import com.garathon.flatdroid.alpine.GuestFiles
 import com.garathon.flatdroid.flatpak.FlatpakCommands
 import com.garathon.flatdroid.flatpak.LauncherFiles
 import com.garathon.flatdroid.proot.ProcessResult
-import com.garathon.flatdroid.util.writeTextAtomically
+import com.garathon.flatdroid.settings.UserSettings
 import java.io.File
 import java.io.IOException
 
 /** What each [SetupStep] does in Alpine. */
 class AlpineSetup(
+    /** For the user-facing texts. */
+    private val context: Context,
     private val env: AlpineEnvironment,
     private val launcherFiles: LauncherFiles,
 ) {
@@ -21,6 +24,7 @@ class AlpineSetup(
         SetupStep.PACKAGES -> packages(reporter)
         SetupStep.FLATHUB -> flathub(reporter)
         SetupStep.CONFIG_FILES -> configFiles()
+        SetupStep.SETTINGS -> applySettings(reporter)
     }
 
     private fun rootfs(reporter: SetupReporter) {
@@ -39,8 +43,8 @@ class AlpineSetup(
             cacheFile = File(env.cacheDir, "alpine-minirootfs-$version-$arch.tar.gz"),
         ) { done, total ->
             val fraction = if (total > 0) done.toFloat() / total else null
-            reporter.progress(fraction, "${mib(done)} / ${if (total > 0) mib(total) else "?"} MiB")
-            if (done == total) reporter.progress(null, "Checking and extracting")
+            reporter.progress(fraction, context.getString(R.string.setup_progress_mib, mib(done), if (total > 0) mib(total) else "?"))
+            if (done == total) reporter.progress(null, context.getString(R.string.setup_progress_extracting))
         }
         env.installer.install(source)
         reporter.log("Extracted Alpine $version ($arch)")
@@ -49,16 +53,16 @@ class AlpineSetup(
 
     /** Fails early, with proot's own output, on a device where proot can't run Alpine at all. */
     private fun checkProot(reporter: SetupReporter) {
-        reporter.progress(null, "Checking that proot runs")
+        reporter.progress(null, context.getString(R.string.setup_progress_proot))
         val result = run(listOf("/bin/true"), reporter)
-        if (result.exitCode != 0) throw IOException("proot can't run Alpine on this device: ${lastLine(result)}")
+        if (result.exitCode != 0) throw IOException(context.getString(R.string.setup_error_proot, lastLine(result)))
     }
 
     /** Setup's downloads and installs all go to this app's internal storage (files and cache). */
     private fun requireSpace(bytes: Long) {
         val free = StatFs(env.cacheDir.path).availableBytes
         if (free < bytes) {
-            throw IOException("Not enough free storage: ${free shr 20} MiB free, about ${bytes shr 20} MiB needed")
+            throw IOException(context.getString(R.string.setup_error_space, free shr 20, bytes shr 20))
         }
     }
 
@@ -68,25 +72,25 @@ class AlpineSetup(
         val cache = File(env.cacheDir, "apk-cache").apply { mkdirs() }
         // Upgrade the minirootfs's own packages first: `apk add` alone only upgrades what the new
         // packages require, so base packages would miss fixes released after the minirootfs.
-        reporter.progress(null, "Upgrading Alpine")
+        reporter.progress(null, context.getString(R.string.setup_progress_upgrade))
         apk(listOf("upgrade"), cache, reporter)
-        reporter.progress(null, "Installing packages")
+        reporter.progress(null, context.getString(R.string.setup_progress_packages))
         var summary = apk(listOf("add") + PACKAGES, cache, reporter)
         // apk ends with "OK: …" or "N errors; …". The count is kept in apk's database, so a later
         // run still reports packages whose install scripts failed; `apk fix` runs those again
         // (verify that it re-runs triggers too).
         if (!summary.ok) {
-            reporter.progress(null, "Running failed package scripts again")
+            reporter.progress(null, context.getString(R.string.setup_progress_fix))
             summary = apk(listOf("fix"), cache, reporter)
         }
         if (!summary.ok) {
             val failed = summary.errors.ifEmpty { listOf(summary.line ?: "no summary line") }
-            throw IOException("Package scripts failed:\n${failed.joinToString("\n")}")
+            throw IOException(context.getString(R.string.setup_error_scripts, failed.joinToString("\n")))
         }
         val check = run(listOf("/sbin/apk", "info", "-e") + PACKAGES, reporter)
         if (check.exitCode != 0) {
             val installed = check.output.lines().filter { it.isNotBlank() }.toSet()
-            throw IOException("Packages not installed: ${PACKAGES.filter { it !in installed }.joinToString(" ")}")
+            throw IOException(context.getString(R.string.setup_error_packages, PACKAGES.filter { it !in installed }.joinToString(" ")))
         }
         AndroidTarFs.deleteTree(cache)
     }
@@ -95,7 +99,7 @@ class AlpineSetup(
     private fun apk(args: List<String>, cache: File, reporter: SetupReporter): ApkSummary {
         val output = mutableListOf<String>()
         run(
-            listOf("/sbin/apk") + args + listOf("--no-progress", "--cache-dir", APK_CACHE),
+            apkCommand(args),
             reporter,
             timeoutSeconds = 60 * 60,
             extraBinds = listOf(cache.path to APK_CACHE),
@@ -117,25 +121,34 @@ class AlpineSetup(
         // deleted, before a retry and when giving up.
         val key = File(env.installer.rootfs, FlatpakCommands.FLATHUB_KEY)
         for (attempt in 1..REMOTE_ADD_ATTEMPTS) {
-            reporter.progress(null, if (attempt == 1) "Adding Flathub" else "Adding Flathub (attempt $attempt of $REMOTE_ADD_ATTEMPTS)")
+            reporter.progress(
+                null,
+                if (attempt == 1) context.getString(R.string.setup_progress_flathub)
+                else context.getString(R.string.setup_progress_flathub_retry, attempt, REMOTE_ADD_ATTEMPTS),
+            )
             val result = run(FlatpakCommands.addFlathub, reporter, 5 * 60)
             if (result.exitCode == 0 && key.isFile) break
             reporter.log("Flathub was not added with its signing key (exit ${result.exitCode})")
             run(FlatpakCommands.deleteFlathub, reporter)
             if (attempt == REMOTE_ADD_ATTEMPTS) {
-                throw IOException("Could not add Flathub with its signing key: ${lastLine(result)}")
+                throw IOException(context.getString(R.string.setup_error_flathub, lastLine(result)))
             }
             Thread.sleep(RETRY_DELAY_MS * attempt)
         }
     }
 
-    /**
-     * Files Flatdroid generates once, outside the rootfs: the Openbox config (to be bound into
-     * Alpine when Openbox runs) and the /etc files for Flatpak roots.
-     */
+    /** Files Flatdroid generates outside the rootfs: the /etc files for Flatpak roots. */
     private fun configFiles() {
         launcherFiles.write()
-        env.openboxConfig.writeTextAtomically(GuestFiles.openboxRc())
+    }
+
+    /** The settings the user chose before setup (Settings applies later changes itself). */
+    private fun applySettings(reporter: SetupReporter) {
+        val settings = SetupController.settings(context).load() ?: throw IOException(context.getString(R.string.setup_error_no_settings))
+        for (command in settings.commands()) {
+            val result = run(command, reporter, UserSettings.APPLY_TIMEOUT_SECONDS)
+            if (result.exitCode != 0) throw IOException(lastLine(result).ifEmpty { "exit ${result.exitCode}" })
+        }
     }
 
     private fun run(
@@ -150,7 +163,7 @@ class AlpineSetup(
             reporter.log(line)
             onLine(line)
         }
-        if (result.timedOut) throw IOException("Timed out: ${command.joinToString(" ")}")
+        if (result.timedOut) throw IOException(context.getString(R.string.setup_error_timeout, command.joinToString(" ")))
         return result
     }
 
@@ -159,9 +172,24 @@ class AlpineSetup(
     private fun mib(bytes: Long) = "%.1f".format(bytes / 1048576.0)
 
     companion object {
-        /** Alpine's tigervnc stays until our own Xvnc build replaces it. */
-        val PACKAGES = listOf("flatpak", "tigervnc", "openbox", "pulseaudio", "ca-certificates")
-        private const val APK_CACHE = "/var/cache/apk"
+        /**
+         * Alpine's tigervnc stays until our own Xvnc build replaces it. Openbox needs a font: without
+         * one its title bars collapse to a few pixels. ostree repairs the Flatpak repository after
+         * an interrupted removal (FlatpakTaskService). pulseaudio-utils has `pactl`, which tells
+         * when an app records (SessionScript). dbus and xdg-dbus-proxy give apps their session bus
+         * (SessionBus); PipeWire, WirePlumber, the portal and GStreamer's PipeWire elements carry
+         * the camera (gst-plugins-good to split its JPEG frames), and pipewire-tools tells when an app uses it.
+         */
+        val PACKAGES = listOf(
+            "flatpak", "ostree", "tigervnc", "openbox", "font-cantarell", "pulseaudio", "pulseaudio-utils", "ca-certificates",
+            "dbus", "xdg-dbus-proxy", "pipewire", "wireplumber", "xdg-desktop-portal", "gst-plugin-pipewire", "gstreamer-tools", "gst-plugins-good",
+            "pipewire-tools",
+        )
+        /** Where apk's package cache is bound: a directory in Flatdroid's cache, deleted afterwards. */
+        const val APK_CACHE = "/var/cache/apk"
+
+        /** An apk command with [args], its cache at [APK_CACHE], without progress bars. */
+        fun apkCommand(args: List<String>) = listOf("/sbin/apk") + args + listOf("--no-progress", "--cache-dir", APK_CACHE)
         /** Free space setup needs: the minirootfs, and the package cache plus installed packages. */
         private const val ROOTFS_BYTES = 20L shl 20
         private const val PACKAGES_BYTES = 600L shl 20

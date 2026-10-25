@@ -64,10 +64,10 @@ class SetupRunnerTest {
     fun stateRoundTrips() {
         val store = store()
         assertEquals(SetupState(), store.load())
-        val state = SetupState(setOf(SetupStep.ROOTFS, SetupStep.FLATHUB), settingsApplied = true)
+        val state = SetupState(setOf(SetupStep.ROOTFS, SetupStep.FLATHUB), settingsChosen = true)
         store.save(state)
         assertEquals(state, store.load())
-        assertFalse(SetupState().settingsApplied)
+        assertFalse(SetupState().settingsChosen)
         assertEquals(SetupStep.PACKAGES, state.next)
     }
 

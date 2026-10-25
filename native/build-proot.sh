@@ -5,12 +5,12 @@
 #   build-proot.sh <abi> <ndk dir> <work dir> <output dir>
 #
 # abi: arm64-v8a or x86_64. Outputs <output dir>/libproot.so and libproot-loader.so.
-# Host needs: sh, make, git, curl, sha256sum, python3 (talloc's waf), gawk and readelf
+# Host needs: sh, make, git, curl, sha256sum, gawk and readelf
 # (proot's loader-info.awk on aarch64).
 set -eu
 
 PROOT_REPO=https://github.com/termux/proot.git
-PROOT_COMMIT=a179d3e8a4e045aaa1fb8cc3284f23509d96d353 # v5.1.107.96
+PROOT_COMMIT=4a27ca61ff7a800cdcac3bc616929bba7a484c74 # v5.1.107.97
 TALLOC_VERSION=2.5.0
 TALLOC_SHA256=912afa237510ae542a7733998eb18a12bcda35ab6729c8e2ddb43e8d0ebab007
 API=24
@@ -32,7 +32,7 @@ esac
 TC=$NDK/toolchains/llvm/prebuilt/linux-x86_64
 [ -x "$TC/bin/clang" ] || { echo "NDK toolchain not found in $TC" >&2; exit 1; }
 CC="$TC/bin/clang --target=$TRIPLE$API"
-for tool in make git curl sha256sum python3 gawk readelf; do
+for tool in make git curl sha256sum gawk readelf; do
     command -v $tool >/dev/null || { echo "missing host tool: $tool" >&2; exit 1; }
 done
 
@@ -46,16 +46,14 @@ mkdir -p "$WORK/bin" "$OUT"
 ln -s "$(command -v gawk)" "$WORK/bin/awk"
 PATH=$WORK/bin:$PATH
 
-# ---- talloc: waf only configures (cross answers checked in); sources compiled directly
+# ---- talloc
 cd "$WORK"
 curl -fsSL -o talloc.tar.gz "https://www.samba.org/ftp/talloc/talloc-$TALLOC_VERSION.tar.gz"
 echo "$TALLOC_SHA256  talloc.tar.gz" | sha256sum -c -
 tar xzf talloc.tar.gz
 T=$WORK/talloc-$TALLOC_VERSION
-cp "$HERE/talloc-cross-answers.txt" "$WORK/talloc-answers.txt"
-(cd "$T" && CC="$CC" CFLAGS="$HARDEN_CFLAGS" ./configure --cross-compile \
-    --cross-answers="$WORK/talloc-answers.txt" --disable-python >"$WORK/talloc-configure.log" 2>&1) \
-    || { tail -20 "$WORK/talloc-configure.log"; exit 1; }
+mkdir -p "$T/bin/default"
+cp "$HERE/talloc-config.h" "$T/bin/default/config.h"
 mkdir -p "$WORK/talloc/lib" "$WORK/talloc/include"
 for f in talloc.c lib/replace/replace.c; do
     $CC $HARDEN_CFLAGS -D__STDC_WANT_LIB_EXT1__=1 -I"$T/bin/default" -I"$T/lib/replace" -I"$T" -c "$T/$f" \

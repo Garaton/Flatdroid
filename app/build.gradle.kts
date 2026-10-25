@@ -24,7 +24,7 @@ android {
         minSdk = 24
         targetSdk = 35
         versionCode = 1
-        versionName = "0.1"
+        versionName = "0.5.5"
 
         buildConfigField("String", "ALPINE_BRANCH", "\"${alpine.getProperty("branch")}\"")
         buildConfigField("String", "ALPINE_VERSION", "\"${alpine.getProperty("version")}\"")
@@ -96,7 +96,7 @@ android {
 abstract class BuildProotTask @Inject constructor(private val exec: ExecOperations) : DefaultTask() {
     @get:Input abstract val abi: Property<String>
     @get:InputFile abstract val script: RegularFileProperty
-    @get:InputFile abstract val crossAnswers: RegularFileProperty
+    @get:InputFile abstract val tallocConfig: RegularFileProperty
     @get:InputDirectory abstract val patches: DirectoryProperty
     @get:Internal abstract val ndkDirectory: DirectoryProperty
     @get:Input val ndkPath: Provider<String> get() = ndkDirectory.map { it.asFile.absolutePath }
@@ -119,7 +119,7 @@ val prootTasks = architectures.keys.associateWith { abi ->
     tasks.register<BuildProotTask>("buildProot_$abi") {
         this.abi = abi
         script = rootProject.file("native/build-proot.sh")
-        crossAnswers = rootProject.file("native/talloc-cross-answers.txt")
+        tallocConfig = rootProject.file("native/talloc-config.h")
         patches = rootProject.layout.projectDirectory.dir("native/patches")
         ndkDirectory = androidComponents.sdkComponents.ndkDirectory
         workDirectory = layout.buildDirectory.dir("native-work")
@@ -144,6 +144,11 @@ dependencies {
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.compose.material.icons.core)
+    // Icons the core set lacks (import). Large; only the icons used remain once release builds shrink code.
+    implementation(libs.androidx.compose.material.icons.extended)
+    // App icons that Flatpaks export only as SVG.
+    implementation(libs.androidsvg)
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)

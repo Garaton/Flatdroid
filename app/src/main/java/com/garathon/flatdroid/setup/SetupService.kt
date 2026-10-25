@@ -17,6 +17,7 @@ import com.garathon.flatdroid.MainActivity
 import com.garathon.flatdroid.R
 import com.garathon.flatdroid.alpine.AlpineEnvironment
 import com.garathon.flatdroid.flatpak.AppData
+import com.garathon.flatdroid.storage.SavedSizes
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -65,7 +66,8 @@ class SetupService : Service() {
         val resetOnly = intent?.action == ACTION_RESET
         job = scope.launch {
             try {
-                val env = AlpineEnvironment(applicationContext)
+                SavedSizes.forgetAll(applicationContext)
+                val env = AlpineEnvironment.get(applicationContext)
                 val reset = SetupController.reset(applicationContext, env)
                 if (reset.isPending()) {
                     SetupController.reporter.progress(null, getString(R.string.reset_running))
@@ -74,14 +76,18 @@ class SetupService : Service() {
                     SetupController.reporter.log(getString(R.string.reset_done))
                 }
                 if (!resetOnly) {
+                    // Setup is started from the settings screen, so they are chosen by now; recorded here,
+                    // after any reset, which clears the record.
+                    SetupController.settingsChosen(applicationContext)
                     val store = SetupController.store(applicationContext)
-                    val setup = AlpineSetup(env, AppData.launcherFiles(applicationContext))
+                    val setup = AlpineSetup(applicationContext, env, AppData.launcherFiles(applicationContext))
                     runInterruptible { SetupRunner(store, setup::perform).run(SetupController.reporter) }
                 }
             } catch (e: Exception) {
                 if (e !is CancellationException) SetupController.error(e.message ?: e.toString())
             } finally {
                 withContext(NonCancellable) { progress.cancelAndJoin() }
+                SavedSizes.changedAll(applicationContext)
                 SetupController.end()
                 val ui = SetupController.state.value
                 if (!resetOnly && (ui.isComplete || ui.failed != null)) {
@@ -95,7 +101,7 @@ class SetupService : Service() {
 
     /** Android 15 limits dataSync services to 6 hours a day. */
     override fun onTimeout(startId: Int, fgsType: Int) {
-        SetupController.reporter.log("Android stopped the setup service (time limit); open Flatdroid to resume")
+        SetupController.reporter.log(getString(R.string.setup_time_limit))
         stopSelf()
     }
 
@@ -176,8 +182,8 @@ class SetupService : Service() {
         }
 
         /** Requests a reset of the Alpine environment and carries it out; setup isn't started. */
-        fun reset(context: Context, keepFlatpaks: Boolean) {
-            SetupController.reset(context).request(keepFlatpaks)
+        fun reset(context: Context, mode: ResetMode) {
+            SetupController.reset(context).request(mode)
             SetupController.refresh(context)
             ContextCompat.startForegroundService(
                 context, Intent(context, SetupService::class.java).setAction(ACTION_RESET),

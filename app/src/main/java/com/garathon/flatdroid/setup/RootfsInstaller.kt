@@ -53,6 +53,9 @@ class RootfsInstaller(alpineDir: File, private val workDir: File, private val fs
         }
         File(partial, ".l2s").mkdirs()
         File(partial, MARKER).writeText(source.version + "\n")
+        // Extracted in the cache, so it has the cache group, and its setgid directories would give
+        // that group to everything made in them later (.l2s holds every Flatpak's files).
+        fs.useOwnGroupTree(partial)
         rootfs.parentFile?.mkdirs()
         move(partial, rootfs)
         fs.deleteTree(keptDir)

@@ -1,18 +1,24 @@
 package com.garathon.flatdroid.ui
 
+import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
-import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -29,19 +35,21 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.garathon.flatdroid.R
+import com.garathon.flatdroid.setup.ResetMode
 import com.garathon.flatdroid.setup.SetupStep
 import com.garathon.flatdroid.setup.SetupUi
 import com.garathon.flatdroid.ui.theme.FlatdroidTheme
 
 /**
- * First-run setup, the same for everyone: the steps and their state, progress of the current one,
- * recent output, and Start/Resume/Retry. The user's choices come afterwards, on the settings screen.
+ * First-run setup, the same for everyone: the steps with their state and the current one's
+ * progress, recent output, and Start/Resume/Retry. The user's choices come before, on the setup
+ * settings screen.
  */
 @Composable
 fun SetupScreen(
     ui: SetupUi,
     onStart: () -> Unit,
-    onReset: (keepFlatpaks: Boolean) -> Unit,
+    onReset: (ResetMode) -> Unit,
     modifier: Modifier = Modifier,
     /** The command field, for looking into a failed or interrupted setup; null hides it. */
     command: CommandState? = null,
@@ -64,14 +72,12 @@ fun SetupScreen(
 
         for (step in SetupStep.entries) StepRow(step, ui)
 
-        if (ui.running) {
-            val fraction = ui.fraction
-            if (fraction != null) {
-                LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth())
-            } else {
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        // Work outside the steps: finishing a reset.
+        if (ui.running && ui.current == null && ui.detail.isNotEmpty()) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                StepMark { CircularProgressIndicator(Modifier.size(PROGRESS_SIZE), strokeWidth = PROGRESS_STROKE) }
+                Text(ui.detail)
             }
-            Text(ui.detail, style = MaterialTheme.typography.bodySmall)
         }
         ui.error?.let {
             SelectionContainer {
@@ -120,18 +126,54 @@ fun SetupScreen(
 
 private val OUTPUT_HEIGHT = 400.dp
 
+private val MARK_SIZE = 24.dp
+/** The circle inside a 24 dp check-circle icon, so empty, running and done line up. */
+private val PROGRESS_SIZE = 20.dp
+private val PROGRESS_STROKE = 3.dp
+
+/**
+ * A step and its state: an empty ring before it runs; while it runs, a ring filling with its
+ * progress (a spinner when the step can't tell) and its detail below; a check once done; a
+ * warning sign when it failed.
+ */
 @Composable
 private fun StepRow(step: SetupStep, ui: SetupUi) {
-    val mark = when {
-        step in ui.completed -> "✓"
-        step == ui.failed -> "✗"
-        step == ui.current -> "…"
-        else -> "·"
+    val current = step == ui.current
+    val state = when {
+        step in ui.completed -> StepState.DONE
+        step == ui.failed -> StepState.FAILED
+        current -> StepState.RUNNING
+        else -> StepState.WAITING
     }
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(mark, modifier = Modifier.width(24.dp))
-        Text(stringResource(step.title))
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        // Fades between states only; progress within a state just moves the ring.
+        Crossfade(targetState = state, label = "step") { shown ->
+            StepMark {
+                val fraction = ui.fraction
+                when (shown) {
+                    StepState.DONE ->
+                        Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(MARK_SIZE))
+                    StepState.FAILED ->
+                        Icon(Icons.Filled.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(MARK_SIZE))
+                    StepState.RUNNING ->
+                        if (fraction != null) CircularProgressIndicator(progress = { fraction }, modifier = Modifier.size(PROGRESS_SIZE), strokeWidth = PROGRESS_STROKE)
+                        else CircularProgressIndicator(Modifier.size(PROGRESS_SIZE), strokeWidth = PROGRESS_STROKE)
+                    StepState.WAITING -> CircularProgressIndicator(progress = { 0f }, modifier = Modifier.size(PROGRESS_SIZE), strokeWidth = PROGRESS_STROKE)
+                }
+            }
+        }
+        Column {
+            Text(stringResource(step.title))
+            if (current && ui.detail.isNotEmpty()) Text(ui.detail, style = MaterialTheme.typography.bodySmall)
+        }
     }
+}
+
+private enum class StepState { WAITING, RUNNING, DONE, FAILED }
+
+@Composable
+private fun StepMark(content: @Composable () -> Unit) {
+    Box(Modifier.size(MARK_SIZE), contentAlignment = Alignment.Center) { content() }
 }
 
 @Preview(showBackground = true)

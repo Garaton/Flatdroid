@@ -11,6 +11,20 @@ interface TarFs {
     fun chmod(file: File, mode: Int)
     /** True for a symlink itself (lstat), whatever it points to. */
     fun isSymlink(file: File): Boolean
+    /**
+     * Gives [file] (a link itself, not its target) the app's own group. Files made in the cache
+     * get the cache group, which Android counts as cache wherever the file later moves.
+     */
+    fun useOwnGroup(file: File) {}
+}
+
+/**
+ * Gives [dir] and everything below it the app's own group, without following symlinks: for files
+ * made in the cache that stay as app data, which Android would otherwise count as cache (by
+ * group) where clearing the cache can't reach them.
+ */
+fun TarFs.useOwnGroupTree(dir: File) {
+    dir.walkTopDown().onEnter { it == dir || !isSymlink(it) }.forEach { useOwnGroup(it) }
 }
 
 /**

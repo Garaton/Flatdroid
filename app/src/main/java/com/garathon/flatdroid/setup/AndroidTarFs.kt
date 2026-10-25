@@ -9,6 +9,7 @@ import java.io.File
 object AndroidTarFs : TarFs {
     override fun symlink(target: String, link: File) = Os.symlink(target, link.path)
     override fun chmod(file: File, mode: Int) = Os.chmod(file.path, mode)
+    override fun useOwnGroup(file: File) = Os.lchown(file.path, -1, Os.getgid())
     override fun isSymlink(file: File): Boolean = try {
         OsConstants.S_ISLNK(Os.lstat(file.path).st_mode)
     } catch (_: ErrnoException) {

@@ -1,5 +1,6 @@
 package com.garathon.flatdroid.settings
 
+import com.garathon.flatdroid.flatpak.FlatpakCommands
 import com.garathon.flatdroid.alpine.GuestFiles
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -25,6 +26,13 @@ class UserSettingsTest {
         assertEquals(UserSettings("de;en"), store.load())
         store.save(UserSettings(GuestFiles.ALL_LANGUAGES))
         assertEquals(UserSettings(GuestFiles.ALL_LANGUAGES), store.load())
+        val all = UserSettings(
+            "de;en", developerOptions = true, vncViewer = "com.gaurav.avnc", frameRate60 = true, customFrameRate = 45,
+            uncappedFrameRate = true, installGpuRuntimes = true, titleBars = false, customAudioLatencyMs = 30,
+            lowLatencyAudio = true, highQualityAudio = true, sharedHome = "/storage/emulated/0/Download/Home",
+        )
+        store.save(all)
+        assertEquals(all, store.load())
     }
 
     @Test
@@ -35,10 +43,50 @@ class UserSettingsTest {
     }
 
     @Test
-    fun commandsSetFlatpakLanguages() {
-        assertEquals(
-            listOf(listOf("/usr/bin/flatpak", "--user", "config", "--set", "languages", "fr;en")),
-            UserSettings("fr;en").commands(),
-        )
+    fun commandsSetFlatpakLanguagesAndMaskGpuRuntimes() {
+        val f = listOf("/usr/bin/flatpak", "--user")
+        val masks = FlatpakCommands.GPU_RUNTIME_PATTERNS.map { f + listOf("mask", it) }
+        val remove = FlatpakCommands.uninstallMatching(FlatpakCommands.GPU_RUNTIME_PATTERNS)
+        assertEquals(listOf(f + listOf("config", "--set", "languages", "fr;en")) + masks + listOf(remove), UserSettings("fr;en").commands())
+        // Allowed only with developer options on: each mask is added (harmless if present), then removed.
+        assertEquals(masks + listOf(remove), UserSettings("fr;en", installGpuRuntimes = true).commands().drop(1))
+        val allowed = UserSettings("fr;en", developerOptions = true, installGpuRuntimes = true).commands().drop(1)
+        assertEquals(FlatpakCommands.GPU_RUNTIME_PATTERNS.flatMap { listOf(f + listOf("mask", it), f + listOf("mask", "--remove", it)) }, allowed)
+        assertTrue(FlatpakCommands.GPU_RUNTIME_PATTERNS.none { it.startsWith("org.freedesktop.Platform.GL.default") })
+    }
+
+    @Test
+    fun titleBarsCanBeTurnedOffOnlyWithDeveloperOptions() {
+        assertTrue(UserSettings("en").windowTitleBars)
+        assertTrue(UserSettings("en", titleBars = false).windowTitleBars)
+        assertFalse(UserSettings("en", developerOptions = true, titleBars = false).windowTitleBars)
+    }
+
+    @Test
+    fun audioLatencyIs60UnlessTheDeveloperSettingIsOn() {
+        assertEquals(60, UserSettings("en").audioLatencyMs)
+        assertEquals(60, UserSettings("en", customAudioLatencyMs = 20).audioLatencyMs)
+        assertEquals(20, UserSettings("en", developerOptions = true, customAudioLatencyMs = 20).audioLatencyMs)
+    }
+
+    @Test
+    fun audioIsPowerSavingAndFastUnlessTurnedOn() {
+        val base = UserSettings("en")
+        assertEquals(AudioOutputMode.POWER_SAVING, base.audioOutputMode)
+        assertEquals("speex-float-0", base.resampler.pulseName)
+        assertEquals(AudioOutputMode.LOW_LATENCY, base.copy(lowLatencyAudio = true).audioOutputMode)
+        assertEquals("speex-float-1", base.copy(highQualityAudio = true).resampler.pulseName)
+    }
+
+    @Test
+    fun frameRateIs30Unless60OrADeveloperSettingIsChosen() {
+        val base = UserSettings("en")
+        assertEquals(30, base.frameRate)
+        assertEquals(60, base.copy(frameRate60 = true).frameRate)
+        // Developer settings count only while developer options are on.
+        assertEquals(60, base.copy(frameRate60 = true, customFrameRate = 45).frameRate)
+        assertEquals(45, base.copy(frameRate60 = true, customFrameRate = 45, developerOptions = true).frameRate)
+        assertEquals(UserSettings.UNCAPPED_FRAME_RATE, base.copy(customFrameRate = 45, uncappedFrameRate = true, developerOptions = true).frameRate)
+        assertEquals(30, base.copy(uncappedFrameRate = true).frameRate)
     }
 }

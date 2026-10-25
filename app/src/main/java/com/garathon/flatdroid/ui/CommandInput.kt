@@ -28,8 +28,8 @@ import androidx.compose.ui.unit.dp
 import com.garathon.flatdroid.R
 
 /**
- * The single command field: one command for Alpine with an ✕ beside it that cancels the running
- * command (like Ctrl-C), and a Run button below; [buttons] go beside Run.
+ * The single command field: one command for Alpine with an ✕ beside it for the running command
+ * (first press Ctrl-C, second press force-stop), and a Run button below; [buttons] go beside Run.
  */
 @Composable
 fun CommandInput(

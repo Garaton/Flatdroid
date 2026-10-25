@@ -8,13 +8,27 @@ import java.io.File
 
 /** Runs host programs (Linux) in place of proot: the runner itself doesn't care what argv[0] is. */
 class ProotRunnerTest {
-    private val dir = File(System.getProperty("java.io.tmpdir"))
+    private val dir = File(System.getProperty("java.io.tmpdir")!!)
 
     @Test
     fun collectsOutputAndExitCode() {
         val result = ProotRunner.run(ProotInvocation(listOf("/bin/sh", "-c", "echo hi; echo err >&2; exit 3"), emptyMap()), dir)
         assertEquals("hi\nerr\n", result.output)
         assertEquals(3, result.exitCode)
+    }
+
+    @Test
+    fun onlyTheTailOfLongOutputIsKept() {
+        // 200 000 lines of "line N" is well over the limit.
+        val lines = mutableListOf<String>()
+        val result = ProotRunner.run(
+            ProotInvocation(listOf("/bin/sh", "-c", "i=0; while [ \$i -lt 200000 ]; do echo line \$i; i=\$((i+1)); done"), emptyMap()), dir,
+            timeoutSeconds = 120,
+        ) { synchronized(lines) { lines += it } }
+        assertEquals(200_000, lines.size)
+        assertTrue(result.output.length <= ProotRunner.MAX_OUTPUT_CHARS)
+        assertTrue(result.output.startsWith("line "))
+        assertTrue(result.output.endsWith("line 199999\n"))
     }
 
     @Test
