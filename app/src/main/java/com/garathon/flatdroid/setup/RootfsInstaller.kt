@@ -37,27 +37,32 @@ class RootfsInstaller(alpineDir: File, private val workDir: File, private val fs
             throw IOException("Alpine rootfs checksum mismatch: $actual, expected ${source.sha256}")
         }
 
-        rescueFromPartial()
+        rescueCarried()
         fs.deleteTree(partial)
         fs.deleteTree(rootfs) // incomplete: no marker
         source.open().use { raw ->
             GZIPInputStream(raw.buffered(), 64 * 1024).use { TarExtractor(fs).extract(it, partial) }
         }
-        for (rel in CARRIED) {
-            val kept = File(keptDir, rel)
-            if (!lexists(kept)) continue
-            val target = File(partial, rel)
-            fs.deleteTree(target)
-            target.parentFile!!.mkdirs()
-            move(kept, target)
-        }
-        File(partial, ".l2s").mkdirs()
-        File(partial, MARKER).writeText(source.version + "\n")
         // Extracted in the cache, so it has the cache group, and its setgid directories would give
         // that group to everything made in them later (.l2s holds every Flatpak's files).
         fs.useOwnGroupTree(partial)
         rootfs.parentFile?.mkdirs()
         move(partial, rootfs)
+        // The kept Flatpaks go in only now that the rootfs is at its final place in files/: moving
+        // them into the partial rootfs in the cache first would lose them if Android cleared the
+        // cache mid-setup (they had already left keptDir). They keep the group they had in files/.
+        for (rel in CARRIED) {
+            val kept = File(keptDir, rel)
+            if (!lexists(kept)) continue
+            val target = File(rootfs, rel)
+            fs.deleteTree(target)
+            target.parentFile!!.mkdirs()
+            move(kept, target)
+        }
+        File(rootfs, ".l2s").mkdirs()
+        // Written last: its absence keeps the rootfs incomplete, so an interruption above (the
+        // Flatpaks still either in keptDir or back in the rootfs) is retried, not treated as done.
+        File(rootfs, MARKER).writeText(source.version + "\n")
         fs.deleteTree(keptDir)
         source.cleanup()
     }
@@ -68,7 +73,7 @@ class RootfsInstaller(alpineDir: File, private val workDir: File, private val fs
      */
     fun setAside() {
         marker.delete()
-        rescueFromPartial()
+        rescueCarried()
         val root = rootfs.canonicalFile
         for (rel in CARRIED) {
             val source = File(rootfs, rel)
@@ -99,18 +104,19 @@ class RootfsInstaller(alpineDir: File, private val workDir: File, private val fs
     }
 
     /**
-     * An install interrupted after moving kept paths into the partial rootfs: move them back
-     * before the partial rootfs is deleted. (The minirootfs contains neither path, so anything
-     * there came from [keptDir].)
+     * An install interrupted after moving the kept paths out of [keptDir]: move them back before
+     * the partial or incomplete rootfs is deleted. They may be in the partial rootfs (an older
+     * build) or, since the Flatpaks now go in last, in the incomplete in-place rootfs. The
+     * minirootfs contains neither path, so anything there came from [keptDir]. install() has
+     * already returned if the rootfs is complete, so the in-place rootfs here is always incomplete.
      */
-    private fun rescueFromPartial() {
+    private fun rescueCarried() {
         for (rel in CARRIED) {
-            val inPartial = File(partial, rel)
             val kept = File(keptDir, rel)
-            if (lexists(inPartial) && !lexists(kept)) {
-                kept.parentFile!!.mkdirs()
-                move(inPartial, kept)
-            }
+            if (lexists(kept)) continue
+            val source = listOf(File(partial, rel), File(rootfs, rel)).firstOrNull(::lexists) ?: continue
+            kept.parentFile!!.mkdirs()
+            move(source, kept)
         }
     }
 

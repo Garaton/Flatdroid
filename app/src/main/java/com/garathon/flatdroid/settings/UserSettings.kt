@@ -61,7 +61,17 @@ data class UserSettings(
     /** The shared home's absolute path; null for the default, `Documents/Flatdroid`. */
     val sharedHome: String? = null,
     val flatpakTheme: FlatpakTheme = FlatpakTheme.SYSTEM,
+    /** What the security level sets ([SecurityLevel]). */
+    val security: SecuritySettings = SecuritySettings(),
+    /** Developer setting: the terminal's commands run behind fdsec's filter. */
+    val terminalFilter: Boolean = true,
 ) {
+    /** The level [security] matches; null for Custom. */
+    val securityLevel: SecurityLevel? get() = SecurityLevel.of(security)
+
+    /** Whether the terminal filters its commands; the developer setting counts only while developer options are on. */
+    val filterTerminal: Boolean get() = !developerOptions || terminalFilter
+
     val onlyMyLanguages: Boolean get() = flatpakLanguages != GuestFiles.ALL_LANGUAGES
 
     /** Xvnc's `-FrameRate`. The developer settings count only while developer options are on. */
@@ -135,6 +145,29 @@ class UserSettingsStore(private val file: File) {
             highQualityAudio = props.getProperty(KEY_HIGH_QUALITY_AUDIO) == "true",
             sharedHome = props.getProperty(KEY_SHARED_HOME)?.takeIf { it.startsWith("/") },
             flatpakTheme = FlatpakTheme.entries.firstOrNull { it.name.lowercase() == props.getProperty(KEY_THEME) } ?: FlatpakTheme.SYSTEM,
+            security = security(props),
+            terminalFilter = props.getProperty(KEY_TERMINAL_FILTER) != "false",
+        )
+    }
+
+    /**
+     * A level is saved by name, so its settings follow the level as Flatdroid changes it; only
+     * Custom saves each setting (any missing one is Default's).
+     */
+    private fun security(props: Properties): SecuritySettings {
+        val level = props.getProperty(KEY_SECURITY_LEVEL)
+        SecurityLevel.entries.firstOrNull { it.name.lowercase() == level }?.let { return it.settings }
+        if (level != CUSTOM) return SecurityLevel.DEFAULT.settings
+        val default = SecurityLevel.DEFAULT.settings
+        fun flag(key: String, fallback: Boolean) = props.getProperty(key)?.toBooleanStrictOrNull() ?: fallback
+        return SecuritySettings(
+            extraSyscallFilter = flag(KEY_EXTRA_SYSCALLS, default.extraSyscallFilter),
+            hideHelperProcesses = flag(KEY_HIDE_HELPERS, default.hideHelperProcesses),
+            permissionsFromMetadata = flag(KEY_PERMISSIONS_FROM_METADATA, default.permissionsFromMetadata),
+            defaultHomeMode = HomeMode.entries.firstOrNull { it.name.lowercase() == props.getProperty(KEY_DEFAULT_HOME) } ?: default.defaultHomeMode,
+            limitDevices = flag(KEY_LIMIT_DEVICES, default.limitDevices),
+            protectPassword = flag(KEY_PROTECT_PASSWORD, default.protectPassword),
+            exportWithPicker = flag(KEY_EXPORT_PICKER, default.exportWithPicker),
         )
     }
 
@@ -153,22 +186,45 @@ class UserSettingsStore(private val file: File) {
         if (settings.highQualityAudio) props.setProperty(KEY_HIGH_QUALITY_AUDIO, "true")
         settings.sharedHome?.let { props.setProperty(KEY_SHARED_HOME, it) }
         if (settings.flatpakTheme != FlatpakTheme.SYSTEM) props.setProperty(KEY_THEME, settings.flatpakTheme.name.lowercase())
+        val level = settings.securityLevel
+        props.setProperty(KEY_SECURITY_LEVEL, level?.name?.lowercase() ?: CUSTOM)
+        if (level == null) {
+            val s = settings.security
+            props.setProperty(KEY_EXTRA_SYSCALLS, s.extraSyscallFilter.toString())
+            props.setProperty(KEY_HIDE_HELPERS, s.hideHelperProcesses.toString())
+            props.setProperty(KEY_PERMISSIONS_FROM_METADATA, s.permissionsFromMetadata.toString())
+            props.setProperty(KEY_DEFAULT_HOME, s.defaultHomeMode.name.lowercase())
+            props.setProperty(KEY_LIMIT_DEVICES, s.limitDevices.toString())
+            props.setProperty(KEY_PROTECT_PASSWORD, s.protectPassword.toString())
+            props.setProperty(KEY_EXPORT_PICKER, s.exportWithPicker.toString())
+        }
+        if (!settings.terminalFilter) props.setProperty(KEY_TERMINAL_FILTER, "false")
         file.writeTextAtomically(StringWriter().also { props.store(it, null) }.toString())
     }
 
     private companion object {
-        const val KEY_LANGUAGES = "flatpak.languages"
-        const val KEY_DEVELOPER = "ui.developerOptions"
-        const val KEY_VNC_VIEWER = "vnc.viewer"
-        const val KEY_FRAME_RATE_60 = "vnc.frameRate60"
-        const val KEY_CUSTOM_FRAME_RATE = "vnc.frameRate"
-        const val KEY_UNCAPPED_FRAME_RATE = "vnc.frameRateUncapped"
-        const val KEY_GPU_RUNTIMES = "flatpak.gpuRuntimes"
-        const val KEY_TITLE_BARS = "display.titleBars"
-        const val KEY_AUDIO_LATENCY = "audio.latencyMs"
-        const val KEY_LOW_LATENCY_AUDIO = "audio.lowLatency"
-        const val KEY_HIGH_QUALITY_AUDIO = "audio.highQuality"
-        const val KEY_SHARED_HOME = "home.shared"
-        const val KEY_THEME = "flatpak.theme"
+        private const val CUSTOM = "custom"
+        private const val KEY_SECURITY_LEVEL = "security.level"
+        private const val KEY_EXTRA_SYSCALLS = "security.extraSyscalls"
+        private const val KEY_HIDE_HELPERS = "security.hideHelpers"
+        private const val KEY_PERMISSIONS_FROM_METADATA = "security.permissionsFromMetadata"
+        private const val KEY_DEFAULT_HOME = "security.defaultHome"
+        private const val KEY_LIMIT_DEVICES = "security.limitDevices"
+        private const val KEY_PROTECT_PASSWORD = "security.protectPassword"
+        private const val KEY_EXPORT_PICKER = "security.exportPicker"
+        private const val KEY_TERMINAL_FILTER = "terminal.filter"
+        private const val KEY_LANGUAGES = "flatpak.languages"
+        private const val KEY_DEVELOPER = "ui.developerOptions"
+        private const val KEY_VNC_VIEWER = "vnc.viewer"
+        private const val KEY_FRAME_RATE_60 = "vnc.frameRate60"
+        private const val KEY_CUSTOM_FRAME_RATE = "vnc.frameRate"
+        private const val KEY_UNCAPPED_FRAME_RATE = "vnc.frameRateUncapped"
+        private const val KEY_GPU_RUNTIMES = "flatpak.gpuRuntimes"
+        private const val KEY_TITLE_BARS = "display.titleBars"
+        private const val KEY_AUDIO_LATENCY = "audio.latencyMs"
+        private const val KEY_LOW_LATENCY_AUDIO = "audio.lowLatency"
+        private const val KEY_HIGH_QUALITY_AUDIO = "audio.highQuality"
+        private const val KEY_SHARED_HOME = "home.shared"
+        private const val KEY_THEME = "flatpak.theme"
     }
 }

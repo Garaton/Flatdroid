@@ -93,6 +93,8 @@ fun SettingsScreen(
     var lowLatencyAudio by rememberSaveable { mutableStateOf(settings.lowLatencyAudio) }
     var highQualityAudio by rememberSaveable { mutableStateOf(settings.highQualityAudio) }
     var flatpakTheme by rememberSaveable { mutableStateOf(settings.flatpakTheme) }
+    var security by rememberSaveable(stateSaver = SecuritySaver) { mutableStateOf(settings.security) }
+    var terminalFilter by rememberSaveable { mutableStateOf(settings.terminalFilter) }
     var confirmResetSettings by rememberSaveable { mutableStateOf(false) }
     var cachesCleared by rememberSaveable { mutableStateOf(false) }
     var confirmClear by rememberSaveable { mutableStateOf<String?>(null) }
@@ -169,6 +171,9 @@ fun SettingsScreen(
             hint = stringResource(R.string.settings_theme_hint),
             enabled = !applying,
         )
+
+        SectionTitle(stringResource(R.string.settings_section_security))
+        SecuritySection(security, { security = it }, details = true, enabled = !applying, developerOptions = developerOptions)
 
         SectionTitle(stringResource(R.string.settings_section_viewer))
         val askViewer = stringResource(R.string.settings_viewer_ask)
@@ -298,6 +303,11 @@ fun SettingsScreen(
                 stringResource(R.string.settings_gpu_runtimes), stringResource(R.string.settings_gpu_runtimes_hint),
                 enabled = !applying, developer = true,
             )
+            SwitchRow(
+                terminalFilter, { terminalFilter = it },
+                stringResource(R.string.settings_terminal_filter), stringResource(R.string.settings_terminal_filter_hint),
+                enabled = !applying, developer = true,
+            )
         }
 
         error?.let {
@@ -321,6 +331,8 @@ fun SettingsScreen(
                             highQualityAudio = highQualityAudio,
                             sharedHome = settings.sharedHome,
                             flatpakTheme = flatpakTheme,
+                            security = security,
+                            terminalFilter = terminalFilter,
                         )
                     )
                 },

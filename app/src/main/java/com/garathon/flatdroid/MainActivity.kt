@@ -312,6 +312,7 @@ class MainActivity : ComponentActivity() {
                         onStop = { SessionService.stop(this) },
                         onShowLog = { log = LogKind.SESSION },
                         onDismiss = SessionController::dismissMessage,
+                        protectPassword = remember { savedSettings(languages).security.protectPassword },
                     )
                 }
             }
@@ -365,12 +366,16 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun openViewer(password: String) {
+        val settings = SetupController.settings(this).load()
+        // With the password protected, it goes only to the viewer chosen in Settings, never through a chooser.
+        val protect = settings?.security?.protectPassword == true
         try {
-            val intent = Viewer.intent(this, password, SetupController.settings(this).load()?.vncViewer)
+            val intent = Viewer.intent(this, password, settings?.vncViewer, allowChooser = !protect)
                 ?: throw ActivityNotFoundException()
             startActivity(intent)
         } catch (_: ActivityNotFoundException) {
-            Toast.makeText(this, R.string.session_no_viewer, Toast.LENGTH_LONG).show()
+            val noChosen = protect && Viewer.installed(this).isNotEmpty()
+            Toast.makeText(this, if (noChosen) R.string.session_choose_viewer else R.string.session_no_viewer, Toast.LENGTH_LONG).show()
         }
     }
 

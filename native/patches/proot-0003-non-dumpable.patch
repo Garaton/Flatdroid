@@ -1,0 +1,58 @@
+diff --git a/src/cli/cli.c b/src/cli/cli.c
+index bbc6400..a99df75 100644
+--- a/src/cli/cli.c
++++ b/src/cli/cli.c
+@@ -30,6 +30,7 @@
+ #include <sys/types.h>     /* getpid(2),  */
+ #include <unistd.h>        /* getpid(2),  */
+ #include <errno.h>         /* errno(3), */
++#include <sys/prctl.h>     /* prctl(2), PR_SET_DUMPABLE, */
+ #include <libgen.h>        /* basename(3), */
+ #ifdef __GLIBC__
+ #include <execinfo.h>      /* backtrace_symbols(3), */
+@@ -450,6 +451,17 @@ int main(int argc, char *const argv[])
+ 	Tracee *tracee;
+ 	int status;
+ 
++	/* Not dumpable: other processes of the same user (tracees
++	 * included) can then neither open /proc/<pid>/mem nor use
++	 * ptrace(2) or process_vm_{read,write}v(2) on PRoot, which
++	 * would otherwise give them PRoot's own view of the host.
++	 * Tracees are made dumpable again in launch_process(); the
++	 * shm helper is PRoot run again, so it gets here too.  */
++	if (prctl(PR_SET_DUMPABLE, 0, 0, 0, 0) < 0) {
++		perror("proot: prctl(PR_SET_DUMPABLE)");
++		exit(EXIT_FAILURE);
++	}
++
+ 	/* Configure the memory allocator.  */
+ 	talloc_enable_leak_report();
+ 
+diff --git a/src/tracee/event.c b/src/tracee/event.c
+index 6141e19..9e198c4 100644
+--- a/src/tracee/event.c
++++ b/src/tracee/event.c
+@@ -23,6 +23,7 @@
+ #include <sched.h>      /* CLONE_*,  */
+ #include <sys/types.h>  /* pid_t, */
+ #include <sys/ptrace.h> /* ptrace(1), PTRACE_*, */
++#include <sys/prctl.h>  /* prctl(2), PR_SET_DUMPABLE, */
+ #include <sys/types.h>  /* waitpid(2), */
+ #include <sys/wait.h>   /* waitpid(2), */
+ #include <sys/utsname.h> /* uname(2), */
+@@ -118,6 +119,15 @@ int launch_process(Tracee *tracee, char *const argv[])
+ 		 * system, like container runtimes do.  */
+ 		signal(SIGPIPE, SIG_DFL);
+ 
++		/* PRoot itself isn't dumpable (see main()), and a child
++		 * inherits that until its execve(2).  The kernel refuses a
++		 * tracer access to a non-dumpable tracee's memory, so this
++		 * one's first execve(2) couldn't be translated.  */
++		if (prctl(PR_SET_DUMPABLE, 1, 0, 0, 0) < 0) {
++			note(tracee, ERROR, SYSTEM, "prctl(PR_SET_DUMPABLE)");
++			return -errno;
++		}
++
+ 		/* Declare myself as ptraceable before executing the
+ 		 * requested program. */
+ 		status = ptrace(PTRACE_TRACEME, 0, NULL, NULL);

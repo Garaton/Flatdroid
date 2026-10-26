@@ -4,6 +4,7 @@ import com.garathon.flatdroid.flatpak.Deployment
 import com.garathon.flatdroid.flatpak.FlatpakInstallation
 import com.garathon.flatdroid.flatpak.FlatpakRef
 import com.garathon.flatdroid.proot.DevNodes
+import com.garathon.flatdroid.proot.Fdsec
 import com.garathon.flatdroid.proot.FlatpakBinds
 import com.garathon.flatdroid.proot.GuestPaths
 import java.io.File
@@ -16,6 +17,8 @@ data class HostDirs(
     val home: File,
     /** The app's own private directories, over parts of the home and at Flatpak's /var ones: host to guest path. */
     val appDirs: List<Pair<File, String>>,
+    /** The app's own single files over the home's ([FlatpakBinds.privateFiles]): host to guest path. */
+    val privateFiles: List<Pair<File, String>> = emptyList(),
     /** Generated /etc files: name to host file. */
     val etc: Map<String, File>,
     val x11Sockets: File,
@@ -47,6 +50,12 @@ data class LaunchOptions(
     val wholeDev: Boolean = false,
     /** The app gets PulseAudio's socket (see AppSettings.audioAllowed). */
     val audio: Boolean = true,
+    /** The app gets the Internet (see AppSettings.networkAllowed): resolv.conf, and Internet sockets. */
+    val network: Boolean = true,
+    /** fdsec also refuses the security level's extra system calls ([Fdsec.Filter.extraSyscalls]). */
+    val extraSyscalls: Boolean = true,
+    /** Only CPU and memory information from /sys, and `devices=all` limited to the GPU ([DevNodes.forApp]). */
+    val limitDevices: Boolean = false,
     /** The root gets /.flatpak-info ([LaunchPlanner.flatpakInfo]). */
     val flatpakInfo: Boolean = true,
     /** Android is in dark mode; apps are asked to follow it. */
@@ -67,6 +76,8 @@ data class LaunchPlan(
     val usrLinks: List<String>,
     /** Electron or a Chromium browser, started without zypak or cobalt ([Electron]). */
     val isElectron: Boolean,
+    /** What fdsec refuses for this app. */
+    val filter: Fdsec.Filter,
 )
 
 sealed interface PlanResult {
@@ -189,7 +200,8 @@ class LaunchPlanner(
             root = dirs.root.path,
             runtimeFiles = runtime.files.path,
             appFiles = app.files.path,
-            etc = dirs.etc.mapValues { it.value.path },
+            // Without the network, no DNS: the runtime's resolv.conf is a link that leads nowhere here.
+            etc = dirs.etc.filterKeys { options.network || it != RESOLV_CONF }.mapValues { it.value.path },
             extensions = extensions.map { (base, ext) -> ext.deployment.files.path to "$base/${ext.guestPath}" },
             tmp = dirs.tmp.path,
             shm = dirs.shm.path,
@@ -197,8 +209,10 @@ class LaunchPlanner(
             pulseSockets = dirs.pulseSockets?.takeIf { options.audio }?.path,
             home = dirs.home.path,
             appDirs = dirs.appDirs.map { it.first.path to it.second },
-            dev = DevNodes.forApp(devices, devExists),
+            privateFiles = dirs.privateFiles.map { it.first.path to it.second },
+            dev = DevNodes.forApp(devices, devExists, limited = options.limitDevices),
             wholeDev = options.wholeDev && DevNodes.ALL in devices,
+            sys = if (options.limitDevices) DevNodes.LIMITED_SYS.filter(devExists) else null,
             extra = extraBinds,
         )
         return PlanResult.Ready(
@@ -212,6 +226,7 @@ class LaunchPlanner(
                 flatpakInfo = if (options.flatpakInfo) flatpakInfo(appId, runtimeRef) else null,
                 usrLinks = USR_LINKS.filter { File(runtime.files, it).exists() },
                 isElectron = isElectron,
+                filter = Fdsec.Filter(extraSyscalls = options.extraSyscalls, noInternet = !options.network),
             )
         )
     }
@@ -245,6 +260,7 @@ class LaunchPlanner(
 
     companion object {
         const val GL_DEFAULT = "org.freedesktop.Platform.GL.default"
+        const val RESOLV_CONF = "resolv.conf"
         private const val MAX_LINKS = 8
 
         /** Flatpak links these to /usr when the runtime has them. */

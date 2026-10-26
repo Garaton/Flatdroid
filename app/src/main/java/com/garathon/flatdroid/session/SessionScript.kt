@@ -1,6 +1,7 @@
 package com.garathon.flatdroid.session
 
 import com.garathon.flatdroid.camera.CameraScript
+import com.garathon.flatdroid.proot.Fdsec
 import com.garathon.flatdroid.proot.GuestPaths
 import com.garathon.flatdroid.settings.Resampler
 
@@ -18,6 +19,9 @@ object SessionScript {
     const val GUEST_PULSE_SCRIPT = "/run/flatdroid/pulse.pa"
     const val GUEST_VNC_DIR = "/run/flatdroid/vnc"
     const val GUEST_OPENBOX_RC = "/root/.config/openbox/rc.xml"
+
+    /** In front of a helper's command: fdsec again, adding no Internet sockets to the filter it already has. */
+    private val NO_INTERNET = (listOf(Fdsec.ALPINE_PATH) + Fdsec.flags(Fdsec.Filter(noInternet = true)) + "--").joinToString(" ")
 
     /** Printed with the number of streams recording from the microphone, whenever it changes. */
     const val MIC_USERS_PREFIX = "flatdroid: microphone users "
@@ -57,6 +61,9 @@ object SessionScript {
      * subscribe` reports how many streams record from it ([MIC_USERS_PREFIX]), so Flatdroid
      * records from Android's microphone only meanwhile. The session bus's proxy reads its
      * arguments from a file ([SessionBus.proxyArgs]), so none pass through the shell.
+     * The whole script runs behind fdsec's filter; every helper but Xvnc, which serves the VNC
+     * port, also runs behind a second one without Internet sockets, so exploiting one from the
+     * app gives no network the app may not have.
      */
     val TEXT = """
         |#!/bin/sh
@@ -82,28 +89,28 @@ object SessionScript {
         |  sleep 0.1
         |done
         |
-        |DISPLAY=:1 openbox &
+        |DISPLAY=:1 $NO_INTERNET /usr/bin/openbox &
         |if [ "${'$'}session_bus" = on ]; then
         |  rm -f ${SessionBus.GUEST_DAEMON_DIR}/${SessionBus.SOCKET} ${SessionBus.GUEST_PROXY_DIR}/${SessionBus.SOCKET}
-        |  dbus-daemon --config-file=${SessionBus.GUEST_CONFIG} --nofork --nopidfile --nosyslog &
+        |  $NO_INTERNET /usr/bin/dbus-daemon --config-file=${SessionBus.GUEST_CONFIG} --nofork --nopidfile --nosyslog &
         |  i=0
         |  while [ ! -S ${SessionBus.GUEST_DAEMON_DIR}/${SessionBus.SOCKET} ] && [ "${'$'}i" -le 100 ]; do
         |    i=${'$'}((i + 1))
         |    sleep 0.1
         |  done
         |  if [ -S ${SessionBus.GUEST_DAEMON_DIR}/${SessionBus.SOCKET} ]; then
-        |    xdg-dbus-proxy --args=3 3< ${SessionBus.GUEST_PROXY_ARGS} &
+        |    $NO_INTERNET /usr/bin/xdg-dbus-proxy --args=3 3< ${SessionBus.GUEST_PROXY_ARGS} &
         |    if [ "${'$'}camera" = on ]; then
         |      rm -f ${CameraScript.GUEST_PIPEWIRE_DIR}/*
         |      XDG_RUNTIME_DIR=${CameraScript.GUEST_PIPEWIRE_DIR} \
-        |        DBUS_SESSION_BUS_ADDRESS=unix:path=${SessionBus.GUEST_DAEMON_DIR}/${SessionBus.SOCKET} pipewire &
+        |        DBUS_SESSION_BUS_ADDRESS=unix:path=${SessionBus.GUEST_DAEMON_DIR}/${SessionBus.SOCKET} $NO_INTERNET /usr/bin/pipewire &
         |    fi
         |  else
         |    echo "flatdroid: the session bus did not start"
         |  fi
         |fi
         |if [ "${'$'}sound" = on ]; then
-        |  pulseaudio -n --use-pid-file=no --daemonize=no --exit-idle-time=-1 --disable-shm=yes \
+        |  $NO_INTERNET /usr/bin/pulseaudio -n --use-pid-file=no --daemonize=no --exit-idle-time=-1 --disable-shm=yes \
         |    --resample-method="${'$'}resampler" -F $GUEST_PULSE_SCRIPT &
         |fi
         |if [ "${'$'}microphone" = on ]; then

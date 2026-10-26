@@ -53,6 +53,48 @@ class RootfsInstallerTest {
     }
 
     @Test
+    fun keepFlatpaksCarriesDataAndSurvivesACacheClearMidSetup() {
+        val alpine = tmp.newFolder("alpine")
+        val cache = tmp.newFolder("cache")
+        val installer = RootfsInstaller(alpine, cache, JvmTarFs)
+        installer.install(FakeSource(tarGz, sha256(tarGz)))
+        // A Flatpak and a link2symlink backing file, as "keep Flatpaks" carries them.
+        File(installer.rootfs, "root/.local/share/flatpak/app/org.x/current").apply { parentFile!!.mkdirs(); writeText("app") }
+        File(installer.rootfs, ".l2s/0001").apply { parentFile!!.mkdirs(); writeText("blob") }
+
+        installer.setAside()
+        // The kept data waits in files/ (alpine/kept), never in the cache.
+        assertTrue(File(alpine, "kept/root/.local/share/flatpak/app/org.x/current").exists())
+        assertEquals(emptyList<String>(), cache.list()?.toList().orEmpty())
+        installer.wipe()
+        // Android clears the cache between the reset and the re-install: the kept data is in files/.
+        cache.deleteRecursively(); cache.mkdirs()
+
+        installer.install(FakeSource(tarGz, sha256(tarGz)))
+        assertEquals("app", File(installer.rootfs, "root/.local/share/flatpak/app/org.x/current").readText())
+        assertEquals("blob", File(installer.rootfs, ".l2s/0001").readText())
+        assertEquals("3.24.2", installer.installedVersion())
+        assertFalse(File(alpine, "kept").exists())
+    }
+
+    @Test
+    fun carriedDataInAnIncompleteRootfsIsRescued() {
+        val alpine = tmp.newFolder("alpine")
+        val installer = RootfsInstaller(alpine, tmp.newFolder("cache"), JvmTarFs)
+        // An install interrupted after the Flatpaks were moved into the in-place rootfs but before
+        // the marker was written: no marker, Flatpaks present, keptDir gone.
+        val rootfs = installer.rootfs
+        File(rootfs, "root/.local/share/flatpak/app/org.x/current").apply { parentFile!!.mkdirs(); writeText("app") }
+        File(rootfs, ".l2s/0001").apply { parentFile!!.mkdirs(); writeText("blob") }
+        assertNull(installer.installedVersion())
+
+        installer.install(FakeSource(tarGz, sha256(tarGz)))
+        assertEquals("app", File(rootfs, "root/.local/share/flatpak/app/org.x/current").readText())
+        assertEquals("blob", File(rootfs, ".l2s/0001").readText())
+        assertEquals("3.24.2", installer.installedVersion())
+    }
+
+    @Test
     fun checksumMismatchWritesNothing() {
         val alpine = tmp.newFolder("alpine")
         val cache = tmp.newFolder("cache")

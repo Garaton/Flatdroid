@@ -50,9 +50,10 @@ import com.garathon.flatdroid.storage.AppStorage
 import com.garathon.flatdroid.ui.theme.FlatdroidTheme
 
 /**
- * One app's settings: its display size, its permissions (sound and microphone), its cache, and
+ * One app's settings: its display size, its permissions (sound, network and microphone), its cache, and
  * uninstalling; with [developerOptions], for apps asking for all devices, also the host's whole
- * /dev. Sound left at its default is saved as unset, so it follows the app's metadata.
+ * /dev, and the security level's extra system calls. Sound, network and the home left at their
+ * defaults are saved as unset, so they follow the security level and the app's metadata.
  * [onRequestMicrophone] asks Android for its microphone permission and reports whether it was
  * granted: the microphone turns on only with it, so a notification can later allow it for a
  * session, unless it is always allowed. The camera likewise ([onRequestCamera]), when the device
@@ -92,8 +93,13 @@ fun AppSettingsScreen(
     var width by rememberSaveable { mutableStateOf(settings.customWidth.toString()) }
     var height by rememberSaveable { mutableStateOf(settings.customHeight.toString()) }
     var wholeDev by rememberSaveable { mutableStateOf(settings.wholeDev) }
-    val audioDefault = app.requestsAudio
+    val fromMetadata = settings.defaults.permissionsFromMetadata
+    val audioDefault = fromMetadata && app.requestsAudio
     var audio by rememberSaveable { mutableStateOf(settings.audio ?: audioDefault) }
+    val networkDefault = fromMetadata && app.requestsNetwork
+    var network by rememberSaveable { mutableStateOf(settings.network ?: networkDefault) }
+    var allowExtraSyscalls by rememberSaveable { mutableStateOf(settings.allowExtraSyscalls) }
+    var shareHiddenFiles by rememberSaveable { mutableStateOf(settings.shareHiddenFiles) }
     var microphone by rememberSaveable { mutableStateOf(settings.microphone) }
     var alwaysAllowMicrophone by rememberSaveable { mutableStateOf(settings.alwaysAllowMicrophone) }
     var camera by rememberSaveable { mutableStateOf(settings.camera) }
@@ -139,6 +145,9 @@ fun AppSettingsScreen(
                 Text(app.id, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
+        if (app.showsWebContent) {
+            Text(stringResource(R.string.app_settings_web_content), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+        }
 
         SectionTitle(stringResource(R.string.app_settings_display))
         Text(stringResource(R.string.app_settings_display_hint), style = MaterialTheme.typography.bodySmall)
@@ -164,9 +173,26 @@ fun AppSettingsScreen(
 
         SectionTitle(stringResource(R.string.app_settings_permissions))
         SwitchRow(
+            network, { network = it },
+            stringResource(R.string.app_settings_network),
+            stringResource(
+                when {
+                    !app.requestsNetwork -> R.string.app_settings_network_not_requested
+                    fromMetadata -> R.string.app_settings_network_requested
+                    else -> R.string.app_settings_network_requested_off
+                }
+            ),
+        )
+        SwitchRow(
             audio, { audio = it },
             stringResource(R.string.app_settings_audio),
-            stringResource(if (app.requestsAudio) R.string.app_settings_audio_requested else R.string.app_settings_audio_not_requested),
+            stringResource(
+                when {
+                    !app.requestsAudio -> R.string.app_settings_audio_not_requested
+                    fromMetadata -> R.string.app_settings_audio_requested
+                    else -> R.string.app_settings_audio_requested_off
+                }
+            ),
         )
         if (audio) SwitchRow(
             microphone,
@@ -259,6 +285,14 @@ fun AppSettingsScreen(
                 stringResource(R.string.app_settings_sdcard), stringResource(R.string.app_settings_sdcard_hint),
             )
         }
+        // Sharing hidden files only has an effect in Shared Home mode, where each app otherwise gets its own.
+        if (developerOptions && homeMode == HomeMode.SHARED) {
+            SwitchRow(
+                shareHiddenFiles, { shareHiddenFiles = it },
+                stringResource(R.string.app_settings_share_hidden), stringResource(R.string.app_settings_share_hidden_hint),
+                developer = true,
+            )
+        }
 
         if (developerOptions && app.requestsAllDevices) {
             SectionTitle(stringResource(R.string.app_settings_devices))
@@ -271,6 +305,11 @@ fun AppSettingsScreen(
 
         if (developerOptions) {
             SectionTitle(stringResource(R.string.app_settings_launch))
+            SwitchRow(
+                allowExtraSyscalls, { allowExtraSyscalls = it },
+                stringResource(R.string.app_settings_extra_syscalls), stringResource(R.string.app_settings_extra_syscalls_hint),
+                developer = true,
+            )
             TextRow(
                 content = environment,
                 onChange = { environment = it },
@@ -294,13 +333,16 @@ fun AppSettingsScreen(
                             customHeight = size(height) ?: settings.customHeight,
                             wholeDev = wholeDev,
                             audio = audio.takeIf { it != audioDefault },
+                            network = network.takeIf { it != networkDefault },
+                            allowExtraSyscalls = if (developerOptions) allowExtraSyscalls else settings.allowExtraSyscalls,
+                            shareHiddenFiles = if (developerOptions) shareHiddenFiles else settings.shareHiddenFiles,
                             microphone = microphone,
                             alwaysAllowMicrophone = alwaysAllowMicrophone,
                             camera = camera,
                             cameraResolution = cameraResolution,
                             cameraFrameRate = cameraFrameRate,
                             environment = if (developerOptions) environmentValue.orEmpty() else settings.environment,
-                            homeMode = homeMode,
+                            homeModeChoice = homeMode.takeIf { it != settings.defaults.homeMode },
                             sdcard = if (broadAccess) sdcard else settings.sdcard,
                         )
                     )

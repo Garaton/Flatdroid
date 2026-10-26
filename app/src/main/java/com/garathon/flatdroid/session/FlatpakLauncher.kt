@@ -31,7 +31,9 @@ import com.garathon.flatdroid.launcher.PlanResult
 import com.garathon.flatdroid.launcher.VncPassword
 import com.garathon.flatdroid.proot.AlpineBinds
 import com.garathon.flatdroid.proot.DevNodes
+import com.garathon.flatdroid.proot.Fdsec
 import com.garathon.flatdroid.proot.GuestPaths
+import com.garathon.flatdroid.proot.HelperProcesses
 import com.garathon.flatdroid.proot.ProotCommand
 import com.garathon.flatdroid.proot.ProotProcess
 import com.garathon.flatdroid.proot.ProotRunner
@@ -41,9 +43,11 @@ import com.garathon.flatdroid.settings.AudioOutputMode
 import com.garathon.flatdroid.settings.FlatpakTheme
 import com.garathon.flatdroid.settings.HomeMode
 import com.garathon.flatdroid.settings.Resampler
+import com.garathon.flatdroid.settings.SecuritySettings
 import com.garathon.flatdroid.settings.UserSettings
 import com.garathon.flatdroid.setup.SetupController
 import com.garathon.flatdroid.setup.deleteTree
+import com.garathon.flatdroid.storage.AppFiles
 import com.garathon.flatdroid.storage.HomeFolders
 import com.garathon.flatdroid.storage.SharedHome
 import com.garathon.flatdroid.storage.StorageTaskService
@@ -85,6 +89,8 @@ class FlatpakLauncher(private val context: Context) {
     private val pipewireDir = File(sessionDir, "pipewire")
     private val cameraPipeDir = File(sessionDir, "camera")
     private val cameraConfigDir = File(sessionDir, "camera-config")
+    /** Bound over the helpers' /proc entries in the app's root, when they are hidden. */
+    private val emptyDir = File(sessionDir, "empty")
 
     fun electronSwap(appId: String) = ElectronSwap(
         dir = File(AppData.electronDir(context), appId),
@@ -155,6 +161,7 @@ class FlatpakLauncher(private val context: Context) {
         writeDesktopFiles(home, plan)
         prepareDirs(appId, plan)
         val userSettings = SetupController.settings(context).load()
+        val security = userSettings?.security ?: SecuritySettings()
         val password = VncPassword.random()
         val audio = plan.binds.pulseSockets != null
         if (settings.microphone && !MicStreamer.hasPermission(context)) {
@@ -197,10 +204,14 @@ class FlatpakLauncher(private val context: Context) {
         }
         SessionController.onMicrophoneAnswer = mic?.let { it::answer }
         val resampler = userSettings?.resampler ?: Resampler.FAST
+        // Any of the proots below: fdsec refused to start its command, so nothing ran in it.
+        val filterRefused = AtomicBoolean(false)
         val helpers = startHelpers(
             SessionScript.command(settings.geometry, frameRate, audio, microphone = mic != null, resampler, sessionBus = true, camera = cameraNodes.isNotEmpty()),
             audio,
+            Fdsec.Filter(extraSyscalls = security.extraSyscallFilter),
         ) { line ->
+            if (Fdsec.refused(line)) filterRefused.set(true)
             SessionScript.micUsers(line)?.let { mic?.onUsers(it) }
         }
         var app: ProotProcess? = null
@@ -210,11 +221,15 @@ class FlatpakLauncher(private val context: Context) {
             cameraNodes[it].name to CameraStreamer(context, cameras[it], File(cameraPipeDir, cameraNodes[it].name), cameraRotations[it])
         }
         try {
-            waitForFile(File(x11Dir, SessionScript.X_SOCKET), helpers, DISPLAY_TIMEOUT_MS, context.getString(R.string.launch_display_failed))
+            try {
+                waitForFile(File(x11Dir, SessionScript.X_SOCKET), helpers, DISPLAY_TIMEOUT_MS, context.getString(R.string.launch_display_failed))
+            } catch (e: LaunchException) {
+                throw if (filterRefused.get()) LaunchException(context.getString(R.string.launch_filter_refused)) else e
+            }
             if (!waitForFile(File(busProxyDir, SessionBus.SOCKET), helpers, BUS_TIMEOUT_MS, null)) {
                 SessionController.log("[flatdroid] the session bus did not start; the app has none")
             } else if (streamers.isNotEmpty()) {
-                cameraHelpers = startCamera(helpers, streamers)
+                cameraHelpers = startCamera(helpers, streamers, Fdsec.Filter(extraSyscalls = security.extraSyscallFilter, noInternet = true), filterRefused)
             }
             if (!audio) {
                 SessionController.log("[flatdroid] sound is off for this app; PulseAudio isn't started")
@@ -228,6 +243,12 @@ class FlatpakLauncher(private val context: Context) {
                 )
                 player.start()
             }
+            // The helpers run under proot, which keeps them dumpable: hide what runs now from the app.
+            val hidden = if (security.hideHelperProcesses) HelperProcesses.procPaths(listOfNotNull(helpers.pid, cameraHelpers?.pid)) else emptyList()
+            fun hideHelpers(plan: LaunchPlan) =
+                if (hidden.isEmpty()) plan else plan.copy(binds = plan.binds.copy(hiddenProc = hidden, emptyDir = emptyDir.path))
+            plan = hideHelpers(plan)
+            SessionController.log("[flatdroid] " + describeFilter(plan.filter, hidden.size))
             var triedNewerFlags = false
             var triedWithoutFlatpakInfo = false
             while (true) {
@@ -237,9 +258,10 @@ class FlatpakLauncher(private val context: Context) {
                 val kdeHostProcess = AtomicBoolean(false)
                 val killedBySignal = AtomicBoolean(false)
                 app = ProotRunner.start(
-                    ProotCommand.flatpak(env.paths(), plan.binds, plan.environment, plan.command),
+                    ProotCommand.flatpak(env.paths(), plan.binds, plan.environment, plan.command, plan.filter),
                     File(plan.binds.root),
                 ) { line ->
+                    if (Fdsec.refused(line)) filterRefused.set(true)
                     if (Electron.GPU_FAILURE in line) gpuFailed.set(true)
                     if (LaunchPlanner.KDE_HOST_PROCESS_WARNING in line) kdeHostProcess.set(true)
                     if (LaunchPlanner.PROOT_KILLED_BY_SIGNAL in line) killedBySignal.set(true)
@@ -248,6 +270,7 @@ class FlatpakLauncher(private val context: Context) {
                 SessionController.running(appId, password)
                 val code = app.waitFor()
                 SessionController.log("[flatdroid] the app exited ($code)")
+                if (filterRefused.get()) throw LaunchException(context.getString(R.string.launch_filter_refused))
                 if (plan.isElectron && !settings.newerElectronFlags && gpuFailed.get() && !triedNewerFlags) {
                     // Newer Electron: relaunch once with its extra flags, and keep them if they help.
                     triedNewerFlags = true
@@ -255,7 +278,7 @@ class FlatpakLauncher(private val context: Context) {
                     store.update { it.copy(newerElectronFlags = true) }
                     SessionController.log("[flatdroid] relaunching with ${Electron.NEWER_FLAGS.joinToString(" ")}")
                     SessionController.starting(appId, context.getString(R.string.session_relaunching_newer_flags))
-                    plan = (planner.plan(appId, hostDirs(appId), options(appId)) as? PlanResult.Ready)?.plan
+                    plan = (planner.plan(appId, hostDirs(appId), options(appId)) as? PlanResult.Ready)?.plan?.let(::hideHelpers)
                         ?: throw LaunchException(context.getString(R.string.launch_app_changed))
                     // The app has run, so it may have replaced its own directories with links meanwhile.
                     prepareDirs(appId, plan)
@@ -271,7 +294,7 @@ class FlatpakLauncher(private val context: Context) {
                     if ((code != 0 || killedBySignal.get()) && !triedWithoutFlatpakInfo) {
                         triedWithoutFlatpakInfo = true
                         SessionController.starting(appId, context.getString(R.string.session_relaunching_without_flatpak_info))
-                        plan = (planner.plan(appId, hostDirs(appId), options(appId)) as? PlanResult.Ready)?.plan
+                        plan = (planner.plan(appId, hostDirs(appId), options(appId)) as? PlanResult.Ready)?.plan?.let(::hideHelpers)
                             ?: throw LaunchException(context.getString(R.string.launch_app_changed))
                         prepareDirs(appId, plan)
                         checkBindSources(plan)
@@ -299,8 +322,44 @@ class FlatpakLauncher(private val context: Context) {
             streamers.values.forEach { it.close() }
             SessionController.onMicrophoneAnswer = null
             helpers.stop()
+            // proot leaves the private binds' mount points behind in the shared home, where the
+            // user sees them (empty .ssh, .bashrc, .config and the rest). Remove the empty ones.
+            if (settings.homeMode == HomeMode.SHARED) cleanSharedHomeMountPoints(home, plan)
         }
     }
+
+    /**
+     * Removes the mount points a launch's private binds leave empty in [home]: the first path
+     * element of each bind under [GuestPaths.HOME]. Only empty files and empty directory trees go,
+     * so a real file the user keeps under one of these names (a hand-written `.bashrc`) stays.
+     */
+    private fun cleanSharedHomeMountPoints(home: File, plan: LaunchPlan) {
+        val prefix = GuestPaths.HOME + "/"
+        val names = (plan.binds.appDirs + plan.binds.privateFiles)
+            .map { it.second }
+            .filter { it.startsWith(prefix) }
+            .map { it.removePrefix(prefix).substringBefore('/') }
+            .filter { it.isNotEmpty() && it != ".." && it != "." }
+            .distinct()
+        for (name in names) deleteIfEmpty(File(home, name))
+    }
+
+    /** Deletes [file] if it is an empty file or a directory whose whole tree is empty; never a link. */
+    private fun deleteIfEmpty(file: File) {
+        when {
+            AndroidTarFs.isSymlink(file) -> return
+            file.isDirectory -> {
+                file.listFiles()?.forEach { deleteIfEmpty(it) }
+                file.delete() // succeeds only if it is now empty
+            }
+            file.isFile && file.length() == 0L -> file.delete()
+        }
+    }
+
+    /** The session log's line about the app's filter and the helpers' hidden /proc entries. */
+    private fun describeFilter(filter: Fdsec.Filter, hidden: Int): String =
+        "fdsec: " + (listOf("base list") + listOfNotNull("extra system calls".takeIf { filter.extraSyscalls }, "no Internet".takeIf { filter.noInternet }))
+            .joinToString(", ") + "; $hidden helper /proc entries hidden"
 
     /**
      * How far the device would be turned from its natural orientation to be [landscape] (or
@@ -347,7 +406,7 @@ class FlatpakLauncher(private val context: Context) {
      * the [streamers] writing to their pipes; waits until the nodes exist and the portal has
      * started, so the app sees its cameras from the start. Null when PipeWire didn't start.
      */
-    private fun startCamera(helpers: ProotProcess, streamers: Map<String, CameraStreamer>): ProotProcess? {
+    private fun startCamera(helpers: ProotProcess, streamers: Map<String, CameraStreamer>, filter: Fdsec.Filter, refused: AtomicBoolean): ProotProcess? {
         if (!waitForFile(File(pipewireDir, CameraScript.PIPEWIRE_SOCKET), helpers, CAMERA_TIMEOUT_MS, null)) {
             SessionController.log("[flatdroid] PipeWire did not start; the app has no camera")
             return null
@@ -360,7 +419,8 @@ class FlatpakLauncher(private val context: Context) {
             cameraConfigDir.path to CameraScript.GUEST_CONFIG_DIR,
             busDaemonDir.path to SessionBus.GUEST_DAEMON_DIR,
         )
-        val process = env.start(listOf("/bin/sh", CameraScript.GUEST_SCRIPT), binds, asAppUser = true) { line ->
+        val process = env.start(listOf("/bin/sh", CameraScript.GUEST_SCRIPT), binds, asAppUser = true, filter = filter) { line ->
+            if (Fdsec.refused(line)) refused.set(true)
             CameraScript.users(line)?.let { (node, count) -> streamers[node]?.setUsers(count) }
             if (line == CameraScript.READY) ready.countDown()
             SessionController.log("[camera] $line")
@@ -411,8 +471,10 @@ class FlatpakLauncher(private val context: Context) {
     private fun options(appId: String): LaunchOptions {
         val settings = AppData.settings(context, appId).load()
         val app = installation.app(appId)
+        val user = SetupController.settings(context).load()
+        val security = user?.security ?: SecuritySettings()
         // Developer settings count only while developer options are on.
-        val developerOptions = SetupController.settings(context).load()?.developerOptions == true
+        val developerOptions = user?.developerOptions == true
         return LaunchOptions(
             environment = if (developerOptions) settings.environment else emptyMap(),
             newerElectronFlags = settings.newerElectronFlags,
@@ -421,6 +483,9 @@ class FlatpakLauncher(private val context: Context) {
             flatpakInfo = !settings.withoutFlatpakInfo,
             darkTheme = isDarkTheme(),
             audio = settings.audioAllowed(app?.metadata?.context?.sockets.orEmpty()),
+            network = settings.networkAllowed(app?.metadata?.context?.shared.orEmpty()),
+            extraSyscalls = security.extraSyscallFilter && !(developerOptions && settings.allowExtraSyscalls),
+            limitDevices = security.limitDevices,
         )
     }
 
@@ -433,6 +498,13 @@ class FlatpakLauncher(private val context: Context) {
         val launcher = AppData.launcherFiles(context)
         val home = GuestPaths.HOME
         val varApp = "$home/.var/app/$appId"
+        // A shared home's dot-files would be every app's (and readable by other Android apps): the app's
+        // own instead, unless the developer setting shares one set across the apps that opt in.
+        val dotFiles = when {
+            settings.homeMode != HomeMode.SHARED -> null
+            settings.shareHiddenFiles -> AppData.sharedDotfilesDir(context)
+            else -> File(appData, AppFiles.DOT_FILES_DIR)
+        }
         return HostDirs(
             root = File(AppData.rootsDir(context), appId),
             tmp = File(tmpBase, "tmp"),
@@ -454,7 +526,8 @@ class FlatpakLauncher(private val context: Context) {
                 File(appData, "var/data") to "/var/data",
                 cache to "/var/cache",
                 File(cache, "tmp") to "/var/tmp",
-            ),
+            ) + dotFiles?.let { dir -> AppFiles.PRIVATE_DOT_DIRS.map { File(dir, it) to "$home/$it" } }.orEmpty(),
+            privateFiles = dotFiles?.let { dir -> AppFiles.PRIVATE_DOT_FILES.map { File(dir, it) to "$home/$it" } }.orEmpty(),
             etc = linkedMapOf(
                 "resolv.conf" to File(etcDir, "resolv.conf"),
                 "hosts" to launcher.hosts,
@@ -486,6 +559,7 @@ class FlatpakLauncher(private val context: Context) {
         if (!plan.binds.wholeDev) DevNodes.createMountPoints(root, plan.binds.dev + AlpineBinds.FD_LINKS.keys)
         for (name in plan.usrLinks) Os.symlink("usr/$name", File(root, name).path)
         plan.flatpakInfo?.let { File(root, ".flatpak-info").writeText(it) }
+        File(root, Fdsec.APP_PATH.removePrefix("/")).apply { parentFile!!.mkdirs() }.createNewFile()
 
         AndroidTarFs.deleteTree(File(AppData.appTmpDir(context), appId))
         File(plan.binds.tmp).mkdirs()
@@ -494,6 +568,11 @@ class FlatpakLauncher(private val context: Context) {
         for (dir in listOf(File(plan.binds.home)) + plan.binds.appDirs.map { File(it.first) }) {
             if (AndroidTarFs.isSymlink(dir)) dir.delete()
             dir.mkdirs()
+        }
+        for ((host, _) in plan.binds.privateFiles) {
+            val file = File(host)
+            if (AndroidTarFs.isSymlink(file)) file.delete()
+            if (!file.exists()) file.apply { parentFile!!.mkdirs() }.createNewFile()
         }
         // Mount points for the further binds: in the root, or in the app's own directory they fall in.
         for ((host, guest) in plan.binds.extra) {
@@ -514,8 +593,8 @@ class FlatpakLauncher(private val context: Context) {
      */
     private fun checkBindSources(plan: LaunchPlan) {
         val b = plan.binds
-        val sources = listOfNotNull(b.root, b.runtimeFiles, b.appFiles, "${b.runtimeFiles}/etc", b.tmp, b.shm, b.x11Sockets, b.pulseSockets, b.home, env.paths().l2sDir) +
-            b.etc.values + b.extensions.map { it.first } + b.appDirs.map { it.first } + b.extra.map { it.first }
+        val sources = listOfNotNull(b.root, b.runtimeFiles, b.appFiles, "${b.runtimeFiles}/etc", b.tmp, b.shm, b.x11Sockets, b.pulseSockets, b.home, b.emptyDir, env.paths().l2sDir) +
+            b.etc.values + b.extensions.map { it.first } + b.appDirs.map { it.first } + b.privateFiles.map { it.first } + b.extra.map { it.first }
         for (path in sources) {
             val file = File(path)
             if (!file.exists() || file.canonicalPath != file.absolutePath) {
@@ -535,7 +614,7 @@ class FlatpakLauncher(private val context: Context) {
         launcher.write()
         File(etcDir, "machine-id").writeTextAtomically(launcher.machineId.readText(), durable = false)
         File(etcDir, "resolv.conf").writeTextAtomically(env.resolvConf(), durable = false)
-        for (dir in listOf(x11Dir, pulseDir, vncDir, busDaemonDir, busProxyDir, pipewireDir, cameraPipeDir, cameraConfigDir)) {
+        for (dir in listOf(x11Dir, pulseDir, vncDir, busDaemonDir, busProxyDir, pipewireDir, cameraPipeDir, cameraConfigDir, emptyDir)) {
             AndroidTarFs.deleteTree(dir)
             dir.mkdirs()
         }
@@ -562,10 +641,10 @@ class FlatpakLauncher(private val context: Context) {
     }
 
     /**
-     * Starts [command] ([SessionScript.command]), with PulseAudio's script bound when there is
-     * [sound]; [onLine] also gets each line of the helpers' output, before it is logged.
+     * Starts [command] ([SessionScript.command]) behind [filter], with PulseAudio's script bound
+     * when there is [sound]; [onLine] also gets each line of the helpers' output, before it is logged.
      */
-    private fun startHelpers(command: List<String>, sound: Boolean, onLine: (String) -> Unit): ProotProcess {
+    private fun startHelpers(command: List<String>, sound: Boolean, filter: Fdsec.Filter, onLine: (String) -> Unit): ProotProcess {
         val binds = listOf(
             x11Dir.path to GuestPaths.X11_DIR,
             pulseDir.path to GuestPaths.PULSE_DIR,
@@ -578,7 +657,7 @@ class FlatpakLauncher(private val context: Context) {
             File(sessionDir, "dbus.conf").path to SessionBus.GUEST_CONFIG,
             File(sessionDir, "proxy.args").path to SessionBus.GUEST_PROXY_ARGS,
         ) + if (sound) listOf(File(sessionDir, "pulse.pa").path to SessionScript.GUEST_PULSE_SCRIPT) else emptyList()
-        return env.start(command, binds, asAppUser = true) { line ->
+        return env.start(command, binds, asAppUser = true, filter = filter) { line ->
             onLine(line)
             SessionController.log("[display] $line")
         }

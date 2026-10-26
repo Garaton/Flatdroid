@@ -21,6 +21,16 @@ enum class HomeMode {
     TEMPORARY,
 }
 
+/**
+ * What a Flatpak's own settings start as, from the security level ([SecuritySettings.appDefaults]):
+ * the settings below that the user hasn't changed follow these.
+ */
+data class AppDefaults(
+    val homeMode: HomeMode = HomeMode.SHARED,
+    /** Network and sound are on when the app's metadata asks for them; otherwise off until the user turns them on. */
+    val permissionsFromMetadata: Boolean = true,
+)
+
 /** Flatdroid's choices for one Flatpak. */
 data class AppSettings(
     /** Xvnc's size at launch; the viewer's resize option can change it afterwards. */
@@ -42,8 +52,21 @@ data class AppSettings(
      * the device groups Flatpak names. Shown only with developer options.
      */
     val wholeDev: Boolean = false,
-    /** Sound output (the PulseAudio socket); null follows the app's metadata ([audioAllowed]). */
+    /** Sound output (the PulseAudio socket); null follows [defaults] ([audioAllowed]). */
     val audio: Boolean? = null,
+    /**
+     * Internet access: off, the app gets no resolv.conf and can't open Internet sockets. Null
+     * follows [defaults] ([networkAllowed]).
+     */
+    val network: Boolean? = null,
+    /** Developer setting: the security level's extra system calls stay allowed for this app. */
+    val allowExtraSyscalls: Boolean = false,
+    /**
+     * Developer setting (Shared Home only): the app's hidden config and key files (.ssh, .gnupg,
+     * shell start-up, .gitconfig, …) come from a location shared with the other apps that opt in,
+     * instead of the app's own. Off by default, so apps don't share keys unless asked.
+     */
+    val shareHiddenFiles: Boolean = false,
     /**
      * Microphone input, through Android's microphone while the app records. Off by default; on,
      * the user is asked in a notification the first time the app records in a session, and the
@@ -68,15 +91,23 @@ data class AppSettings(
     val cameraFrameRate: Int = AndroidCameras.DEFAULT_FRAME_RATE,
     /** Developer setting: variables added to the app's environment, over Flatdroid's own. */
     val environment: Map<String, String> = emptyMap(),
-    val homeMode: HomeMode = HomeMode.SHARED,
+    /** The user's choice of home; null follows [defaults] ([homeMode]). */
+    val homeModeChoice: HomeMode? = null,
     /**
      * All of shared storage at /sdcard. Shown, and bound, only while Flatdroid has access to all
      * of it (All files access, or the storage permission on Android 10 and older).
      */
     val sdcard: Boolean = false,
+    /** What the settings the user hasn't changed follow; not saved (it comes from the security level). */
+    val defaults: AppDefaults = AppDefaults(),
 ) {
-    /** Whether the app gets sound: its own setting, else whether its metadata asks for PulseAudio. */
-    fun audioAllowed(sockets: List<String>): Boolean = audio ?: (PULSEAUDIO_SOCKET in sockets)
+    val homeMode: HomeMode get() = homeModeChoice ?: defaults.homeMode
+
+    /** Whether the app gets sound: its own setting, else [defaults] and whether its metadata asks for PulseAudio. */
+    fun audioAllowed(sockets: List<String>): Boolean = audio ?: (defaults.permissionsFromMetadata && PULSEAUDIO_SOCKET in sockets)
+
+    /** Whether the app gets the Internet: its own setting, else [defaults] and whether its metadata asks for the network. */
+    fun networkAllowed(shared: List<String>): Boolean = network ?: (defaults.permissionsFromMetadata && NETWORK in shared)
 
     val width: Int get() = when (displaySize) {
         DisplaySize.PORTRAIT -> PORTRAIT_WIDTH
@@ -99,6 +130,8 @@ data class AppSettings(
         const val MAX_SIZE = 4096
         /** Flatpak's `sockets=` name for sound. */
         const val PULSEAUDIO_SOCKET = "pulseaudio"
+        /** Flatpak's `shared=` name for the network. */
+        const val NETWORK = "network"
     }
 }
 
@@ -125,15 +158,16 @@ object EnvironmentText {
 
 /**
  * Keeps [AppSettings] in a properties file. Only a custom size is stored as numbers, so the
- * portrait and landscape choices follow Flatdroid's defaults.
+ * portrait and landscape choices follow Flatdroid's defaults; settings left at [appDefaults]
+ * aren't stored, so they follow the security level.
  */
-class AppSettingsStore(private val file: File) {
+class AppSettingsStore(private val file: File, private val appDefaults: AppDefaults = AppDefaults()) {
     fun load(): AppSettings {
-        if (!file.isFile) return AppSettings()
+        if (!file.isFile) return AppSettings(defaults = appDefaults)
         val props = try {
             Properties().apply { file.inputStream().use { load(it) } }
         } catch (_: Exception) {
-            return AppSettings()
+            return AppSettings(defaults = appDefaults)
         }
         val defaults = AppSettings()
         fun size(key: String, default: Int) =
@@ -147,6 +181,9 @@ class AppSettingsStore(private val file: File) {
             lastOpened = props.getProperty(KEY_LAST_OPENED)?.toLongOrNull(),
             wholeDev = props.getProperty(KEY_WHOLE_DEV) == "true",
             audio = props.getProperty(KEY_AUDIO)?.toBooleanStrictOrNull(),
+            network = props.getProperty(KEY_NETWORK)?.toBooleanStrictOrNull(),
+            allowExtraSyscalls = props.getProperty(KEY_EXTRA_SYSCALLS) == "true",
+            shareHiddenFiles = props.getProperty(KEY_SHARE_HIDDEN_FILES) == "true",
             microphone = props.getProperty(KEY_MICROPHONE) == "true",
             camera = props.getProperty(KEY_CAMERA) == "true",
             cameraResolution = props.getProperty(KEY_CAMERA_RESOLUTION)?.toIntOrNull()
@@ -161,8 +198,9 @@ class AppSettingsStore(private val file: File) {
                 .filter(LaunchEnvironment::isName)
                 .sorted()
                 .associateWith { props.getProperty(KEY_ENV_PREFIX + it) },
-            homeMode = HomeMode.entries.firstOrNull { it.name.lowercase() == props.getProperty(KEY_HOME_MODE) } ?: defaults.homeMode,
+            homeModeChoice = HomeMode.entries.firstOrNull { it.name.lowercase() == props.getProperty(KEY_HOME_MODE) },
             sdcard = props.getProperty(KEY_SDCARD) == "true",
+            defaults = appDefaults,
         )
     }
 
@@ -177,13 +215,16 @@ class AppSettingsStore(private val file: File) {
         settings.lastOpened?.let { props.setProperty(KEY_LAST_OPENED, it.toString()) }
         props.setProperty(KEY_WHOLE_DEV, settings.wholeDev.toString())
         settings.audio?.let { props.setProperty(KEY_AUDIO, it.toString()) }
+        settings.network?.let { props.setProperty(KEY_NETWORK, it.toString()) }
+        if (settings.allowExtraSyscalls) props.setProperty(KEY_EXTRA_SYSCALLS, "true")
+        if (settings.shareHiddenFiles) props.setProperty(KEY_SHARE_HIDDEN_FILES, "true")
         if (settings.microphone) props.setProperty(KEY_MICROPHONE, "true")
         if (settings.alwaysAllowMicrophone) props.setProperty(KEY_MICROPHONE_ALWAYS, "true")
         if (settings.camera) props.setProperty(KEY_CAMERA, "true")
         props.setProperty(KEY_CAMERA_RESOLUTION, settings.cameraResolution.toString())
         props.setProperty(KEY_CAMERA_FRAME_RATE, settings.cameraFrameRate.toString())
         for ((name, value) in settings.environment) props.setProperty(KEY_ENV_PREFIX + name, value)
-        props.setProperty(KEY_HOME_MODE, settings.homeMode.name.lowercase())
+        settings.homeModeChoice?.let { props.setProperty(KEY_HOME_MODE, it.name.lowercase()) }
         if (settings.sdcard) props.setProperty(KEY_SDCARD, "true")
         file.writeTextAtomically(StringWriter().also { props.store(it, null) }.toString())
     }
@@ -199,11 +240,12 @@ class AppSettingsStore(private val file: File) {
          * An app's settings file from an import, [imported], with the settings that widen what the
          * app can reach left as they are on this device ([local], its current file, or null for
          * none): whole /dev (with Binder), all of shared storage, the microphone without asking,
-         * the camera and its environment. A shared settings file can't turn them on.
+         * the camera, the network, the extra system calls, its home and its environment. A shared
+         * settings file can't turn them on.
          */
         fun imported(imported: ByteArray, local: ByteArray?): ByteArray {
             fun widensReach(key: String) =
-                key == KEY_WHOLE_DEV || key == KEY_SDCARD || key == KEY_MICROPHONE_ALWAYS || key == KEY_CAMERA || key.startsWith(KEY_ENV_PREFIX)
+                key in WIDENING_KEYS || key.startsWith(KEY_ENV_PREFIX)
             val props = Properties().apply { load(imported.inputStream()) }
             props.stringPropertyNames().filter(::widensReach).forEach { props.remove(it) }
             if (local != null) {
@@ -229,5 +271,12 @@ class AppSettingsStore(private val file: File) {
         private const val KEY_ENV_PREFIX = "env."
         private const val KEY_HOME_MODE = "home.mode"
         private const val KEY_SDCARD = "storage.sdcard"
+        private const val KEY_NETWORK = "permission.network"
+        private const val KEY_EXTRA_SYSCALLS = "filter.allowExtraSyscalls"
+        private const val KEY_SHARE_HIDDEN_FILES = "home.shareHiddenFiles"
+        private val WIDENING_KEYS = setOf(
+            KEY_WHOLE_DEV, KEY_SDCARD, KEY_MICROPHONE_ALWAYS, KEY_CAMERA, KEY_NETWORK, KEY_EXTRA_SYSCALLS, KEY_HOME_MODE,
+            KEY_SHARE_HIDDEN_FILES,
+        )
     }
 }

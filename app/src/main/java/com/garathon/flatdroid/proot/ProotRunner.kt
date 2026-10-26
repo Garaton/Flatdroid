@@ -29,6 +29,9 @@ class ProotProcess internal constructor(
     // Process.isAlive needs API 26; minSdk is 24.
     val isAlive: Boolean get() = !ProcessStopper.waitForExit(process, 0)
 
+    /** proot's own pid; null if it can't be told. */
+    val pid: Int? get() = ProcessStopper.pidOf(process)
+
     /** Waits for the exit and for the last output lines. Interruptible. */
     fun waitFor(): Int {
         val code = process.waitFor()

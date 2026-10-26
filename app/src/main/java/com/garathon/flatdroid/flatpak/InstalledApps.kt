@@ -2,6 +2,8 @@ package com.garathon.flatdroid.flatpak
 
 import android.content.Context
 import com.garathon.flatdroid.alpine.AlpineEnvironment
+import com.garathon.flatdroid.launcher.Electron
+import com.garathon.flatdroid.launcher.Executable
 import com.garathon.flatdroid.proot.DevNodes
 import com.garathon.flatdroid.settings.AppSettings
 import com.garathon.flatdroid.util.readTextUpTo
@@ -20,6 +22,10 @@ data class InstalledApp(
     val requestsAllDevices: Boolean = false,
     /** Its metadata asks for sound (`sockets=pulseaudio`). */
     val requestsAudio: Boolean = false,
+    /** Its metadata asks for the network (`shared=network`). */
+    val requestsNetwork: Boolean = false,
+    /** An Electron app or a Chromium browser: it shows web content, without Chromium's sandbox here. */
+    val showsWebContent: Boolean = false,
 )
 
 /** Installed apps with their names and icons, read from what each app exports. */
@@ -37,7 +43,19 @@ class InstalledApps(private val context: Context) {
             installed = installation.installed(id),
             requestsAllDevices = DevNodes.ALL in app.metadata.context.devices,
             requestsAudio = AppSettings.PULSEAUDIO_SOCKET in app.metadata.context.sockets,
+            requestsNetwork = AppSettings.NETWORK in app.metadata.context.shared,
+            showsWebContent = showsWebContent(app, id),
         )
+    }
+
+    /**
+     * Whether the app's command starts Electron or a Chromium browser, as the launcher sees it
+     * (through zypak or cobalt). WebKitGTK apps can't be told this way (a script may load it).
+     */
+    private fun showsWebContent(app: Deployment, id: String): Boolean {
+        val command = app.metadata.command?.takeIf { it.isNotBlank() && !it.startsWith("/") } ?: return false
+        val script = (Executable.of(File(app.files, "bin/$command")) as? Executable.Script)?.text ?: return false
+        return Electron.zypakTarget(script) != null || Electron.cobaltTarget(script, id) { true } != null
     }
 
     fun name(id: String): String? = installation.app(id)?.let { desktopName(it, id) }

@@ -31,6 +31,13 @@ class DevNodesTest {
     }
 
     @Test
+    fun limitedAllMeansTheGpuOnlyAndNamedGroupsStay() {
+        assertEquals(DevNodes.BASE + "/dev/dri", DevNodes.forApp(listOf("all"), everything, limited = true))
+        assertEquals(DevNodes.BASE + listOf("/dev/dri", "/dev/input"), DevNodes.forApp(listOf("all", "input"), everything, limited = true))
+        assertEquals(DevNodes.BASE + "/dev/bus/usb", DevNodes.forApp(listOf("usb"), everything, limited = true))
+    }
+
+    @Test
     fun missingNodesAreLeftOut() {
         val forApp = DevNodes.forApp(listOf("all"), { it != "/dev/kvm" && it != "/dev/tty" })
         assertFalse("/dev/kvm" in forApp)

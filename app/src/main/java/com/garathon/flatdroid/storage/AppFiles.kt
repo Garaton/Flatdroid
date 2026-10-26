@@ -16,7 +16,26 @@ object AppFiles {
         "var" to ".var/app/$appId/",
     )
 
-    fun dirs(appData: File, appId: String): List<File> = layout(appId).map { File(appData, it.first) }
+    /**
+     * Everything that is the app's own in `files/appdata/<ID>/` (its settings size, reset with them):
+     * [layout]'s directories and [DOT_FILES_DIR].
+     */
+    fun dirs(appData: File, appId: String): List<File> = layout(appId).map { File(appData, it.first) } + File(appData, DOT_FILES_DIR)
+
+    /**
+     * The app's own copies of the dot-files a Shared Home would otherwise share between apps and
+     * with other Android apps that can read shared storage: shell start-up files (which run
+     * code), Git's settings (which can name commands), and keys and logins. Bound over the shared
+     * home's, only in Shared Home mode (a private or temporary home is the app's already). Not
+     * exported: on a desktop they belong to the whole home, not to one app.
+     */
+    const val DOT_FILES_DIR = "dotfiles"
+    val PRIVATE_DOT_FILES = listOf(
+        // Shell start-up (run code), Git (can name commands), network-tool rc files (curl/wget
+        // read options such as an output path from them), credentials and history.
+        ".bash_history", ".bash_profile", ".bashrc", ".curlrc", ".gitconfig", ".inputrc", ".netrc", ".profile", ".wgetrc", ".zshrc",
+    )
+    val PRIVATE_DOT_DIRS = listOf(".gnupg", ".ssh")
 
     /**
      * What an export holds: without Flatdroid's `user-dirs.dirs` (written at every launch) and the

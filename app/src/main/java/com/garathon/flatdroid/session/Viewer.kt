@@ -38,13 +38,15 @@ object Viewer {
     /**
      * Opens the display in [chosen] (a package from Settings) if it is still installed, else
      * through a chooser every time: the link carries the password, so it must not go to whichever
-     * app made itself the default for `vnc:` links. Null when no viewer is installed.
+     * app made itself the default for `vnc:` links. Null when no viewer is installed, or, without
+     * [allowChooser] (the password protection setting), when the chosen one isn't.
      */
-    fun intent(context: Context, password: String, chosen: String?): Intent? {
+    fun intent(context: Context, password: String, chosen: String?, allowChooser: Boolean = true): Intent? {
         val viewers = installed(context)
         if (viewers.isEmpty()) return null
         val view = Intent(Intent.ACTION_VIEW, uri(password))
         val target = chosen?.takeIf { pkg -> viewers.any { it.packageName == pkg } }
+        if (target == null && !allowChooser) return null
         val intent = if (target != null) view.setPackage(target) else Intent.createChooser(view, context.getString(R.string.session_open_viewer))
         return intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }

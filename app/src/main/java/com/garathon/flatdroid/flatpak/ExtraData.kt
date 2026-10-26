@@ -4,6 +4,7 @@ import android.system.ErrnoException
 import android.system.Os
 import com.garathon.flatdroid.alpine.AlpineEnvironment
 import com.garathon.flatdroid.launcher.LaunchPlanner
+import com.garathon.flatdroid.proot.Fdsec
 import com.garathon.flatdroid.proot.ProotCommand
 import com.garathon.flatdroid.proot.ProotRunner
 import com.garathon.flatdroid.setup.AndroidTarFs
@@ -59,6 +60,7 @@ class ExtraData(private val env: AlpineEnvironment, private val stateFile: File,
             for (dir in listOf("usr", "app", "tmp", "dev")) File(root, dir).mkdirs()
             tmp.mkdirs()
             for (dev in listOf("null", "zero", "urandom")) File(root, "dev/$dev").createNewFile()
+            File(root, Fdsec.APP_PATH.removePrefix("/")).apply { parentFile!!.mkdirs() }.createNewFile()
             if (runtime != null) {
                 for (link in LaunchPlanner.USR_LINKS.filter { File(runtime, it).exists() }) Os.symlink("usr/$link", File(root, link).path)
             }

@@ -43,9 +43,19 @@ class SessionAudioTest {
     fun pulseAudioAndTheMicrophoneWatcherStartOnlyWithSound() {
         val lines = SessionScript.TEXT.lines().map { it.trim() }
         val soundCheck = lines.indexOf("if [ \"${'$'}sound\" = on ]; then")
-        val pulse = lines.indexOfFirst { it.startsWith("pulseaudio ") }
+        val pulse = lines.indexOfFirst { "/usr/bin/pulseaudio " in it }
         assertTrue(soundCheck in 0 until pulse && lines.subList(soundCheck, pulse).none { it == "fi" })
         assertTrue("sound=${'$'}4" in lines && "microphone=${'$'}5" in lines && "resampler=${'$'}6" in lines)
+    }
+
+    @Test
+    fun everyHelperButXvncRunsWithoutInternetSockets() {
+        val lines = SessionScript.TEXT.lines().map { it.trim() }
+        for (helper in listOf("openbox", "dbus-daemon", "xdg-dbus-proxy", "pipewire", "pulseaudio")) {
+            val line = lines.single { "/usr/bin/$helper" in it }
+            assertTrue(line, "/run/flatdroid/fdsec --no-inet -- /usr/bin/$helper" in line)
+        }
+        assertTrue(lines.single { it.startsWith("Xvnc ") }.let { "fdsec" !in it })
     }
 
     @Test

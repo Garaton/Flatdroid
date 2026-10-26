@@ -6,6 +6,7 @@ import android.os.SystemClock
 import android.system.Os
 import com.garathon.flatdroid.proot.AlpineBinds
 import com.garathon.flatdroid.proot.DevNodes
+import com.garathon.flatdroid.proot.Fdsec
 import com.garathon.flatdroid.proot.GuestPaths
 import com.garathon.flatdroid.proot.ProcessResult
 import com.garathon.flatdroid.proot.ProcessStopper
@@ -74,13 +75,15 @@ class AlpineEnvironment private constructor(private val context: Context) {
 
     /**
      * Starts [command] in Alpine as fake root and returns at once; the caller stops it. Used for
-     * the terminal and the long-running display and audio helpers.
+     * the terminal and the long-running display and audio helpers. [filter] is [Fdsec]'s; only
+     * the terminal may pass null (its developer setting), every other start keeps a filter.
      */
     fun start(
         command: List<String>,
         extraBinds: List<Pair<String, String>> = emptyList(),
         /** As the app's own user IDs instead of root ([ProotCommand.alpine]'s ids). */
         asAppUser: Boolean = false,
+        filter: Fdsec.Filter? = Fdsec.Filter(),
         onLine: (String) -> Unit = {},
     ): ProotProcess {
         check(isInstalled()) { "The Alpine rootfs is not installed" }
@@ -91,7 +94,7 @@ class AlpineEnvironment private constructor(private val context: Context) {
             write("passwd", GuestFiles.passwdWith(rootfsFile("etc/passwd"), uid, gid)).path to "/etc/passwd",
             write("group", GuestFiles.groupWith(rootfsFile("etc/group"), gid)).path to "/etc/group",
         )
-        val invocation = ProotCommand.alpine(paths(), prepareBinds(binds), command, ids = ids)
+        val invocation = ProotCommand.alpine(paths(), prepareBinds(binds), command, ids = ids, filter = filter)
         return ProotRunner.start(invocation, alpineDir, onLine = onLine)
     }
 
@@ -106,6 +109,7 @@ class AlpineEnvironment private constructor(private val context: Context) {
         loader = File(libDir, "libproot-loader.so").path,
         tmpDir = dir(File(cacheDir, "proot-tmp")).path,
         rootfs = installer.rootfs.path,
+        fdsec = File(libDir, Fdsec.LIBRARY).path,
     )
 
     private fun prepareBinds(extra: List<Pair<String, String>>): AlpineBinds {

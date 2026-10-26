@@ -43,6 +43,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
+import java.io.OutputStream
 
 /**
  * Copies files into and out of Flatdroid's storage in the foreground (dataSync), one task at a
@@ -158,18 +159,18 @@ class StorageTaskService : Service() {
         is StorageTask.ExportTempHome -> {
             val home = TempHomes.home(this)
             if (TempHomes.owner(this) != task.appId || !home.isDirectory) throw IOException(getString(R.string.storage_temp_home_gone))
-            val saved = zipToDownload(task, getString(R.string.storage_temp_home_zip, label(task.appId), Names.timestamp()), listOf(HomeZip.Part(home, exclude = HomeZip.SETTINGS_DIRS)))
+            val saved = zipOut(task, uris, listOf(HomeZip.Part(home, exclude = HomeZip.SETTINGS_DIRS)))
             TempHomes.delete(this)
             getString(R.string.storage_exported_title) to getString(R.string.storage_exported, saved)
         }
         is StorageTask.ExportHome -> {
             val home = AppData.privateHome(this, task.appId)
             if (!home.isDirectory) throw IOException(getString(R.string.storage_no_private_home, label(task.appId)))
-            val saved = zipToDownload(task, getString(R.string.storage_home_zip, label(task.appId), Names.timestamp()), listOf(HomeZip.Part(home, exclude = HomeZip.SETTINGS_DIRS)))
+            val saved = zipOut(task, uris, listOf(HomeZip.Part(home, exclude = HomeZip.SETTINGS_DIRS)))
             getString(R.string.storage_exported_title) to getString(R.string.storage_exported, saved)
         }
         is StorageTask.ExportAppFiles -> {
-            val saved = zipToDownload(task, getString(R.string.storage_settings_zip, label(task.appId), Names.timestamp()), AppFiles.parts(appData(task.appId), task.appId))
+            val saved = zipOut(task, uris, AppFiles.parts(appData(task.appId), task.appId))
             getString(R.string.storage_exported_title) to getString(R.string.storage_exported, saved)
         }
         StorageTask.ExportAllHomes -> {
@@ -177,13 +178,13 @@ class StorageTaskService : Service() {
                 AppData.privateHome(this, appId).takeIf { it.isDirectory }?.let { HomeZip.Part(it, "$appId/", HomeZip.SETTINGS_DIRS) }
             }
             if (parts.isEmpty()) throw IOException(getString(R.string.storage_no_private_homes))
-            val saved = zipToDownload(task, getString(R.string.storage_all_homes_zip, Names.timestamp()), parts)
+            val saved = zipOut(task, uris, parts)
             getString(R.string.storage_exported_title) to getString(R.string.storage_exported, saved)
         }
         StorageTask.ExportAllAppFiles -> {
             val parts = appsWithData().flatMap { appId -> AppFiles.parts(appData(appId), appId).map { it.copy(prefix = "$appId/${it.prefix}") } }
             if (parts.none { it.dir.isDirectory }) throw IOException(getString(R.string.storage_no_app_settings))
-            val saved = zipToDownload(task, getString(R.string.storage_all_settings_zip, Names.timestamp()), parts)
+            val saved = zipOut(task, uris, parts)
             getString(R.string.storage_exported_title) to getString(R.string.storage_exported, saved)
         }
         StorageTask.ImportAllHomes -> {
@@ -209,7 +210,7 @@ class StorageTaskService : Service() {
             getString(R.string.storage_imported_title) to resources.getQuantityString(R.plurals.storage_imported_all_settings, apps.size, apps.size)
         }
         StorageTask.ExportFlatdroidSettings -> {
-            val saved = Downloads.save(this, getString(R.string.storage_flatdroid_settings_zip, Names.timestamp()), "application/zip") { out ->
+            val saved = saveExport(exportName(this, task), uris.firstOrNull()) { out ->
                 SettingsBackup.write(out, File(filesDir, SetupController.SETTINGS_FILE), AppData.settingsDir(this))
             }
             getString(R.string.storage_exported_title) to getString(R.string.storage_exported, saved)
@@ -312,10 +313,27 @@ class StorageTaskService : Service() {
 
     private fun open(uri: Uri): InputStream = contentResolver.openInputStream(uri) ?: throw IOException(getString(R.string.storage_unreadable))
 
-    private fun zipToDownload(task: StorageTask, name: String, parts: List<HomeZip.Part>): String =
-        Downloads.save(this, Names.safe(name, "export.zip"), "application/zip") { out ->
+    /** [parts] zipped, to the file the user chose in the "save as" picker ([uris]) or into Download. */
+    private fun zipOut(task: StorageTask, uris: List<Uri>, parts: List<HomeZip.Part>): String =
+        saveExport(exportName(this, task), uris.firstOrNull()) { out ->
             HomeZip.write(parts, out, AndroidTarFs::isSymlink) { done, total -> updateProgress(task, if (total > 0) done.toFloat() / total else null) }
         }
+
+    /**
+     * Writes an export to [target], the file the user chose in Android's "save as" picker, or
+     * with none into Download. Returns where it went, as the user knows it. A failed write leaves
+     * no file.
+     */
+    private fun saveExport(name: String, target: Uri?, write: (OutputStream) -> Unit): String {
+        if (target == null) return Downloads.save(this, Names.safe(name, "export.zip"), "application/zip", write)
+        try {
+            (contentResolver.openOutputStream(target, "wt") ?: throw IOException(getString(R.string.storage_unwritable))).use(write)
+        } catch (e: Exception) {
+            runCatching { DocumentsContract.deleteDocument(contentResolver, target) }
+            throw e
+        }
+        return queryName(target) ?: name
+    }
 
     private fun extractFrom(
         task: StorageTask,
@@ -522,6 +540,21 @@ class StorageTaskService : Service() {
                 if (runCatching { context.contentResolver.releasePersistableUriPermission(permission.uri, flags) }.isSuccess) released++
             }
             if (released > 0) DebugLog.i("released access to $released picked files; ${context.contentResolver.persistedUriPermissions.size} still kept")
+        }
+
+        /** The file name an export suggests; empty for other tasks. */
+        fun exportName(context: Context, task: StorageTask): String {
+            fun label(appId: String) = InstalledApps(context).name(appId) ?: appId
+            val time = Names.timestamp()
+            return when (task) {
+                is StorageTask.ExportTempHome -> context.getString(R.string.storage_temp_home_zip, label(task.appId), time)
+                is StorageTask.ExportHome -> context.getString(R.string.storage_home_zip, label(task.appId), time)
+                is StorageTask.ExportAppFiles -> context.getString(R.string.storage_settings_zip, label(task.appId), time)
+                StorageTask.ExportAllHomes -> context.getString(R.string.storage_all_homes_zip, time)
+                StorageTask.ExportAllAppFiles -> context.getString(R.string.storage_all_settings_zip, time)
+                StorageTask.ExportFlatdroidSettings -> context.getString(R.string.storage_flatdroid_settings_zip, time)
+                else -> ""
+            }
         }
 
         /** What [task] does, as the user reads it. */

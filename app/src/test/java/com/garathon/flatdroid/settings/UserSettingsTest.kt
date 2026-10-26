@@ -89,4 +89,50 @@ class UserSettingsTest {
         assertEquals(UserSettings.UNCAPPED_FRAME_RATE, base.copy(customFrameRate = 45, uncappedFrameRate = true, developerOptions = true).frameRate)
         assertEquals(30, base.copy(uncappedFrameRate = true).frameRate)
     }
+
+    @Test
+    fun aSecurityLevelIsSavedByNameAndCustomBySetting() {
+        val file = File(tmp.root, "settings.properties")
+        val store = UserSettingsStore(file)
+        // Older files without a level, and the defaults, are Default.
+        assertEquals(SecurityLevel.DEFAULT, UserSettings("en").securityLevel)
+        file.writeText("flatpak.languages=en\n")
+        assertEquals(SecurityLevel.DEFAULT.settings, store.load()!!.security)
+        for (level in SecurityLevel.entries) {
+            store.save(UserSettings("en", security = level.settings))
+            assertEquals(level, store.load()!!.securityLevel)
+            assertTrue("security.level=${level.name.lowercase()}" in file.readText())
+            assertFalse("security.limitDevices" in file.readText())
+        }
+        val custom = SecurityLevel.HARDENED.settings.copy(defaultHomeMode = HomeMode.SHARED, exportWithPicker = false)
+        store.save(UserSettings("en", security = custom))
+        assertNull(store.load()!!.securityLevel)
+        assertEquals(custom, store.load()!!.security)
+        assertTrue("security.level=custom" in file.readText())
+    }
+
+    @Test
+    fun theLevelsSortTheirSettings() {
+        val performant = SecurityLevel.PERFORMANT.settings
+        val default = SecurityLevel.DEFAULT.settings
+        val hardened = SecurityLevel.HARDENED.settings
+        assertFalse(performant.extraSyscallFilter || performant.hideHelperProcesses)
+        assertTrue(default.extraSyscallFilter && hardened.extraSyscallFilter)
+        assertTrue(default.hideHelperProcesses && hardened.hideHelperProcesses)
+        assertEquals(HomeMode.PRIVATE, hardened.appDefaults.homeMode)
+        assertFalse(hardened.appDefaults.permissionsFromMetadata)
+        assertTrue(hardened.limitDevices && hardened.protectPassword && hardened.exportWithPicker && hardened.hideHelperProcesses)
+        assertEquals(AppDefaults(), default.appDefaults)
+        assertEquals(AppDefaults(), performant.appDefaults)
+    }
+
+    @Test
+    fun theTerminalIsFilteredUnlessTheDeveloperSettingSaysOtherwise() {
+        assertTrue(UserSettings("en").filterTerminal)
+        assertTrue(UserSettings("en", terminalFilter = false).filterTerminal)
+        assertFalse(UserSettings("en", developerOptions = true, terminalFilter = false).filterTerminal)
+        val store = UserSettingsStore(File(tmp.root, "t.properties"))
+        store.save(UserSettings("en", terminalFilter = false))
+        assertFalse(store.load()!!.terminalFilter)
+    }
 }

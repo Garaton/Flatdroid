@@ -1,7 +1,9 @@
 package com.garathon.flatdroid.ui
 
+import android.app.Activity
 import android.content.ClipData
 import android.os.PersistableBundle
+import android.view.WindowManager
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -24,6 +26,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -33,6 +36,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
@@ -48,7 +52,11 @@ import com.garathon.flatdroid.session.SessionUi
 import com.garathon.flatdroid.session.Viewer
 import kotlinx.coroutines.launch
 
-/** The running session, or how the last one ended. Nothing when idle with no message. */
+/**
+ * The running session, or how the last one ended. Nothing when idle with no message. With
+ * [protectPassword] (the security setting), the screen can't be captured while the password is on
+ * it, and the password shows only on tap.
+ */
 @Composable
 fun SessionPanel(
     session: SessionUi,
@@ -57,6 +65,7 @@ fun SessionPanel(
     onStop: () -> Unit,
     onShowLog: () -> Unit,
     onDismiss: () -> Unit,
+    protectPassword: Boolean = false,
 ) {
     val state = session.state
     if (state is SessionState.Idle && session.message == null) return
@@ -84,7 +93,8 @@ fun SessionPanel(
                 }
                 is SessionState.Running -> {
                     Text(stringResource(R.string.session_running_app, nameOf(state.appId)), style = MaterialTheme.typography.titleSmall)
-                    PasswordLine(state.password)
+                    if (protectPassword) SecureWindow()
+                    PasswordLine(state.password, hidden = protectPassword)
                 }
                 is SessionState.Stopping -> Text(stringResource(R.string.session_stopping, nameOf(state.appId)), style = MaterialTheme.typography.titleSmall)
                 else -> session.message?.let { SelectionContainer { Text(it, style = MaterialTheme.typography.bodyMedium) } }
@@ -103,20 +113,36 @@ fun SessionPanel(
     }
 }
 
+/** While shown: the activity's window can't be captured (screenshots, screen recording, Recents). */
 @Composable
-private fun PasswordLine(password: String) {
+private fun SecureWindow() {
+    val window = (LocalContext.current as? Activity)?.window ?: return
+    DisposableEffect(window) {
+        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        onDispose { window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE) }
+    }
+}
+
+/** The display's address and password; with [hidden], the password only once tapped. */
+@Composable
+private fun PasswordLine(password: String, hidden: Boolean) {
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
+    var shown by rememberSaveable { mutableStateOf(false) }
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
             stringResource(R.string.session_address, Viewer.HOST, SessionScript.VNC_PORT),
             style = MaterialTheme.typography.bodyMedium,
         )
-        Text(
-            stringResource(R.string.session_password, password),
-            style = MaterialTheme.typography.bodyMedium,
-            fontFamily = FontFamily.Monospace,
-        )
+        if (hidden && !shown) {
+            TextButton(onClick = { shown = true }) { Text(stringResource(R.string.session_show_password)) }
+        } else {
+            Text(
+                stringResource(R.string.session_password, password),
+                style = MaterialTheme.typography.bodyMedium,
+                fontFamily = FontFamily.Monospace,
+            )
+        }
         TextButton(onClick = { scope.launch { clipboard.setClipEntry(ClipEntry(sensitiveText("VNC password", password))) } }) {
             Text(stringResource(R.string.session_copy_password))
         }

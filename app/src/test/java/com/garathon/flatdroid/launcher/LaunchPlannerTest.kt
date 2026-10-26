@@ -3,6 +3,7 @@ package com.garathon.flatdroid.launcher
 import com.garathon.flatdroid.flatpak.FlatpakInstallation
 import com.garathon.flatdroid.flatpak.TestInstallation
 import com.garathon.flatdroid.proot.DevNodes
+import com.garathon.flatdroid.proot.Fdsec
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -73,6 +74,29 @@ class LaunchPlannerTest {
         )
         assertEquals("1", plan.environment["LIBGL_ALWAYS_SOFTWARE"])
         assertEquals(dirs.home.path, plan.binds.home)
+    }
+
+    @Test
+    fun networkOffDropsResolvConfAndInternetSocketsAndDevicesCanBeLimited() {
+        runtimeWithGl()
+        val files = inst.app("org.example.Tool", metadata = appMetadata("org.example.Tool", "tool", extra = "[Context]\ndevices=all;\n"))
+        File(files, "bin").mkdirs()
+        File(files, "bin/tool").writeBytes(ExecutableTest.elf(0xb7))
+        val withEtc = dirs.copy(etc = mapOf("resolv.conf" to File(tmp.root, "resolv.conf"), "passwd" to File(tmp.root, "passwd")))
+        val everything: (String) -> Boolean = { true }
+        val limitedPlanner = LaunchPlanner(FlatpakInstallation(inst.root, "aarch64"), "aarch64", l2s, TestInstallation::readlink, everything)
+
+        val open = Ready(limitedPlanner.plan("org.example.Tool", withEtc))
+        assertEquals(setOf("resolv.conf", "passwd"), open.binds.etc.keys)
+        assertEquals(Fdsec.Filter(extraSyscalls = true, noInternet = false), open.filter)
+        assertEquals(null, open.binds.sys)
+        assertTrue("/dev/input" in open.binds.dev)
+
+        val closed = Ready(limitedPlanner.plan("org.example.Tool", withEtc, LaunchOptions(network = false, extraSyscalls = false, limitDevices = true)))
+        assertEquals(setOf("passwd"), closed.binds.etc.keys)
+        assertEquals(Fdsec.Filter(extraSyscalls = false, noInternet = true), closed.filter)
+        assertEquals(DevNodes.LIMITED_SYS, closed.binds.sys)
+        assertEquals(DevNodes.BASE + "/dev/dri", closed.binds.dev)
     }
 
     @Test

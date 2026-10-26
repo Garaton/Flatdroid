@@ -40,7 +40,7 @@ Android app (`com.garathon.flatdroid`, Kotlin, GPL-3.0-or-later) that installs F
 - Build the proot invocation as an argument list in one place, used by setup and the launcher. Never build it as a shell string.
 - Start every proot from a cleared environment (`env -i` equivalent) with absolute paths; never rely on ambient state.
 - Pure Kotlin, unit-tested: metadata parser (keyfile; trim spaces around `=`), bind and argument builders, path mapping, ELF architecture check.
-- Every launch: non-dumpable proot, `fdsec` run first inside the root (before `/usr/bin/env`), refuse to launch if `Seccomp_filters` shows no filter.
+- Every launch: non-dumpable proot, `fdsec` run first inside the root (before `/usr/bin/env`). `fdsec` checks its own filter took effect (a marker rule, plus `Seccomp_filters` where the kernel reports it — 5.9+, not the T607's 4.19) and refuses to exec the app otherwise.
 - Keep architecture strings (`aarch64`, `aarch64-linux-gnu`) parameterised.
 - Avoid referencing documents outside of the repository outside of the README. Comments shouldn't refer to "section 13", or "DocumentNotInRepository.md". Avoid referencing prompts in comments (e.g. "applied the requested change to optimize the file storage process", etc).
 - No device- or app-specific code or comments: no test device names ("faster on the T607"), no Flatpak app IDs or app names in app code; describe the general case ("on a Cortex-A53", "apps that use the camera portal"). App IDs in unit tests as example data are fine.

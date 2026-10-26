@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.garathon.flatdroid.alpine.AlpineEnvironment
+import com.garathon.flatdroid.proot.Fdsec
 import com.garathon.flatdroid.proot.ProotProcess
 import com.garathon.flatdroid.settings.UserSettings
 import com.garathon.flatdroid.setup.SetupController
@@ -114,8 +115,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             SavedSizes.forgetAll(getApplication())
             try {
                 // The user's text reaches the guest shell as one argument; the proot invocation
-                // itself is still an argument list.
-                proc = AlpineEnvironment.get(getApplication()).start(listOf("/bin/sh", "-c", command), onLine = ::log)
+                // itself is still an argument list. Behind fdsec's filter unless the developer
+                // setting turns it off for the terminal.
+                val filtered = SetupController.settings(getApplication()).load()?.filterTerminal ?: true
+                proc = AlpineEnvironment.get(getApplication())
+                    .start(listOf("/bin/sh", "-c", command), filter = Fdsec.Filter().takeIf { filtered }, onLine = ::log)
                 this@MainViewModel.command = proc
                 val started = proc
                 val watchdog = launch {

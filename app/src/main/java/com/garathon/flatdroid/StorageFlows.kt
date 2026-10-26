@@ -33,11 +33,13 @@ import com.garathon.flatdroid.storage.SettingsBackup
 import com.garathon.flatdroid.storage.SharedFolderPath
 import com.garathon.flatdroid.storage.SharedHome
 import com.garathon.flatdroid.storage.StorageTask
+import com.garathon.flatdroid.storage.StorageTaskCodec
 import com.garathon.flatdroid.storage.StorageTaskService
 import com.garathon.flatdroid.storage.StorageTasks
 import com.garathon.flatdroid.storage.TempHomePrompt
 import com.garathon.flatdroid.storage.TempHomes
 import com.garathon.flatdroid.ui.ClashDialog
+import com.garathon.flatdroid.ui.ConfirmDialog
 import com.garathon.flatdroid.ui.MessageDialog
 import com.garathon.flatdroid.ui.StorageAction
 import com.garathon.flatdroid.ui.TempHomeDialog
@@ -81,6 +83,12 @@ class StorageFlows(
     /** A storage task that didn't finish, asked about ([checkUnfinished]). */
     private var unfinished by mutableStateOf<PendingTasks.Record?>(null)
 
+    /** An export of apps' files, waiting for the user to read what it may hold ([export]). */
+    private var exportQuestion by mutableStateOf<StorageTask?>(null)
+
+    /** The export whose file the "save as" picker is choosing. */
+    private var exportTarget: StorageTask? = null
+
     private val pending by lazy { StorageTaskService.pendingTasks(activity) }
 
     /** Android 10 and older: what waits for the storage permission (it goes ahead either way). */
@@ -101,6 +109,8 @@ class StorageFlows(
                 importTarget?.let { putString(KEY_IMPORT, it.key) }
                 zipTarget?.let { putString(KEY_ZIP, it.key) }
                 clashQuestion?.let { putString(KEY_CLASH, it.toString()) }
+                exportQuestion?.let { task -> StorageTaskCodec.encode(task).forEach { (k, v) -> putString(KEY_EXPORT_QUESTION + k, v) } }
+                exportTarget?.let { task -> StorageTaskCodec.encode(task).forEach { (k, v) -> putString(KEY_EXPORT_TARGET + k, v) } }
             }
         }
     }
@@ -111,6 +121,11 @@ class StorageFlows(
         importTarget = state.getString(KEY_IMPORT)?.let(::importTargetOf)
         zipTarget = state.getString(KEY_ZIP)?.let(ZipTarget::of)
         clashQuestion = state.getString(KEY_CLASH)?.toUri()
+        fun task(prefix: String) = StorageTaskCodec.decode(
+            state.keySet().filter { it.startsWith(prefix) }.associate { it.removePrefix(prefix) to state.getString(it).orEmpty() }
+        )
+        exportQuestion = task(KEY_EXPORT_QUESTION)
+        exportTarget = task(KEY_EXPORT_TARGET)
     }
 
     private val storagePermission = activity.registerForActivityResult(ActivityResultContracts.RequestPermission()) {
@@ -139,6 +154,12 @@ class StorageFlows(
         uri?.let(::useSharedHomeFolder)
     }
 
+    private val exportPicker = activity.registerForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+        val task = exportTarget
+        exportTarget = null
+        if (task != null && uri != null) start(task, listOf(uri))
+    }
+
     /** The questions and messages, on every screen: they follow pickers and sessions, which can end anywhere. */
     @Composable
     fun Dialogs(nameOf: (String) -> String) {
@@ -154,7 +175,8 @@ class StorageFlows(
                 onExport = {
                     tempHomeQuestion = null
                     TempHomePrompt.answer(appId)
-                    withStorage(LEGACY_DOWNLOAD) { StorageTaskService.start(activity, StorageTask.ExportTempHome(appId)) }
+                    // Its question already says what the zip may hold.
+                    exportConfirmed(StorageTask.ExportTempHome(appId))
                     checkTempHomes()
                 },
                 onDelete = {
@@ -163,6 +185,15 @@ class StorageFlows(
                     activity.lifecycleScope.launch(Dispatchers.IO) { if (TempHomes.owner(activity) == appId) TempHomes.delete(activity) }
                     checkTempHomes()
                 },
+            )
+        }
+        exportQuestion?.let { task ->
+            ConfirmDialog(
+                activity.getString(R.string.storage_export_warning_title),
+                activity.getString(if (exportWithPicker()) R.string.storage_export_warning_picker else R.string.storage_export_warning_download),
+                activity.getString(R.string.storage_export),
+                onConfirm = { exportQuestion = null; exportConfirmed(task) },
+                onDismiss = { exportQuestion = null },
             )
         }
         clashQuestion?.let { uri ->
@@ -333,8 +364,26 @@ class StorageFlows(
         }
     }
 
-    /** Exports go to Download, which by path needs the storage permission before Android 10. */
-    private fun export(task: StorageTask) = withStorage(LEGACY_DOWNLOAD) { StorageTaskService.start(activity, task) }
+    /**
+     * An export. Zips of apps' files first say what they may hold (logins, cookies, keys); then
+     * it goes to Download, or with the security setting wherever the user picks in Android's
+     * "save as" picker.
+     */
+    private fun export(task: StorageTask) {
+        if (task == StorageTask.ExportFlatdroidSettings) exportConfirmed(task) else exportQuestion = task
+    }
+
+    /** Download by path needs the storage permission before Android 10; a picked file doesn't. */
+    private fun exportConfirmed(task: StorageTask) {
+        if (exportWithPicker()) {
+            exportTarget = task
+            exportPicker.launch(StorageTaskService.exportName(activity, task))
+        } else {
+            withStorage(LEGACY_DOWNLOAD) { StorageTaskService.start(activity, task) }
+        }
+    }
+
+    private fun exportWithPicker() = SetupController.settings(activity).load()?.security?.exportWithPicker == true
 
     /** Runs [then], first asking for the storage permission on Android 10 and older when [needed]. */
     private fun withStorage(needed: Boolean, then: () -> Unit) {
@@ -397,8 +446,14 @@ class StorageFlows(
                             SettingsBackup.appId(fileName)?.let { SavedSizes.changed(activity, it) }
                         }
                     }
-                    // The viewer stays this device's choice: it gets every session's VNC password.
-                    settings.copy(vncViewer = SetupController.settings(activity).load()?.vncViewer)
+                    // The viewer stays this device's choice: it gets every session's VNC password. So do
+                    // the security level and the terminal's filter, which decide how far apps reach.
+                    val device = SetupController.settings(activity).load()
+                    settings.copy(
+                        vncViewer = device?.vncViewer,
+                        security = device?.security ?: settings.security,
+                        terminalFilter = device?.terminalFilter ?: settings.terminalFilter,
+                    )
                 } catch (e: Exception) {
                     withContext(Dispatchers.Main) {
                         Toast.makeText(activity, activity.getString(R.string.storage_failed, e.message ?: e.toString()), Toast.LENGTH_LONG).show()
@@ -516,6 +571,8 @@ class StorageFlows(
     private companion object {
         /** Download by path, before Android 10, needs the storage permission. */
         val LEGACY_DOWNLOAD = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
+        const val KEY_EXPORT_QUESTION = "exportQuestion."
+        const val KEY_EXPORT_TARGET = "exportTarget."
         const val SAVED_STATE = "storage"
         const val KEY_IMPORT = "import"
         const val KEY_ZIP = "zip"

@@ -27,10 +27,23 @@ object DevNodes {
     /** Android-only names never bound from these lists: Binder, system properties, init's sockets. */
     val DENIED = setOf("binder", "hwbinder", "vndbinder", "__properties__", "socket")
 
-    /** Host paths (bound at the same guest path) for an app whose metadata asks for [devices]. */
-    fun forApp(devices: List<String>, exists: (String) -> Boolean): List<String> {
-        val groups = if (ALL in devices) GROUPS.keys.toList() else devices.filter { it in GROUPS }
-        return select(BASE + groups.flatMap { GROUPS.getValue(it) }, exists)
+    /** `devices=all` when devices are limited ([forApp]): the GPU only. */
+    val LIMITED_ALL = listOf("dri")
+
+    /**
+     * The /sys paths an app gets when devices are limited, instead of the whole of /sys: CPU and
+     * NUMA information, which runtimes and apps read to size their thread pools and memory.
+     */
+    val LIMITED_SYS = listOf("/sys/devices/system/cpu", "/sys/devices/system/node")
+
+    /**
+     * Host paths (bound at the same guest path) for an app whose metadata asks for [devices].
+     * With [limited], `all` gives only [LIMITED_ALL]; groups the metadata names stay.
+     */
+    fun forApp(devices: List<String>, exists: (String) -> Boolean, limited: Boolean = false): List<String> {
+        val all = if (limited) LIMITED_ALL else GROUPS.keys.toList()
+        val groups = (if (ALL in devices) all else emptyList()) + devices.filter { it in GROUPS }
+        return select(BASE + groups.distinct().flatMap { GROUPS.getValue(it) }, exists)
     }
 
     /** Alpine's roots: the base set, except /dev/random, which Alpine gets from /dev/urandom. */
