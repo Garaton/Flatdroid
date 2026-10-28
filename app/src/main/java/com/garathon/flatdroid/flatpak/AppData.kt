@@ -73,4 +73,7 @@ object AppData {
 
     /** The running session's sockets, VNC password file and generated /etc files. */
     fun sessionDir(context: Context): File = File(context.cacheDir.canonicalFile, "session")
+
+    /** File-integrity baselines, one manifest per deployment commit (see FileIntegrityCheck). */
+    fun integrityDir(context: Context): File = File(context.filesDir.canonicalFile, "integrity")
 }

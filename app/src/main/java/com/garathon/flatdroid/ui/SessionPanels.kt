@@ -46,6 +46,7 @@ import com.garathon.flatdroid.R
 import com.garathon.flatdroid.flatpak.FlatpakTask
 import com.garathon.flatdroid.flatpak.FlatpakTaskUi
 import com.garathon.flatdroid.flatpak.InstalledApps
+import com.garathon.flatdroid.session.SessionController
 import com.garathon.flatdroid.session.SessionScript
 import com.garathon.flatdroid.session.SessionState
 import com.garathon.flatdroid.session.SessionUi
@@ -70,6 +71,7 @@ fun SessionPanel(
     val state = session.state
     if (state is SessionState.Idle && session.message == null) return
     if (state is SessionState.ElectronOffer) return
+    if (state is SessionState.FilesChanged) return
     val colors = MaterialTheme.colorScheme
     val failed = state is SessionState.Idle && session.failed
     Surface(
@@ -101,6 +103,7 @@ fun SessionPanel(
             }
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (state is SessionState.Running) Button(onClick = { onOpenViewer(state.password) }) { Text(stringResource(R.string.session_open_viewer)) }
+                if (state is SessionState.Starting && state.skippable) OutlinedButton(onClick = { SessionController.skipFileCheck() }) { Text(stringResource(R.string.session_skip_check)) }
                 when (state) {
                     is SessionState.Starting, is SessionState.Running, is SessionState.PreparingElectron ->
                         OutlinedButton(onClick = onStop) { Text(stringResource(R.string.session_stop)) }
@@ -259,6 +262,18 @@ fun ElectronDialog(offer: SessionState.ElectronOffer, appName: String, deviceArc
             else TextButton(onClick = onDismiss) { Text(stringResource(R.string.dismiss)) }
         },
         dismissButton = { if (offer.problem == null) TextButton(onClick = onDismiss) { Text(stringResource(R.string.reset_cancel)) } },
+    )
+}
+
+/** The file check found changed files: the launch was refused; Reinstall restores the packages. */
+@Composable
+fun FilesChangedDialog(state: SessionState.FilesChanged, appName: String, onReinstall: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.files_changed_title, appName)) },
+        text = { SelectionContainer { Text(state.detail, style = MaterialTheme.typography.bodyMedium) } },
+        confirmButton = { Button(onClick = onReinstall) { Text(stringResource(R.string.session_reinstall)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.reset_cancel)) } },
     )
 }
 

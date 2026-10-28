@@ -20,6 +20,7 @@ import com.garathon.flatdroid.camera.CameraStreamer
 import com.garathon.flatdroid.flatpak.AndroidLinkFs
 import com.garathon.flatdroid.flatpak.AppData
 import com.garathon.flatdroid.flatpak.FlatpakInstallation
+import com.garathon.flatdroid.flatpak.IntegrityGuard
 import com.garathon.flatdroid.launcher.DesktopConfig
 import com.garathon.flatdroid.launcher.Electron
 import com.garathon.flatdroid.launcher.ElectronSwap
@@ -154,6 +155,8 @@ class FlatpakLauncher(private val context: Context) {
             else -> throw LaunchException(describe(result))
         }
         store.update { it.copy(lastOpened = System.currentTimeMillis()) }
+
+        if (SetupController.settings(context).load()?.security?.checkFilesBeforeLaunch == true && !checkFiles(appId, plan)) return false
 
         SessionController.starting(appId, context.getString(R.string.session_preparing_files))
         val home = prepareHome(appId, settings.homeMode)
@@ -356,6 +359,41 @@ class FlatpakLauncher(private val context: Context) {
         }
     }
 
+    /**
+     * The Hardened file check: verifies the app's, its runtime's and their extensions' files
+     * against the baseline recorded at install, reporting progress and letting the user skip.
+     * Returns true to go ahead; false when files changed, having put the refusal and a reinstall
+     * offer in [SessionController].
+     */
+    private fun checkFiles(appId: String, plan: LaunchPlan): Boolean {
+        val cancelled = java.util.concurrent.atomic.AtomicBoolean(false)
+        SessionController.onSkipFileCheck = { cancelled.set(true) }
+        val problems = try {
+            IntegrityGuard(context).verify(
+                appId,
+                onProgress = { ref, done, total ->
+                    // Throttled: a per-file UI emission would flood the flow over a large runtime.
+                    if (done == total || done % 500 == 0)
+                        SessionController.starting(appId, context.getString(R.string.session_checking_files, ref.name, done, total), skippable = true)
+                },
+                cancelled = { cancelled.get() },
+            )
+        } finally {
+            SessionController.onSkipFileCheck = null
+        }
+        // Skip drops the check entirely and launches, even if an earlier deployment already flagged.
+        if (cancelled.get()) return true
+        if (problems.isEmpty()) return true
+        for (p in problems) {
+            p.tampered.forEach { SessionController.log("[flatdroid] changed in ${p.ref.name}: $it") }
+            p.removed.forEach { SessionController.log("[flatdroid] removed in ${p.ref.name}: $it") }
+        }
+        val detail = context.getString(R.string.session_files_changed) + "\n" +
+            problems.joinToString("\n") { context.getString(R.string.session_files_changed_item, it.ref.name, it.tampered.size, it.removed.size) }
+        SessionController.filesChanged(SessionState.FilesChanged(appId, detail))
+        return false
+    }
+
     /** The session log's line about the app's filter and the helpers' hidden /proc entries. */
     private fun describeFilter(filter: Fdsec.Filter, hidden: Int): String =
         "fdsec: " + (listOf("base list") + listOfNotNull("extra system calls".takeIf { filter.extraSyscalls }, "no Internet".takeIf { filter.noInternet }))
@@ -528,6 +566,8 @@ class FlatpakLauncher(private val context: Context) {
                 File(cache, "tmp") to "/var/tmp",
             ) + dotFiles?.let { dir -> AppFiles.PRIVATE_DOT_DIRS.map { File(dir, it) to "$home/$it" } }.orEmpty(),
             privateFiles = dotFiles?.let { dir -> AppFiles.PRIVATE_DOT_FILES.map { File(dir, it) to "$home/$it" } }.orEmpty(),
+            // These /etc files are overridden at launch, so the integrity check leaves the
+            // deployment's copies out (IntegrityGuard.OVERRIDDEN_ETC must list the same names).
             etc = linkedMapOf(
                 "resolv.conf" to File(etcDir, "resolv.conf"),
                 "hosts" to launcher.hosts,
@@ -543,6 +583,8 @@ class FlatpakLauncher(private val context: Context) {
             userDirs = File(etcDir, USER_DIRS),
             sdcard = SharedHome.storageRoot().takeIf { settings.sdcard && SharedHome.broadAccess(context) },
             sessionBus = busProxyDir,
+            // Under the app's cache, so clearing caches drops it (fontconfig then regenerates it).
+            runtimeCache = File(cache, RUNTIME_CACHE_DIR),
         )
     }
 
@@ -573,6 +615,12 @@ class FlatpakLauncher(private val context: Context) {
             val file = File(host)
             if (AndroidTarFs.isSymlink(file)) file.delete()
             if (!file.exists()) file.apply { parentFile!!.mkdirs() }.createNewFile()
+        }
+        // Writable scratch for the runtime caches shadowed over the deployment (their guest paths
+        // are under /usr, so the loop below skips making mount points for them — the runtime already
+        // has those directories). Persisted across launches, so fontconfig regenerates them once.
+        for ((host, guest) in plan.binds.extra) {
+            if (guest in LaunchPlanner.RUNTIME_CACHE_DIRS) File(host).mkdirs()
         }
         // Mount points for the further binds: in the root, or in the app's own directory they fall in.
         for ((host, guest) in plan.binds.extra) {
@@ -720,5 +768,7 @@ class FlatpakLauncher(private val context: Context) {
         const val HELPER_CHECK_MS = 250L
         const val DEFAULT_OUTPUT_RATE = 48_000
         const val USER_DIRS = "user-dirs.dirs"
+        /** Hidden subdirectory of the app's cache holding the runtime-cache scratch overlays. */
+        const val RUNTIME_CACHE_DIR = ".flatdroid-runtime"
     }
 }

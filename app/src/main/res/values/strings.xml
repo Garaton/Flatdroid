@@ -102,6 +102,10 @@
     <string name="task_installing">Installing %1$s</string>
     <string name="task_updating">Updating all apps</string>
     <string name="task_repairing">Repairing Flatpak\'s storage after an interrupted task</string>
+    <string name="task_reinstalling">Reinstalling %1$s</string>
+    <string name="task_reinstalling_all">Reinstalling all apps</string>
+    <string name="task_recording_baseline">Recording file baseline</string>
+    <string name="task_baseline_progress">Baseline %1$s: %2$d/%3$d</string>
     <string name="task_uninstalling">Uninstalling %1$s</string>
     <string name="task_done">Done: %1$s</string>
     <string name="task_failed">Failed: %1$s (%2$s)</string>
@@ -155,6 +159,13 @@
     <string name="settings_developer_options_hint">Shows extra settings that Flatdroid either manages itself, or are dangerous/unfriendly for the average user.</string>
 
     <string name="session_channel">Running app</string>
+    <string name="session_checking_files">Checking files: %1$s (%2$d/%3$d)</string>
+    <string name="session_files_changed">Some files changed since this app was installed, so it was not started. Another app may have altered them. Reinstall restores the affected packages.</string>
+    <string name="session_files_changed_item">• %1$s: %2$d changed, %3$d removed</string>
+    <string name="session_reinstall">Reinstall</string>
+    <string name="session_skip_check">Skip check</string>
+    <string name="files_changed_title">%1$s\'s files changed</string>
+    
     <string name="session_mic_channel">Permission requests</string>
     <string name="mic_request_title">%1$s wants to use the microphone</string>
     <string name="mic_request_notification">Your answer holds until the app is closed. Swiping this away denies it.</string>
@@ -457,6 +468,12 @@
     <string name="security_protect_password_hint">The password shows only when you tap it, the screen can\'t be captured while it\'s shown, and it goes only to the viewer chosen under VNC viewer, never through Android\'s chooser.</string>
     <string name="security_export_picker">Choose where exports go</string>
     <string name="security_export_picker_hint">Exports open Android\'s \"save as\" picker instead of going into Download, where any app with All files access can read them.</string>
+    <string name="security_check_files">Check app files before launch</string>
+    <string name="security_check_files_hint">Before an app starts, Flatdroid checks its and its runtime\'s files against what was recorded when they were installed, to catch another Flatpak having changed them. It can take seconds to minutes; it refuses to start an app whose files changed. Files installed before this was first turned on are trusted as they are.</string>
+    <string name="baseline_choice_title">Record a baseline?</string>
+    <string name="baseline_choice_message">No app has a baseline yet. Reinstall every app and runtime now so the baseline is taken from known-good files on Flathub (this downloads them again), or trust the apps already installed and let each app\'s baseline be recorded the first time it launches.</string>
+    <string name="baseline_choice_reinstall">Reinstall all apps</string>
+    <string name="baseline_choice_trust">Trust current apps</string>
     <string name="settings_terminal_filter">Filter the terminal\'s commands</string>
     <string name="settings_terminal_filter_hint">Commands run behind Flatdroid\'s system call filter, as everything else in Alpine does. Off, tools such as strace and gdb work, and so does anything you run there that tries to leave proot.</string>
     <string name="launch_filter_refused">Flatdroid couldn\'t put its system call filter in place, so it started nothing.</string>

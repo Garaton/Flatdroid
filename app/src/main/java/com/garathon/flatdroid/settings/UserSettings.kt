@@ -168,6 +168,7 @@ class UserSettingsStore(private val file: File) {
             limitDevices = flag(KEY_LIMIT_DEVICES, default.limitDevices),
             protectPassword = flag(KEY_PROTECT_PASSWORD, default.protectPassword),
             exportWithPicker = flag(KEY_EXPORT_PICKER, default.exportWithPicker),
+            checkFilesBeforeLaunch = flag(KEY_CHECK_FILES, default.checkFilesBeforeLaunch),
         )
     }
 
@@ -197,6 +198,7 @@ class UserSettingsStore(private val file: File) {
             props.setProperty(KEY_LIMIT_DEVICES, s.limitDevices.toString())
             props.setProperty(KEY_PROTECT_PASSWORD, s.protectPassword.toString())
             props.setProperty(KEY_EXPORT_PICKER, s.exportWithPicker.toString())
+            props.setProperty(KEY_CHECK_FILES, s.checkFilesBeforeLaunch.toString())
         }
         if (!settings.terminalFilter) props.setProperty(KEY_TERMINAL_FILTER, "false")
         file.writeTextAtomically(StringWriter().also { props.store(it, null) }.toString())
@@ -212,6 +214,7 @@ class UserSettingsStore(private val file: File) {
         private const val KEY_LIMIT_DEVICES = "security.limitDevices"
         private const val KEY_PROTECT_PASSWORD = "security.protectPassword"
         private const val KEY_EXPORT_PICKER = "security.exportPicker"
+        private const val KEY_CHECK_FILES = "security.checkFiles"
         private const val KEY_TERMINAL_FILTER = "terminal.filter"
         private const val KEY_LANGUAGES = "flatpak.languages"
         private const val KEY_DEVELOPER = "ui.developerOptions"

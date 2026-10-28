@@ -17,6 +17,7 @@ import androidx.core.content.ContextCompat
 import com.garathon.flatdroid.MainActivity
 import com.garathon.flatdroid.R
 import com.garathon.flatdroid.alpine.AlpineEnvironment
+import com.garathon.flatdroid.setup.SetupController
 import com.garathon.flatdroid.launcher.ElectronSwap
 import com.garathon.flatdroid.proot.RunInterruptedException
 import com.garathon.flatdroid.session.SessionController
@@ -152,13 +153,14 @@ class FlatpakTaskService : Service() {
                 // Possibly left by a kill some time before, so the links are checked too.
                 cleanRepository(env, checkLinks = true)
                 run(env, FlatpakCommands.install(task.appId))
-            }.also { applyExtraData(env) }
+            }.also { applyExtraData(env); baseline(env, listOf(task.appId)) }
             FlatpakTask.UpdateAll -> {
                 updateAlpine(env)
                 // Unused runtimes first, so they aren't downloaded again only to be removed.
                 run(env, FlatpakCommands.uninstallUnused, getString(R.string.task_removing_unused))
                 run(env, FlatpakCommands.update)
                 applyExtraData(env)
+                baseline(env, FlatpakInstallation(env.flatpakDir, env.arch).appIds())
             }
             // After a force stop, which kills processes anywhere.
             FlatpakTask.Repair -> cleanRepository(env, checkLinks = true)
@@ -166,8 +168,49 @@ class FlatpakTaskService : Service() {
                 run(env, FlatpakCommands.uninstall(task.appId))
                 if (!task.keepRuntimes) run(env, FlatpakCommands.uninstallUnused, getString(R.string.task_removing_unused))
                 removeAppFiles(task.appId, task.deleteData)
+                IntegrityGuard(applicationContext).cleanOrphans()
+            }
+            is FlatpakTask.Reinstall -> {
+                // The app, its runtime and their extensions, so a tampered extension is restored too
+                // (not re-baselined as trusted). force = true then records the pristine files.
+                val refs = FlatpakInstallation(env.flatpakDir, env.arch).reinstallRefsFor(task.appId)
+                if (refs.isNotEmpty()) run(env, FlatpakCommands.reinstall(refs))
+                applyExtraData(env)
+                baseline(env, listOf(task.appId), force = true)
+            }
+            FlatpakTask.ReinstallAll -> {
+                val installation = FlatpakInstallation(env.flatpakDir, env.arch)
+                val appIds = installation.appIds()
+                // Every deployment, each ref once, so a shared runtime or extension isn't re-downloaded per app.
+                val refs = LinkedHashSet<String>()
+                for (id in appIds) refs += installation.reinstallRefsFor(id)
+                if (refs.isNotEmpty()) run(env, FlatpakCommands.reinstall(refs.toList()))
+                applyExtraData(env)
+                baseline(env, appIds, force = true)
             }
         }
+    }
+
+    /**
+     * Records the file-integrity baseline of the given apps (their deployments and runtimes), when
+     * the file check is on; and removes manifests for deployments no longer present.
+     */
+    private fun baseline(env: AlpineEnvironment, appIds: List<String>, force: Boolean = false) {
+        if (SetupController.settings(this).load()?.security?.checkFilesBeforeLaunch != true) return
+        val guard = IntegrityGuard(applicationContext)
+        // Shared across apps so a runtime or extension several apps use is hashed once, not per app.
+        val baselinedCommits = mutableSetOf<String>()
+        for (id in appIds) {
+            guard.recordBaseline(
+                id,
+                force = force,
+                baselinedCommits = baselinedCommits,
+                onStart = { FlatpakTasks.newCommand(getString(R.string.task_recording_baseline)) },
+            ) { ref, done, total ->
+                if (done == total || done % 1000 == 0) FlatpakTasks.log(getString(R.string.task_baseline_progress, ref.name, done, total))
+            }
+        }
+        guard.cleanOrphans()
     }
 
     /**
@@ -290,6 +333,8 @@ class FlatpakTaskService : Service() {
                 FlatpakTask.Repair -> intent.putExtra(EXTRA_TASK, "repair")
                 is FlatpakTask.Uninstall -> intent.putExtra(EXTRA_TASK, "uninstall").putExtra(EXTRA_APP_ID, task.appId)
                     .putExtra(EXTRA_DELETE_DATA, task.deleteData).putExtra(EXTRA_KEEP_RUNTIMES, task.keepRuntimes)
+                is FlatpakTask.Reinstall -> intent.putExtra(EXTRA_TASK, "reinstall").putExtra(EXTRA_APP_ID, task.appId)
+                FlatpakTask.ReinstallAll -> intent.putExtra(EXTRA_TASK, "reinstallAll")
             }
             ContextCompat.startForegroundService(context, intent)
         }
@@ -300,6 +345,8 @@ class FlatpakTaskService : Service() {
                 "install" -> appId?.let { FlatpakTask.Install(it) }
                 "update" -> FlatpakTask.UpdateAll
                 "repair" -> FlatpakTask.Repair
+                "reinstall" -> appId?.let { FlatpakTask.Reinstall(it) }
+                "reinstallAll" -> FlatpakTask.ReinstallAll
                 "uninstall" -> appId?.let {
                     FlatpakTask.Uninstall(it, intent.getBooleanExtra(EXTRA_DELETE_DATA, false), intent.getBooleanExtra(EXTRA_KEEP_RUNTIMES, false))
                 }
@@ -317,6 +364,8 @@ class FlatpakTaskService : Service() {
             FlatpakTask.UpdateAll -> context.getString(R.string.task_updating)
             FlatpakTask.Repair -> context.getString(R.string.task_repairing)
             is FlatpakTask.Uninstall -> context.getString(R.string.task_uninstalling, task.appId)
+            is FlatpakTask.Reinstall -> context.getString(R.string.task_reinstalling, task.appId)
+            FlatpakTask.ReinstallAll -> context.getString(R.string.task_reinstalling_all)
         }
     }
 }

@@ -52,6 +52,7 @@ import com.garathon.flatdroid.setup.SetupStep
 import com.garathon.flatdroid.ui.AppSettingsScreen
 import com.garathon.flatdroid.ui.CommandState
 import com.garathon.flatdroid.ui.ElectronDialog
+import com.garathon.flatdroid.ui.FilesChangedDialog
 import com.garathon.flatdroid.ui.HomeScreen
 import com.garathon.flatdroid.ui.InstallDialog
 import com.garathon.flatdroid.ui.LogDialog
@@ -147,7 +148,7 @@ class MainActivity : ComponentActivity() {
         val apps by home.apps.collectAsState()
         val session by SessionController.ui.collectAsState()
         val task by FlatpakTasks.ui.collectAsState()
-        val sessionBusy = SessionController.isBusy || session.state is SessionState.ElectronOffer
+        val sessionBusy = SessionController.isBusy || session.state is SessionState.ElectronOffer || session.state is SessionState.FilesChanged
         val taskRunning = task.running != null
         // Installing adds new files only, so it can run alongside an app; update and uninstall
         // change or remove files a running app may use.
@@ -175,6 +176,12 @@ class MainActivity : ComponentActivity() {
                 error = settingsError,
                 // The shared home is saved when it is changed, so keep the saved one.
                 onSave = { new -> viewModel.applySettings(new.copy(sharedHome = SetupController.settings(this).load()?.sharedHome)) { navigate(Screen.Home) } },
+                // Settings are persisted before onApplied runs, so the reinstall's baseline sees the check on.
+                onSaveAndReinstallAll = { new ->
+                    viewModel.applySettings(new.copy(sharedHome = SetupController.settings(this).load()?.sharedHome)) {
+                        navigate(Screen.Home); FlatpakTaskService.start(this, FlatpakTask.ReinstallAll)
+                    }
+                },
                 onBack = { navigate(Screen.Home); viewModel.clearSettingsError() },
                 onReset = { mode -> navigate(Screen.Home); resetAlpine(mode) },
                 onTerminal = { navigate(Screen.Terminal) },
@@ -264,6 +271,13 @@ class MainActivity : ComponentActivity() {
                     ElectronDialog(
                         offer, nameOf(offer.appId), remember { AlpineEnvironment.get(this).arch },
                         onAccept = { SessionController.ended(null); continueLaunch(PendingLaunch(offer.appId, prepareElectron = true)) },
+                        onDismiss = { SessionController.ended(null) },
+                    )
+                }
+                (session.state as? SessionState.FilesChanged)?.let { changed ->
+                    FilesChangedDialog(
+                        changed, nameOf(changed.appId),
+                        onReinstall = { SessionController.ended(null); FlatpakTaskService.start(this, FlatpakTask.Reinstall(changed.appId)) },
                         onDismiss = { SessionController.ended(null) },
                     )
                 }

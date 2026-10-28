@@ -1,5 +1,7 @@
 package com.garathon.flatdroid.settings
 
+import com.garathon.flatdroid.R
+
 /**
  * The settings a security level sets ([SecurityLevel]). Each can still be changed on its own;
  * values that match no level are "Custom". None of them makes proot a sandbox: they narrow
@@ -23,6 +25,8 @@ data class SecuritySettings(
     val protectPassword: Boolean = false,
     /** Exports go through Android's "save as" picker instead of straight into Download. */
     val exportWithPicker: Boolean = false,
+    /** Each app's and its runtime's deployed files are checked against a baseline before launch. */
+    val checkFilesBeforeLaunch: Boolean = false,
 ) {
     val appDefaults: AppDefaults get() = AppDefaults(defaultHomeMode, permissionsFromMetadata)
 }
@@ -32,9 +36,16 @@ data class SecuritySettings(
  * Flatpak; Default assumes some are malicious without knowing Flatdroid; Hardened assumes one
  * knows exactly how Flatdroid works, and gives up speed and features for it.
  */
-enum class SecurityLevel(val settings: SecuritySettings) {
-    PERFORMANT(SecuritySettings(extraSyscallFilter = false, hideHelperProcesses = false)),
-    DEFAULT(SecuritySettings()),
+enum class SecurityLevel(
+    override val settings: SecuritySettings,
+    override val labelRes: Int,
+    override val hintRes: Int,
+) : Preset<SecuritySettings> {
+    PERFORMANT(
+        SecuritySettings(extraSyscallFilter = false, hideHelperProcesses = false),
+        R.string.security_level_performant, R.string.security_level_performant_hint,
+    ),
+    DEFAULT(SecuritySettings(), R.string.security_level_default, R.string.security_level_default_hint),
     HARDENED(
         SecuritySettings(
             permissionsFromMetadata = false,
@@ -42,12 +53,14 @@ enum class SecurityLevel(val settings: SecuritySettings) {
             limitDevices = true,
             protectPassword = true,
             exportWithPicker = true,
-        )
+            checkFilesBeforeLaunch = true,
+        ),
+        R.string.security_level_hardened, R.string.security_level_hardened_hint,
     ),
     ;
 
     companion object {
         /** The level whose settings these are; null for Custom. */
-        fun of(settings: SecuritySettings): SecurityLevel? = entries.firstOrNull { it.settings == settings }
+        fun of(settings: SecuritySettings): SecurityLevel? = entries.presetFor(settings)
     }
 }

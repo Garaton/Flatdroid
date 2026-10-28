@@ -12,7 +12,7 @@ import kotlinx.coroutines.flow.update
 /** What the one Flatpak session is doing. */
 sealed interface SessionState {
     data object Idle : SessionState
-    data class Starting(val appId: String, val detail: String) : SessionState
+    data class Starting(val appId: String, val detail: String, val skippable: Boolean = false) : SessionState
     /** The app runs; the viewer connects to localhost:[SessionScript.VNC_PORT] with [password]. */
     data class Running(val appId: String, val password: String) : SessionState
     data class Stopping(val appId: String) : SessionState
@@ -22,6 +22,11 @@ sealed interface SessionState {
      */
     data class ElectronOffer(val appId: String, val version: String?, val fromArch: String, val problem: String?) : SessionState
     data class PreparingElectron(val appId: String, val detail: String, val fraction: Float?) : SessionState
+    /**
+     * The file check found changed files before launch; [detail] lists the affected packages and
+     * the launch was refused. The reinstall path restores them by [appId] (see FlatpakTask.Reinstall).
+     */
+    data class FilesChanged(val appId: String, val detail: String) : SessionState
 
     val appIdOrNull: String?
         get() = when (this) {
@@ -31,6 +36,7 @@ sealed interface SessionState {
             is Stopping -> appId
             is ElectronOffer -> appId
             is PreparingElectron -> appId
+            is FilesChanged -> appId
         }
 }
 
@@ -55,20 +61,26 @@ object SessionController {
     /** Where answers to [SessionUi.micRequest] go: the running session's microphone, while one has it. */
     @Volatile var onMicrophoneAnswer: ((Boolean) -> Unit)? = null
 
-    val isBusy: Boolean get() = _ui.value.state !is SessionState.Idle && _ui.value.state !is SessionState.ElectronOffer
+    val isBusy: Boolean get() = _ui.value.state !is SessionState.Idle && _ui.value.state !is SessionState.ElectronOffer && _ui.value.state !is SessionState.FilesChanged
 
     /** Also clears a finished Flatpak task's banner: one banner at a time. */
-    fun starting(appId: String, detail: String, clearLog: Boolean = false) {
+    fun starting(appId: String, detail: String, clearLog: Boolean = false, skippable: Boolean = false) {
         FlatpakTasks.dismiss()
         if (clearLog) logBuffer.clear()
-        _ui.update { it.copy(state = SessionState.Starting(appId, detail), message = null, failed = false) }
+        _ui.update { it.copy(state = SessionState.Starting(appId, detail, skippable), message = null, failed = false) }
     }
+
+    /** Set while the file check runs; the Skip button calls [skipFileCheck]. */
+    @Volatile var onSkipFileCheck: (() -> Unit)? = null
+    fun skipFileCheck() { onSkipFileCheck?.invoke() }
 
     fun running(appId: String, password: String) = _ui.update { it.copy(state = SessionState.Running(appId, password)) }
 
     fun stopping(appId: String) = _ui.update { it.copy(state = SessionState.Stopping(appId)) }
 
     fun offerElectron(offer: SessionState.ElectronOffer) = _ui.update { it.copy(state = offer) }
+
+    fun filesChanged(state: SessionState.FilesChanged) = _ui.update { it.copy(state = state, message = null) }
 
     fun preparingElectron(appId: String, detail: String, fraction: Float?) =
         _ui.update { it.copy(state = SessionState.PreparingElectron(appId, detail, fraction), message = null) }

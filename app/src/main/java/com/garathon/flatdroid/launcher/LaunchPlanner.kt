@@ -36,6 +36,12 @@ data class HostDirs(
     val sdcard: File? = null,
     /** Holds the session bus proxy's socket, bound at [GuestPaths.SESSION_BUS_DIR]; null for no bus. */
     val sessionBus: File? = null,
+    /**
+     * Writable per-app base for the runtime caches a tool rewrites at launch ([LaunchPlanner.RUNTIME_CACHE_DIRS]):
+     * a scratch for each is bound over the deployment's copy, so the file-integrity check doesn't
+     * see the app's own writes as tampering. Persisted (regenerated once), not bound anywhere else.
+     */
+    val runtimeCache: File,
 )
 
 /** Per-app choices that change a launch. */
@@ -140,6 +146,9 @@ class LaunchPlanner(
             dirs.userDirs.path to "$varApp/config/user-dirs.dirs",
             dirs.userDirs.path to "${GuestPaths.HOME}/.config/user-dirs.dirs",
         )
+        // A writable scratch over each runtime cache a tool rewrites at launch, so the deployment
+        // (what the file check baselines) isn't changed by the app's own normal operation.
+        for (guest in RUNTIME_CACHE_DIRS) extraBinds += runtimeCacheScratch(dirs.runtimeCache, guest).path to guest
         dirs.hostFonts?.let { extraBinds += it.path to GuestPaths.HOST_FONTS }
         dirs.sdcard?.let { extraBinds += it.path to GuestPaths.SDCARD }
         dirs.sessionBus?.let { extraBinds += it.path to GuestPaths.SESSION_BUS_DIR }
@@ -262,6 +271,18 @@ class LaunchPlanner(
         const val GL_DEFAULT = "org.freedesktop.Platform.GL.default"
         const val RESOLV_CONF = "resolv.conf"
         private const val MAX_LINKS = 8
+
+        /**
+         * Runtime cache directories some tool regenerates into at launch (a read-only Flatpak
+         * runtime would write these to the home instead). A writable scratch is bound over each so
+         * the deployment stays unchanged for the file-integrity check. Add a directory here if the
+         * check reports its files changing on an ordinary launch.
+         */
+        val RUNTIME_CACHE_DIRS = listOf("/usr/lib/fontconfig/cache")
+
+        /** The scratch directory under [HostDirs.runtimeCache] that shadows [guest]. */
+        fun runtimeCacheScratch(base: File, guest: String): File =
+            File(base, guest.removePrefix("/").replace('/', '_'))
 
         /** Flatpak links these to /usr when the runtime has them. */
         val USR_LINKS = listOf("bin", "lib", "lib32", "lib64", "sbin")

@@ -26,11 +26,8 @@ fun SecuritySection(
     developerOptions: Boolean = false,
 ) {
     val level = SecurityLevel.of(security)
-    val names = mapOf(
-        SecurityLevel.PERFORMANT to stringResource(R.string.security_level_performant),
-        SecurityLevel.DEFAULT to stringResource(R.string.security_level_default),
-        SecurityLevel.HARDENED to stringResource(R.string.security_level_hardened),
-    )
+    // Each level carries its own label and hint, so adding a preset needs no change here.
+    val names = SecurityLevel.entries.associateWith { stringResource(it.labelRes) }
     val custom = stringResource(R.string.security_level_custom)
     DropdownRow(
         selected = level,
@@ -39,14 +36,7 @@ fun SecuritySection(
         onSelect = { it?.let { chosen -> onChange(chosen.settings) } },
         label = { it?.let(names::getValue) ?: custom },
         title = stringResource(R.string.security_level),
-        hint = stringResource(
-            when (level) {
-                SecurityLevel.PERFORMANT -> R.string.security_level_performant_hint
-                SecurityLevel.DEFAULT -> R.string.security_level_default_hint
-                SecurityLevel.HARDENED -> R.string.security_level_hardened_hint
-                null -> R.string.security_level_custom_hint
-            }
-        ),
+        hint = stringResource(level?.hintRes ?: R.string.security_level_custom_hint),
         enabled = enabled,
     )
     Text(stringResource(R.string.security_not_sandboxed), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
@@ -96,6 +86,10 @@ fun SecuritySection(
         security.exportWithPicker, { onChange(security.copy(exportWithPicker = it)) },
         stringResource(R.string.security_export_picker), stringResource(R.string.security_export_picker_hint), enabled = enabled,
     )
+    SwitchRow(
+        security.checkFilesBeforeLaunch, { onChange(security.copy(checkFilesBeforeLaunch = it)) },
+        stringResource(R.string.security_check_files), stringResource(R.string.security_check_files_hint), enabled = enabled,
+    )
 }
 
 /** Keeps [SecuritySettings] across configuration changes (rememberSaveable needs plain values). */
@@ -103,7 +97,7 @@ val SecuritySaver: Saver<SecuritySettings, Any> = listSaver(
     save = {
         listOf(
             it.extraSyscallFilter, it.hideHelperProcesses, it.permissionsFromMetadata, it.defaultHomeMode.name,
-            it.limitDevices, it.protectPassword, it.exportWithPicker,
+            it.limitDevices, it.protectPassword, it.exportWithPicker, it.checkFilesBeforeLaunch,
         )
     },
     restore = {
@@ -115,6 +109,7 @@ val SecuritySaver: Saver<SecuritySettings, Any> = listSaver(
             limitDevices = it[4] as Boolean,
             protectPassword = it[5] as Boolean,
             exportWithPicker = it[6] as Boolean,
+            checkFilesBeforeLaunch = it[7] as Boolean,
         )
     },
 )

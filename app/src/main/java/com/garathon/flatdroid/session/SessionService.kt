@@ -101,7 +101,7 @@ class SessionService : Service() {
         val notifications = getSystemService(NotificationManager::class.java)
         val updates = scope.launch {
             SessionController.ui.distinctUntilChangedBy { it.state::class to it.state.appIdOrNull }
-                .filter { it.state !is SessionState.Idle && it.state !is SessionState.ElectronOffer }
+                .filter { it.state !is SessionState.Idle && it.state !is SessionState.ElectronOffer && it.state !is SessionState.FilesChanged }
                 .collect { notifications.notify(NOTIFICATION_ID, notification(it.state)) }
         }
         val micRequests = scope.launch {
@@ -145,8 +145,11 @@ class SessionService : Service() {
                 if (AppData.settings(applicationContext, appId).load().homeMode == HomeMode.TEMPORARY) {
                     TempHomePrompt.sessionEnded(applicationContext, appId)
                 }
-                // An Electron offer stays up for the UI to answer.
-                if (SessionController.ui.value.state !is SessionState.ElectronOffer) SessionController.ended(message, failed)
+                // An Electron offer or a files-changed report stays up for the UI to answer.
+                val awaitingUi = SessionController.ui.value.state.let {
+                    it is SessionState.ElectronOffer || it is SessionState.FilesChanged
+                }
+                if (!awaitingUi) SessionController.ended(message, failed)
                 stopSelf()
             }
         }

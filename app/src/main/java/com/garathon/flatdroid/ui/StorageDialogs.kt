@@ -37,6 +37,22 @@ fun TempHomeDialog(appName: String, onExport: () -> Unit, onDelete: () -> Unit) 
     )
 }
 
+/**
+ * Shown when the file check is turned on and no app has a baseline yet: reinstall everything for a
+ * baseline from known-good files, or trust what is installed (baselines then recorded on launch).
+ * Both choices save the settings; the dialog has no cancel, so one of them is always made.
+ */
+@Composable
+fun BaselineChoiceDialog(onReinstall: () -> Unit, onTrust: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = {},
+        title = { Text(stringResource(R.string.baseline_choice_title)) },
+        text = { Text(stringResource(R.string.baseline_choice_message)) },
+        confirmButton = { Button(onClick = onReinstall) { Text(stringResource(R.string.baseline_choice_reinstall)) } },
+        dismissButton = { TextButton(onClick = onTrust) { Text(stringResource(R.string.baseline_choice_trust)) } },
+    )
+}
+
 /** Asks before something that replaces or deletes files; [confirm] is the button, in the error color. */
 @Composable
 fun ConfirmDialog(title: String, text: String, confirm: String, onConfirm: () -> Unit, onDismiss: () -> Unit) {

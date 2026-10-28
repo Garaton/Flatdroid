@@ -31,6 +31,8 @@ import androidx.compose.ui.unit.dp
 import com.garathon.flatdroid.FlatdroidStorage
 import com.garathon.flatdroid.Unused
 import com.garathon.flatdroid.R
+import com.garathon.flatdroid.flatpak.AppData
+import com.garathon.flatdroid.flatpak.FileIntegrityCheck
 import com.garathon.flatdroid.settings.FlatpakTheme
 import com.garathon.flatdroid.setup.ResetMode
 import com.garathon.flatdroid.alpine.GuestFiles
@@ -59,6 +61,8 @@ fun SettingsScreen(
     applying: Boolean,
     error: String?,
     onSave: (UserSettings) -> Unit,
+    /** Saves, then reinstalls every app for a baseline from known-good files (the "no baseline" prompt). */
+    onSaveAndReinstallAll: (UserSettings) -> Unit = onSave,
     onBack: () -> Unit,
     onReset: (ResetMode) -> Unit,
     onTerminal: () -> Unit,
@@ -96,6 +100,7 @@ fun SettingsScreen(
     var security by rememberSaveable(stateSaver = SecuritySaver) { mutableStateOf(settings.security) }
     var terminalFilter by rememberSaveable { mutableStateOf(settings.terminalFilter) }
     var confirmResetSettings by rememberSaveable { mutableStateOf(false) }
+    var baselineChoice by rememberSaveable { mutableStateOf(false) }
     var cachesCleared by rememberSaveable { mutableStateOf(false) }
     var confirmClear by rememberSaveable { mutableStateOf<String?>(null) }
     var confirmImportAll by rememberSaveable { mutableStateOf<String?>(null) }
@@ -313,28 +318,38 @@ fun SettingsScreen(
         error?.let {
             SelectionContainer { Text(stringResource(R.string.settings_failed, it), color = MaterialTheme.colorScheme.error) }
         }
+        val collectSettings = {
+            UserSettings(
+                flatpakLanguages = if (onlyMyLanguages) deviceLanguages else GuestFiles.ALL_LANGUAGES,
+                developerOptions = developerOptions,
+                vncViewer = vncViewer,
+                frameRate60 = frameRate60,
+                customFrameRate = customFrameRateValue,
+                uncappedFrameRate = uncappedFrameRate,
+                installGpuRuntimes = installGpuRuntimes,
+                titleBars = titleBars,
+                customAudioLatencyMs = audioLatencyValue,
+                lowLatencyAudio = lowLatencyAudio,
+                highQualityAudio = highQualityAudio,
+                sharedHome = settings.sharedHome,
+                flatpakTheme = flatpakTheme,
+                security = security,
+                terminalFilter = terminalFilter,
+            )
+        }
+        if (baselineChoice) {
+            BaselineChoiceDialog(
+                onReinstall = { baselineChoice = false; onSaveAndReinstallAll(collectSettings()) },
+                onTrust = { baselineChoice = false; onSave(collectSettings()) },
+            )
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
                 onClick = {
-                    onSave(
-                        UserSettings(
-                            flatpakLanguages = if (onlyMyLanguages) deviceLanguages else GuestFiles.ALL_LANGUAGES,
-                            developerOptions = developerOptions,
-                            vncViewer = vncViewer,
-                            frameRate60 = frameRate60,
-                            customFrameRate = customFrameRateValue,
-                            uncappedFrameRate = uncappedFrameRate,
-                            installGpuRuntimes = installGpuRuntimes,
-                            titleBars = titleBars,
-                            customAudioLatencyMs = audioLatencyValue,
-                            lowLatencyAudio = lowLatencyAudio,
-                            highQualityAudio = highQualityAudio,
-                            sharedHome = settings.sharedHome,
-                            flatpakTheme = flatpakTheme,
-                            security = security,
-                            terminalFilter = terminalFilter,
-                        )
-                    )
+                    // The first time the check is turned on with no baseline yet, ask how to get one.
+                    val enablingCheck = security.checkFilesBeforeLaunch && !settings.security.checkFilesBeforeLaunch
+                    if (enablingCheck && !FileIntegrityCheck(AppData.integrityDir(context)).hasAny()) baselineChoice = true
+                    else onSave(collectSettings())
                 },
                 enabled = !applying && customFrameRateValid && audioLatencyValid,
             ) {

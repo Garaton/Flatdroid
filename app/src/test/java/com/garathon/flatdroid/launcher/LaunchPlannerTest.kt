@@ -25,7 +25,7 @@ class LaunchPlannerTest {
             appDirs = listOf(File(d, "config") to "/home/user/.config"),
             etc = mapOf("passwd" to File(d, "passwd")),
             x11Sockets = File(d, "x11"), pulseSockets = File(d, "pulse"), fontDirs = File(d, "font-dirs.xml"),
-            desktopConfig = File(d, "xdg"), userDirs = File(d, "user-dirs.dirs"),
+            desktopConfig = File(d, "xdg"), userDirs = File(d, "user-dirs.dirs"), runtimeCache = File(d, "runtime-cache"),
         )
     }
 
@@ -35,6 +35,7 @@ class LaunchPlannerTest {
         dirs.desktopConfig.path to "/run/flatdroid/xdg",
         dirs.userDirs.path to "/home/user/.var/app/$id/config/user-dirs.dirs",
         dirs.userDirs.path to "/home/user/.config/user-dirs.dirs",
+        LaunchPlanner.runtimeCacheScratch(dirs.runtimeCache, "/usr/lib/fontconfig/cache").path to "/usr/lib/fontconfig/cache",
     )
 
     private fun appMetadata(id: String, command: String, runtime: String = "org.freedesktop.Platform/aarch64/26.08", extra: String = "") =
