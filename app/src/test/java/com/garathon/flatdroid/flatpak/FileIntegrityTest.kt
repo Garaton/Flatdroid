@@ -75,6 +75,39 @@ class FileIntegrityTest {
     }
 
     @Test
+    fun aTreesOwnSymlinkIsCheckedByItsTargetAndLink2symlinksIsFollowed() {
+        val own = File("/d/lib/libx.so")
+        val hardLink = File("/d/bin/app")
+        val fake = FakeFs(
+            links = mutableMapOf(own.path to "libx.so.1", hardLink.path to "/data/rootfs/.l2s/.l2s.app0001"),
+            stats = mutableMapOf(own.path to Triple(5L, 6L, 7L), hardLink.path to Triple(42L, 1700L, 99L)),
+            content = mutableMapOf(own.path to "host-file", hardLink.path to "deadbeef"),
+        )
+        // Followed from the host, a guest path would read the host's file: only the target counts.
+        assertEquals(Entry("libx.so.1", 0, 0, 0, null), FileIntegrity.entry(own, fake.fs))
+        assertTrue(FileIntegrity.entry(own, fake.fs).linkOnly)
+        assertEquals(Entry("/data/rootfs/.l2s/.l2s.app0001", 42, 1700, 99, "deadbeef"), FileIntegrity.entry(hardLink, fake.fs))
+    }
+
+    @Test
+    fun benignChangesComeBackToBeWrittenAndLinkOnlyEntriesCompareTheirTarget() {
+        val base = mapOf(
+            "a" to Entry(null, 1, 100, 10, "sha-a"),
+            "own" to Entry("libx.so.1", 5, 6, 7, "followed-before"), // an older, followed entry
+            "moved" to Entry("libx.so.1", 0, 0, 0, null),
+        )
+        val current = mapOf(
+            "a" to Entry(null, 1, 200, 10, null),                   // link2symlink renamed it: ctime only
+            "own" to Entry("libx.so.1", 0, 0, 0, null),
+            "moved" to Entry("evil.so", 0, 0, 0, null),
+        )
+        val diff = FileIntegrity.diff(base, current) { if (it == "a") Entry(null, 1, 200, 10, "sha-a") else error("no hash for $it") }
+        assertEquals(listOf("moved"), diff.tampered)
+        assertEquals(setOf("a", "own"), diff.refreshed.keys)
+        assertEquals(Entry(null, 1, 200, 10, "sha-a"), diff.refreshed["a"])
+    }
+
+    @Test
     fun manifestRoundTrips() {
         val m = mapOf(
             "bin/a file" to Entry(null, 10, 1700000000, 1234, "abcdef"),

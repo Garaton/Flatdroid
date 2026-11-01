@@ -1,9 +1,9 @@
 package com.garathon.flatdroid.ui
 
-import android.app.Activity
 import android.content.ClipData
 import android.os.PersistableBundle
 import android.view.WindowManager
+import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -36,7 +36,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
@@ -119,7 +118,7 @@ fun SessionPanel(
 /** While shown: the activity's window can't be captured (screenshots, screen recording, Recents). */
 @Composable
 private fun SecureWindow() {
-    val window = (LocalContext.current as? Activity)?.window ?: return
+    val window = LocalActivity.current?.window ?: return
     DisposableEffect(window) {
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         onDispose { window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE) }

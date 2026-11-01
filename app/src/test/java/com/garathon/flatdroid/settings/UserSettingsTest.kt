@@ -104,7 +104,7 @@ class UserSettingsTest {
             assertTrue("security.level=${level.name.lowercase()}" in file.readText())
             assertFalse("security.limitDevices" in file.readText())
         }
-        val custom = SecurityLevel.HARDENED.settings.copy(defaultHomeMode = HomeMode.SHARED, exportWithPicker = false)
+        val custom = SecurityLevel.HARDENED.settings.copy(defaultHomeMode = HomeMode.SHARED, exportWithPicker = false, shareClipboard = true)
         store.save(UserSettings("en", security = custom))
         assertNull(store.load()!!.securityLevel)
         assertEquals(custom, store.load()!!.security)
@@ -122,6 +122,7 @@ class UserSettingsTest {
         assertEquals(HomeMode.PRIVATE, hardened.appDefaults.homeMode)
         assertFalse(hardened.appDefaults.permissionsFromMetadata)
         assertTrue(hardened.limitDevices && hardened.protectPassword && hardened.exportWithPicker && hardened.hideHelperProcesses)
+        assertFalse(hardened.appDefaults.androidFonts || hardened.appDefaults.clipboard)
         assertEquals(AppDefaults(), default.appDefaults)
         assertEquals(AppDefaults(), performant.appDefaults)
     }

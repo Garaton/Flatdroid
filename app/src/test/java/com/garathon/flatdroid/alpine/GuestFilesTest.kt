@@ -17,6 +17,14 @@ class GuestFilesTest {
     }
 
     @Test
+    fun resolvConfListsOnlyThePrivateDnsProviderWhenThereIsOne() {
+        val conf = GuestFiles.resolvConf(listOf("10.0.0.1", "10.0.0.2"), preferred = listOf("2001:db8::53", "192.0.2.53", "198.51.100.53", "203.0.113.53"))
+        assertEquals("nameserver 2001:db8::53\nnameserver 192.0.2.53\nnameserver 198.51.100.53\n", conf)
+        // Without a provider (or none answering) the network's servers stay.
+        assertEquals("nameserver 10.0.0.1\n", GuestFiles.resolvConf(listOf("10.0.0.1"), emptyList()))
+    }
+
+    @Test
     fun resolvConfFallsBackWhenNothingUsable() {
         assertEquals("nameserver 1.1.1.1\nnameserver 9.9.9.9\n", GuestFiles.resolvConf(emptyList()))
         assertEquals("nameserver 1.1.1.1\nnameserver 9.9.9.9\n", GuestFiles.resolvConf(listOf("fe80::1%wlan0")))

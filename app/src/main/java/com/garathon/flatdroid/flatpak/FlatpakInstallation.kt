@@ -4,8 +4,12 @@ import com.garathon.flatdroid.util.readTextUpTo
 import java.io.File
 
 /** An installed app or runtime: its ref and deployed directory (with `files/` and `metadata`). */
-data class Deployment(val ref: FlatpakRef, val dir: File, val metadata: FlatpakMetadata) {
+data class Deployment(val ref: FlatpakRef, val dir: File, val metadata: FlatpakMetadata, val kind: String = "runtime") {
     val files: File get() = File(dir, "files")
+    /** The ref Flatpak installs it by: `app/…` or `runtime/…`. */
+    val installRef: String get() = "$kind/$ref"
+    /** `<kind>/<ID>/<arch>/<branch>`, relative to the installation. */
+    val branch: String get() = "$kind/${ref.name}/${ref.arch}/${ref.branch}"
     val export: File get() = File(dir, "export")
 }
 
@@ -67,8 +71,11 @@ class FlatpakInstallation(root: File, private val arch: String) {
     fun reinstallRefsFor(appId: String): List<String> {
         val deployments = deploymentsFor(appId)
         if (deployments.isEmpty()) return emptyList()
-        return listOf(appId) + deployments.drop(1).map { "runtime/${it.ref}" }
+        return deployments.map { it.installRef }.distinct()
     }
+
+    /** `app/<ID>/<arch>/<branch>` and `runtime/…` of each deployment [appId] uses, relative to the installation. */
+    fun branchesFor(appId: String): List<String> = deploymentsFor(appId).map { it.branch }.distinct()
 
     /**
      * Installed extensions for [points] of a parent on [parentBranch]: for each point, the first of
@@ -103,7 +110,7 @@ class FlatpakInstallation(root: File, private val arch: String) {
             return null
         }
         if (!File(dir, "files").isDirectory) return null
-        return Deployment(ref, dir, metadata)
+        return Deployment(ref, dir, metadata, kind)
     }
 
     /** [file] resolved, or null if it doesn't exist or resolves outside the installation. */

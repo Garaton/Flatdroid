@@ -88,6 +88,8 @@ fun AppSettingsScreen(
     broadAccess: Boolean,
     onStorage: (StorageAction) -> Unit,
     modifier: Modifier = Modifier,
+    /** An Electron app or a Chromium browser ([com.garathon.flatdroid.flatpak.InstalledApps.showsWebContent]). */
+    showsWebContent: Boolean = false,
 ) {
     var choice by rememberSaveable { mutableStateOf(settings.displaySize) }
     var width by rememberSaveable { mutableStateOf(settings.customWidth.toString()) }
@@ -98,6 +100,8 @@ fun AppSettingsScreen(
     var audio by rememberSaveable { mutableStateOf(settings.audio ?: audioDefault) }
     val networkDefault = fromMetadata && app.requestsNetwork
     var network by rememberSaveable { mutableStateOf(settings.network ?: networkDefault) }
+    var clipboard by rememberSaveable { mutableStateOf(settings.sharesClipboard) }
+    var androidFonts by rememberSaveable { mutableStateOf(settings.usesAndroidFonts) }
     var allowExtraSyscalls by rememberSaveable { mutableStateOf(settings.allowExtraSyscalls) }
     var shareHiddenFiles by rememberSaveable { mutableStateOf(settings.shareHiddenFiles) }
     var microphone by rememberSaveable { mutableStateOf(settings.microphone) }
@@ -145,7 +149,7 @@ fun AppSettingsScreen(
                 Text(app.id, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        if (app.showsWebContent) {
+        if (showsWebContent) {
             Text(stringResource(R.string.app_settings_web_content), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
         }
 
@@ -269,6 +273,14 @@ fun AppSettingsScreen(
                 hint = stringResource(R.string.app_settings_camera_resolution_hint),
             )
         }
+        SwitchRow(
+            clipboard, { clipboard = it },
+            stringResource(R.string.app_settings_clipboard), stringResource(R.string.app_settings_clipboard_hint),
+        )
+        SwitchRow(
+            androidFonts, { androidFonts = it },
+            stringResource(R.string.app_settings_android_fonts), stringResource(R.string.app_settings_android_fonts_hint),
+        )
 
         SectionTitle(stringResource(R.string.app_settings_files))
         Column(Modifier.selectableGroup()) {
@@ -285,8 +297,7 @@ fun AppSettingsScreen(
                 stringResource(R.string.app_settings_sdcard), stringResource(R.string.app_settings_sdcard_hint),
             )
         }
-        // Sharing hidden files only has an effect in Shared Home mode, where each app otherwise gets its own.
-        if (developerOptions && homeMode == HomeMode.SHARED) {
+        if (developerOptions) {
             SwitchRow(
                 shareHiddenFiles, { shareHiddenFiles = it },
                 stringResource(R.string.app_settings_share_hidden), stringResource(R.string.app_settings_share_hidden_hint),
@@ -334,6 +345,8 @@ fun AppSettingsScreen(
                             wholeDev = wholeDev,
                             audio = audio.takeIf { it != audioDefault },
                             network = network.takeIf { it != networkDefault },
+                            clipboard = clipboard.takeIf { it != settings.defaults.clipboard },
+                            androidFonts = androidFonts.takeIf { it != settings.defaults.androidFonts },
                             allowExtraSyscalls = if (developerOptions) allowExtraSyscalls else settings.allowExtraSyscalls,
                             shareHiddenFiles = if (developerOptions) shareHiddenFiles else settings.shareHiddenFiles,
                             microphone = microphone,
@@ -355,7 +368,10 @@ fun AppSettingsScreen(
         SectionTitle(stringResource(R.string.app_settings_storage))
         val context = LocalContext.current
         val measuring = stringResource(R.string.app_settings_measuring)
-        fun size(bytes: Long?) = bytes?.let { Formatter.formatShortFileSize(context, it) } ?: measuring
+        val measuringSize = stringResource(R.string.storage_measuring_size)
+        // The last measured size stays shown while a new measurement runs.
+        fun size(bytes: Long?) = bytes?.let { Formatter.formatShortFileSize(context, it) }
+            ?.let { if (storage?.measuring == true) measuringSize.format(it) else it } ?: measuring
         val hasHome = (storage?.privateHome ?: 0L) > 0L
         Text(stringResource(R.string.app_settings_app_storage, size(storage?.total)), style = MaterialTheme.typography.titleMedium)
 

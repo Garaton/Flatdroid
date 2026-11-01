@@ -36,7 +36,6 @@ interface LinkFs {
 class BrokenLinks(private val l2sDir: File, private val fs: LinkFs) {
     /** Removes the broken links under [dir] (and their dangling intermediates); returns how many. */
     fun removeUnder(dir: File): Int {
-        val prefix = l2sDir.path + "/"
         val names = fs.list(l2sDir).orEmpty().toHashSet()
         val withContent = names.mapNotNullTo(HashSet()) { name -> if (COUNT.containsMatchIn(name)) name.dropLast(COUNT_LENGTH) else null }
         var removed = 0
@@ -51,10 +50,10 @@ class BrokenLinks(private val l2sDir: File, private val fs: LinkFs) {
                     if (fs.isDirectory(entry)) pending.addLast(entry)
                     continue
                 }
-                val intermediate = target.takeIf { it.startsWith(prefix) }?.substring(prefix.length)?.takeIf { '/' !in it } ?: continue
+                val intermediate = L2s.storedName(target, l2sDir) ?: continue
                 if (intermediate in names && intermediate in withContent) continue
                 fs.delete(entry)
-                if (intermediate in names) fs.delete(File(target))
+                if (intermediate in names) fs.delete(File(l2sDir, intermediate))
                 removed++
             }
         }

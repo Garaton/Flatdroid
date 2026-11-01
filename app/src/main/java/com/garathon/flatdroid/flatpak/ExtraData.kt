@@ -34,6 +34,19 @@ class ExtraData(private val env: AlpineEnvironment, private val stateFile: File,
         }.filter { !AndroidTarFs.isSymlink(it) && File(it, "files/bin/apply_extra").exists() && it.path !in done }
     }
 
+    /**
+     * Forgets that the scripts under [branches] (`<kind>/<ID>/<arch>/<branch>`, relative to the
+     * installation) ran, or every script's with null: a reinstall redeploys the same commit at the
+     * same path, without the files its script made.
+     */
+    fun forget(branches: List<String>? = null) {
+        val prefix = env.flatpakDir.path + "/"
+        val keep = if (branches == null) emptyList() else applied().filter { path ->
+            branches.none { path.removePrefix(prefix).startsWith("$it/") }
+        }
+        stateFile.writeTextAtomically(keep.joinToString("\n", postfix = if (keep.isEmpty()) "" else "\n"))
+    }
+
     /** Runs every pending script, [onLine] getting their output; records each as applied. */
     fun applyAll(onLine: (String) -> Unit): List<Result> = pending().map { deployment ->
         val result = Result(deployment, deployment.parentFile!!.parentFile!!.parentFile!!.parentFile!!.name == "app", run(deployment, onLine))

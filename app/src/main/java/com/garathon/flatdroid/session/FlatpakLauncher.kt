@@ -1,5 +1,6 @@
 package com.garathon.flatdroid.session
 
+import com.garathon.flatdroid.FlatdroidApplication
 import android.content.Context
 import android.content.res.Configuration
 import android.hardware.display.DisplayManager
@@ -11,6 +12,7 @@ import android.view.Display
 import android.view.Surface
 import com.garathon.flatdroid.R
 import com.garathon.flatdroid.alpine.AlpineEnvironment
+import com.garathon.flatdroid.alpine.ResolvConfRefresher
 import com.garathon.flatdroid.alpine.GuestFiles
 import com.garathon.flatdroid.audio.AudioPlayer
 import com.garathon.flatdroid.audio.MicStreamer
@@ -131,6 +133,8 @@ class FlatpakLauncher(private val context: Context) {
      */
     fun run(appId: String, micAnswer: Boolean? = null): Boolean {
         SessionController.starting(appId, context.getString(R.string.session_reading_metadata), clearLog = true)
+        // Every Flatpak could otherwise open Flatdroid's memory through /proc (same user).
+        if (!FlatdroidApplication.nonDumpable) throw LaunchException(context.getString(R.string.launch_dumpable))
         val store = AppData.settings(context, appId)
         var settings = store.load()
         // A launch in Temporary Home mode replaces the temporary home, so not while it is exported.
@@ -156,7 +160,7 @@ class FlatpakLauncher(private val context: Context) {
         }
         store.update { it.copy(lastOpened = System.currentTimeMillis()) }
 
-        if (SetupController.settings(context).load()?.security?.checkFilesBeforeLaunch == true && !checkFiles(appId, plan)) return false
+        if (SetupController.settings(context).load()?.security?.checkFilesBeforeLaunch == true && !checkFiles(appId)) return false
 
         SessionController.starting(appId, context.getString(R.string.session_preparing_files))
         val home = prepareHome(appId, settings.homeMode)
@@ -210,7 +214,10 @@ class FlatpakLauncher(private val context: Context) {
         // Any of the proots below: fdsec refused to start its command, so nothing ran in it.
         val filterRefused = AtomicBoolean(false)
         val helpers = startHelpers(
-            SessionScript.command(settings.geometry, frameRate, audio, microphone = mic != null, resampler, sessionBus = true, camera = cameraNodes.isNotEmpty()),
+            SessionScript.command(
+                settings.geometry, frameRate, audio, microphone = mic != null, resampler, sessionBus = true,
+                camera = cameraNodes.isNotEmpty(), clipboard = settings.sharesClipboard,
+            ),
             audio,
             Fdsec.Filter(extraSyscalls = security.extraSyscallFilter),
         ) { line ->
@@ -223,6 +230,8 @@ class FlatpakLauncher(private val context: Context) {
         val streamers = cameraNodes.indices.associate {
             cameraNodes[it].name to CameraStreamer(context, cameras[it], File(cameraPipeDir, cameraNodes[it].name), cameraRotations[it])
         }
+        // A network change during the session (Wi-Fi to mobile data, Private DNS) reaches the app's resolv.conf.
+        val dns = ResolvConfRefresher(context, listOf(File(etcDir, "resolv.conf"))).apply { start() }
         try {
             try {
                 waitForFile(File(x11Dir, SessionScript.X_SOCKET), helpers, DISPLAY_TIMEOUT_MS, context.getString(R.string.launch_display_failed))
@@ -260,11 +269,13 @@ class FlatpakLauncher(private val context: Context) {
                 val gpuFailed = AtomicBoolean(false)
                 val kdeHostProcess = AtomicBoolean(false)
                 val killedBySignal = AtomicBoolean(false)
+                // The app's own: a helper's fdsec refusing later (sound, say) doesn't make the app's exit a failure.
+                val appRefused = AtomicBoolean(false)
                 app = ProotRunner.start(
                     ProotCommand.flatpak(env.paths(), plan.binds, plan.environment, plan.command, plan.filter),
                     File(plan.binds.root),
                 ) { line ->
-                    if (Fdsec.refused(line)) filterRefused.set(true)
+                    if (Fdsec.refused(line)) appRefused.set(true)
                     if (Electron.GPU_FAILURE in line) gpuFailed.set(true)
                     if (LaunchPlanner.KDE_HOST_PROCESS_WARNING in line) kdeHostProcess.set(true)
                     if (LaunchPlanner.PROOT_KILLED_BY_SIGNAL in line) killedBySignal.set(true)
@@ -273,7 +284,7 @@ class FlatpakLauncher(private val context: Context) {
                 SessionController.running(appId, password)
                 val code = app.waitFor()
                 SessionController.log("[flatdroid] the app exited ($code)")
-                if (filterRefused.get()) throw LaunchException(context.getString(R.string.launch_filter_refused))
+                if (appRefused.get()) throw LaunchException(context.getString(R.string.launch_filter_refused))
                 if (plan.isElectron && !settings.newerElectronFlags && gpuFailed.get() && !triedNewerFlags) {
                     // Newer Electron: relaunch once with its extra flags, and keep them if they help.
                     triedNewerFlags = true
@@ -317,6 +328,7 @@ class FlatpakLauncher(private val context: Context) {
                 return true
             }
         } finally {
+            dns.stop()
             app?.stop()
             player?.stop()
             mic?.stop()
@@ -327,36 +339,42 @@ class FlatpakLauncher(private val context: Context) {
             helpers.stop()
             // proot leaves the private binds' mount points behind in the shared home, where the
             // user sees them (empty .ssh, .bashrc, .config and the rest). Remove the empty ones.
-            if (settings.homeMode == HomeMode.SHARED) cleanSharedHomeMountPoints(home, plan)
+            // A private home gets them too when it shares hidden files (a temporary one goes anyway).
+            if (settings.homeMode == HomeMode.SHARED || (settings.shareHiddenFiles && settings.homeMode == HomeMode.PRIVATE)) {
+                cleanSharedHomeMountPoints(home, plan)
+            }
         }
     }
 
     /**
-     * Removes the mount points a launch's private binds leave empty in [home]: the first path
-     * element of each bind under [GuestPaths.HOME]. Only empty files and empty directory trees go,
-     * so a real file the user keeps under one of these names (a hand-written `.bashrc`) stays.
+     * Removes the mount points a launch's private binds leave empty in [home] (each bind's path
+     * under [GuestPaths.HOME]), and the folders above one that are left empty, up to the home.
+     * Only an empty file or an empty folder goes, so a real file the user keeps under one of these
+     * names (a hand-written `.bashrc`), or an empty folder of their own elsewhere, stays.
      */
     private fun cleanSharedHomeMountPoints(home: File, plan: LaunchPlan) {
         val prefix = GuestPaths.HOME + "/"
-        val names = (plan.binds.appDirs + plan.binds.privateFiles)
+        val points = (plan.binds.appDirs + plan.binds.privateFiles)
             .map { it.second }
             .filter { it.startsWith(prefix) }
-            .map { it.removePrefix(prefix).substringBefore('/') }
-            .filter { it.isNotEmpty() && it != ".." && it != "." }
+            .map { it.removePrefix(prefix) }
+            .filter { rel -> rel.split('/').none { it.isEmpty() || it == "." || it == ".." } }
             .distinct()
-        for (name in names) deleteIfEmpty(File(home, name))
+            .sortedByDescending { rel -> rel.count { it == '/' } } // deepest first, so parents are empty by their turn
+        for (rel in points) {
+            // The mount point itself, then the folders proot made for it, up to the home.
+            var file: File? = File(home, rel)
+            while (file != null && file != home && deleteIfEmpty(file)) file = file.parentFile
+        }
     }
 
     /** Deletes [file] if it is an empty file or a directory whose whole tree is empty; never a link. */
-    private fun deleteIfEmpty(file: File) {
-        when {
-            AndroidTarFs.isSymlink(file) -> return
-            file.isDirectory -> {
-                file.listFiles()?.forEach { deleteIfEmpty(it) }
-                file.delete() // succeeds only if it is now empty
-            }
-            file.isFile && file.length() == 0L -> file.delete()
-        }
+    /** Deletes [file] if it is an empty file or an empty folder (never a link); whether it did. */
+    private fun deleteIfEmpty(file: File): Boolean = when {
+        AndroidTarFs.isSymlink(file) -> false
+        file.isDirectory -> file.list()?.isEmpty() == true && file.delete()
+        file.isFile -> file.length() == 0L && file.delete()
+        else -> false
     }
 
     /**
@@ -365,22 +383,29 @@ class FlatpakLauncher(private val context: Context) {
      * Returns true to go ahead; false when files changed, having put the refusal and a reinstall
      * offer in [SessionController].
      */
-    private fun checkFiles(appId: String, plan: LaunchPlan): Boolean {
-        val cancelled = java.util.concurrent.atomic.AtomicBoolean(false)
+    private fun checkFiles(appId: String): Boolean {
+        val cancelled = AtomicBoolean(false)
+        // False once the check is over (done, skipped or stopped): workers still finishing a file
+        // must not put "Checking files" back over the launch or the ended session.
+        val checking = AtomicBoolean(true)
         SessionController.onSkipFileCheck = { cancelled.set(true) }
         val problems = try {
             IntegrityGuard(context).verify(
                 appId,
                 onProgress = { ref, done, total ->
                     // Throttled: a per-file UI emission would flood the flow over a large runtime.
-                    if (done == total || done % 500 == 0)
+                    if (checking.get() && !cancelled.get() && (done == total || done % 500 == 0))
                         SessionController.starting(appId, context.getString(R.string.session_checking_files, ref.name, done, total), skippable = true)
                 },
-                cancelled = { cancelled.get() },
+                // Skip, or Stop (which interrupts this thread): either ends the walk and the hashing at once.
+                cancelled = { cancelled.get() || Thread.currentThread().isInterrupted },
             )
         } finally {
+            checking.set(false)
             SessionController.onSkipFileCheck = null
         }
+        // Stopped: end here, before anything starts (the interrupt is still pending for the caller).
+        if (Thread.currentThread().isInterrupted) throw InterruptedException()
         // Skip drops the check entirely and launches, even if an earlier deployment already flagged.
         if (cancelled.get()) return true
         if (problems.isEmpty()) return true
@@ -537,10 +562,10 @@ class FlatpakLauncher(private val context: Context) {
         val home = GuestPaths.HOME
         val varApp = "$home/.var/app/$appId"
         // A shared home's dot-files would be every app's (and readable by other Android apps): the app's
-        // own instead, unless the developer setting shares one set across the apps that opt in.
+        // own instead. The developer setting shares one set across the apps that opt in, in any home.
         val dotFiles = when {
-            settings.homeMode != HomeMode.SHARED -> null
             settings.shareHiddenFiles -> AppData.sharedDotfilesDir(context)
+            settings.homeMode != HomeMode.SHARED -> null
             else -> File(appData, AppFiles.DOT_FILES_DIR)
         }
         return HostDirs(
@@ -568,17 +593,18 @@ class FlatpakLauncher(private val context: Context) {
             privateFiles = dotFiles?.let { dir -> AppFiles.PRIVATE_DOT_FILES.map { File(dir, it) to "$home/$it" } }.orEmpty(),
             // These /etc files are overridden at launch, so the integrity check leaves the
             // deployment's copies out (IntegrityGuard.OVERRIDDEN_ETC must list the same names).
-            etc = linkedMapOf(
-                "resolv.conf" to File(etcDir, "resolv.conf"),
-                "hosts" to launcher.hosts,
-                "machine-id" to File(etcDir, "machine-id"),
-                "passwd" to launcher.passwd,
-                "group" to launcher.group,
-            ),
+            etc = LaunchPlanner.ETC_OVERRIDES.associateWithTo(linkedMapOf()) { name ->
+                when (name) {
+                    "hosts" -> launcher.hosts
+                    "passwd" -> launcher.passwd
+                    "group" -> launcher.group
+                    else -> File(etcDir, name) // resolv.conf and the machine-id's copy, written per launch
+                }
+            },
             x11Sockets = x11Dir,
             pulseSockets = pulseDir,
             fontDirs = launcher.fontDirs,
-            hostFonts = ANDROID_FONTS.takeIf { it.isDirectory },
+            hostFonts = ANDROID_FONTS.takeIf { settings.usesAndroidFonts && it.isDirectory },
             desktopConfig = desktopDir,
             userDirs = File(etcDir, USER_DIRS),
             sdcard = SharedHome.storageRoot().takeIf { settings.sdcard && SharedHome.broadAccess(context) },

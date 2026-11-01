@@ -25,7 +25,12 @@ object FileIntegrity {
     data class Entry(val link: String?, val ino: Long, val ctime: Long, val size: Long, val sha256: String?) {
         /** Everything but the content hash, from a cheap `stat`; the fast path compares these. */
         fun sameShape(other: Entry) = link == other.link && ino == other.ino && ctime == other.ctime && size == other.size
+
+        /** A symlink the deployment's tree itself holds (see [entry]): only its target is recorded. */
+        val linkOnly: Boolean get() = link != null && ino == 0L && ctime == 0L && size == 0L && sha256 == null
     }
+
+
 
     /** Host operations, injected for testing. All take an absolute file under a deployment's tree. */
     data class Fs(
@@ -65,13 +70,22 @@ object FileIntegrity {
     /** The [Entry] for one leaf: its link target, stat and (unless a directory) content hash. */
     fun entry(file: File, fs: Fs): Entry {
         val link = fs.readlink(file)
+        // A symlink of the Flatpak's own tree names a guest path: followed from the host it would
+        // read the host's file (or nothing), so only its target is recorded. link2symlink's links
+        // lead to the file's content in its store and are followed.
+        if (link != null && !File(link).name.startsWith(L2s.PREFIX)) return Entry(link, 0, 0, 0, null)
         val stat = fs.stat(file) ?: Triple(0L, 0L, 0L)
         val sha = fs.sha256(file)
         return Entry(link, stat.first, stat.second, stat.third, sha)
     }
 
     /** What a check turns up, by relative path. [tampered] covers changed and added files. */
-    data class Diff(val tampered: List<String>, val removed: List<String>) {
+    data class Diff(
+        val tampered: List<String>,
+        val removed: List<String>,
+        /** Entries whose stat changed but whose content was confirmed the same: written back, so they aren't re-hashed every check. */
+        val refreshed: Map<String, Entry> = emptyMap(),
+    ) {
         val clean: Boolean get() = tampered.isEmpty() && removed.isEmpty()
     }
 
@@ -79,19 +93,27 @@ object FileIntegrity {
      * Compares [current] against [baseline]. [needsHash] is called for each path whose shape
      * (link + stat) differs or that is new, and must return the file's current [Entry] with its
      * hash computed; the caller runs those in parallel. A hash that matches the baseline is benign
-     * (a bare ctime touch); anything else is tampering.
+     * (a bare ctime touch, such as link2symlink renaming its file when another hard link is made)
+     * and goes into [Diff.refreshed]; anything else is tampering. A new path is tampering without
+     * a hash, and a link-only entry ([Entry.linkOnly]) is compared by its target alone.
      */
     fun diff(baseline: Map<String, Entry>, current: Map<String, Entry>, needsHash: (String) -> Entry?): Diff {
         val tampered = mutableListOf<String>()
+        val refreshed = LinkedHashMap<String, Entry>()
         for ((path, shape) in current) {
             val base = baseline[path]
             if (base == null) { tampered += path; continue }    // added
             if (shape.sameShape(base)) continue                 // fast path: unchanged
+            if (shape.linkOnly) {
+                if (shape.link == base.link) refreshed[path] = shape else tampered += path
+                continue
+            }
             val hashed = needsHash(path)                        // shape changed: re-hash
             if (hashed == null || hashed.link != base.link || hashed.sha256 == null || hashed.sha256 != base.sha256) tampered += path
+            else refreshed[path] = hashed
         }
         val removed = baseline.keys.filter { it !in current }
-        return Diff(tampered.sorted(), removed.sorted())
+        return Diff(tampered.sorted(), removed.sorted(), refreshed)
     }
 
     // ---- manifest serialization: one tab-separated line per entry, "-" for an absent field.

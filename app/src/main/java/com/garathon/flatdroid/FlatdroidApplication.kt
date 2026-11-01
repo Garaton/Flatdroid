@@ -31,10 +31,17 @@ class FlatdroidApplication : Application() {
         // from any other open().
         try {
             Os.prctl(OsConstants.PR_SET_DUMPABLE, 0, 0, 0, 0)
+            nonDumpable = Os.prctl(OsConstants.PR_GET_DUMPABLE, 0, 0, 0, 0) == 0
         } catch (e: ErrnoException) {
             DebugLog.w("Could not make the process non-dumpable: $e")
         }
         super.attachBaseContext(base)
+    }
+
+    companion object {
+        /** Whether this process is non-dumpable; launches refuse otherwise, as they do when fdsec's filter isn't in place. */
+        @Volatile var nonDumpable = false
+            private set
     }
 
     override fun onCreate() {

@@ -101,8 +101,11 @@ class AlpineEnvironment private constructor(private val context: Context) {
     /** The Flatpak user installation inside the rootfs. */
     val flatpakDir: File get() = File(installer.rootfs, "root/.local/share/flatpak")
 
-    /** resolv.conf for the current network. */
-    fun resolvConf(): String = GuestFiles.resolvConf(NetworkDns.servers(context))
+    /** The resolv.conf every Alpine proot binds; kept in step with the network during a Flatpak task ([ResolvConfRefresher]). */
+    val resolvConfFile: File get() = File(generatedDir, "resolv.conf")
+
+    /** resolv.conf for the current network (its Private DNS provider's servers when it names one that answers). */
+    fun resolvConf(): String = GuestFiles.resolvConf(NetworkDns.servers(context), NetworkDns.privateDnsServers(context))
 
     fun paths(): ProotPaths = ProotPaths(
         proot = File(libDir, "libproot.so").path,

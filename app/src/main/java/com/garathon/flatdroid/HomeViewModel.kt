@@ -16,6 +16,7 @@ import com.garathon.flatdroid.setup.AndroidTarFs
 import com.garathon.flatdroid.setup.deleteTree
 import com.garathon.flatdroid.storage.AppFiles
 import com.garathon.flatdroid.storage.AppStorage
+import com.garathon.flatdroid.FlatdroidStorage.Part
 import com.garathon.flatdroid.storage.SavedSizes
 import com.garathon.flatdroid.storage.StorageSizes
 import com.garathon.flatdroid.storage.StorageTasks
@@ -66,10 +67,12 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     val flatdroidStorage: StateFlow<FlatdroidStorage?> = _flatdroidStorage.asStateFlow()
 
     fun measureStorage(appId: String) {
+        // The last sizes stay shown, marked as measuring, until the new ones are in.
+        _storage.update { m -> m[appId]?.let { m + (appId to it.copy(measuring = true)) } ?: m }
         viewModelScope.launch(Dispatchers.IO) {
             val context = getApplication<Application>()
             // Not while a Flatpak task or setup changes everything; measured again once it ends.
-            val saved = SavedSizes.app(context, appId) ?: return@launch _storage.update { it - appId }
+            val saved = SavedSizes.app(context, appId) ?: return@launch
             val measured = AppStorage(
                 app = saved.app,
                 cache = StorageSizes.contents(File(AppData.cacheRoot(context), appId)),
@@ -80,29 +83,51 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Flatdroid's storage, part by part: what was measured before shows at once, marked as being
+     * measured again, and each part replaces it as soon as it is in (the shared hidden files, then
+     * the apps, the cache, and last the runtimes and the rest, the slowest).
+     */
     fun measureFlatdroid() {
         viewModelScope.launch(Dispatchers.IO) {
             val context = getApplication<Application>()
             val installed = installedIds()
-            val apps = SavedSizes.appIds(context).associateWith { SavedSizes.app(context, it) ?: return@launch run { _flatdroidStorage.value = null } }
-            val unused = apps.filterKeys { it !in installed }.values
-            val shared = SavedSizes.shared(context) ?: return@launch run { _flatdroidStorage.value = null }
-            _flatdroidStorage.value = FlatdroidStorage(
-                runtimes = shared.runtimes,
-                apps = apps.values.sumOf { it.app },
-                appData = apps.values.sumOf { it.settings },
-                privateHomes = apps.values.sumOf { it.privateHome },
-                cache = StorageSizes.of(context.cacheDir),
-                other = shared.other,
-                unusedAppData = Unused(unused.count { it.settings > 0 }, unused.sumOf { it.settings }),
-                unusedHomes = Unused(unused.count { it.privateHome > 0 }, unused.sumOf { it.privateHome }),
-            )
+            val ids = SavedSizes.appIds(context)
+            _flatdroidStorage.update { (it ?: lastKnownStorage(context, ids, installed)).copy(stale = Part.entries.toSet()) }
+            fun done(part: Part, change: (FlatdroidStorage) -> FlatdroidStorage) =
+                _flatdroidStorage.update { it?.let { s -> change(s).copy(stale = s.stale - part) } }
+            done(Part.SHARED_DOTFILES) { it.copy(sharedDotfiles = StorageSizes.of(AppData.sharedDotfilesDir(context))) }
+            // Not while a Flatpak task changes everything: the parts left keep their earlier sizes, marked.
+            val apps = ids.associateWith { SavedSizes.app(context, it) ?: return@launch }
+            done(Part.APPS) { it.withApps(apps, installed) }
+            done(Part.CACHE) { it.copy(cache = StorageSizes.of(context.cacheDir)) }
+            val shared = SavedSizes.shared(context) ?: return@launch
+            done(Part.SHARED) { it.copy(runtimes = shared.runtimes, other = shared.other) }
         }
     }
+
+    /** The parts saved before (perhaps from before a change), for showing until measured again. */
+    private fun lastKnownStorage(context: Application, ids: Set<String>, installed: Set<String>): FlatdroidStorage {
+        var storage = FlatdroidStorage()
+        val apps = ids.associateWith { SavedSizes.lastApp(context, it) }
+        if (apps.values.none { it == null }) storage = storage.withApps(apps.mapValues { it.value!! }, installed)
+        SavedSizes.lastShared(context)?.let { storage = storage.copy(runtimes = it.runtimes, other = it.other) }
+        return storage
+    }
+
 
     /** Deletes the app's cache; not while it runs. */
     fun clearCache(appId: String) = whileIdle(appId) {
         AndroidTarFs.deleteTree(File(AppData.cacheRoot(getApplication()), appId))
+    }
+
+    /** The hidden files apps share when they opt in; not while an app runs or a storage task uses files. */
+    fun resetSharedDotfiles() {
+        if (SessionController.isBusy || StorageTasks.busy) return
+        viewModelScope.launch(Dispatchers.IO) {
+            AndroidTarFs.deleteTree(AppData.sharedDotfilesDir(getApplication()))
+            measureFlatdroid()
+        }
     }
 
     /** Every app's cache; not while one runs. */
@@ -110,7 +135,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         if (SessionController.isBusy) return
         viewModelScope.launch(Dispatchers.IO) {
             AndroidTarFs.deleteTree(AppData.cacheRoot(getApplication()))
-            _storage.value = emptyMap()
+            _storage.update { m -> m.mapValues { it.value.copy(measuring = true) } }
             measureFlatdroid()
         }
     }
@@ -177,21 +202,42 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
 /** Flatdroid's storage, in bytes, by part. */
 data class FlatdroidStorage(
-    val runtimes: Long,
+    val runtimes: Long? = null,
     /** Installed apps' own Flatpak files. */
-    val apps: Long,
+    val apps: Long? = null,
     /** Apps' settings and other files of their own, installed or not. */
-    val appData: Long,
-    val privateHomes: Long,
-    val cache: Long,
+    val appData: Long? = null,
+    val privateHomes: Long? = null,
+    val cache: Long? = null,
     /** Alpine and Flatdroid's own files: counted in [total], not shown on its own. */
-    val other: Long,
+    val other: Long? = null,
     /** Of [appData], what apps that aren't installed have. */
-    val unusedAppData: Unused,
+    val unusedAppData: Unused? = null,
     /** Of [privateHomes], what apps that aren't installed have. */
-    val unusedHomes: Unused,
+    val unusedHomes: Unused? = null,
+    /** The hidden files apps share when they opt in (developer setting); counted in [total]. */
+    val sharedDotfiles: Long? = null,
+    /** Parts shown from an earlier measurement while they are measured again. A null size isn't known yet. */
+    val stale: Set<Part> = emptySet(),
 ) {
-    val total: Long get() = runtimes + apps + appData + privateHomes + cache + other
+    /** Which sizes are measured together: [APPS] is [apps], [appData], [privateHomes] and the unused ones; [SHARED] is [runtimes] and [other]. */
+    enum class Part { APPS, SHARED, CACHE, SHARED_DOTFILES }
+
+    /** Null until every part is known. */
+    val total: Long? get() = listOf(runtimes, apps, appData, privateHomes, cache, other, sharedDotfiles)
+        .takeIf { parts -> parts.all { it != null } }?.sumOf { it!! }
+
+    /** The apps' part from each app's saved sizes; [installed] tells the unused ones. */
+    fun withApps(apps: Map<String, SavedSizes.App>, installed: Set<String>): FlatdroidStorage {
+        val unused = apps.filterKeys { it !in installed }.values
+        return copy(
+            apps = apps.values.sumOf { it.app },
+            appData = apps.values.sumOf { it.settings },
+            privateHomes = apps.values.sumOf { it.privateHome },
+            unusedAppData = Unused(unused.count { it.settings > 0 }, unused.sumOf { it.settings }),
+            unusedHomes = Unused(unused.count { it.privateHome > 0 }, unused.sumOf { it.privateHome }),
+        )
+    }
 }
 
 /** Files of [apps] apps that aren't installed, [bytes] in all. */

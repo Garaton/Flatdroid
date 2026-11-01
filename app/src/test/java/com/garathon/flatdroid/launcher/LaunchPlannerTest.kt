@@ -97,7 +97,8 @@ class LaunchPlannerTest {
         assertEquals(setOf("passwd"), closed.binds.etc.keys)
         assertEquals(Fdsec.Filter(extraSyscalls = false, noInternet = true), closed.filter)
         assertEquals(DevNodes.LIMITED_SYS, closed.binds.sys)
-        assertEquals(DevNodes.BASE + "/dev/dri", closed.binds.dev)
+        // `devices=all` with devices limited: only the basic nodes, not even the GPU.
+        assertEquals(DevNodes.BASE, closed.binds.dev)
     }
 
     @Test

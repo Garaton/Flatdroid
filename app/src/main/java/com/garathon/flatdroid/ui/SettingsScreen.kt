@@ -31,8 +31,7 @@ import androidx.compose.ui.unit.dp
 import com.garathon.flatdroid.FlatdroidStorage
 import com.garathon.flatdroid.Unused
 import com.garathon.flatdroid.R
-import com.garathon.flatdroid.flatpak.AppData
-import com.garathon.flatdroid.flatpak.FileIntegrityCheck
+import com.garathon.flatdroid.flatpak.IntegrityGuard
 import com.garathon.flatdroid.settings.FlatpakTheme
 import com.garathon.flatdroid.setup.ResetMode
 import com.garathon.flatdroid.alpine.GuestFiles
@@ -63,6 +62,8 @@ fun SettingsScreen(
     onSave: (UserSettings) -> Unit,
     /** Saves, then reinstalls every app for a baseline from known-good files (the "no baseline" prompt). */
     onSaveAndReinstallAll: (UserSettings) -> Unit = onSave,
+    /** Saves, then records the file baseline of every installed app from its files as they are. */
+    onSaveAndBaselineAll: (UserSettings) -> Unit = onSave,
     onBack: () -> Unit,
     onReset: (ResetMode) -> Unit,
     onTerminal: () -> Unit,
@@ -78,6 +79,9 @@ fun SettingsScreen(
     onImportAllHomes: () -> Unit,
     onExportAllAppFiles: () -> Unit,
     onImportAllAppFiles: () -> Unit,
+    onExportSharedDotfiles: () -> Unit,
+    onImportSharedDotfiles: () -> Unit,
+    onResetSharedDotfiles: () -> Unit,
     onExportSettings: () -> Unit,
     onImportSettings: () -> Unit,
     onResetSettings: () -> Unit,
@@ -104,6 +108,7 @@ fun SettingsScreen(
     var cachesCleared by rememberSaveable { mutableStateOf(false) }
     var confirmClear by rememberSaveable { mutableStateOf<String?>(null) }
     var confirmImportAll by rememberSaveable { mutableStateOf<String?>(null) }
+    var confirmDotfiles by rememberSaveable { mutableStateOf<String?>(null) }
     val context = LocalContext.current
     fun size(bytes: Long) = Formatter.formatShortFileSize(context, bytes)
     if (confirmResetSettings) {
@@ -114,7 +119,7 @@ fun SettingsScreen(
         )
     }
     storage?.let { measured ->
-        val unused = if (confirmClear == HOMES) measured.unusedHomes else measured.unusedAppData
+        val unused = (if (confirmClear == HOMES) measured.unusedHomes else measured.unusedAppData) ?: Unused(0, 0)
         if (confirmClear != null && unused.apps > 0) {
             val homes = confirmClear == HOMES
             ConfirmDialog(
@@ -137,6 +142,16 @@ fun SettingsScreen(
             stringResource(R.string.storage_import),
             onConfirm = { confirmImportAll = null; if (homes) onImportAllHomes() else onImportAllAppFiles() },
             onDismiss = { confirmImportAll = null },
+        )
+    }
+    confirmDotfiles?.let { what ->
+        val reset = what == RESET
+        ConfirmDialog(
+            stringResource(if (reset) R.string.storage_reset_shared_dotfiles_title else R.string.storage_import_shared_dotfiles_title),
+            stringResource(if (reset) R.string.storage_reset_shared_dotfiles_text else R.string.storage_import_shared_dotfiles_text),
+            stringResource(if (reset) R.string.storage_reset else R.string.storage_import),
+            onConfirm = { confirmDotfiles = null; if (reset) onResetSharedDotfiles() else onImportSharedDotfiles() },
+            onDismiss = { confirmDotfiles = null },
         )
     }
     // Empty means "not set"; anything else must be a rate Xvnc takes.
@@ -252,13 +267,18 @@ fun SettingsScreen(
         if (storage == null) {
             Text(stringResource(R.string.app_settings_measuring))
         } else {
+            // Each part shows as soon as it is known; one from an earlier measurement is marked until measured again.
+            val measuringSize = stringResource(R.string.storage_measuring_size)
+            val measuring = stringResource(R.string.app_settings_measuring)
+            fun shown(bytes: Long?, again: Boolean) = bytes?.let { size(it).let { s -> if (again) measuringSize.format(s) else s } } ?: measuring
+            fun shown(bytes: Long?, part: FlatdroidStorage.Part) = shown(bytes, part in storage.stale)
             Column {
-                Text(stringResource(R.string.settings_storage_total, size(storage.total)))
-                Text(stringResource(R.string.settings_storage_runtimes, size(storage.runtimes)))
-                Text(stringResource(R.string.settings_storage_apps, size(storage.apps)))
-                Text(stringResource(R.string.settings_storage_app_data, size(storage.appData)))
-                Text(stringResource(R.string.settings_storage_homes, size(storage.privateHomes)))
-                Text(stringResource(R.string.settings_storage_cache, size(storage.cache)))
+                Text(stringResource(R.string.settings_storage_total, shown(storage.total, storage.stale.isNotEmpty())))
+                Text(stringResource(R.string.settings_storage_runtimes, shown(storage.runtimes, FlatdroidStorage.Part.SHARED)))
+                Text(stringResource(R.string.settings_storage_apps, shown(storage.apps, FlatdroidStorage.Part.APPS)))
+                Text(stringResource(R.string.settings_storage_app_data, shown(storage.appData, FlatdroidStorage.Part.APPS)))
+                Text(stringResource(R.string.settings_storage_homes, shown(storage.privateHomes, FlatdroidStorage.Part.APPS)))
+                Text(stringResource(R.string.settings_storage_cache, shown(storage.cache, FlatdroidStorage.Part.CACHE)))
             }
         }
         val canClear = !applying && canReset && !storageBusy
@@ -280,6 +300,19 @@ fun SettingsScreen(
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = { confirmImportAll = APP_DATA }, enabled = canClear) { Text(stringResource(R.string.storage_import_all_settings)) }
             OutlinedButton(onClick = onExportAllAppFiles, enabled = canClear) { Text(stringResource(R.string.storage_export_all_settings)) }
+        }
+        // Used only by apps that opt in (a developer setting), so shown with developer options or once it holds something.
+        val sharedDotfiles = storage?.sharedDotfiles ?: 0L
+        if (developerOptions || sharedDotfiles > 0) {
+            Text(stringResource(R.string.settings_shared_dotfiles), style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(R.string.settings_shared_dotfiles_hint, size(sharedDotfiles)), style = MaterialTheme.typography.bodySmall)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { confirmDotfiles = IMPORT }, enabled = canClear) { Text(stringResource(R.string.storage_import)) }
+                OutlinedButton(onClick = onExportSharedDotfiles, enabled = canClear && sharedDotfiles > 0) { Text(stringResource(R.string.storage_export)) }
+                OutlinedButton(onClick = { confirmDotfiles = RESET }, enabled = canClear && sharedDotfiles > 0) {
+                    Text(stringResource(R.string.storage_reset), color = MaterialTheme.colorScheme.error)
+                }
+            }
         }
         Text(stringResource(R.string.settings_flatdroid_settings), style = MaterialTheme.typography.titleMedium)
         Text(stringResource(R.string.settings_flatdroid_settings_hint), style = MaterialTheme.typography.bodySmall)
@@ -339,16 +372,19 @@ fun SettingsScreen(
         }
         if (baselineChoice) {
             BaselineChoiceDialog(
+                canStartTask = canReset,
                 onReinstall = { baselineChoice = false; onSaveAndReinstallAll(collectSettings()) },
-                onTrust = { baselineChoice = false; onSave(collectSettings()) },
+                onRecordNow = { baselineChoice = false; onSaveAndBaselineAll(collectSettings()) },
+                onAtFirstLaunch = { baselineChoice = false; onSave(collectSettings()) },
             )
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
                 onClick = {
-                    // The first time the check is turned on with no baseline yet, ask how to get one.
+                    // Turning the check on: its baselines were dropped when it was turned off (and installs or
+                    // updates meanwhile recorded none), so ask how to record them.
                     val enablingCheck = security.checkFilesBeforeLaunch && !settings.security.checkFilesBeforeLaunch
-                    if (enablingCheck && !FileIntegrityCheck(AppData.integrityDir(context)).hasAny()) baselineChoice = true
+                    if (enablingCheck && !IntegrityGuard(context).allBaselined()) baselineChoice = true
                     else onSave(collectSettings())
                 },
                 enabled = !applying && customFrameRateValid && audioLatencyValid,
@@ -376,9 +412,13 @@ private fun SettingsScreenPreview() {
             UserSettings.defaults("de;en"), "de;en", listOf(Viewer.App("com.gaurav.avnc", "AVNC")), applying = false, error = null,
             onSave = {}, onBack = {}, onReset = {}, onTerminal = {},
             sharedHome = "Documents/Flatdroid", allFilesAccess = false, onChangeSharedHome = {}, onAllFilesAccess = {},
-            storage = FlatdroidStorage(800L shl 20, 200L shl 20, 5L shl 20, 30L shl 20, 3L shl 20, 150L shl 20, Unused(1, 1L shl 20), Unused(0, 0)),
+            storage = FlatdroidStorage(
+                runtimes = 800L shl 20, apps = 200L shl 20, appData = 5L shl 20, privateHomes = 30L shl 20, cache = 3L shl 20,
+                other = 150L shl 20, unusedAppData = Unused(1, 1L shl 20), unusedHomes = Unused(0, 0), sharedDotfiles = 0,
+            ),
             onClearAllCaches = {}, onClearUnusedAppData = {}, onClearUnusedHomes = {},
             onExportAllHomes = {}, onImportAllHomes = {}, onExportAllAppFiles = {}, onImportAllAppFiles = {},
+            onExportSharedDotfiles = {}, onImportSharedDotfiles = {}, onResetSharedDotfiles = {},
             onExportSettings = {}, onImportSettings = {}, onResetSettings = {},
         )
     }
@@ -386,3 +426,5 @@ private fun SettingsScreenPreview() {
 
 private const val APP_DATA = "appData"
 private const val HOMES = "homes"
+private const val IMPORT = "import"
+private const val RESET = "reset"

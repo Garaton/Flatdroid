@@ -19,7 +19,7 @@ data class SecuritySettings(
     val permissionsFromMetadata: Boolean = true,
     /** The home an app gets until the user picks one. */
     val defaultHomeMode: HomeMode = HomeMode.SHARED,
-    /** Only CPU and memory information from /sys, and `devices=all` limited to the GPU. */
+    /** Only CPU and memory information from /sys, and `devices=all` gives no device group. */
     val limitDevices: Boolean = false,
     /** The VNC password screen can't be captured, the password shows only on tap, and the viewer must be chosen in Settings. */
     val protectPassword: Boolean = false,
@@ -27,8 +27,12 @@ data class SecuritySettings(
     val exportWithPicker: Boolean = false,
     /** Each app's and its runtime's deployed files are checked against a baseline before launch. */
     val checkFilesBeforeLaunch: Boolean = false,
+    /** Apps get Android's fonts (their list tells apps and websites the device's Android version and maker) until changed per app. */
+    val androidFonts: Boolean = true,
+    /** Apps share the clipboard with Android (through the VNC viewer) until changed per app. */
+    val shareClipboard: Boolean = true,
 ) {
-    val appDefaults: AppDefaults get() = AppDefaults(defaultHomeMode, permissionsFromMetadata)
+    val appDefaults: AppDefaults get() = AppDefaults(defaultHomeMode, permissionsFromMetadata, androidFonts, shareClipboard)
 }
 
 /**
@@ -54,6 +58,8 @@ enum class SecurityLevel(
             protectPassword = true,
             exportWithPicker = true,
             checkFilesBeforeLaunch = true,
+            androidFonts = false,
+            shareClipboard = false,
         ),
         R.string.security_level_hardened, R.string.security_level_hardened_hint,
     ),

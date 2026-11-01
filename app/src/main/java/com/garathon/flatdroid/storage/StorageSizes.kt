@@ -14,6 +14,8 @@ data class AppStorage(
     val privateHome: Long,
     /** Its settings and other files of its own ([AppFiles]). */
     val settings: Long,
+    /** These are the last measured sizes and a new measurement is under way (or waits for a task to end). */
+    val measuring: Boolean = false,
 ) {
     val total: Long get() = app + cache + privateHome + settings
 }

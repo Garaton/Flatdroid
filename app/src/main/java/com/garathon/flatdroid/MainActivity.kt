@@ -182,6 +182,12 @@ class MainActivity : ComponentActivity() {
                         navigate(Screen.Home); FlatpakTaskService.start(this, FlatpakTask.ReinstallAll)
                     }
                 },
+                onSaveAndBaselineAll = { new ->
+                    viewModel.applySettings(new.copy(sharedHome = SetupController.settings(this).load()?.sharedHome)) {
+                        if (FlatpakTaskService.start(this, FlatpakTask.BaselineAll)) navigate(Screen.Home)
+                        else Toast.makeText(this, R.string.task_busy, Toast.LENGTH_LONG).show()
+                    }
+                },
                 onBack = { navigate(Screen.Home); viewModel.clearSettingsError() },
                 onReset = { mode -> navigate(Screen.Home); resetAlpine(mode) },
                 onTerminal = { navigate(Screen.Terminal) },
@@ -197,6 +203,9 @@ class MainActivity : ComponentActivity() {
                 onImportAllHomes = storage::importAllHomes,
                 onExportAllAppFiles = storage::exportAllAppFiles,
                 onImportAllAppFiles = storage::importAllAppFiles,
+                onExportSharedDotfiles = storage::exportSharedDotfiles,
+                onImportSharedDotfiles = storage::importSharedDotfiles,
+                onResetSharedDotfiles = home::resetSharedDotfiles,
                 onExportSettings = storage::exportFlatdroidSettings,
                 // Back to the home screen once applied, as Save does: this screen shows the old values.
                 onImportSettings = { storage.importFlatdroidSettings { navigate(Screen.Home) } },
@@ -221,8 +230,12 @@ class MainActivity : ComponentActivity() {
                 // Again after every copy, export, import or reset.
                 LaunchedEffect(app.id, storageTasks.generation, savedSizes) { home.measureStorage(app.id) }
                 val appBusy = storageTasks.busyWith(app.id)
+                val showsWebContent by produceState(false, app.id) {
+                    value = withContext(Dispatchers.IO) { InstalledApps(this@MainActivity).showsWebContent(app.id) }
+                }
                 AppSettingsScreen(
                     app = app,
+                    showsWebContent = showsWebContent,
                     storage = appStorage[app.id],
                     settings = remember(app.id) { store.load() },
                     canChangeFiles = session.state.appIdOrNull != app.id && !appBusy,
@@ -263,7 +276,12 @@ class MainActivity : ComponentActivity() {
                 var log by rememberSaveable { mutableStateOf<LogKind?>(null) }
                 if (installDialog) {
                     InstallDialog(
-                        onInstall = { FlatpakTaskService.start(this, FlatpakTask.Install(it)); installDialog = false },
+                        onInstall = {
+                            if (!FlatpakTaskService.start(this, FlatpakTask.Install(it)) && SessionController.isBusy) {
+                                Toast.makeText(this, R.string.task_install_waits, Toast.LENGTH_LONG).show()
+                            }
+                            installDialog = false
+                        },
                         onDismiss = { installDialog = false },
                     )
                 }
@@ -403,6 +421,7 @@ class MainActivity : ComponentActivity() {
             storage.checkTempHomes()
         }
         repairAfterKilledTask()
+        resumeBaselines()
     }
 
     /**
@@ -415,6 +434,21 @@ class MainActivity : ComponentActivity() {
         if (!AppData.taskMarker(this).exists() || !setup.isComplete || setup.running) return
         if (FlatpakTasks.ui.value.running != null || SessionController.isBusy) return
         FlatpakTaskService.start(this, FlatpakTask.Repair)
+    }
+
+    /**
+     * File baselines a task didn't get to record (it was cancelled, failed or Flatdroid was killed):
+     * recorded now, unless a Repair runs first (it records them itself). Not while anything else runs.
+     */
+    private fun resumeBaselines() {
+        val setup = SetupController.state.value
+        if (!AppData.baselineMarker(this).exists() || !setup.isComplete || setup.running) return
+        if (SetupController.settings(this).load()?.security?.checkFilesBeforeLaunch != true) {
+            AppData.baselineMarker(this).delete()
+            return
+        }
+        if (FlatpakTasks.ui.value.running != null || SessionController.isBusy) return
+        FlatpakTaskService.start(this, FlatpakTask.BaselineAll)
     }
 
     private fun startSetup() {

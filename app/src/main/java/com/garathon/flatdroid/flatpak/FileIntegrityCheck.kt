@@ -1,12 +1,11 @@
 package com.garathon.flatdroid.flatpak
 
-import android.system.ErrnoException
 import android.system.Os
 import android.system.OsConstants
-import com.garathon.flatdroid.flatpak.FileIntegrity.Entry
 import com.garathon.flatdroid.util.sha256
 import com.garathon.flatdroid.util.writeTextAtomically
 import java.io.File
+import java.util.concurrent.Callable
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
@@ -17,6 +16,8 @@ import java.util.concurrent.atomic.AtomicInteger
  * for [FileIntegrity], the manifest files (one per deployment commit, in Flatdroid's private
  * storage, never bound into a Flatpak root), and the parallel hashing. One deployment commit = one
  * manifest, so an update (a new commit) gets a fresh baseline and old manifests are cleaned up.
+ * The deployment's `metadata` (its command, runtime, extensions and environment, which the
+ * launcher reads at every launch) has its own hash beside the manifest.
  */
 class FileIntegrityCheck(
     private val integrityDir: File,
@@ -25,11 +26,9 @@ class FileIntegrityCheck(
     private val statOnly = fs(hash = false)
     private val withHash = fs(hash = true)
 
-    fun manifestFile(commit: String): File = File(integrityDir, "$commit.manifest")
+    fun manifestFile(commit: String): File = File(integrityDir, "$commit$SUFFIX")
     fun hasBaseline(commit: String): Boolean = manifestFile(commit).isFile
-
-    /** Whether any baseline exists at all; false on a device where the check has never been on. */
-    fun hasAny(): Boolean = integrityDir.listFiles()?.any { it.name.endsWith(SUFFIX) } == true
+    private fun metadataHashFile(commit: String): File = File(integrityDir, "$commit$METADATA_SUFFIX")
 
     /**
      * Records the baseline of [files] under [commit] (hashing every file, in parallel). [ignore]
@@ -47,14 +46,15 @@ class FileIntegrityCheck(
         val entries = parallel(leaves, onProgress, cancelled) { rel -> rel to FileIntegrity.entry(File(files, rel), withHash) }.toMap()
         // A skipped baseline writes nothing, so the next launch records it afresh (and trusts it).
         if (cancelled()) return
-        integrityDir.mkdirs()
-        manifestFile(commit).writeTextAtomically(FileIntegrity.write(entries), durable = false)
+        write(commit, entries)
     }
 
     /**
      * Checks [files] against the baseline for [commit], re-hashing only the files whose shape
      * (symlink target, inode, ctime, size) changed. Null when there is no baseline for [commit].
      * [cancelled] is polled so the user can skip; a cancelled check returns a clean [FileIntegrity.Diff].
+     * When everything matches, files whose stat changed but whose content didn't are written back,
+     * so the next check takes the fast path for them again.
      */
     fun verify(
         commit: String,
@@ -72,25 +72,66 @@ class FileIntegrityCheck(
         // Cheap pass: shape only (stat + readlink, no content read).
         val shapes = parallel(leaves, onProgress, cancelled) { rel -> rel to FileIntegrity.entry(File(files, rel), statOnly) }.toMap()
         if (cancelled()) return FileIntegrity.Diff(emptyList(), emptyList())
-        // Only files whose shape changed or are new need their content read.
-        val toHash = shapes.filter { (rel, shape) -> baseline[rel]?.sameShape(shape) != true }.keys.toList()
+        // Only files the baseline has, whose shape changed, need their content read (a new file is
+        // tampering whatever it holds, and a link-only entry is compared by its target).
+        val toHash = shapes.filter { (rel, shape) ->
+            val base = baseline[rel]
+            base != null && !shape.linkOnly && !base.sameShape(shape)
+        }.keys.toList()
         val hashed = parallel(toHash, onProgress, cancelled) { rel -> rel to FileIntegrity.entry(File(files, rel), withHash) }.toMap()
         if (cancelled()) return FileIntegrity.Diff(emptyList(), emptyList())
-        return FileIntegrity.diff(baseline, shapes) { hashed[it] }
-    }
-
-    /** Removes manifests for commits not in [keep]. */
-    fun cleanExcept(keep: Set<String>) {
-        integrityDir.listFiles()?.forEach { file ->
-            if (file.name.endsWith(SUFFIX) && file.name.removeSuffix(SUFFIX) !in keep) file.delete()
-        }
+        val diff = FileIntegrity.diff(baseline, shapes) { hashed[it] }
+        if (diff.clean && diff.refreshed.isNotEmpty()) write(commit, baseline + diff.refreshed)
+        return diff
     }
 
     /**
-     * Runs [work] over [items] across [threads], reporting progress; order of the result is
-     * undefined. When [cancelled] turns true it stops waiting at once and returns the results so far
-     * (the caller discards them on a skip), shutting the pool down with an interrupt so a skipped
-     * check doesn't hold the launch while a large runtime finishes hashing.
+     * Re-records [paths] of [commit]'s baseline from [files] as they are now, dropping those that
+     * no longer exist; other entries stay.
+     */
+    fun refresh(commit: String, files: File, paths: Collection<String>) {
+        if (paths.isEmpty()) return
+        val baseline = runCatching { FileIntegrity.read(manifestFile(commit).readText()) }.getOrNull() ?: return
+        val (present, gone) = paths.partition { runCatching { Os.lstat(File(files, it).path) }.isSuccess }
+        write(commit, baseline - gone.toSet() + present.associateWith { FileIntegrity.entry(File(files, it), withHash) })
+    }
+
+    /** Records [metadata]'s hash for [commit]; nothing when it can't be read. */
+    fun baselineMetadata(commit: String, metadata: File) {
+        val hash = runCatching { sha256(metadata) }.getOrNull() ?: return
+        integrityDir.mkdirs()
+        metadataHashFile(commit).writeTextAtomically(hash + "\n", durable = false)
+    }
+
+    /** Whether [metadata] still has [commit]'s recorded hash; null when none is recorded yet. */
+    fun metadataMatches(commit: String, metadata: File): Boolean? {
+        val recorded = runCatching { metadataHashFile(commit).readText().trim() }.getOrNull()?.takeIf { it.isNotEmpty() } ?: return null
+        return runCatching { sha256(metadata) }.getOrNull() == recorded
+    }
+
+    /** Removes the manifests and metadata hashes of commits not in [keep]. */
+    fun cleanExcept(keep: Set<String>) {
+        integrityDir.listFiles()?.forEach { file ->
+            val commit = when {
+                file.name.endsWith(SUFFIX) -> file.name.removeSuffix(SUFFIX)
+                file.name.endsWith(METADATA_SUFFIX) -> file.name.removeSuffix(METADATA_SUFFIX)
+                else -> return@forEach
+            }
+            if (commit !in keep) file.delete()
+        }
+    }
+
+    private fun write(commit: String, entries: Map<String, FileIntegrity.Entry>) {
+        integrityDir.mkdirs()
+        manifestFile(commit).writeTextAtomically(FileIntegrity.write(entries), durable = false)
+    }
+
+    /**
+     * Runs [work] over [items] across [threads], in chunks of [CHUNK] (one task per file would
+     * cost more than a stat), reporting progress; order of the result is undefined. When
+     * [cancelled] turns true the chunks stop between files and the wait ends at once, returning the
+     * results so far (the caller discards them on a skip); the pool is shut down with an interrupt,
+     * so a skipped check doesn't hold the launch while a large runtime finishes hashing.
      */
     private fun <T> parallel(
         items: List<String>,
@@ -101,20 +142,26 @@ class FileIntegrityCheck(
         if (items.isEmpty()) return emptyList()
         val total = items.size
         val done = AtomicInteger()
-        val pool = Executors.newFixedThreadPool(threads.coerceAtMost(total))
+        val chunks = items.chunked(CHUNK)
+        val pool = Executors.newFixedThreadPool(threads.coerceAtMost(chunks.size))
         try {
-            val futures = items.map { item ->
-                pool.submit(java.util.concurrent.Callable {
-                    val r = work(item)
-                    onProgress(done.incrementAndGet(), total)
-                    r
+            val futures = chunks.map { chunk ->
+                pool.submit(Callable {
+                    val results = ArrayList<T>(chunk.size)
+                    for (item in chunk) {
+                        // Skipped, or stopped (the pool is shut down with an interrupt): no more files.
+                        if (cancelled() || Thread.currentThread().isInterrupted) break
+                        results += work(item)
+                        onProgress(done.incrementAndGet(), total)
+                    }
+                    results
                 })
             }
             val results = ArrayList<T>(total)
             collect@ for (f in futures) {
                 while (!cancelled()) {
                     try {
-                        results.add(f.get(POLL_MS, TimeUnit.MILLISECONDS)); continue@collect
+                        results.addAll(f.get(POLL_MS, TimeUnit.MILLISECONDS)); continue@collect
                     } catch (e: TimeoutException) {
                         // Still running; re-check cancelled and keep waiting.
                     }
@@ -129,7 +176,9 @@ class FileIntegrityCheck(
 
     private companion object {
         const val SUFFIX = ".manifest"
+        const val METADATA_SUFFIX = ".metadata"
         const val POLL_MS = 50L
+        const val CHUNK = 64
 
         fun fs(hash: Boolean) = FileIntegrity.Fs(
             isSymlink = { isSymlink(it) },

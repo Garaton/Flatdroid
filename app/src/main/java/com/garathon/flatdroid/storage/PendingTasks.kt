@@ -43,6 +43,8 @@ object StorageTaskCodec {
             "exportAllSettings" -> StorageTask.ExportAllAppFiles
             "importAllHomes" -> StorageTask.ImportAllHomes
             "importAllSettings" -> StorageTask.ImportAllAppFiles
+            "exportSharedDotfiles" -> StorageTask.ExportSharedDotfiles
+            "importSharedDotfiles" -> StorageTask.ImportSharedDotfiles
             "importHome" -> appId?.let { StorageTask.ImportHome(it) }
             "importSettings" -> appId?.let { StorageTask.ImportAppFiles(it) }
             "importSharedZip" -> HomeZip.Clash.entries.firstOrNull { it.name == values[CLASH] }?.let { StorageTask.ImportSharedZip(it) }
@@ -61,6 +63,8 @@ object StorageTaskCodec {
         StorageTask.ExportAllAppFiles -> "exportAllSettings"
         StorageTask.ImportAllHomes -> "importAllHomes"
         StorageTask.ImportAllAppFiles -> "importAllSettings"
+        StorageTask.ExportSharedDotfiles -> "exportSharedDotfiles"
+        StorageTask.ImportSharedDotfiles -> "importSharedDotfiles"
         is StorageTask.ImportHome -> "importHome"
         is StorageTask.ImportAppFiles -> "importSettings"
         is StorageTask.ImportSharedZip -> "importSharedZip"

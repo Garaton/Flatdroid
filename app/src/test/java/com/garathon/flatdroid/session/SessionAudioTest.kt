@@ -28,15 +28,25 @@ class SessionAudioTest {
     @Test
     fun helpersGetSoundMicrophoneAndResampler() {
         assertEquals(
-            listOf("/bin/sh", SessionScript.GUEST_SCRIPT, "1000x1400", "14400", "30", "on", "on", "speex-float-0", "on", "on"),
+            listOf("/bin/sh", SessionScript.GUEST_SCRIPT, "1000x1400", "14400", "30", "on", "on", "speex-float-0", "on", "on", "on"),
             SessionScript.command("1000x1400", 30, sound = true, microphone = true, Resampler.FAST, sessionBus = true, camera = true),
         )
         // Without sound there is no PulseAudio, so no microphone either.
         assertEquals(
             // PipeWire only with the bus, which the camera's portal needs.
             listOf("off", "off", "speex-float-1", "off", "off"),
-            SessionScript.command("1000x1400", 30, sound = false, microphone = true, Resampler.STANDARD, sessionBus = false, camera = true).takeLast(5),
+            SessionScript.command("1000x1400", 30, sound = false, microphone = true, Resampler.STANDARD, sessionBus = false, camera = true).subList(5, 10),
         )
+    }
+
+    @Test
+    fun anUnsharedClipboardTurnsOffXvncsCutText() {
+        val args = SessionScript.command("1000x1400", 30, sound = false, microphone = false, Resampler.FAST, sessionBus = true, clipboard = false)
+        assertEquals("off", args.last())
+        val lines = SessionScript.TEXT.lines().map { it.trim() }
+        assertTrue("clipboard=${'$'}9" in lines)
+        assertTrue("[ \"${'$'}clipboard\" = on ] || clipboard_args=\"-AcceptCutText=0 -SendCutText=0\"" in lines)
+        assertTrue(lines.single { it.startsWith("-nolisten local") }.endsWith("${'$'}clipboard_args &"))
     }
 
     @Test

@@ -72,6 +72,11 @@ class AppSettingsTest {
         assertTrue(AppSettings().networkAllowed(listOf("network")))
         assertFalse(AppSettings().networkAllowed(listOf("ipc")))
         assertEquals(HomeMode.SHARED, AppSettings().homeMode)
+        // Android's fonts and the clipboard: shared unless the level or the user says otherwise.
+        assertTrue(AppSettings().usesAndroidFonts && AppSettings().sharesClipboard)
+        val private = AppSettings(defaults = AppDefaults(androidFonts = false, clipboard = false))
+        assertFalse(private.usesAndroidFonts || private.sharesClipboard)
+        assertTrue(private.copy(androidFonts = true, clipboard = true).let { it.usesAndroidFonts && it.sharesClipboard })
         // The store hands the defaults to what it loads, saved or not.
         val file = File(tmp.root, "d.properties")
         assertEquals(HomeMode.PRIVATE, AppSettingsStore(file, hardened).load().homeMode)
@@ -107,14 +112,18 @@ class AppSettingsTest {
         val imported = file(
             "home.mode=shared\ndev.whole=true\nstorage.sdcard=true\npermission.microphone=true\npermission.camera=true\n" +
                 "permission.microphone.always=true\nenv.LD_PRELOAD=/home/user/x.so\npermission.network=true\n" +
-                "filter.allowExtraSyscalls=true\npermission.audio=false\nhome.shareHiddenFiles=true\n",
+                "filter.allowExtraSyscalls=true\npermission.audio=false\nhome.shareHiddenFiles=true\n" +
+                "privacy.androidFonts=true\npermission.clipboard=true\n",
         ).readBytes()
-        val local = file("home.mode=private\ndev.whole=false\nenv.LANG=de_DE.UTF-8\npermission.network=false\n").readBytes()
+        val local = file(
+            "home.mode=private\ndev.whole=false\nenv.LANG=de_DE.UTF-8\npermission.network=false\n" +
+                "privacy.androidFonts=false\npermission.clipboard=false\n",
+        ).readBytes()
         val loaded = AppSettingsStore(file(AppSettingsStore.imported(imported, local).decodeToString())).load()
         assertEquals(
             AppSettings(
                 homeModeChoice = HomeMode.PRIVATE, microphone = true, network = false, audio = false,
-                environment = mapOf("LANG" to "de_DE.UTF-8"),
+                androidFonts = false, clipboard = false, environment = mapOf("LANG" to "de_DE.UTF-8"),
             ),
             loaded,
         )

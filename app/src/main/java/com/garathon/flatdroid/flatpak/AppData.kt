@@ -27,7 +27,7 @@ object AppData {
 
     /**
      * Hidden config and key files (.ssh, .gnupg, shell start-up, .gitconfig, …) shared by the apps
-     * that opt in, in Shared Home mode (the developer setting [AppSettings.shareHiddenFiles]). A
+     * that opt in, in any home mode (the developer setting [AppSettings.shareHiddenFiles]). A
      * leading dot keeps it from colliding with an app ID directory.
      */
     fun sharedDotfilesDir(context: Context): File = File(root(context), ".shared-dotfiles")
@@ -70,6 +70,12 @@ object AppData {
      * is cleaned up before anything else (see FlatpakTask.Repair).
      */
     fun taskMarker(context: Context): File = File(context.filesDir.canonicalFile, "flatpak-task-running")
+
+    /**
+     * Written by a task that ends by recording file baselines (with the file check on) and removed
+     * once it finished: still there at start, the baselines are recorded then (FlatpakTask.BaselineAll).
+     */
+    fun baselineMarker(context: Context): File = File(context.filesDir.canonicalFile, "file-check-baselines-pending")
 
     /** The running session's sockets, VNC password file and generated /etc files. */
     fun sessionDir(context: Context): File = File(context.cacheDir.canonicalFile, "session")

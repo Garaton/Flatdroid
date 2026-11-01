@@ -56,7 +56,6 @@ object FlatpakCommands {
     val update = listOf(FLATPAK, "--user", "update", "-y")
     /** Re-deploys [refs] (IDs or full refs) from Flathub, replacing their files. */
     fun reinstall(refs: List<String>) = listOf(FLATPAK, "--user", "install", "--reinstall", "-y", "flathub") + refs
-    fun reinstall(vararg refs: String) = reinstall(refs.toList())
     /** Removes runtimes and extensions no installed app uses any more. */
     val uninstallUnused = listOf(FLATPAK, "--user", "uninstall", "-y", "--unused")
 

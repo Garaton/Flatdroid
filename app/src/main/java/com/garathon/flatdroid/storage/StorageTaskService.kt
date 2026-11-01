@@ -209,6 +209,18 @@ class StorageTaskService : Service() {
             AndroidTarFs.deleteTree(staging)
             getString(R.string.storage_imported_title) to resources.getQuantityString(R.plurals.storage_imported_all_settings, apps.size, apps.size)
         }
+        StorageTask.ExportSharedDotfiles -> {
+            val dir = AppData.sharedDotfilesDir(this)
+            if (dir.list().isNullOrEmpty()) throw IOException(getString(R.string.storage_no_shared_dotfiles))
+            val saved = zipOut(task, uris, listOf(HomeZip.Part(dir)))
+            getString(R.string.storage_exported_title) to getString(R.string.storage_exported, saved)
+        }
+        StorageTask.ImportSharedDotfiles -> {
+            val staging = staging(task)
+            extractFrom(task, uris.single(), staging) { File(staging, it) }
+            putInPlace(staging, AppData.sharedDotfilesDir(this))
+            getString(R.string.storage_imported_title) to getString(R.string.storage_imported_shared_dotfiles)
+        }
         StorageTask.ExportFlatdroidSettings -> {
             val saved = saveExport(exportName(this, task), uris.firstOrNull()) { out ->
                 SettingsBackup.write(out, File(filesDir, SetupController.SETTINGS_FILE), AppData.settingsDir(this))
@@ -305,6 +317,7 @@ class StorageTaskService : Service() {
         is StorageTask.ImportAppFiles -> "${task.appId}-settings"
         StorageTask.ImportAllHomes -> "all-homes"
         StorageTask.ImportAllAppFiles -> "all-settings"
+        StorageTask.ImportSharedDotfiles -> "shared-dotfiles"
         else -> null
     }?.let { File(cacheDir.canonicalFile, "import/$it") }
 
@@ -553,6 +566,7 @@ class StorageTaskService : Service() {
                 StorageTask.ExportAllHomes -> context.getString(R.string.storage_all_homes_zip, time)
                 StorageTask.ExportAllAppFiles -> context.getString(R.string.storage_all_settings_zip, time)
                 StorageTask.ExportFlatdroidSettings -> context.getString(R.string.storage_flatdroid_settings_zip, time)
+                StorageTask.ExportSharedDotfiles -> context.getString(R.string.storage_shared_dotfiles_zip, time)
                 else -> ""
             }
         }
@@ -577,6 +591,8 @@ class StorageTaskService : Service() {
                 StorageTask.ExportAllAppFiles -> context.getString(R.string.storage_exporting_all_settings)
                 StorageTask.ImportAllHomes -> context.getString(R.string.storage_importing_all_homes)
                 StorageTask.ImportAllAppFiles -> context.getString(R.string.storage_importing_all_settings)
+                StorageTask.ExportSharedDotfiles -> context.getString(R.string.storage_exporting_shared_dotfiles)
+                StorageTask.ImportSharedDotfiles -> context.getString(R.string.storage_importing_shared_dotfiles)
             }
         }
     }

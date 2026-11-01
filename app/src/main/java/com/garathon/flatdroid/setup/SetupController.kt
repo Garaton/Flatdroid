@@ -47,7 +47,7 @@ object SetupController {
         temporary = env.temporaryFiles() + listOf(AppData.rootsDir(context), AppData.appTmpDir(context), AppData.sessionDir(context), TempHomes.root(context)) +
             ElectronSwap.temporaryFiles(env.cacheDir),
         appCaches = listOf(AppData.cacheRoot(context)),
-        flatpakFiles = listOf(AppData.electronDir(context)),
+        flatpakFiles = listOf(AppData.electronDir(context), AppData.integrityDir(context)),
         userData = listOf(
             AppData.root(context), AppData.launcherDir(context), AppData.settingsDir(context), File(context.filesDir, SETTINGS_FILE),
         ),

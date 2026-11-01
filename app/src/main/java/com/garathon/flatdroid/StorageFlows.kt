@@ -157,7 +157,14 @@ class StorageFlows(
     private val exportPicker = activity.registerForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
         val task = exportTarget
         exportTarget = null
-        if (task != null && uri != null) start(task, listOf(uri))
+        if (task != null && uri != null) {
+            start(task, listOf(uri))
+        } else if (task is StorageTask.ExportTempHome) {
+            // No file picked: the temporary home isn't saved, so the question comes back before
+            // the next launch can replace it.
+            TempHomePrompt.askAgain(task.appId)
+            checkTempHomes()
+        }
     }
 
     /** The questions and messages, on every screen: they follow pickers and sessions, which can end anywhere. */
@@ -340,6 +347,11 @@ class StorageFlows(
 
     fun exportAllAppFiles() = export(StorageTask.ExportAllAppFiles)
 
+    fun exportSharedDotfiles() = export(StorageTask.ExportSharedDotfiles)
+
+    /** Confirmed: replaces the shared hidden files with the picked zip's. */
+    fun importSharedDotfiles() = pickZip(ZipTarget.SharedDotfiles)
+
     /** Confirmed: replaces the private homes of the apps in the picked zip. */
     fun importAllHomes() = pickZip(ZipTarget.AllHomes)
 
@@ -409,6 +421,7 @@ class StorageFlows(
             ZipTarget.FlatdroidSettings -> applyFlatdroidSettings(uri)
             ZipTarget.AllHomes -> start(StorageTask.ImportAllHomes, listOf(uri))
             ZipTarget.AllAppFiles -> start(StorageTask.ImportAllAppFiles, listOf(uri))
+            ZipTarget.SharedDotfiles -> start(StorageTask.ImportSharedDotfiles, listOf(uri))
         }
     }
 
@@ -526,6 +539,10 @@ class StorageFlows(
             override val key = "allSettings"
         }
 
+        data object SharedDotfiles : ZipTarget {
+            override val key = "sharedDotfiles"
+        }
+
         companion object {
             fun of(key: String): ZipTarget? {
                 val appId = key.substringAfter(':', "").takeIf(InstalledApps::isValidId)
@@ -536,6 +553,7 @@ class StorageFlows(
                     FlatdroidSettings.key -> FlatdroidSettings
                     AllHomes.key -> AllHomes
                     AllAppFiles.key -> AllAppFiles
+                    SharedDotfiles.key -> SharedDotfiles
                     else -> null
                 }
             }

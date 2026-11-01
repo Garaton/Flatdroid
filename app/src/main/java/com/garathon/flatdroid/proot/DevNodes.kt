@@ -27,8 +27,12 @@ object DevNodes {
     /** Android-only names never bound from these lists: Binder, system properties, init's sockets. */
     val DENIED = setOf("binder", "hwbinder", "vndbinder", "__properties__", "socket")
 
-    /** `devices=all` when devices are limited ([forApp]): the GPU only. */
-    val LIMITED_ALL = listOf("dri")
+    /**
+     * `devices=all` when devices are limited ([forApp]): no group. Not even the GPU: OpenGL renders
+     * in software (`LIBGL_ALWAYS_SOFTWARE`), and the limited /sys lacks what Mesa needs to identify
+     * a GPU node anyway, so it would only open the GPU driver's kernel interface to the app.
+     */
+    val LIMITED_ALL = emptyList<String>()
 
     /**
      * The /sys paths an app gets when devices are limited, instead of the whole of /sys: CPU and

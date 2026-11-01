@@ -73,20 +73,8 @@ class RootfsInstaller(alpineDir: File, private val workDir: File, private val fs
      */
     fun setAside() {
         marker.delete()
+        // Moves what the rootfs (or an earlier partial one) carries, refusing paths that leave it.
         rescueCarried()
-        val root = rootfs.canonicalFile
-        for (rel in CARRIED) {
-            val source = File(rootfs, rel)
-            val kept = File(keptDir, rel)
-            if (!lexists(source) || lexists(kept)) continue
-            // Refuse a path that leaves the rootfs through a symlinked parent.
-            val parent = source.parentFile!!.canonicalPath
-            if (parent != root.path && !parent.startsWith(root.path + File.separator)) {
-                throw IOException("$source is outside the rootfs")
-            }
-            kept.parentFile!!.mkdirs()
-            move(source, kept)
-        }
     }
 
     /** First half of a reset that wipes everything: marks the rootfs incomplete and drops anything kept. */
@@ -114,10 +102,18 @@ class RootfsInstaller(alpineDir: File, private val workDir: File, private val fs
         for (rel in CARRIED) {
             val kept = File(keptDir, rel)
             if (lexists(kept)) continue
-            val source = listOf(File(partial, rel), File(rootfs, rel)).firstOrNull(::lexists) ?: continue
+            val (base, source) = listOf(partial, rootfs).map { it to File(it, rel) }.firstOrNull { lexists(it.second) } ?: continue
+            requireInside(base, source)
             kept.parentFile!!.mkdirs()
             move(source, kept)
         }
+    }
+
+    /** Refuses a path that leaves [base] through a symlinked parent. */
+    private fun requireInside(base: File, source: File) {
+        val root = base.canonicalPath
+        val parent = source.parentFile!!.canonicalPath
+        if (parent != root && !parent.startsWith(root + File.separator)) throw IOException("$source is outside ${base.name}")
     }
 
     private fun lexists(file: File) = fs.isSymlink(file) || file.exists()

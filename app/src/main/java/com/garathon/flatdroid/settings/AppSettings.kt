@@ -29,6 +29,8 @@ data class AppDefaults(
     val homeMode: HomeMode = HomeMode.SHARED,
     /** Network and sound are on when the app's metadata asks for them; otherwise off until the user turns them on. */
     val permissionsFromMetadata: Boolean = true,
+    val androidFonts: Boolean = true,
+    val clipboard: Boolean = true,
 )
 
 /** Flatdroid's choices for one Flatpak. */
@@ -59,12 +61,24 @@ data class AppSettings(
      * follows [defaults] ([networkAllowed]).
      */
     val network: Boolean? = null,
+    /**
+     * Android's fonts at /run/host/fonts. Off, the app has only its runtime's own fonts, so the
+     * font list (which apps and the websites they show can read) doesn't reveal the device; text in
+     * scripts the runtime has no font for may show as boxes. Null follows [defaults] ([usesAndroidFonts]).
+     */
+    val androidFonts: Boolean? = null,
+    /**
+     * Clipboard text goes both ways between the app and Android, through the VNC viewer. Off,
+     * Xvnc neither takes the viewer's clipboard nor sends its own, so the app can't read what was
+     * copied in Android. Null follows [defaults] ([sharesClipboard]).
+     */
+    val clipboard: Boolean? = null,
     /** Developer setting: the security level's extra system calls stay allowed for this app. */
     val allowExtraSyscalls: Boolean = false,
     /**
-     * Developer setting (Shared Home only): the app's hidden config and key files (.ssh, .gnupg,
-     * shell start-up, .gitconfig, …) come from a location shared with the other apps that opt in,
-     * instead of the app's own. Off by default, so apps don't share keys unless asked.
+     * Developer setting: the app's hidden config and key files (.ssh, .gnupg, shell start-up,
+     * .gitconfig, …) come from a location shared with the other apps that opt in, instead of the
+     * app's own, in any home mode. Off by default, so apps don't share keys unless asked.
      */
     val shareHiddenFiles: Boolean = false,
     /**
@@ -102,6 +116,8 @@ data class AppSettings(
     val defaults: AppDefaults = AppDefaults(),
 ) {
     val homeMode: HomeMode get() = homeModeChoice ?: defaults.homeMode
+    val usesAndroidFonts: Boolean get() = androidFonts ?: defaults.androidFonts
+    val sharesClipboard: Boolean get() = clipboard ?: defaults.clipboard
 
     /** Whether the app gets sound: its own setting, else [defaults] and whether its metadata asks for PulseAudio. */
     fun audioAllowed(sockets: List<String>): Boolean = audio ?: (defaults.permissionsFromMetadata && PULSEAUDIO_SOCKET in sockets)
@@ -182,6 +198,8 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
             wholeDev = props.getProperty(KEY_WHOLE_DEV) == "true",
             audio = props.getProperty(KEY_AUDIO)?.toBooleanStrictOrNull(),
             network = props.getProperty(KEY_NETWORK)?.toBooleanStrictOrNull(),
+            androidFonts = props.getProperty(KEY_ANDROID_FONTS)?.toBooleanStrictOrNull(),
+            clipboard = props.getProperty(KEY_CLIPBOARD)?.toBooleanStrictOrNull(),
             allowExtraSyscalls = props.getProperty(KEY_EXTRA_SYSCALLS) == "true",
             shareHiddenFiles = props.getProperty(KEY_SHARE_HIDDEN_FILES) == "true",
             microphone = props.getProperty(KEY_MICROPHONE) == "true",
@@ -216,6 +234,8 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
         props.setProperty(KEY_WHOLE_DEV, settings.wholeDev.toString())
         settings.audio?.let { props.setProperty(KEY_AUDIO, it.toString()) }
         settings.network?.let { props.setProperty(KEY_NETWORK, it.toString()) }
+        settings.androidFonts?.let { props.setProperty(KEY_ANDROID_FONTS, it.toString()) }
+        settings.clipboard?.let { props.setProperty(KEY_CLIPBOARD, it.toString()) }
         if (settings.allowExtraSyscalls) props.setProperty(KEY_EXTRA_SYSCALLS, "true")
         if (settings.shareHiddenFiles) props.setProperty(KEY_SHARE_HIDDEN_FILES, "true")
         if (settings.microphone) props.setProperty(KEY_MICROPHONE, "true")
@@ -240,7 +260,7 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
          * An app's settings file from an import, [imported], with the settings that widen what the
          * app can reach left as they are on this device ([local], its current file, or null for
          * none): whole /dev (with Binder), all of shared storage, the microphone without asking,
-         * the camera, the network, the extra system calls, its home and its environment. A shared
+         * the camera, the network, Android's fonts, the clipboard, the extra system calls, its home and its environment. A shared
          * settings file can't turn them on.
          */
         fun imported(imported: ByteArray, local: ByteArray?): ByteArray {
@@ -272,11 +292,13 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
         private const val KEY_HOME_MODE = "home.mode"
         private const val KEY_SDCARD = "storage.sdcard"
         private const val KEY_NETWORK = "permission.network"
+        private const val KEY_ANDROID_FONTS = "privacy.androidFonts"
+        private const val KEY_CLIPBOARD = "permission.clipboard"
         private const val KEY_EXTRA_SYSCALLS = "filter.allowExtraSyscalls"
         private const val KEY_SHARE_HIDDEN_FILES = "home.shareHiddenFiles"
         private val WIDENING_KEYS = setOf(
             KEY_WHOLE_DEV, KEY_SDCARD, KEY_MICROPHONE_ALWAYS, KEY_CAMERA, KEY_NETWORK, KEY_EXTRA_SYSCALLS, KEY_HOME_MODE,
-            KEY_SHARE_HIDDEN_FILES,
+            KEY_SHARE_HIDDEN_FILES, KEY_ANDROID_FONTS, KEY_CLIPBOARD,
         )
     }
 }

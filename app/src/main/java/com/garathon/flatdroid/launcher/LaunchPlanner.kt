@@ -60,7 +60,7 @@ data class LaunchOptions(
     val network: Boolean = true,
     /** fdsec also refuses the security level's extra system calls ([Fdsec.Filter.extraSyscalls]). */
     val extraSyscalls: Boolean = true,
-    /** Only CPU and memory information from /sys, and `devices=all` limited to the GPU ([DevNodes.forApp]). */
+    /** Only CPU and memory information from /sys, and `devices=all` gives no device group ([DevNodes.forApp]). */
     val limitDevices: Boolean = false,
     /** The root gets /.flatpak-info ([LaunchPlanner.flatpakInfo]). */
     val flatpakInfo: Boolean = true,
@@ -270,6 +270,8 @@ class LaunchPlanner(
     companion object {
         const val GL_DEFAULT = "org.freedesktop.Platform.GL.default"
         const val RESOLV_CONF = "resolv.conf"
+        /** The `/etc` files every launch binds Flatdroid's own over (the runtime's are never read). */
+        val ETC_OVERRIDES = listOf(RESOLV_CONF, "hosts", "machine-id", "passwd", "group")
         private const val MAX_LINKS = 8
 
         /**

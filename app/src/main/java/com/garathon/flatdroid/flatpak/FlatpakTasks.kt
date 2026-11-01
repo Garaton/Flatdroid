@@ -27,6 +27,8 @@ sealed interface FlatpakTask {
      * known-good files when the file check is turned on and no deployment has one yet.
      */
     data object ReinstallAll : FlatpakTask
+    /** Records the file baseline of every installed app that has none yet (with the file check on). */
+    data object BaselineAll : FlatpakTask
 }
 
 data class FlatpakTaskUi(

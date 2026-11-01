@@ -25,8 +25,8 @@ class HelperProcessesTest {
         proc(dir, 200, 1, 0) // something else
         assertEquals(
             listOf("/proc/100", "/proc/101", "/proc/102", "/proc/103", "/proc/104", "/proc/300"),
-            HelperProcesses.procPaths(listOf(50, 60), dir),
+            HelperProcesses.procPaths(listOf(50, 60), dir, settleMs = 0),
         )
-        assertEquals(emptyList<String>(), HelperProcesses.procPaths(emptyList(), dir))
+        assertEquals(emptyList<String>(), HelperProcesses.procPaths(emptyList(), dir, settleMs = 0))
     }
 }

@@ -33,15 +33,17 @@ object SessionScript {
      * The helpers' command: [TEXT] at [GUEST_SCRIPT] with its arguments. Without [sound],
      * PulseAudio doesn't start, and so neither does the microphone. With [sessionBus], the app's
      * bus and its proxy ([SessionBus]) start too, and with [camera] PipeWire, for the camera's
-     * own helpers ([CameraScript]).
+     * own helpers ([CameraScript]). Without [clipboard], Xvnc neither takes the viewer's clipboard
+     * nor sends its own.
      */
     fun command(
         geometry: String, frameRate: Int, sound: Boolean, microphone: Boolean, resampler: Resampler, sessionBus: Boolean,
-        camera: Boolean = false,
+        camera: Boolean = false, clipboard: Boolean = true,
     ): List<String> =
         listOf(
             "/bin/sh", GUEST_SCRIPT, geometry, VNC_PORT.toString(), frameRate.toString(),
             onOff(sound), onOff(sound && microphone), resampler.pulseName, onOff(sessionBus), onOff(sessionBus && camera),
+            onOff(clipboard),
         )
 
     private fun onOff(value: Boolean) = if (value) "on" else "off"
@@ -49,7 +51,8 @@ object SessionScript {
     /**
      * Arguments: geometry (WxH), VNC port, frame rate, "on" when the app gets sound (PulseAudio
      * starts only then), "on" when it may use the microphone, PulseAudio's resample method, "on"
-     * for the session bus, and "on" for PipeWire ([command] builds them). Exits when Xvnc does; Flatdroid ends the session by stopping this proot.
+     * for the session bus, "on" for PipeWire, and "on" when the clipboard is shared ([command]
+     * builds them; off adds `-AcceptCutText=0 -SendCutText=0` to Xvnc). Exits when Xvnc does; Flatdroid ends the session by stopping this proot.
      * `-extension GLX` turns GLX off in Alpine's Xvnc, which still has it (apps use EGL);
      * Flatdroid's own Xvnc build won't need it. `-nolisten local` drops the abstract socket
      * `@/tmp/.X11-unix/X1`: proot doesn't translate abstract names, so it would be open to other
@@ -75,11 +78,14 @@ object SessionScript {
         |resampler=$6
         |session_bus=$7
         |camera=$8
+        |clipboard=$9
+        |clipboard_args=
+        |[ "${'$'}clipboard" = on ] || clipboard_args="-AcceptCutText=0 -SendCutText=0"
         |rm -f /tmp/.X1-lock ${GuestPaths.X11_DIR}/$X_SOCKET ${GuestPaths.PULSE_DIR}/*
         |
         |Xvnc :1 -geometry "${'$'}geometry" -depth 24 -rfbport "${'$'}port" -localhost \
         |  -SecurityTypes VncAuth -PasswordFile $GUEST_VNC_DIR/passwd -NeverShared -DisconnectClients=0 -FrameRate "${'$'}frame_rate" \
-        |  -nolisten local -extension MIT-SHM -extension GLX &
+        |  -nolisten local -extension MIT-SHM -extension GLX ${'$'}clipboard_args &
         |xvnc=${'$'}!
         |i=0
         |while [ ! -S ${GuestPaths.X11_DIR}/$X_SOCKET ]; do

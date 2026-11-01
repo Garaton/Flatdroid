@@ -4,10 +4,13 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.garathon.flatdroid.alpine.AlpineEnvironment
+import com.garathon.flatdroid.flatpak.AppData
 import com.garathon.flatdroid.proot.Fdsec
 import com.garathon.flatdroid.proot.ProotProcess
 import com.garathon.flatdroid.settings.UserSettings
+import com.garathon.flatdroid.setup.AndroidTarFs
 import com.garathon.flatdroid.setup.SetupController
+import com.garathon.flatdroid.setup.deleteTree
 import com.garathon.flatdroid.storage.SavedSizes
 import com.garathon.flatdroid.util.DebugLog
 import com.garathon.flatdroid.util.LineBuffer
@@ -81,7 +84,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val app = getApplication<Application>()
         viewModelScope.launch(Dispatchers.IO) {
             try {
+                val before = SetupController.settings(app).load()
                 SetupController.settings(app).save(settings)
+                // Off, the file check's baselines aren't kept up (installs and updates record none), so
+                // they are dropped; turning it on again asks how to record them.
+                if (before?.security?.checkFilesBeforeLaunch == true && !settings.security.checkFilesBeforeLaunch) {
+                    AndroidTarFs.deleteTree(AppData.integrityDir(app))
+                }
                 runInterruptible {
                     val env = AlpineEnvironment.get(app)
                     for (command in settings.commands()) {
