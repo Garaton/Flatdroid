@@ -492,7 +492,8 @@
     <string name="security_hide_helpers">Hide the display and audio processes</string>
     <string name="security_hide_helpers_hint">Apps can\'t open the memory of Xvnc, Openbox, PulseAudio and the other helpers through /proc. Helper processes started after the app aren\'t covered.</string>
     <string name="security_permissions_from_metadata">Give apps the permissions they ask for</string>
-    <string name="security_permissions_from_metadata_hint">If an app asks for permissions, they are granted by default. Off, they start off until you turn them on in an app\'s settings. Also applies to settings still on the default.</string>
+    <string name="security_applies_to_default">Also applies to settings still on the default.</string>
+    <string name="security_permissions_from_metadata_hint">If an app asks for permissions, they are granted by default. Off, they start off until you turn them on in an app\'s settings.</string>
     <string name="security_default_home">Default app home</string>
     <string name="security_default_home_hint">The home an app gets until you choose one in its settings. Also applies to apps whose home you haven\'t chosen.</string>
     <string name="security_limit_devices">Limit devices and system information</string>
@@ -502,13 +503,9 @@
     <string name="security_export_picker">Choose where exports go</string>
     <string name="security_export_picker_hint">Exports open Android\'s \"save as\" picker instead of going into Download.</string>
     <string name="security_android_fonts">App default: use Android\'s fonts</string>
-    <string name="security_android_fonts_hint">Android\'s fonts tell apps, and the websites they show, the device\'s Android version and maker. Off, apps have only their own runtime\'s fonts, so some languages and emoji may show as boxes. Also applies to settings still on the default.</string>
     <string name="security_share_time_zone">App default: share the time zone</string>
-    <string name="security_share_time_zone_hint">Apps\' clocks follow Android\'s time zone. Off, apps get UTC, so their times don\'t hint at where you are. Also applies to settings still on the default.</string>
     <string name="security_share_language">App default: share the language and region</string>
-    <string name="security_share_language_hint">Apps use Android\'s language and its region\'s formats when they have them. Off, apps use English with generic formats, and can\'t tell your language or region. Also applies to settings still on the default.</string>
     <string name="security_share_clipboard">App default: share the clipboard with Android</string>
-    <string name="security_share_clipboard_hint">Copy and paste between the app and Android, through the VNC viewer. Also applies to settings still on the default.</string>
     <string name="security_check_files">Check app files before launch</string>
     <string name="security_check_files_hint">Before an app starts, Flatdroid checks its files against what was recorded when they were installed/updated, to catch possible tampering. It refuses to start an app whose files changed. At most it takes a minute to finish the check. Turning it off drops the recorded baselines, turning it on asks how to record them again.</string>
     <string name="baseline_choice_title">Record a baseline?</string>

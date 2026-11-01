@@ -56,9 +56,11 @@ fun SecuritySection(
             enabled = enabled, developer = true,
         )
     }
+    // These match the per-app switches of the same name; the level's value also reaches every app still on it.
+    val appliesToDefault = " " + stringResource(R.string.security_applies_to_default)
     SwitchRow(
         security.permissionsFromMetadata, { onChange(security.copy(permissionsFromMetadata = it)) },
-        stringResource(R.string.security_permissions_from_metadata), stringResource(R.string.security_permissions_from_metadata_hint), enabled = enabled,
+        stringResource(R.string.security_permissions_from_metadata), stringResource(R.string.security_permissions_from_metadata_hint) + appliesToDefault, enabled = enabled,
     )
     val homes = mapOf(
         HomeMode.SHARED to stringResource(R.string.app_settings_home_shared),
@@ -76,19 +78,19 @@ fun SecuritySection(
     )
     SwitchRow(
         security.androidFonts, { onChange(security.copy(androidFonts = it)) },
-        stringResource(R.string.security_android_fonts), stringResource(R.string.security_android_fonts_hint), enabled = enabled,
+        stringResource(R.string.security_android_fonts), stringResource(R.string.app_settings_android_fonts_hint) + appliesToDefault, enabled = enabled,
     )
     SwitchRow(
         security.shareClipboard, { onChange(security.copy(shareClipboard = it)) },
-        stringResource(R.string.security_share_clipboard), stringResource(R.string.security_share_clipboard_hint), enabled = enabled,
+        stringResource(R.string.security_share_clipboard), stringResource(R.string.app_settings_clipboard_hint) + appliesToDefault, enabled = enabled,
     )
     SwitchRow(
         security.shareTimeZone, { onChange(security.copy(shareTimeZone = it)) },
-        stringResource(R.string.security_share_time_zone), stringResource(R.string.security_share_time_zone_hint), enabled = enabled,
+        stringResource(R.string.security_share_time_zone), stringResource(R.string.app_settings_time_zone_hint) + appliesToDefault, enabled = enabled,
     )
     SwitchRow(
         security.shareLanguage, { onChange(security.copy(shareLanguage = it)) },
-        stringResource(R.string.security_share_language), stringResource(R.string.security_share_language_hint), enabled = enabled,
+        stringResource(R.string.security_share_language), stringResource(R.string.app_settings_language_hint) + appliesToDefault, enabled = enabled,
     )
     SwitchRow(
         security.limitDevices, { onChange(security.copy(limitDevices = it)) },

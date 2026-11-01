@@ -1,0 +1,27 @@
+# Pull requests that keep the CI actions and the Gradle dependencies up to date.
+version: 2
+updates:
+  # The actions in .github/workflows, pinned to commits.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    # Wait a week after a release before proposing it, so a bad or compromised release has time to be pulled.
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # gradle/libs.versions.toml and the build scripts (AGP, Kotlin, AndroidX, AndroidSVG).
+  - package-ecosystem: gradle
+    directory: /
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
+    # One pull request a month with every update, rather than one per library.
+    groups:
+      gradle:
+        patterns: ["*"]
+    open-pull-requests-limit: 2
