@@ -77,6 +77,11 @@ class AppSettingsTest {
         val private = AppSettings(defaults = AppDefaults(androidFonts = false, clipboard = false))
         assertFalse(private.usesAndroidFonts || private.sharesClipboard)
         assertTrue(private.copy(androidFonts = true, clipboard = true).let { it.usesAndroidFonts && it.sharesClipboard })
+        // The time zone and the language likewise.
+        assertTrue(AppSettings().sharesTimeZone && AppSettings().sharesLanguage)
+        val generic = AppSettings(defaults = AppDefaults(timeZone = false, language = false))
+        assertFalse(generic.sharesTimeZone || generic.sharesLanguage)
+        assertTrue(generic.copy(timeZone = true, language = true).let { it.sharesTimeZone && it.sharesLanguage })
         // The store hands the defaults to what it loads, saved or not.
         val file = File(tmp.root, "d.properties")
         assertEquals(HomeMode.PRIVATE, AppSettingsStore(file, hardened).load().homeMode)
@@ -113,17 +118,17 @@ class AppSettingsTest {
             "home.mode=shared\ndev.whole=true\nstorage.sdcard=true\npermission.microphone=true\npermission.camera=true\n" +
                 "permission.microphone.always=true\nenv.LD_PRELOAD=/home/user/x.so\npermission.network=true\n" +
                 "filter.allowExtraSyscalls=true\npermission.audio=false\nhome.shareHiddenFiles=true\n" +
-                "privacy.androidFonts=true\npermission.clipboard=true\n",
+                "privacy.androidFonts=true\npermission.clipboard=true\nprivacy.timeZone=true\nprivacy.language=true\n",
         ).readBytes()
         val local = file(
             "home.mode=private\ndev.whole=false\nenv.LANG=de_DE.UTF-8\npermission.network=false\n" +
-                "privacy.androidFonts=false\npermission.clipboard=false\n",
+                "privacy.androidFonts=false\npermission.clipboard=false\nprivacy.timeZone=false\n",
         ).readBytes()
         val loaded = AppSettingsStore(file(AppSettingsStore.imported(imported, local).decodeToString())).load()
         assertEquals(
             AppSettings(
                 homeModeChoice = HomeMode.PRIVATE, microphone = true, network = false, audio = false,
-                androidFonts = false, clipboard = false, environment = mapOf("LANG" to "de_DE.UTF-8"),
+                androidFonts = false, clipboard = false, timeZone = false, environment = mapOf("LANG" to "de_DE.UTF-8"),
             ),
             loaded,
         )

@@ -31,6 +31,8 @@ data class AppDefaults(
     val permissionsFromMetadata: Boolean = true,
     val androidFonts: Boolean = true,
     val clipboard: Boolean = true,
+    val timeZone: Boolean = true,
+    val language: Boolean = true,
 )
 
 /** Flatdroid's choices for one Flatpak. */
@@ -73,6 +75,18 @@ data class AppSettings(
      * copied in Android. Null follows [defaults] ([sharesClipboard]).
      */
     val clipboard: Boolean? = null,
+    /**
+     * Android's time zone, as Flatpak gives the host's (`/etc/localtime`, `/etc/timezone`). Off,
+     * the app gets UTC, so its clock doesn't hint at where the device is. Null follows [defaults]
+     * ([sharesTimeZone]).
+     */
+    val timeZone: Boolean? = null,
+    /**
+     * Android's language and region as the app's locale (`LANG`), as Flatpak passes the host's.
+     * Off, the generic C.UTF-8: English, and nothing about the device's language or region. Null
+     * follows [defaults] ([sharesLanguage]).
+     */
+    val language: Boolean? = null,
     /** Developer setting: the security level's extra system calls stay allowed for this app. */
     val allowExtraSyscalls: Boolean = false,
     /**
@@ -118,6 +132,8 @@ data class AppSettings(
     val homeMode: HomeMode get() = homeModeChoice ?: defaults.homeMode
     val usesAndroidFonts: Boolean get() = androidFonts ?: defaults.androidFonts
     val sharesClipboard: Boolean get() = clipboard ?: defaults.clipboard
+    val sharesTimeZone: Boolean get() = timeZone ?: defaults.timeZone
+    val sharesLanguage: Boolean get() = language ?: defaults.language
 
     /** Whether the app gets sound: its own setting, else [defaults] and whether its metadata asks for PulseAudio. */
     fun audioAllowed(sockets: List<String>): Boolean = audio ?: (defaults.permissionsFromMetadata && PULSEAUDIO_SOCKET in sockets)
@@ -200,6 +216,8 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
             network = props.getProperty(KEY_NETWORK)?.toBooleanStrictOrNull(),
             androidFonts = props.getProperty(KEY_ANDROID_FONTS)?.toBooleanStrictOrNull(),
             clipboard = props.getProperty(KEY_CLIPBOARD)?.toBooleanStrictOrNull(),
+            timeZone = props.getProperty(KEY_TIME_ZONE)?.toBooleanStrictOrNull(),
+            language = props.getProperty(KEY_LANGUAGE)?.toBooleanStrictOrNull(),
             allowExtraSyscalls = props.getProperty(KEY_EXTRA_SYSCALLS) == "true",
             shareHiddenFiles = props.getProperty(KEY_SHARE_HIDDEN_FILES) == "true",
             microphone = props.getProperty(KEY_MICROPHONE) == "true",
@@ -236,6 +254,8 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
         settings.network?.let { props.setProperty(KEY_NETWORK, it.toString()) }
         settings.androidFonts?.let { props.setProperty(KEY_ANDROID_FONTS, it.toString()) }
         settings.clipboard?.let { props.setProperty(KEY_CLIPBOARD, it.toString()) }
+        settings.timeZone?.let { props.setProperty(KEY_TIME_ZONE, it.toString()) }
+        settings.language?.let { props.setProperty(KEY_LANGUAGE, it.toString()) }
         if (settings.allowExtraSyscalls) props.setProperty(KEY_EXTRA_SYSCALLS, "true")
         if (settings.shareHiddenFiles) props.setProperty(KEY_SHARE_HIDDEN_FILES, "true")
         if (settings.microphone) props.setProperty(KEY_MICROPHONE, "true")
@@ -260,7 +280,8 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
          * An app's settings file from an import, [imported], with the settings that widen what the
          * app can reach left as they are on this device ([local], its current file, or null for
          * none): whole /dev (with Binder), all of shared storage, the microphone without asking,
-         * the camera, the network, Android's fonts, the clipboard, the extra system calls, its home and its environment. A shared
+         * the camera, the network, Android's fonts, the clipboard, the time zone, the language, the
+         * extra system calls, its home and its environment. A shared
          * settings file can't turn them on.
          */
         fun imported(imported: ByteArray, local: ByteArray?): ByteArray {
@@ -294,11 +315,13 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
         private const val KEY_NETWORK = "permission.network"
         private const val KEY_ANDROID_FONTS = "privacy.androidFonts"
         private const val KEY_CLIPBOARD = "permission.clipboard"
+        private const val KEY_TIME_ZONE = "privacy.timeZone"
+        private const val KEY_LANGUAGE = "privacy.language"
         private const val KEY_EXTRA_SYSCALLS = "filter.allowExtraSyscalls"
         private const val KEY_SHARE_HIDDEN_FILES = "home.shareHiddenFiles"
         private val WIDENING_KEYS = setOf(
             KEY_WHOLE_DEV, KEY_SDCARD, KEY_MICROPHONE_ALWAYS, KEY_CAMERA, KEY_NETWORK, KEY_EXTRA_SYSCALLS, KEY_HOME_MODE,
-            KEY_SHARE_HIDDEN_FILES, KEY_ANDROID_FONTS, KEY_CLIPBOARD,
+            KEY_SHARE_HIDDEN_FILES, KEY_ANDROID_FONTS, KEY_CLIPBOARD, KEY_TIME_ZONE, KEY_LANGUAGE,
         )
     }
 }

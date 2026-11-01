@@ -3,6 +3,7 @@ package com.garathon.flatdroid.launcher
 import com.garathon.flatdroid.flatpak.Deployment
 import com.garathon.flatdroid.flatpak.FlatpakInstallation
 import com.garathon.flatdroid.flatpak.FlatpakRef
+import com.garathon.flatdroid.flatpak.L2s
 import com.garathon.flatdroid.proot.DevNodes
 import com.garathon.flatdroid.proot.Fdsec
 import com.garathon.flatdroid.proot.FlatpakBinds
@@ -42,6 +43,12 @@ data class HostDirs(
      * see the app's own writes as tampering. Persisted (regenerated once), not bound anywhere else.
      */
     val runtimeCache: File,
+    /**
+     * The app's own XDG_RUNTIME_DIR, bound at `/run/user/<[userId]>` as in Flatpak (its `app/<ID>`
+     * and the links to the bus and the sound socket are made at launch); null keeps /tmp.
+     */
+    val runtimeDir: File? = null,
+    val userId: Int = 0,
 )
 
 /** Per-app choices that change a launch. */
@@ -66,6 +73,8 @@ data class LaunchOptions(
     val flatpakInfo: Boolean = true,
     /** Android is in dark mode; apps are asked to follow it. */
     val darkTheme: Boolean = false,
+    /** The device's languages (BCP 47) for the app's locale; empty gives the generic C.UTF-8. */
+    val languageTags: List<String> = emptyList(),
 )
 
 /** Everything needed to start an app: its proot binds, environment and command, and its root's layout. */
@@ -152,10 +161,11 @@ class LaunchPlanner(
         dirs.hostFonts?.let { extraBinds += it.path to GuestPaths.HOST_FONTS }
         dirs.sdcard?.let { extraBinds += it.path to GuestPaths.SDCARD }
         dirs.sessionBus?.let { extraBinds += it.path to GuestPaths.SESSION_BUS_DIR }
-        val script = (hostPath(app, commandPath)?.let { Executable.of(it) } as? Executable.Script)?.text
-        val electronBinary = script?.let(Electron::zypakTarget)
+        val runtimeDir = dirs.runtimeDir?.let { host -> GuestPaths.runtimeDir(dirs.userId).also { extraBinds += host.path to it } }
+        val scripts = launchScripts(app, commandPath)
+        val electronBinary = scripts.firstNotNullOfOrNull(Electron::zypakTarget)
         val cobaltBrowser = if (electronBinary != null) null
-            else script?.let { Electron.cobaltTarget(it, appId) { path -> hostPath(app, path)?.isFile == true } }
+            else scripts.firstNotNullOfOrNull { Electron.cobaltTarget(it, appId) { path -> hostPath(app, path)?.isFile == true } }
         if (electronBinary != null) {
             isElectron = true
             val host = hostPath(app, electronBinary) ?: return PlanResult.NoCommand(appId)
@@ -203,6 +213,10 @@ class LaunchPlanner(
             darkTheme = options.darkTheme,
             kdePlatformTheme = DesktopConfig.KDE_PLATFORM_THEMES.any { File(runtime.files, it).exists() },
             sessionBus = dirs.sessionBus != null,
+            lang = if (options.languageTags.isEmpty()) LaunchEnvironment.GENERIC_LOCALE
+                else LaunchEnvironment.locale(options.languageTags, File(runtime.files, "lib/locale").list()?.toList().orEmpty()),
+            runtimeDir = runtimeDir ?: "/tmp",
+            flatpakContainer = options.flatpakInfo,
         )
         val devices = app.metadata.context.devices
         val binds = FlatpakBinds(
@@ -241,6 +255,22 @@ class LaunchPlanner(
     }
 
     /**
+     * The text of the script at [commandPath] and of the scripts under /app it hands over to with
+     * `exec` ([Electron.execTarget]), in that order, at most [MAX_SCRIPTS]: an IDE's command
+     * script may set up its tools and only then call zypak, in a wrapper of its own.
+     */
+    private fun launchScripts(app: Deployment, commandPath: String): List<String> {
+        val scripts = mutableListOf<String>()
+        var path: String? = commandPath
+        while (path != null && scripts.size < MAX_SCRIPTS) {
+            val text = (hostPath(app, path)?.let { Executable.of(it) } as? Executable.Script)?.text ?: break
+            scripts += text
+            path = Electron.execTarget(text)?.takeIf { it != path }
+        }
+        return scripts
+    }
+
+    /**
      * The host file for an /app path, following symlinks: guest ones and relative ones within
      * /app, and link2symlink's (into .l2s, a host path). Null for anything else, such as a link
      * to the runtime's /usr (a guest path that means something else on the host), and for loops.
@@ -255,7 +285,7 @@ class LaunchPlanner(
             val target = readlink(file) ?: return file
             when {
                 target.startsWith("/app/") -> { path = target; return@repeat }
-                target.startsWith(l2sDir.path + "/") -> return File(target)
+                L2s.inStore(target, l2sDir) -> return File(target)
                 target.startsWith("/") -> return null
                 else -> {
                     file = File(file.parentFile, target).normalize()
@@ -271,8 +301,12 @@ class LaunchPlanner(
         const val GL_DEFAULT = "org.freedesktop.Platform.GL.default"
         const val RESOLV_CONF = "resolv.conf"
         /** The `/etc` files every launch binds Flatdroid's own over (the runtime's are never read). */
-        val ETC_OVERRIDES = listOf(RESOLV_CONF, "hosts", "machine-id", "passwd", "group")
+        val ETC_OVERRIDES = listOf(RESOLV_CONF, "hosts", "machine-id", "passwd", "group", LOCALTIME, TIMEZONE)
+        /** The time zone's files: Android's zone (or UTC when it isn't shared), written at every launch. */
+        const val LOCALTIME = "localtime"
+        const val TIMEZONE = "timezone"
         private const val MAX_LINKS = 8
+        private const val MAX_SCRIPTS = 3
 
         /**
          * Runtime cache directories some tool regenerates into at launch (a read-only Flatpak
@@ -298,8 +332,8 @@ class LaunchPlanner(
 
         /**
          * Printed by KDE's frameworks (KSandbox) when /.flatpak-info makes them run a process on
-         * the host but the app may not ask Flatpak to: there is no host here, and Konsole crashes
-         * in that mode. Such an app runs without the file ([LaunchOptions.flatpakInfo]).
+         * the host but the app may not ask Flatpak to: there is no host here, and KDE terminal
+         * apps crash in that mode. Such an app runs without the file ([LaunchOptions.flatpakInfo]).
          */
         const val KDE_HOST_PROCESS_WARNING = "Process execution expects 'org.freedesktop.Flatpak=talk'"
 

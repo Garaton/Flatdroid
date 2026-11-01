@@ -126,4 +126,41 @@ class FileIntegrityTest {
         )
         assertEquals(Entry(null, 42, 1700, 99, "deadbeef"), FileIntegrity.entry(f, fake.fs))
     }
+
+    @Test
+    fun namesWithTabsNewlinesAndBackslashesAreCheckedAndRoundTrip() {
+        val root = tmp.newFolder("files")
+        File(root, "lib").mkdirs()
+        File(root, "lib/plain.so").writeText("x")
+        File(root, "lib/added\tby another app.so").writeText("y")
+        File(root, "lib/a\nb\\c").writeText("z")
+        val fs = FakeFs().fs
+        assertEquals(listOf("lib/a\nb\\c", "lib/added\tby another app.so", "lib/plain.so"), FileIntegrity.walk(root, fs))
+
+        val m = mapOf(
+            "lib/a\nb\\c" to Entry(null, 1, 2, 3, "s1"),
+            "lib/t\tab" to Entry("to\tthere\\x", 4, 5, 6, "s2"),
+            "lib/systemd\\x2d.slice" to Entry(null, 7, 8, 9, "s3"),
+        )
+        val text = FileIntegrity.write(m)
+        assertEquals(3, text.lines().count { it.isNotEmpty() })
+        assertEquals(m, FileIntegrity.read(text))
+
+        // Added under such a name after the baseline: reported like any other new file.
+        val diff = FileIntegrity.diff(mapOf("lib/plain.so" to Entry(null, 1, 1, 1, "x")), mapOf(
+            "lib/plain.so" to Entry(null, 1, 1, 1, null),
+            "lib/added\tby another app.so" to Entry(null, 2, 2, 1, null),
+        )) { null }
+        assertEquals(listOf("lib/added\tby another app.so"), diff.tampered)
+    }
+
+    @Test
+    fun theStoreIsKnownByBothOfAndroidsPathsForAppData() {
+        val store = File("/data/user/0/com.example/files/alpine/rootfs/.l2s")
+        assertTrue(L2s.inStore("/data/user/0/com.example/files/alpine/rootfs/.l2s/.l2s.a0001", store))
+        assertTrue(L2s.inStore("/data/data/com.example/files/alpine/rootfs/.l2s/.l2s.a0001", store))
+        assertEquals(".l2s.a0001", L2s.storedName("/data/data/com.example/files/alpine/rootfs/.l2s/.l2s.a0001", store))
+        assertFalse(L2s.inStore("/sdcard/.l2s/.l2s.a0001", store))
+        assertEquals(null, L2s.storedName("/sdcard/.l2s/.l2s.a0001", store))
+    }
 }

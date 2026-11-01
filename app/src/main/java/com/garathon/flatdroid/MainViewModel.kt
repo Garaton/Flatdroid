@@ -3,10 +3,12 @@ package com.garathon.flatdroid
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.garathon.flatdroid.alpine.AlpineCommands
 import com.garathon.flatdroid.alpine.AlpineEnvironment
 import com.garathon.flatdroid.flatpak.AppData
 import com.garathon.flatdroid.proot.Fdsec
 import com.garathon.flatdroid.proot.ProotProcess
+import com.garathon.flatdroid.session.SessionController
 import com.garathon.flatdroid.settings.UserSettings
 import com.garathon.flatdroid.setup.AndroidTarFs
 import com.garathon.flatdroid.setup.SetupController
@@ -76,7 +78,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _settingsError.value = null
     }
 
-    /** Saves [settings], applies them in Alpine, then calls [onApplied] (on the main thread). */
+    /**
+     * Applies [settings] in Alpine, then saves them and calls [onApplied] (on the main thread).
+     * Only commands that differ from the saved settings' run, and they run first, so settings whose
+     * commands failed aren't saved and a second save tries them again.
+     */
     fun applySettings(settings: UserSettings, onApplied: () -> Unit) {
         if (_applying.value) return
         _applying.value = true
@@ -85,21 +91,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val before = SetupController.settings(app).load()
-                SetupController.settings(app).save(settings)
-                // Off, the file check's baselines aren't kept up (installs and updates record none), so
-                // they are dropped; turning it on again asks how to record them.
-                if (before?.security?.checkFilesBeforeLaunch == true && !settings.security.checkFilesBeforeLaunch) {
-                    AndroidTarFs.deleteTree(AppData.integrityDir(app))
-                }
+                val commands = settings.commands().takeIf { before == null || it != before.commands() }.orEmpty()
+                // Never during a session: the app could take the commands over (see AlpineCommands).
+                if (commands.isNotEmpty() && SessionController.isBusy) throw IOException(text(R.string.settings_app_running))
                 runInterruptible {
                     val env = AlpineEnvironment.get(app)
-                    for (command in settings.commands()) {
+                    for (command in commands) {
                         DebugLog.i("$ ${command.joinToString(" ")}")
                         val result = env.run(command, timeoutSeconds = UserSettings.APPLY_TIMEOUT_SECONDS, onLine = DebugLog::i)
                         if (result.exitCode != 0) {
                             throw IOException(result.output.lines().lastOrNull { it.isNotBlank() } ?: "exit ${result.exitCode}")
                         }
                     }
+                }
+                SetupController.settings(app).save(settings)
+                // Off, the file check's baselines aren't kept up (installs and updates record none), so
+                // they are dropped; turning it on again asks how to record them.
+                if (before?.security?.checkFilesBeforeLaunch == true && !settings.security.checkFilesBeforeLaunch) {
+                    AndroidTarFs.deleteTree(AppData.integrityDir(app))
                 }
                 withContext(Dispatchers.Main) { onApplied() }
             } catch (e: Exception) {
@@ -112,8 +121,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun run(command: String) {
         if (command.isBlank() || _running.value) return
-        _running.value = true
         outputLines.clear()
+        // A command started during a session isn't hidden from the app (see AlpineCommands).
+        if (!AlpineCommands.terminalMayRun(getApplication())) {
+            log("$ $command")
+            end(text(R.string.terminal_app_running))
+            return
+        }
+        _running.value = true
+        AlpineCommands.terminalRunning = true
         DebugLog.i("$ $command")
         log("$ $command")
         interrupted = false
@@ -153,8 +169,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: Exception) {
                 end(text(R.string.terminal_error, e))
             } finally {
-                SavedSizes.changedAll(getApplication())
+                SavedSizes.changedAll(getApplication(), measureNow = false)
                 this@MainViewModel.command = null
+                AlpineCommands.terminalRunning = false
                 _running.value = false
             }
         }

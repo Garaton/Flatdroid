@@ -47,10 +47,24 @@ class ExtraData(private val env: AlpineEnvironment, private val stateFile: File,
         stateFile.writeTextAtomically(keep.joinToString("\n", postfix = if (keep.isEmpty()) "" else "\n"))
     }
 
-    /** Runs every pending script, [onLine] getting their output; records each as applied. */
-    fun applyAll(onLine: (String) -> Unit): List<Result> = pending().map { deployment ->
+    /**
+     * Forgets the scripts of deployments that are gone: one removed and installed again (the same
+     * commit at the same path) gets its extra data again.
+     */
+    fun prune() {
+        val recorded = runCatching { stateFile.readLines() }.getOrDefault(emptyList()).filter { it.isNotBlank() }
+        val kept = applied()
+        if (recorded.size != kept.size) stateFile.writeTextAtomically(kept.joinToString("\n", postfix = if (kept.isEmpty()) "" else "\n"))
+    }
+
+    /**
+     * Runs every pending script, [onLine] getting their output; records each as applied, then
+     * calls [onApplied] with its deployment.
+     */
+    fun applyAll(onLine: (String) -> Unit, onApplied: (File) -> Unit = {}): List<Result> = pending().map { deployment ->
         val result = Result(deployment, deployment.parentFile!!.parentFile!!.parentFile!!.parentFile!!.name == "app", run(deployment, onLine))
         stateFile.writeTextAtomically((applied() + deployment.path).joinToString("\n", postfix = "\n"))
+        onApplied(deployment)
         result
     }
 

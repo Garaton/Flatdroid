@@ -16,10 +16,12 @@ import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.garathon.flatdroid.MainActivity
 import com.garathon.flatdroid.R
+import com.garathon.flatdroid.alpine.AlpineCommands
 import com.garathon.flatdroid.alpine.AlpineEnvironment
 import com.garathon.flatdroid.alpine.ResolvConfRefresher
 import com.garathon.flatdroid.setup.SetupController
 import com.garathon.flatdroid.launcher.ElectronSwap
+import com.garathon.flatdroid.proot.LeftoverProcesses
 import com.garathon.flatdroid.proot.RunInterruptedException
 import com.garathon.flatdroid.session.SessionController
 import com.garathon.flatdroid.setup.AlpineSetup
@@ -40,6 +42,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runInterruptible
 import java.io.File
 import java.io.IOException
+import kotlin.concurrent.thread
 
 /**
  * Installs, updates and uninstalls Flatpaks in the foreground (dataSync), so downloads continue
@@ -82,6 +85,8 @@ class FlatpakTaskService : Service() {
             // A download can outlast a switch between networks: keep Alpine's resolv.conf current.
             val dns = ResolvConfRefresher(applicationContext, listOf(AlpineEnvironment.get(applicationContext).resolvConfFile)).apply { start() }
             try {
+                // Before the task's file checks; see LeftoverProcesses.killEscaped.
+                endEscaped()
                 marker?.writeTextAtomically(task.toString())
                 baselineMarker?.writeTextAtomically(task.toString())
                 SavedSizes.forgetAll(applicationContext)
@@ -95,6 +100,7 @@ class FlatpakTaskService : Service() {
                 runInterruptible { cleanUpAfter(task) }
             } finally {
                 dns.stop()
+                endEscaped()
                 marker?.delete()
                 SavedSizes.changedAll(applicationContext)
                 FlatpakTasks.log(error?.let { getString(R.string.task_log_failed, it) } ?: getString(R.string.task_log_done))
@@ -118,27 +124,48 @@ class FlatpakTaskService : Service() {
     }
 
     /**
-     * Runs the extra-data scripts Flatpak's CLI left to Flatdroid ([ExtraData]). An app whose
-     * script failed can't run, so the task fails; an extension's failure is only logged.
+     * Runs the extra-data scripts Flatpak's CLI left to Flatdroid ([ExtraData]) and records the
+     * baselines of [appIds]' deployments ([baseline]). A script is the app's own code and reaches
+     * every Flatpak's files through link2symlink's store, so with the file check on, nothing is
+     * baselined after a script that the script could have changed: every deployment but the
+     * scripts' own is recorded before they run, each script's own right after it ran, and once any
+     * ran, everything [appIds] use must still match ([requireIntact]), unless [verify] is false
+     * (the caller checks afterwards). An app whose script failed can't run, so the task fails; an
+     * extension's failure is only logged.
      */
-    private fun applyExtraData(env: AlpineEnvironment) {
+    private fun applyExtraDataAndBaseline(env: AlpineEnvironment, appIds: List<String>, verify: Boolean = true) {
         val extraData = extraData(env)
-        if (extraData.pending().isEmpty()) return
+        val pending = extraData.pending()
+        baseline(env, appIds, skip = pending.map { it.name }.toSet())
+        if (pending.isEmpty()) return
         FlatpakTasks.newCommand(getString(R.string.task_extra_data))
-        val failedApp = extraData.applyAll(FlatpakTasks::log).firstOrNull { it.isApp && it.exitCode != 0 }
+        val guard = IntegrityGuard(applicationContext).takeIf { checkFilesOn(this) }
+        val failedApp = extraData.applyAll(FlatpakTasks::log) { guard?.recordDeployment(it) }.firstOrNull { it.isApp && it.exitCode != 0 }
         if (failedApp != null) {
             throw IOException(getString(R.string.task_extra_data_failed, failedApp.deployment.parentFile!!.parentFile!!.parentFile!!.name, failedApp.exitCode))
         }
+        if (verify) requireIntact(appIds, R.string.task_extra_data_changed_files)
     }
 
     /**
-     * Alpine's packages: upgraded, then setup's list installed, which adds any package setup gained
-     * since this Alpine was set up. A failure is only logged: Flatpak's update doesn't depend on it.
+     * Alpine's packages: upgraded, then setup's list installed when one of them is missing (setup
+     * gained a package since this Alpine was set up). Whether one is missing is asked while the
+     * upgrade runs: `apk info` only reads the package database, which the upgrade replaces whole,
+     * and an upgrade removes none of them. A failure is only logged: Flatpak's update doesn't
+     * depend on it.
      */
     private fun updateAlpine(env: AlpineEnvironment) {
         val cache = File(cacheDir, "apk-cache").apply { mkdirs() }
+        var allInstalled = false
+        val check = thread(name = "apk-info") {
+            allInstalled = runCatching { env.run(listOf("/sbin/apk", "info", "-e") + AlpineSetup.PACKAGES).exitCode == 0 }.getOrDefault(false)
+        }
         try {
             for (args in listOf(listOf("upgrade"), listOf("add") + AlpineSetup.PACKAGES)) {
+                if (args.first() == "add") {
+                    check.join()
+                    if (allInstalled) return
+                }
                 val command = AlpineSetup.apkCommand(args)
                 FlatpakTasks.newCommand(getString(R.string.task_updating_alpine))
                 FlatpakTasks.log("$ ${command.joinToString(" ")}")
@@ -149,12 +176,18 @@ class FlatpakTaskService : Service() {
                 }
             }
         } finally {
+            // Stopped with the task (an interrupt stops its proot); already over otherwise.
+            check.interrupt()
+            check.join()
             AndroidTarFs.deleteTree(cache)
         }
     }
 
     private fun perform(task: FlatpakTask) {
         val env = AlpineEnvironment.get(applicationContext)
+        // Deployments removed since (by the last task, or from the terminal) get their extra data
+        // again if they come back.
+        extraData(env).prune()
         when (task) {
             is FlatpakTask.Install -> try {
                 run(env, FlatpakCommands.install(task.appId))
@@ -165,7 +198,7 @@ class FlatpakTaskService : Service() {
                 // Possibly left by a kill some time before, so the links are checked too.
                 cleanRepository(env, checkLinks = true)
                 run(env, FlatpakCommands.install(task.appId))
-            }.also { applyExtraData(env); baseline(env, listOf(task.appId)) }
+            }.also { applyExtraDataAndBaseline(env, listOf(task.appId)) }
             FlatpakTask.UpdateAll -> {
                 // An update reuses every file it doesn't change, so a changed one would end up in the new
                 // commit's baseline: check what is installed first.
@@ -174,8 +207,7 @@ class FlatpakTaskService : Service() {
                 // Unused runtimes first, so they aren't downloaded again only to be removed.
                 run(env, FlatpakCommands.uninstallUnused, getString(R.string.task_removing_unused))
                 run(env, FlatpakCommands.update)
-                applyExtraData(env)
-                baseline(env, FlatpakInstallation(env.flatpakDir, env.arch).appIds())
+                applyExtraDataAndBaseline(env, FlatpakInstallation(env.flatpakDir, env.arch).appIds())
             }
             // After a force stop, which kills processes anywhere.
             FlatpakTask.Repair -> {
@@ -204,8 +236,7 @@ class FlatpakTaskService : Service() {
                 run(env, FlatpakCommands.reinstall(reinstalled.map { it.installRef }.distinct()))
                 // The same commit comes back at the same path, without what its extra-data script made.
                 extraData(env).forget(reinstalled.map { it.branch }.distinct())
-                applyExtraData(env)
-                baseline(env, listOf(task.appId))
+                applyExtraDataAndBaseline(env, listOf(task.appId), verify = false)
                 // The removed files came from Flathub again; everything else must still match its baseline.
                 problems?.let { IntegrityGuard(applicationContext).adoptRedownloaded(it) }
                 requireIntact(listOf(task.appId), R.string.task_reinstall_not_restored)
@@ -219,8 +250,7 @@ class FlatpakTaskService : Service() {
                 val problems = changedDeployments(appIds)?.also { discardChanged(env, it) }
                 if (refs.isNotEmpty()) run(env, FlatpakCommands.reinstall(refs.toList()))
                 extraData(env).forget()
-                applyExtraData(env)
-                baseline(env, appIds)
+                applyExtraDataAndBaseline(env, appIds, verify = false)
                 problems?.let { IntegrityGuard(applicationContext).adoptRedownloaded(it) }
                 requireIntact(appIds, R.string.task_reinstall_not_restored)
             }
@@ -229,9 +259,10 @@ class FlatpakTaskService : Service() {
 
     /**
      * Records the file-integrity baseline of the given apps (their deployments and runtimes), when
-     * the file check is on; and removes manifests for deployments no longer present.
+     * the file check is on, except for the commits in [skip]; and removes manifests for
+     * deployments no longer present.
      */
-    private fun baseline(env: AlpineEnvironment, appIds: List<String>) {
+    private fun baseline(env: AlpineEnvironment, appIds: List<String>, skip: Set<String> = emptySet()) {
         if (!checkFilesOn(this)) return
         val guard = IntegrityGuard(applicationContext)
         // Shared across apps so a runtime or extension several apps use is hashed once, not per app.
@@ -240,6 +271,7 @@ class FlatpakTaskService : Service() {
             guard.recordBaseline(
                 id,
                 baselinedCommits = baselinedCommits,
+                skip = skip,
                 onStart = { FlatpakTasks.newCommand(getString(R.string.task_recording_baseline)) },
             ) { ref, done, total ->
                 if (done == total || done % 1000 == 0) FlatpakTasks.log(getString(R.string.task_baseline_progress, ref.name, done, total))
@@ -257,10 +289,7 @@ class FlatpakTaskService : Service() {
         FlatpakTasks.newCommand(getString(R.string.task_checking_files))
         val problems = IntegrityGuard(applicationContext).verifyAll(appIds, ::logCheckProgress)
         if (problems.isEmpty()) return
-        for (p in problems) {
-            p.tampered.forEach { FlatpakTasks.log(getString(R.string.task_log_changed, p.ref.name, it)) }
-            p.removed.forEach { FlatpakTasks.log(getString(R.string.task_log_removed_file, p.ref.name, it)) }
-        }
+        logProblems(problems)
         throw IOException(getString(message, problems.joinToString(", ") { it.ref.name }))
     }
 
@@ -269,11 +298,22 @@ class FlatpakTaskService : Service() {
         if (!checkFilesOn(this) || appIds.isEmpty()) return null
         FlatpakTasks.newCommand(getString(R.string.task_checking_files))
         val problems = IntegrityGuard(applicationContext).verifyAll(appIds, ::logCheckProgress)
-        for (p in problems) {
-            p.tampered.forEach { FlatpakTasks.log(getString(R.string.task_log_changed, p.ref.name, it)) }
-            p.removed.forEach { FlatpakTasks.log(getString(R.string.task_log_removed_file, p.ref.name, it)) }
-        }
+        logProblems(problems)
         return problems
+    }
+
+    /** Each changed and removed path of [problems] in the task's log. */
+    private fun logProblems(problems: List<IntegrityGuard.Problem>) {
+        for (p in problems) {
+            p.tampered.forEach { FlatpakTasks.log(getString(R.string.task_log_changed, p.ref.name, FileIntegrity.escape(it))) }
+            p.removed.forEach { FlatpakTasks.log(getString(R.string.task_log_removed_file, p.ref.name, FileIntegrity.escape(it))) }
+        }
+    }
+
+    /** Ends processes that left proot ([LeftoverProcesses.killEscaped]), saying so in the task's log. */
+    private fun endEscaped() {
+        val count = LeftoverProcesses.killEscaped()
+        if (count > 0) FlatpakTasks.log(resources.getQuantityString(R.plurals.task_log_escaped, count, count))
     }
 
     /**
@@ -298,10 +338,10 @@ class FlatpakTaskService : Service() {
 
     /** The check's progress in the task's log (its last line shows under the task), every so often. */
     private fun logCheckProgress(ref: FlatpakRef, done: Int, total: Int) {
-        if (done == total || done % 2000 == 0) FlatpakTasks.log(getString(R.string.task_check_progress, ref.name, done, total))
+        if (total > 0 && (done == total || done % 2000 == 0)) FlatpakTasks.log(getString(R.string.task_check_progress, ref.name, done, total))
     }
 
-    private fun extraData(env: AlpineEnvironment) = ExtraData(env, File(filesDir, "extra-data-applied"), File(cacheDir, "extra-data"))
+    private fun extraData(env: AlpineEnvironment) = ExtraData(env, AppData.extraDataState(applicationContext), File(cacheDir, "extra-data"))
 
     /**
      * After an update or uninstall that stopped part way. flatpak's own SIGINT handling exits in
@@ -412,16 +452,12 @@ class FlatpakTaskService : Service() {
         private const val EXTRA_KEEP_RUNTIMES = "keepRuntimes"
 
         /**
-         * One task at a time. An install may run alongside an app (it only adds files); an update
-         * or uninstall may not, since it changes or removes files the app may be using.
-         */
-        /**
-         * Starts [task]; false when it can't start now. With the file check on, an install waits too,
-         * since the running app could change the new files before their baseline is taken.
+         * Starts [task]; false when it can't start now. One task at a time, and none while an app
+         * runs: its commands would be visible to the app ([AlpineCommands]), and an update or
+         * uninstall changes files the app may be using.
          */
         fun start(context: Context, task: FlatpakTask): Boolean {
-            if (FlatpakTasks.ui.value.running != null) return false
-            if (SessionController.isBusy && (task !is FlatpakTask.Install || checkFilesOn(context))) return false
+            if (FlatpakTasks.ui.value.running != null || SessionController.isBusy) return false
             val intent = Intent(context, FlatpakTaskService::class.java)
             when (task) {
                 is FlatpakTask.Install -> intent.putExtra(EXTRA_TASK, "install").putExtra(EXTRA_APP_ID, task.appId)

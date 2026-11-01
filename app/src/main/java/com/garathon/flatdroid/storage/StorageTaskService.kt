@@ -150,7 +150,7 @@ class StorageTaskService : Service() {
                 Downloads.save(this, name, contentResolver.getType(uri) ?: "application/octet-stream") { out ->
                     open(uri).use { it.copyWithProgress(out) }
                 }
-                pending.progress(record.id, i + 1)
+                pending.progress(record, i + 1)
                 updateProgress(task, (i + 1).toFloat() / uris.size)
             }
             val count = uris.size
@@ -251,7 +251,7 @@ class StorageTaskService : Service() {
             val home = sharedHome()
             val result = extractFrom(
                 task, uris.single(), home, task.clash, record.done,
-                onEntry = { pending.progress(record.id, it) },
+                onEntry = { pending.progress(record, it) },
                 onResume = { dest -> dest.parentFile?.let { removeAtomicLeftovers(it, record.created) } },
             ) { File(home, it) }
             getString(R.string.storage_imported_title) to
@@ -402,7 +402,7 @@ class StorageTaskService : Service() {
                     copied++
                 }
             }
-            pending.progress(record.id, i + 1)
+            pending.progress(record, i + 1)
         }
         return Copied(copied, adopted, present)
     }

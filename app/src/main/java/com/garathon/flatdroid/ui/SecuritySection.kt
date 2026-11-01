@@ -83,6 +83,14 @@ fun SecuritySection(
         stringResource(R.string.security_share_clipboard), stringResource(R.string.security_share_clipboard_hint), enabled = enabled,
     )
     SwitchRow(
+        security.shareTimeZone, { onChange(security.copy(shareTimeZone = it)) },
+        stringResource(R.string.security_share_time_zone), stringResource(R.string.security_share_time_zone_hint), enabled = enabled,
+    )
+    SwitchRow(
+        security.shareLanguage, { onChange(security.copy(shareLanguage = it)) },
+        stringResource(R.string.security_share_language), stringResource(R.string.security_share_language_hint), enabled = enabled,
+    )
+    SwitchRow(
         security.limitDevices, { onChange(security.copy(limitDevices = it)) },
         stringResource(R.string.security_limit_devices), stringResource(R.string.security_limit_devices_hint), enabled = enabled,
     )
@@ -106,7 +114,7 @@ val SecuritySaver: Saver<SecuritySettings, Any> = listSaver(
         listOf(
             it.extraSyscallFilter, it.hideHelperProcesses, it.permissionsFromMetadata, it.defaultHomeMode.name,
             it.limitDevices, it.protectPassword, it.exportWithPicker, it.checkFilesBeforeLaunch,
-            it.androidFonts, it.shareClipboard,
+            it.androidFonts, it.shareClipboard, it.shareTimeZone, it.shareLanguage,
         )
     },
     restore = {
@@ -121,6 +129,8 @@ val SecuritySaver: Saver<SecuritySettings, Any> = listSaver(
             checkFilesBeforeLaunch = it[7] as Boolean,
             androidFonts = it[8] as Boolean,
             shareClipboard = it[9] as Boolean,
+            shareTimeZone = it[10] as Boolean,
+            shareLanguage = it[11] as Boolean,
         )
     },
 )

@@ -56,8 +56,7 @@ class AlpineResetTest {
         electron = File(tmp.root, "files/electron/dev.bambosh.UnofficialHomestuckCollection").apply { mkdirs() }
         reset = AlpineReset(
             File(alpine, "reset-pending"), installer, state,
-            temporary = listOf(File(cache, "alpine")),
-            appCaches = listOf(appCache.parentFile!!),
+            temporary = listOf(File(cache, "alpine"), appCache.parentFile!!),
             flatpakFiles = listOf(electron.parentFile!!),
             userData = listOf(appData),
             fs = JvmTarFs,
@@ -104,13 +103,13 @@ class AlpineResetTest {
     }
 
     @Test
-    fun removeFlatpaksKeepsAppDataAndCaches() {
+    fun removeFlatpaksKeepsAppDataButNotCaches() {
         reset.request(ResetMode.REMOVE_FLATPAKS)
         reset.finish()
         assertFalse(installer.hasKept())
         assertFalse(electron.exists())
         assertEquals("[State]", File(appData, "org.xfce.mousepad/config/mousepadrc").readText())
-        assertEquals("x", File(appCache, "thumb").readText())
+        assertFalse(appCache.exists())
         assertFalse(temp.exists())
         installer.install(source)
         assertFalse(File(installer.rootfs, "root/.local/share/flatpak").exists())

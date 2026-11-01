@@ -123,6 +123,7 @@ class UserSettingsTest {
         assertFalse(hardened.appDefaults.permissionsFromMetadata)
         assertTrue(hardened.limitDevices && hardened.protectPassword && hardened.exportWithPicker && hardened.hideHelperProcesses)
         assertFalse(hardened.appDefaults.androidFonts || hardened.appDefaults.clipboard)
+        assertFalse(hardened.appDefaults.timeZone || hardened.appDefaults.language)
         assertEquals(AppDefaults(), default.appDefaults)
         assertEquals(AppDefaults(), performant.appDefaults)
     }
@@ -135,5 +136,17 @@ class UserSettingsTest {
         val store = UserSettingsStore(File(tmp.root, "t.properties"))
         store.save(UserSettings("en", terminalFilter = false))
         assertFalse(store.load()!!.terminalFilter)
+    }
+
+    @Test
+    fun theTerminalOverlapsAppsOnlyByTheDeveloperSetting() {
+        assertFalse(UserSettings("en").terminalWithApps)
+        assertFalse(UserSettings("en", terminalDuringSession = true).terminalWithApps)
+        assertTrue(UserSettings("en", developerOptions = true, terminalDuringSession = true).terminalWithApps)
+        val store = UserSettingsStore(File(tmp.root, "s.properties"))
+        store.save(UserSettings("en", developerOptions = true, terminalDuringSession = true))
+        assertTrue(store.load()!!.terminalWithApps)
+        store.save(UserSettings("en"))
+        assertFalse(store.load()!!.terminalDuringSession)
     }
 }

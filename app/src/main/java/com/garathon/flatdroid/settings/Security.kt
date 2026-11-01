@@ -31,8 +31,13 @@ data class SecuritySettings(
     val androidFonts: Boolean = true,
     /** Apps share the clipboard with Android (through the VNC viewer) until changed per app. */
     val shareClipboard: Boolean = true,
+    /** Apps get Android's time zone (otherwise UTC, which hints at no location) until changed per app. */
+    val shareTimeZone: Boolean = true,
+    /** Apps get Android's language and region as their locale (otherwise the generic C.UTF-8) until changed per app. */
+    val shareLanguage: Boolean = true,
 ) {
-    val appDefaults: AppDefaults get() = AppDefaults(defaultHomeMode, permissionsFromMetadata, androidFonts, shareClipboard)
+    val appDefaults: AppDefaults get() =
+        AppDefaults(defaultHomeMode, permissionsFromMetadata, androidFonts, shareClipboard, shareTimeZone, shareLanguage)
 }
 
 /**
@@ -60,6 +65,8 @@ enum class SecurityLevel(
             checkFilesBeforeLaunch = true,
             androidFonts = false,
             shareClipboard = false,
+            shareTimeZone = false,
+            shareLanguage = false,
         ),
         R.string.security_level_hardened, R.string.security_level_hardened_hint,
     ),

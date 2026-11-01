@@ -460,12 +460,13 @@ class StorageFlows(
                         }
                     }
                     // The viewer stays this device's choice: it gets every session's VNC password. So do
-                    // the security level and the terminal's filter, which decide how far apps reach.
+                    // the security level and the terminal's settings, which decide how far apps reach.
                     val device = SetupController.settings(activity).load()
                     settings.copy(
                         vncViewer = device?.vncViewer,
                         security = device?.security ?: settings.security,
                         terminalFilter = device?.terminalFilter ?: settings.terminalFilter,
+                        terminalDuringSession = device?.terminalDuringSession ?: false,
                     )
                 } catch (e: Exception) {
                     withContext(Dispatchers.Main) {

@@ -29,7 +29,7 @@ class PendingTasksTest {
         val pending = PendingTasks(File(tmp.root, "storage-tasks"))
         val uris = listOf("content://com.android.externalstorage.documents/document/primary%3ADownload%2Fa.zip")
         val record = pending.add(StorageTask.ImportSharedZip(HomeZip.Clash.SKIP), uris, resumable = true)
-        pending.progress(record.id, 42)
+        pending.progress(record, 42)
         assertEquals(record.copy(done = 42), pending.get(record.id))
         val export = pending.add(StorageTask.ExportHome("a.App"), emptyList(), resumable = false)
         assertEquals(setOf(record.id, export.id), pending.all().map { it.id }.toSet())

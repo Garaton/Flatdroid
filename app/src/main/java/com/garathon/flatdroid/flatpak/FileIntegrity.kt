@@ -42,13 +42,15 @@ object FileIntegrity {
         val stat: (File) -> Triple<Long, Long, Long>?,
         /** Content SHA-256 (hex) following symlinks, or null for a directory or an unreadable file. */
         val sha256: (File) -> String?,
+        /** Whether a link's target is a file in link2symlink's store ([L2s.storedName]). */
+        val isStoreLink: (String) -> Boolean = { File(it).name.startsWith(L2s.PREFIX) },
     )
 
     /**
      * Relative paths of every leaf under [root] (regular files and symlinks), recursing only real
      * directories, so a symlinked directory is a leaf and isn't followed. Sorted, for a stable
-     * manifest. Paths with a tab or newline are skipped (deployment paths never have them; the
-     * manifest is tab-separated).
+     * manifest. Every name is kept, tabs and newlines included: the manifest escapes them
+     * ([write]), and a file another app added under such a name must be reported like any other.
      */
     fun walk(root: File, fs: Fs, cancelled: () -> Boolean = { false }): List<String> {
         val out = mutableListOf<String>()
@@ -58,7 +60,6 @@ object FileIntegrity {
             for (child in children) {
                 if (cancelled()) return // the walk (sequential, before hashing) must also stop on a skip
                 val rel = if (prefix.isEmpty()) child.name else "$prefix/${child.name}"
-                if ('\t' in rel || '\n' in rel) continue
                 // A real directory (not a symlink to one) is recursed; everything else is a leaf.
                 if (!fs.isSymlink(child) && child.isDirectory) recurse(child, rel) else out += rel
             }
@@ -73,7 +74,7 @@ object FileIntegrity {
         // A symlink of the Flatpak's own tree names a guest path: followed from the host it would
         // read the host's file (or nothing), so only its target is recorded. link2symlink's links
         // lead to the file's content in its store and are followed.
-        if (link != null && !File(link).name.startsWith(L2s.PREFIX)) return Entry(link, 0, 0, 0, null)
+        if (link != null && !fs.isStoreLink(link)) return Entry(link, 0, 0, 0, null)
         val stat = fs.stat(file) ?: Triple(0L, 0L, 0L)
         val sha = fs.sha256(file)
         return Entry(link, stat.first, stat.second, stat.third, sha)
@@ -116,13 +117,39 @@ object FileIntegrity {
         return Diff(tampered.sorted(), removed.sorted(), refreshed)
     }
 
-    // ---- manifest serialization: one tab-separated line per entry, "-" for an absent field.
+    // ---- manifest serialization: one tab-separated line per entry, "-" for an absent field. Paths
+    // and link targets are [escape]d, so a tab, newline or backslash in a name can't break a line.
 
     fun write(manifest: Map<String, Entry>): String = buildString {
         for ((path, e) in manifest.toSortedMap()) {
             append(e.sha256 ?: "-").append('\t').append(e.ino).append('\t').append(e.ctime).append('\t')
-                .append(e.size).append('\t').append(e.link ?: "-").append('\t').append(path).append('\n')
+                .append(e.size).append('\t').append(e.link?.let(::escape) ?: "-").append('\t').append(escape(path)).append('\n')
         }
+    }
+
+    /** [text] with backslash, tab and newline written as `\\`, `\t` and `\n`; also how such paths are logged. */
+    fun escape(text: String): String =
+        if (text.none { it == '\\' || it == '\t' || it == '\n' }) text
+        else text.replace("\\", "\\\\").replace("\t", "\\t").replace("\n", "\\n")
+
+    /** The reverse of [escape]; any other backslash pair is kept as it is. */
+    fun unescape(text: String): String {
+        if ('\\' !in text) return text
+        val out = StringBuilder(text.length)
+        var i = 0
+        while (i < text.length) {
+            val c = text[i]
+            if (c == '\\' && i + 1 < text.length) {
+                when (text[i + 1]) {
+                    '\\' -> { out.append('\\'); i += 2; continue }
+                    't' -> { out.append('\t'); i += 2; continue }
+                    'n' -> { out.append('\n'); i += 2; continue }
+                }
+            }
+            out.append(c)
+            i++
+        }
+        return out.toString()
     }
 
     fun read(text: String): Map<String, Entry> {
@@ -134,7 +161,7 @@ object FileIntegrity {
             val ino = f[1].toLongOrNull() ?: continue
             val ctime = f[2].toLongOrNull() ?: continue
             val size = f[3].toLongOrNull() ?: continue
-            map[f[5]] = Entry(f[4].takeIf { it != "-" }, ino, ctime, size, f[0].takeIf { it != "-" })
+            map[unescape(f[5])] = Entry(f[4].takeIf { it != "-" }?.let(::unescape), ino, ctime, size, f[0].takeIf { it != "-" })
         }
         return map
     }

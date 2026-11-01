@@ -35,4 +35,7 @@ object GuestPaths {
 
     /** A Flatpak's home. */
     const val HOME = "/home/user"
+
+    /** A Flatpak's XDG_RUNTIME_DIR, as Flatpak names it. */
+    fun runtimeDir(userId: Int) = "/run/user/$userId"
 }

@@ -1,33 +1,45 @@
 package com.garathon.flatdroid.proot
 
+import android.os.Process
 import android.system.ErrnoException
 import android.system.Os
 import android.system.OsConstants
 import java.io.File
 
 /**
- * Processes an earlier run of Flatdroid left behind. Android normally ends an app's child
- * processes with it, but on Waydroid a force-stop left a whole session running (its proots
- * reparented to init), holding the VNC port so the next launch failed. Ended when Flatdroid's
- * process starts, before it starts anything itself.
+ * Processes of Flatdroid's that nothing of the running Flatdroid should have.
+ *
+ * At start ([kill]): what an earlier run left behind. Android normally ends an app's child
+ * processes with it, but a force-stop can leave a whole session running on some systems (its
+ * proots reparented to init), holding the VNC port so the next launch failed.
+ *
+ * At any time ([killEscaped]): processes that left proot. A process can kill its own proot (same
+ * user), and proot doesn't take its tracees with it: they keep running untraced, with the files
+ * they had open, after Flatdroid has ended the session. Every process Flatdroid runs in a root is
+ * traced, so an untraced one of Flatdroid's whose parents up to init are all Flatdroid's escaped.
  */
 object LeftoverProcesses {
-    /** One process: its owner, its parent and its tracer (0 when not traced). */
-    data class Proc(val uid: Int, val ppid: Int, val tracer: Int = 0)
-
     /**
-     * PIDs to end, of the visible [processes]: [uid]'s orphaned trees (processes whose parents, up
-     * to init, are all [uid]'s), and [uid]'s processes traced by a process that isn't visible,
-     * with that tracer. proot isn't dumpable, so Android's /proc hides it from its own app: the
-     * processes it traces lead to a parent Flatdroid can't see, but their tracer names it, and
-     * when Flatdroid's process starts nothing of its own is traced yet. A process of the running
-     * Flatdroid leads to zygote instead, and a `run-as` shell to adbd.
+     * PIDs to end at start, of the visible [processes]: [uid]'s orphaned trees (processes whose
+     * parents, up to init, are all [uid]'s), and [uid]'s processes traced by a process that isn't
+     * visible, with that tracer. proot isn't dumpable, so Android's /proc hides it from its own
+     * app: the processes it traces lead to a parent Flatdroid can't see, but their tracer names it,
+     * and when Flatdroid's process starts nothing of its own is traced yet. A process of the
+     * running Flatdroid leads to zygote instead, and a `run-as` shell to adbd.
      */
     fun select(processes: Map<Int, Proc>, uid: Int): List<Int> {
         val orphans = processes.keys.filter { isOrphan(it, processes, uid) }
         val tracedByHidden = processes.filter { (_, proc) -> proc.uid == uid && proc.tracer != 0 && proc.tracer !in processes }
         return (orphans + tracedByHidden.keys + tracedByHidden.values.map { it.tracer }).distinct().sorted()
     }
+
+    /**
+     * PIDs of [uid]'s processes that escaped proot: untraced orphans (see the class comment).
+     * Traced ones stay, so a running task's or session's daemons (an agent gone into the
+     * background) are left alone; a `run-as` shell leads to adbd and stays too.
+     */
+    fun escaped(processes: Map<Int, Proc>, uid: Int): List<Int> =
+        processes.filter { (pid, proc) -> proc.tracer == 0 && isOrphan(pid, processes, uid) }.keys.sorted()
 
     private fun isOrphan(pid: Int, processes: Map<Int, Proc>, uid: Int): Boolean {
         var current = pid
@@ -41,22 +53,26 @@ object LeftoverProcesses {
         return false
     }
 
-    /** Ends them (SIGKILL) and returns how many there were. */
-    fun kill(): Int {
-        val processes = File("/proc").listFiles()?.mapNotNull { dir ->
-            val pid = dir.name.toIntOrNull() ?: return@mapNotNull null
-            try {
-                // The fourth field of /proc/<pid>/stat, after the parenthesised name.
-                val ppid = File(dir, "stat").readText().substringAfterLast(')').trim().split(' ')[1].toInt()
-                val tracer = File(dir, "status").useLines { lines ->
-                    lines.firstOrNull { it.startsWith("TracerPid:") }?.substringAfter(':')?.trim()?.toIntOrNull()
-                } ?: 0
-                pid to Proc(Os.stat(dir.path).st_uid, ppid, tracer)
-            } catch (_: Exception) {
-                null
-            }
-        }?.toMap() ?: return 0
-        val pids = select(processes, Os.getuid())
+    /** At start: ends what an earlier run left ([select]; SIGKILL) and returns how many there were. */
+    fun kill(): Int = killAll(select(ProcTable.read(uidOf = ::owner), Os.getuid()))
+
+    /**
+     * Ends processes that escaped proot ([escaped]; SIGKILL) and returns how many there were. Run
+     * when a session or task ends and before a file check. proot's own filter leaves an escaped
+     * process without clone, but not every way to start a process (vfork on some architectures),
+     * so it looks again until none is left.
+     */
+    fun killEscaped(): Int {
+        var total = 0
+        repeat(MAX_PASSES) {
+            val pids = escaped(ProcTable.read(uidOf = ::owner), Os.getuid()) - Process.myPid()
+            if (pids.isEmpty()) return total
+            total += killAll(pids)
+        }
+        return total
+    }
+
+    private fun killAll(pids: List<Int>): Int {
         for (pid in pids) {
             try {
                 Os.kill(pid, OsConstants.SIGKILL)
@@ -66,5 +82,8 @@ object LeftoverProcesses {
         return pids.size
     }
 
+    private fun owner(dir: File): Int = Os.stat(dir.path).st_uid
+
     private const val INIT = 1
+    private const val MAX_PASSES = 5
 }

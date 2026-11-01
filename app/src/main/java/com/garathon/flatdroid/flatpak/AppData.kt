@@ -82,4 +82,7 @@ object AppData {
 
     /** File-integrity baselines, one manifest per deployment commit (see FileIntegrityCheck). */
     fun integrityDir(context: Context): File = File(context.filesDir.canonicalFile, "integrity")
+
+    /** The deployments whose extra-data script ran (see ExtraData). */
+    fun extraDataState(context: Context): File = File(context.filesDir.canonicalFile, "extra-data-applied")
 }

@@ -69,10 +69,10 @@
     <string name="reset_title">Reset Alpine environment?</string>
     <string name="reset_text">Alpine is deleted and set up again from scratch: downloaded again, and its packages reinstalled.</string>
     <string name="reset_keep">Keep installed Flatpaks</string>
-    <string name="reset_remove">Remove Flatpaks, keep app data and caches</string>
+    <string name="reset_remove">Remove Flatpaks, keep app data</string>
     <string name="reset_wipe">Wipe everything</string>
-    <string name="reset_keep_hint">Flatpaks and all associated data (settings, cache, homes, etc), stay downloaded within Flatdroid to be used again after the environment is reset.</string>
-    <string name="reset_remove_hint">Flatpaks and all runtimes are removed, however their associated data stays (settings, cache, home, etc).</string>
+    <string name="reset_keep_hint">Flatpaks and their data (settings, homes, etc) stay downloaded within Flatdroid to be used again after the environment is reset. Caches are cleared.</string>
+    <string name="reset_remove_hint">Flatpaks and all runtimes are removed, however their data stays (settings, home, etc). Caches are cleared.</string>
     <string name="reset_wipe_hint">Everything in Flatdroid is wiped (Alpine, Flatpak apps and data), and you start from a clean slate. The only thing that remains the same is Flatdroid\'s own global settings.</string>
     <string name="reset_confirm">Reset</string>
     <string name="reset_cancel">Cancel</string>
@@ -113,7 +113,8 @@
     <string name="task_log_removed_file">removed in %1$s: %2$s</string>
     <string name="task_update_files_changed">Not updating: files of %1$s changed since they were installed, and an update would keep them. Start an affected app to reinstall what changed.</string>
     <string name="task_reinstall_not_restored">Reinstalling didn\'t restore the changed files of %1$s: Flatpak reused its own local copy, which holds the same changes. Don\'t start the affected apps.</string>
-    <string name="task_install_waits">With \"Check app files before launch\" on, installs wait until the running app is closed.</string>
+    <string name="task_extra_data_changed_files">An extra-data script changed files of %1$s, which it may not. Reinstall the affected apps and don\'t start them before.</string>
+    <string name="task_install_waits">Installs wait until the running app is closed.</string>
     <string name="task_baseline_progress">Baseline %1$s: %2$d/%3$d</string>
     <string name="task_uninstalling">Uninstalling %1$s</string>
     <string name="task_done">Done: %1$s</string>
@@ -139,6 +140,10 @@
         <item quantity="other">Removed %d links to changed content, to be downloaded again</item>
     </plurals>
     <string name="task_log_nothing_changed">No changed files now: nothing to reinstall.</string>
+    <plurals name="task_log_escaped">
+        <item quantity="one">(ended %1$d process that had left proot)</item>
+        <item quantity="other">(ended %1$d processes that had left proot)</item>
+    </plurals>
     <plurals name="task_log_removed_broken">
         <item quantity="one">(removed %1$d file whose content was gone)</item>
         <item quantity="other">(removed %1$d files whose content was gone)</item>
@@ -174,6 +179,7 @@
 
     <string name="session_channel">Running app</string>
     <string name="session_checking_files">Checking files: %1$s (%2$d/%3$d)</string>
+    <string name="session_listing_files">Checking files: listing %1$s</string>
     <string name="session_files_changed">Some files changed since this app was installed, so it was not started. Another app may have altered them. Reinstall restores the affected packages.</string>
     <string name="session_files_changed_item">• %1$s: %2$d changed, %3$d removed</string>
     <string name="session_reinstall">Reinstall</string>
@@ -497,6 +503,10 @@
     <string name="security_export_picker_hint">Exports open Android\'s \"save as\" picker instead of going into Download, where any app with All files access can read them.</string>
     <string name="security_android_fonts">Default for new apps: use Android\'s fonts</string>
     <string name="security_android_fonts_hint">Android\'s fonts tell apps, and the websites they show, the device\'s Android version and maker. Off, apps have only their own runtime\'s fonts, so some languages and emoji may show as boxes. Also applies to apps whose fonts setting you haven\'t changed.</string>
+    <string name="security_share_time_zone">Default for new apps: share the time zone</string>
+    <string name="security_share_time_zone_hint">Apps\' clocks follow Android\'s time zone. Off, apps get UTC, so their times don\'t hint at where you are. Also applies to apps whose time zone setting you haven\'t changed.</string>
+    <string name="security_share_language">Default for new apps: share the language and region</string>
+    <string name="security_share_language_hint">Apps use Android\'s language and its region\'s formats when they have them. Off, apps use English with generic formats, and can\'t tell your language or region. Also applies to apps whose language setting you haven\'t changed.</string>
     <string name="security_share_clipboard">Default for new apps: share the clipboard with Android</string>
     <string name="security_share_clipboard_hint">Text copied in Android reaches the app through the VNC viewer, and the other way round. Off, apps can\'t read what you copy in Android. Also applies to apps whose clipboard setting you haven\'t changed.</string>
     <string name="security_check_files">Check app files before launch</string>
@@ -508,6 +518,11 @@
     <string name="baseline_choice_record_now">Record now</string>
     <string name="baseline_choice_first_launch">At first launch</string>
     <string name="settings_terminal_filter">Filter the terminal\'s commands</string>
+    <string name="settings_terminal_during_session">Terminal while an app runs</string>
+    <string name="settings_terminal_during_session_hint">Lets the terminal run commands while an app runs, and apps start while a command runs. A running app can take over such a command and run its own code in Alpine\'s proot, with everything Alpine reaches: every Flatpak\'s files and the Internet. A large security risk; only for apps you trust completely.</string>
+    <string name="settings_app_running">These settings change Alpine, which can\'t happen while an app runs. Stop the app, then save again.</string>
+    <string name="settings_terminal_app_running">Not while an app runs: the app could take over the terminal\'s commands.</string>
+    <string name="terminal_app_running">An app is running. Stop it first: a command run now could be taken over by the app (see the developer setting \"Terminal while an app runs\").</string>
     <string name="settings_terminal_filter_hint">Commands run behind Flatdroid\'s system call filter, as everything else in Alpine does. Off, tools such as strace and gdb work, and so does anything you run there that tries to leave proot.</string>
     <string name="launch_dumpable">Flatdroid couldn\'t make its own process non-dumpable, so an app could read Flatdroid\'s memory. Not starting it.</string>
     <string name="launch_filter_refused">Flatdroid couldn\'t put its system call filter in place, so it started nothing.</string>
@@ -515,6 +530,10 @@
     <string name="app_settings_audio_requested_off">The app asks for sound; your security level keeps it off until you turn it on.</string>
     <string name="app_settings_clipboard">Clipboard</string>
     <string name="app_settings_clipboard_hint">Copy and paste between the app and Android, through the VNC viewer. Off, the app can\'t read what you copy in Android.</string>
+    <string name="app_settings_time_zone">Time zone</string>
+    <string name="app_settings_time_zone_hint">The app\'s clock follows Android\'s time zone. Off, the app gets UTC, so its times don\'t hint at where you are.</string>
+    <string name="app_settings_language">Language and region</string>
+    <string name="app_settings_language_hint">The app uses Android\'s language, and its region\'s date and number formats, when the app has them. Off, it uses English with generic formats, and can\'t tell your language or region.</string>
     <string name="app_settings_android_fonts">Android\'s fonts</string>
     <string name="app_settings_android_fonts_hint">Off, the app has only its runtime\'s fonts, so neither it nor the websites it shows can tell the device\'s Android version and maker from them. Some languages and emoji may then show as boxes.</string>
     <string name="app_settings_network">Network</string>

@@ -4,6 +4,8 @@ import android.content.Context
 import com.garathon.flatdroid.alpine.AlpineEnvironment
 import com.garathon.flatdroid.launcher.LaunchPlanner
 import java.io.File
+import java.util.concurrent.Callable
+import java.util.concurrent.Executors
 
 /**
  * Orchestrates the file-integrity check over all the deployments one app uses (the app, its
@@ -18,7 +20,7 @@ import java.io.File
 class IntegrityGuard(context: Context) {
     private val env = AlpineEnvironment.get(context)
     private val installation = FlatpakInstallation(env.flatpakDir, env.arch)
-    private val check = FileIntegrityCheck(AppData.integrityDir(context))
+    private val check = FileIntegrityCheck(AppData.integrityDir(context), File(env.paths().l2sDir))
 
     /** A deployment whose files changed since its baseline. */
     data class Problem(val deployment: Deployment, val tampered: List<String>, val removed: List<String>) {
@@ -38,6 +40,9 @@ class IntegrityGuard(context: Context) {
 
         /** How a changed `metadata` (beside `files/`) is reported among the changed paths. */
         const val METADATA = "../metadata"
+
+        /** Deployments listed ahead at once ([verify]); listing is mostly waiting on storage. */
+        private const val LISTING_THREADS = 3
     }
 
     private val ignore: (String) -> Boolean = { it in OVERRIDDEN_PATHS }
@@ -48,21 +53,34 @@ class IntegrityGuard(context: Context) {
      * its baseline and only new or updated commits are hashed). [baselinedCommits], shared across
      * the apps of one task, keeps a runtime used by several apps from being hashed once per app.
      * [onStart] is called for each deployment that is actually baselined, before it is hashed.
+     * Commits in [skip] are left for later (deployments whose extra-data script hasn't run yet).
      */
     fun recordBaseline(
         appId: String,
         baselinedCommits: MutableSet<String> = mutableSetOf(),
+        skip: Set<String> = emptySet(),
         onStart: (ref: FlatpakRef) -> Unit = {},
         onProgress: (ref: FlatpakRef, done: Int, total: Int) -> Unit = { _, _, _ -> },
     ) {
         for (d in installation.deploymentsFor(appId)) {
-            if (!baselinedCommits.add(d.dir.name)) continue
-            val metadata = File(d.dir, "metadata")
-            if (check.metadataMatches(d.dir.name, metadata) == null) check.baselineMetadata(d.dir.name, metadata)
-            if (check.hasBaseline(d.dir.name)) continue
-            onStart(d.ref)
-            check.baseline(d.dir.name, d.files, ignore, { done, total -> onProgress(d.ref, done, total) })
+            if (d.dir.name in skip || !baselinedCommits.add(d.dir.name)) continue
+            record(d.dir.name, d.dir) { onStart(d.ref); { done, total -> onProgress(d.ref, done, total) } }
         }
+    }
+
+    /**
+     * Records the baseline of the deployment in [dir] (`<kind>/<ID>/<arch>/<branch>/<commit>`) if
+     * its commit has none: one whose extra-data script just ran.
+     */
+    fun recordDeployment(dir: File, onProgress: (done: Int, total: Int) -> Unit = { _, _ -> }) = record(dir.name, dir) { onProgress }
+
+    /** [commit]'s metadata hash and file baseline from [dir], each unless recorded; [starting] is called before hashing the files. */
+    private fun record(commit: String, dir: File, starting: () -> (Int, Int) -> Unit) {
+        val metadata = File(dir, "metadata")
+        if (check.metadataMatches(commit, metadata) == null) check.baselineMetadata(commit, metadata)
+        if (check.hasBaseline(commit)) return
+        val progress = starting()
+        check.baseline(commit, File(dir, "files"), ignore, progress)
     }
 
     /**
@@ -85,6 +103,12 @@ class IntegrityGuard(context: Context) {
     fun verifyAll(appIds: List<String>, onProgress: (ref: FlatpakRef, done: Int, total: Int) -> Unit = { _, _, _ -> }): List<Problem> =
         verify(appIds.flatMap { installation.deploymentsFor(it) }.distinctBy { it.dir.name }, onProgress, { false }, recordMissing = false)
 
+    /**
+     * Checks [deployments] in order. Listing a deployment's files is one thread's work and reports
+     * no progress, so the next deployments are listed meanwhile ([LISTING_THREADS] at a time),
+     * while the current one is stat'ed and hashed; [onProgress] gets `0` of `0` when a
+     * deployment's turn comes and its list isn't ready yet.
+     */
     private fun verify(
         deployments: List<Deployment>,
         onProgress: (ref: FlatpakRef, done: Int, total: Int) -> Unit,
@@ -92,23 +116,32 @@ class IntegrityGuard(context: Context) {
         recordMissing: Boolean,
     ): List<Problem> {
         val problems = mutableListOf<Problem>()
-        for (d in deployments) {
-            if (cancelled()) break
-            val metadata = File(d.dir, "metadata")
-            if (!recordMissing && !check.hasBaseline(d.dir.name)) continue
-            val metadataChanged = when (check.metadataMatches(d.dir.name, metadata)) {
-                null -> { if (recordMissing) check.baselineMetadata(d.dir.name, metadata); false }
-                true -> false
-                false -> true
+        val checked = deployments.filter { recordMissing || check.hasBaseline(it.dir.name) }
+        if (checked.isEmpty()) return problems
+        val listing = Executors.newFixedThreadPool(LISTING_THREADS.coerceAtMost(checked.size))
+        try {
+            val lists = checked.map { d -> listing.submit(Callable { check.leaves(d.files, ignore, cancelled) }) }
+            for ((i, d) in checked.withIndex()) {
+                if (cancelled()) break
+                if (!lists[i].isDone) onProgress(d.ref, 0, 0)
+                val listed = lists[i].get()
+                val metadata = File(d.dir, "metadata")
+                val metadataChanged = when (check.metadataMatches(d.dir.name, metadata)) {
+                    null -> { if (recordMissing) check.baselineMetadata(d.dir.name, metadata); false }
+                    true -> false
+                    false -> true
+                }
+                val diff = check.verify(d.dir.name, d.files, ignore, { done, total -> onProgress(d.ref, done, total) }, cancelled, listed)
+                if (diff == null) {
+                    // First time (or install predating the check): trust the current files as the baseline.
+                    check.baseline(d.dir.name, d.files, ignore, { done, total -> onProgress(d.ref, done, total) }, cancelled)
+                }
+                val tampered = (if (metadataChanged) listOf(METADATA) else emptyList()) + diff?.tampered.orEmpty()
+                val removed = diff?.removed.orEmpty()
+                if (tampered.isNotEmpty() || removed.isNotEmpty()) problems += Problem(d, tampered, removed)
             }
-            val diff = check.verify(d.dir.name, d.files, ignore, { done, total -> onProgress(d.ref, done, total) }, cancelled)
-            if (diff == null) {
-                // First time (or install predating the check): trust the current files as the baseline.
-                check.baseline(d.dir.name, d.files, ignore, { done, total -> onProgress(d.ref, done, total) }, cancelled)
-            }
-            val tampered = (if (metadataChanged) listOf(METADATA) else emptyList()) + diff?.tampered.orEmpty()
-            val removed = diff?.removed.orEmpty()
-            if (tampered.isNotEmpty() || removed.isNotEmpty()) problems += Problem(d, tampered, removed)
+        } finally {
+            listing.shutdownNow()
         }
         return problems
     }

@@ -1,6 +1,5 @@
 package com.garathon.flatdroid.proot
 
-import com.garathon.flatdroid.proot.LeftoverProcesses.Proc
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -45,5 +44,21 @@ class LeftoverProcessesTest {
     fun unknownParentsAndLoopsAreLeftAlone() {
         val processes = mapOf(10 to Proc(app, 11), 20 to Proc(app, 21), 21 to Proc(app, 20))
         assertEquals(emptyList<Int>(), LeftoverProcesses.select(processes, app))
+    }
+
+    @Test
+    fun escapedAreUntracedOrphansOnly() {
+        val processes = mapOf(
+            1 to Proc(0, 0),
+            89 to Proc(0, 1),
+            500 to Proc(app, 89), // Flatdroid itself
+            600 to Proc(app, 1), // left proot: its proot was killed
+            601 to Proc(app, 600), // its child, also untraced
+            700 to Proc(app, 1, tracer = 650), // a daemon of a running task, still traced
+            701 to Proc(app, 500, tracer = 650), // a running session's app
+            801 to Proc(app, 800), // a run-as shell (adbd hidden)
+            900 to Proc(10200, 1), // another app's
+        )
+        assertEquals(listOf(600, 601), LeftoverProcesses.escaped(processes, app))
     }
 }

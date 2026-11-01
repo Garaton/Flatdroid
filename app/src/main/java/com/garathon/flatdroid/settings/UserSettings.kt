@@ -65,12 +65,21 @@ data class UserSettings(
     val security: SecuritySettings = SecuritySettings(),
     /** Developer setting: the terminal's commands run behind fdsec's filter. */
     val terminalFilter: Boolean = true,
+    /** Developer setting: the terminal runs commands while an app runs, and apps start while it does. */
+    val terminalDuringSession: Boolean = false,
 ) {
     /** The level [security] matches; null for Custom. */
     val securityLevel: SecurityLevel? get() = SecurityLevel.of(security)
 
     /** Whether the terminal filters its commands; the developer setting counts only while developer options are on. */
     val filterTerminal: Boolean get() = !developerOptions || terminalFilter
+
+    /**
+     * Whether the terminal and a running app may overlap; the developer setting counts only while
+     * developer options are on. A command started during a session isn't hidden from the app,
+     * which could take it over (see [com.garathon.flatdroid.alpine.AlpineCommands]).
+     */
+    val terminalWithApps: Boolean get() = developerOptions && terminalDuringSession
 
     val onlyMyLanguages: Boolean get() = flatpakLanguages != GuestFiles.ALL_LANGUAGES
 
@@ -147,6 +156,7 @@ class UserSettingsStore(private val file: File) {
             flatpakTheme = FlatpakTheme.entries.firstOrNull { it.name.lowercase() == props.getProperty(KEY_THEME) } ?: FlatpakTheme.SYSTEM,
             security = security(props),
             terminalFilter = props.getProperty(KEY_TERMINAL_FILTER) != "false",
+            terminalDuringSession = props.getProperty(KEY_TERMINAL_DURING_SESSION) == "true",
         )
     }
 
@@ -171,6 +181,8 @@ class UserSettingsStore(private val file: File) {
             checkFilesBeforeLaunch = flag(KEY_CHECK_FILES, default.checkFilesBeforeLaunch),
             androidFonts = flag(KEY_ANDROID_FONTS, default.androidFonts),
             shareClipboard = flag(KEY_SHARE_CLIPBOARD, default.shareClipboard),
+            shareTimeZone = flag(KEY_SHARE_TIME_ZONE, default.shareTimeZone),
+            shareLanguage = flag(KEY_SHARE_LANGUAGE, default.shareLanguage),
         )
     }
 
@@ -203,8 +215,11 @@ class UserSettingsStore(private val file: File) {
             props.setProperty(KEY_CHECK_FILES, s.checkFilesBeforeLaunch.toString())
             props.setProperty(KEY_ANDROID_FONTS, s.androidFonts.toString())
             props.setProperty(KEY_SHARE_CLIPBOARD, s.shareClipboard.toString())
+            props.setProperty(KEY_SHARE_TIME_ZONE, s.shareTimeZone.toString())
+            props.setProperty(KEY_SHARE_LANGUAGE, s.shareLanguage.toString())
         }
         if (!settings.terminalFilter) props.setProperty(KEY_TERMINAL_FILTER, "false")
+        if (settings.terminalDuringSession) props.setProperty(KEY_TERMINAL_DURING_SESSION, "true")
         file.writeTextAtomically(StringWriter().also { props.store(it, null) }.toString())
     }
 
@@ -221,7 +236,10 @@ class UserSettingsStore(private val file: File) {
         private const val KEY_CHECK_FILES = "security.checkFiles"
         private const val KEY_ANDROID_FONTS = "security.androidFonts"
         private const val KEY_SHARE_CLIPBOARD = "security.shareClipboard"
+        private const val KEY_SHARE_TIME_ZONE = "security.shareTimeZone"
+        private const val KEY_SHARE_LANGUAGE = "security.shareLanguage"
         private const val KEY_TERMINAL_FILTER = "terminal.filter"
+        private const val KEY_TERMINAL_DURING_SESSION = "terminal.duringSession"
         private const val KEY_LANGUAGES = "flatpak.languages"
         private const val KEY_DEVELOPER = "ui.developerOptions"
         private const val KEY_VNC_VIEWER = "vnc.viewer"

@@ -55,7 +55,7 @@ object DevNodes {
 
     /**
      * Whether the device has [path] in a form proot can bind. Uses stat(), as proot does: Android
-     * may let an app see that a node exists but not stat it (`/dev/full` on the test phone), and
+     * may let an app see that a node exists but not stat it (`/dev/full` on some devices), and
      * proot then skips the bind with a warning.
      */
     fun hostHas(path: String): Boolean = try {

@@ -7,7 +7,7 @@ import java.io.File
 enum class ResetMode(internal val key: String) {
     /** The Flatpak installation comes back with the new rootfs; app data and settings stay. */
     KEEP_FLATPAKS("keep-flatpaks"),
-    /** Flatpaks are deleted; each app's data, settings and caches, and Flatdroid's settings stay. */
+    /** Flatpaks (and every cache) are deleted; each app's data and settings, and Flatdroid's settings stay. */
     REMOVE_FLATPAKS("remove-flatpaks"),
     /** Everything is deleted, Flatdroid's settings included. */
     WIPE("wipe"),
@@ -23,11 +23,9 @@ class AlpineReset(
     private val pendingFile: File,
     private val installer: RootfsInstaller,
     private val state: SetupStateStore,
-    /** Temporary files (guest /tmp, downloads, package cache, roots, the session): always removed. */
+    /** Temporary files (guest /tmp, downloads, package cache, roots, the session, apps' caches): always removed. */
     private val temporary: List<File>,
-    /** Each Flatpak's cache: removed unless only Flatpaks are being removed. */
-    private val appCaches: List<File>,
-    /** Files made from installed Flatpaks (prepared Electron builds): removed with them. */
+    /** Files made from installed Flatpaks (prepared Electron builds, baselines, which extra data ran): removed with them. */
     private val flatpakFiles: List<File>,
     /** Each Flatpak's settings and data, the launcher's files and Flatdroid's settings: removed only by [ResetMode.WIPE]. */
     private val userData: List<File>,
@@ -50,7 +48,6 @@ class AlpineReset(
         if (mode == ResetMode.WIPE) userData.forEach { fs.deleteTree(it) }
         installer.wipe()
         temporary.forEach { fs.deleteTree(it) }
-        if (mode != ResetMode.REMOVE_FLATPAKS) appCaches.forEach { fs.deleteTree(it) }
         pendingFile.delete()
     }
 }

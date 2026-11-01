@@ -16,11 +16,10 @@ import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.garathon.flatdroid.MainActivity
 import com.garathon.flatdroid.R
+import com.garathon.flatdroid.alpine.AlpineCommands
 import com.garathon.flatdroid.audio.MicStreamer
 import com.garathon.flatdroid.camera.AndroidCameras
 import com.garathon.flatdroid.flatpak.AppData
-import com.garathon.flatdroid.flatpak.FlatpakTask
-import com.garathon.flatdroid.flatpak.FlatpakTasks
 import com.garathon.flatdroid.flatpak.InstalledApps
 import com.garathon.flatdroid.settings.HomeMode
 import com.garathon.flatdroid.setup.SetupController
@@ -290,10 +289,9 @@ class SessionService : Service() {
             context.startService(Intent(context, SessionService::class.java).setAction(ACTION_STOP))
         }
 
-        /** Not while an update or uninstall runs, which may be changing the app's files; an install is fine. */
+        /** Not while a Flatpak task or a terminal command runs ([AlpineCommands.sessionMayStart]). */
         private fun start(context: Context, action: String, appId: String, micAnswer: Boolean?) {
-            val task = FlatpakTasks.ui.value.running
-            if (SessionController.isBusy || (task != null && task !is FlatpakTask.Install)) return
+            if (SessionController.isBusy || !AlpineCommands.sessionMayStart(context)) return
             SessionController.starting(appId, context.getString(R.string.session_starting), clearLog = true)
             ContextCompat.startForegroundService(
                 context,

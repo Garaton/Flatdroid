@@ -59,4 +59,14 @@ class CameraScriptTest {
         // With XDG_DESKTOP_PORTAL_DIR, the portal reads its configuration only beside its backends.
         assertTrue("default=flatdroid" in CameraScript.CONFIG_FILES.getValue("portals/flatdroid-portals.conf"))
     }
+
+    @Test
+    fun usersAreCountedByOneProcessStartedBeforeReady() {
+        val lines = CameraScript.text(listOf(CameraScript.Node("flatdroid-camera-0", "Back camera", 640, 480, 30))).lines()
+        val monitor = lines.indexOfFirst { it.startsWith("pw-link -m -l") }
+        assertTrue(monitor >= 0 && "awk -v nodes=\"flatdroid-camera-0\" -v prefix=\"flatdroid: camera users \"" in lines[monitor])
+        assertTrue(monitor < lines.indexOf("echo \"${CameraScript.READY}\""))
+        // Nothing runs per change: no shell function that starts pw-link again.
+        assertTrue(lines.none { it.startsWith("report") })
+    }
 }

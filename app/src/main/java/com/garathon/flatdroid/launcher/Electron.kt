@@ -22,23 +22,38 @@ object Electron {
     /** The log line that triggers a relaunch with [NEWER_FLAGS]. */
     const val GPU_FAILURE = "GPU process isn't usable"
 
-    private const val ZYPAK = "zypak-wrapper"
+    /** zypak's entry points: the wrapper script, and its helper, which IDE wrappers call directly. */
+    private val ZYPAK = listOf("zypak-wrapper", "zypak-helper")
     private const val COBALT = "cobalt"
 
     /**
-     * The binary a command script hands to zypak, e.g. `exec zypak-wrapper.sh /app/obsidian "$@"`
-     * gives `/app/obsidian`. Null if the script doesn't use zypak or names no absolute path.
+     * The binary a script hands to zypak, e.g. `exec zypak-wrapper.sh /app/obsidian "$@"` or
+     * `exec /app/bin/zypak-helper host - /app/share/codium/codium "$@"` gives the binary's path.
+     * Null if the script doesn't use zypak or names no absolute path.
      */
     fun zypakTarget(script: String): String? {
-        for (line in script.lineSequence()) {
-            val code = line.substringBefore('#').trim()
-            val words = code.split(Regex("\\s+")).map { it.trim('"', '\'') }
-            val at = words.indexOfFirst { it.substringAfterLast('/').startsWith(ZYPAK) }
+        for (words in commands(script)) {
+            val at = words.indexOfFirst { word -> ZYPAK.any { word.substringAfterLast('/').startsWith(it) } }
             if (at < 0) continue
             return words.drop(at + 1).firstOrNull { it.startsWith("/") }
         }
         return null
     }
+
+    /**
+     * The script under /app a launch script hands over to with `exec` (an IDE's wrapper that sets
+     * up its tools, then calls zypak), e.g. `exec "/app/bin/<ID>-wrapper" …`; null if it hands
+     * over to none. Only an /app path: it is read from the app's own files.
+     */
+    fun execTarget(script: String): String? = commands(script).firstNotNullOfOrNull { words ->
+        words.getOrNull(1)?.takeIf { words[0] == "exec" && it.startsWith("/app/") }
+    }
+
+    /** Each line of [script] as words, comments and quotes removed. */
+    private fun commands(script: String): Sequence<List<String>> = script.lineSequence()
+        .map { line -> line.substringBefore('#').trim() }
+        .filter { it.isNotEmpty() }
+        .map { code -> code.split(Regex("\\s+")).map { it.trim('"', '\'') } }
 
     /**
      * The browser a command script hands to cobalt (`exec cobalt "$@"`): cobalt's own entry

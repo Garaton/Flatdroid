@@ -6,8 +6,11 @@
  *
  * Always blocked: io_uring and openat2 (ENOSYS, so programs fall back to what proot
  * translates), open_by_handle_at, name_to_handle_at, pidfd_getfd, bpf, perf_event_open,
- * userfaultfd, ptrace and process_vm_readv/writev (EPERM); system calls of other ABIs (i386 and
- * x32 on x86_64, AArch32 on aarch64) get ENOSYS.
+ * userfaultfd, ptrace and process_vm_readv/writev (EPERM); statmount, listmount, the *xattrat
+ * calls, file_getattr and file_setattr, and every system call numbered above open_tree_attr
+ * (ENOSYS): they take paths proot doesn't translate (its table ends at open_tree_attr), so they
+ * would reach the host's files directly; later ones fail closed until proot knows them. System
+ * calls of other ABIs (i386 and x32 on x86_64, AArch32 on aarch64) get ENOSYS.
  *   --extra    also pidfd_open, process_madvise, kcmp, keyctl, add_key, request_key (ENOSYS)
  *   --no-inet  socket(AF_INET or AF_INET6) fails with EACCES; Unix and netlink sockets stay
  *
@@ -36,6 +39,29 @@
 #else
 #error "unsupported architecture"
 #endif
+
+/* Since Linux 5.1 new system calls have the same number on every architecture; older kernel
+ * headers (the NDK's) may not name these yet. */
+#ifndef __NR_statmount
+#define __NR_statmount 457
+#endif
+#ifndef __NR_listmount
+#define __NR_listmount 458
+#endif
+#ifndef __NR_setxattrat
+#define __NR_setxattrat 463
+#endif
+#ifndef __NR_getxattrat
+#define __NR_getxattrat 464
+#endif
+#ifndef __NR_listxattrat
+#define __NR_listxattrat 465
+#endif
+#ifndef __NR_removexattrat
+#define __NR_removexattrat 466
+#endif
+/* The highest system call proot translates (open_tree_attr); everything above gets ENOSYS. */
+#define LAST_KNOWN_NR 467
 
 #define AF_INET 2
 #define AF_INET6 10
@@ -143,6 +169,8 @@ static const struct rule ALWAYS[] = {
 	{ __NR_userfaultfd, EPERM },
 	{ __NR_ptrace, EPERM },
 	{ __NR_process_vm_readv, EPERM }, { __NR_process_vm_writev, EPERM },
+	{ __NR_statmount, ENOSYS }, { __NR_listmount, ENOSYS },
+	{ __NR_setxattrat, ENOSYS }, { __NR_getxattrat, ENOSYS }, { __NR_listxattrat, ENOSYS }, { __NR_removexattrat, ENOSYS },
 };
 
 static const struct rule EXTRA[] = {
@@ -153,8 +181,9 @@ static const struct rule EXTRA[] = {
 /* Big enough for every rule build() can emit; the _Static_assert below fails the build if a
  * future rule would overflow the stack array. */
 #define MAX_FILTER 96
-/* base (arch check, nr load) + x32 guard + ALWAYS + EXTRA + the no_inet block + the check rule. */
-_Static_assert(5 + 2 + 2 * (sizeof ALWAYS / sizeof *ALWAYS) + 2 * (sizeof EXTRA / sizeof *EXTRA) + 7 + 5 <= MAX_FILTER,
+/* base (arch check, nr load) + x32 guard + newer-than-proot guard + ALWAYS + EXTRA + the no_inet
+ * block + the check rule. */
+_Static_assert(5 + 2 + 2 + 2 * (sizeof ALWAYS / sizeof *ALWAYS) + 2 * (sizeof EXTRA / sizeof *EXTRA) + 7 + 5 <= MAX_FILTER,
                "fdsec filter would overflow MAX_FILTER");
 #define LOAD(field) BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, field))
 /* The low 32 bits of argument i (seccomp_data is little-endian on both architectures). */
@@ -174,6 +203,8 @@ static unsigned build(struct sock_filter *f, int extra, int no_inet)
 	f[n++] = (struct sock_filter)BPF_JUMP(BPF_JMP | BPF_JGE | BPF_K, __X32_SYSCALL_BIT, 0, 1);
 	f[n++] = (struct sock_filter)RETURN(SECCOMP_RET_ERRNO | ENOSYS);
 #endif
+	f[n++] = (struct sock_filter)BPF_JUMP(BPF_JMP | BPF_JGT | BPF_K, LAST_KNOWN_NR, 0, 1);
+	f[n++] = (struct sock_filter)RETURN(SECCOMP_RET_ERRNO | ENOSYS);
 	for (unsigned i = 0; i < sizeof ALWAYS / sizeof *ALWAYS; i++) {
 		f[n++] = (struct sock_filter)IF_EQUAL(ALWAYS[i].nr, 1);
 		f[n++] = (struct sock_filter)RETURN(SECCOMP_RET_ERRNO | ALWAYS[i].err);

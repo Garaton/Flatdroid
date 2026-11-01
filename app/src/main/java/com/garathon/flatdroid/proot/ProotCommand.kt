@@ -235,7 +235,7 @@ object ProotCommand {
      * rather than proot's own, which carries only proot's settings.
      *
      * Without --kill-on-exit: like Flatpak, the app runs until its last process exits, so apps
-     * that restart themselves (Electron's app.relaunch(), Kate going into the background) keep
+     * that restart themselves (Electron's app.relaunch(), editors that go into the background) keep
      * running. proot then exits with the last process's status.
      */
     fun flatpak(

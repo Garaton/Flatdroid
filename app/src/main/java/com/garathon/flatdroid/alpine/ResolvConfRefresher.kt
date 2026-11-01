@@ -6,6 +6,7 @@ import android.net.LinkProperties
 import android.net.Network
 import com.garathon.flatdroid.util.DebugLog
 import com.garathon.flatdroid.util.appScope
+import com.garathon.flatdroid.util.readTextUpTo
 import com.garathon.flatdroid.util.writeTextAtomically
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -38,15 +39,33 @@ class ResolvConfRefresher(private val context: Context, private val files: List<
         callback = null
     }
 
+    /**
+     * What each file was last given here. A session's copy is bound writable into the app's root,
+     * so it is never read whole: compared with what was written, or at first with at most
+     * [MAX_BYTES] of it.
+     */
+    private val written = HashMap<File, String>()
+
     @Synchronized
     private fun refresh() {
         val servers = NetworkDns.servers(context)
         if (servers.isEmpty()) return
         val text = GuestFiles.resolvConf(servers, NetworkDns.privateDnsServers(context))
         for (file in files) {
-            if (!file.isFile || file.readText() == text) continue
-            file.writeTextAtomically(text, durable = false)
-            DebugLog.i("resolv.conf updated for the new network: ${text.lines().filter { it.isNotBlank() }.joinToString(", ")}")
+            if (!file.isFile) continue
+            val current = written[file] ?: runCatching { file.readTextUpTo(MAX_BYTES) }.getOrNull()
+            if (current == text) continue
+            try {
+                file.writeTextAtomically(text, durable = false)
+                written[file] = text
+                DebugLog.i("resolv.conf updated for the new network: ${text.lines().filter { it.isNotBlank() }.joinToString(", ")}")
+            } catch (e: Exception) {
+                DebugLog.w("resolv.conf not updated: $e")
+            }
         }
+    }
+
+    private companion object {
+        const val MAX_BYTES = 4096L
     }
 }

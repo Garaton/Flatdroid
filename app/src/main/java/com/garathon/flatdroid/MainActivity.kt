@@ -28,6 +28,7 @@ import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
+import com.garathon.flatdroid.alpine.AlpineCommands
 import com.garathon.flatdroid.alpine.AlpineEnvironment
 import com.garathon.flatdroid.alpine.GuestFiles
 import com.garathon.flatdroid.audio.MicStreamer
@@ -150,9 +151,10 @@ class MainActivity : ComponentActivity() {
         val task by FlatpakTasks.ui.collectAsState()
         val sessionBusy = SessionController.isBusy || session.state is SessionState.ElectronOffer || session.state is SessionState.FilesChanged
         val taskRunning = task.running != null
-        // Installing adds new files only, so it can run alongside an app; update and uninstall
-        // change or remove files a running app may use.
-        val installRunning = task.running is FlatpakTask.Install
+        // No task while an app runs, and no app while a task or (unless allowed) a terminal command
+        // runs: a running app could take over Alpine processes started after it ([AlpineCommands]).
+        val terminalWithApps = remember(screen) { AlpineCommands.terminalWithApps(this) }
+        val terminalRunning = running
         val nameOf = { id: String -> apps?.firstOrNull { it.id == id }?.name ?: id }
         BackHandler(enabled = screen != Screen.Home) {
             navigate(screen.parent ?: Screen.Home)
@@ -211,6 +213,7 @@ class MainActivity : ComponentActivity() {
                 onImportSettings = { storage.importFlatdroidSettings { navigate(Screen.Home) } },
                 onResetSettings = { viewModel.applySettings(UserSettings.defaults(languages)) { navigate(Screen.Home) } },
                 canReset = !sessionBusy && !taskRunning,
+                canOpenTerminal = !SessionController.isBusy || terminalWithApps,
                 storageBusy = storageTasks.running != null || storageTasks.queued.isNotEmpty(),
                 modifier = modifier,
             )
@@ -320,8 +323,8 @@ class MainActivity : ComponentActivity() {
                 HomeScreen(
                     apps = apps,
                     runningAppId = session.state.appIdOrNull,
-                    canLaunch = !sessionBusy && (!taskRunning || installRunning),
-                    canInstall = !taskRunning,
+                    canLaunch = !sessionBusy && !taskRunning && (!terminalRunning || terminalWithApps),
+                    canInstall = !sessionBusy && !taskRunning,
                     canUpdate = !sessionBusy && !taskRunning,
                     onLaunch = { launch(it.id) },
                     onAppSettings = { navigate(Screen.AppSettings(it.id)) },

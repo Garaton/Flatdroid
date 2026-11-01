@@ -282,4 +282,43 @@ class LaunchPlannerTest {
         assertEquals(File(dirs.pulseSockets, "").path, Ready(planner.plan("a.Quiet", dirs)).binds.pulseSockets)
         assertEquals(null, Ready(planner.plan("a.Quiet", dirs, LaunchOptions(audio = false))).binds.pulseSockets)
     }
+
+    @Test
+    fun electronBehindAnIdeWrapperIsFound() {
+        runtimeWithGl()
+        val id = "com.vscodium.codium"
+        val files = inst.app(id, metadata = appMetadata(id, id))
+        File(files, "bin").mkdirs()
+        // The command script sets things up and hands over to a wrapper, which calls zypak's helper.
+        File(files, "bin/$id").writeText("#!/usr/bin/bash\nexec_editor() {\n  exec \"/app/bin/$id-wrapper\" \"/app/share/codium/resources/app/out/cli.js\" \"\$@\"\n}\nexec_editor \"\$@\"\n")
+        File(files, "bin/$id-wrapper").writeText("#!/usr/bin/bash\nexec \"/app/bin/zypak-helper\" host - /app/share/codium/$id \"\$@\"\n")
+        File(files, "share/codium").mkdirs()
+        File(files, "share/codium/$id").writeBytes(ExecutableTest.elf(0xb7))
+
+        val plan = Ready(planner.plan(id, dirs))
+        assertTrue(plan.isElectron)
+        assertEquals(listOf("/app/share/codium/$id") + Electron.BASE_FLAGS, plan.command)
+    }
+
+    @Test
+    fun runtimeDirLocaleAndContainerAsFlatpaksOrGeneric() {
+        val runtime = runtimeWithGl()
+        File(runtime, "lib/locale/de_DE.utf8").mkdirs()
+        val files = inst.app("org.xfce.mousepad", metadata = appMetadata("org.xfce.mousepad", "mousepad"))
+        File(files, "bin").mkdirs()
+        File(files, "bin/mousepad").writeBytes(ExecutableTest.elf(0xb7))
+        val withRuntimeDir = dirs.copy(runtimeDir = File(tmp.root, "run"), userId = 10235)
+
+        val shared = Ready(planner.plan("org.xfce.mousepad", withRuntimeDir, LaunchOptions(languageTags = listOf("de-DE"))))
+        assertEquals("/run/user/10235", shared.environment["XDG_RUNTIME_DIR"])
+        assertTrue(File(tmp.root, "run").path to "/run/user/10235" in shared.binds.extra)
+        assertEquals("de_DE.UTF-8", shared.environment["LANG"])
+        assertEquals("flatpak", shared.environment["container"])
+
+        // Not shared: the generic locale; without /.flatpak-info, no `container` either.
+        val generic = Ready(planner.plan("org.xfce.mousepad", withRuntimeDir, LaunchOptions(flatpakInfo = false)))
+        assertEquals(LaunchEnvironment.GENERIC_LOCALE, generic.environment["LANG"])
+        assertFalse("container" in generic.environment)
+        assertTrue(LaunchPlanner.LOCALTIME in LaunchPlanner.ETC_OVERRIDES && LaunchPlanner.TIMEZONE in LaunchPlanner.ETC_OVERRIDES)
+    }
 }

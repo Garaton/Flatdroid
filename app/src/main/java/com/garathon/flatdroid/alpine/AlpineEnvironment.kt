@@ -29,7 +29,7 @@ import java.io.FileInputStream
  * Temporary, in cache: the guest's /tmp and /dev/shm, proot's own temporary files, downloads.
  */
 class AlpineEnvironment private constructor(private val context: Context) {
-    // Fully resolved paths only. Android hands out /data/user/0/<package>, which on the test phone
+    // Fully resolved paths only. Android hands out /data/user/0/<package>, which on some devices
     // resolves elsewhere; link2symlink writes PROOT_L2S_DIR into every link it creates, and proot
     // maps a link target back into the guest only when it starts with the rootfs's resolved path.
     // With the unresolved prefix, every hard link in Alpine dangled (gpg couldn't lock its keyring).

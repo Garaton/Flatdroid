@@ -68,14 +68,7 @@ class FlatpakInstallation(root: File, private val arch: String) {
      * extension too, not only the app and base runtime. `deploymentsFor` returns the app first and
      * the runtime and extensions (all runtime-type refs) after it.
      */
-    fun reinstallRefsFor(appId: String): List<String> {
-        val deployments = deploymentsFor(appId)
-        if (deployments.isEmpty()) return emptyList()
-        return deployments.map { it.installRef }.distinct()
-    }
-
-    /** `app/<ID>/<arch>/<branch>` and `runtime/…` of each deployment [appId] uses, relative to the installation. */
-    fun branchesFor(appId: String): List<String> = deploymentsFor(appId).map { it.branch }.distinct()
+    fun reinstallRefsFor(appId: String): List<String> = deploymentsFor(appId).map { it.installRef }.distinct()
 
     /**
      * Installed extensions for [points] of a parent on [parentBranch]: for each point, the first of

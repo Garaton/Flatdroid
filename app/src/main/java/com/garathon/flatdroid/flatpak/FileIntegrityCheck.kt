@@ -21,10 +21,22 @@ import java.util.concurrent.atomic.AtomicInteger
  */
 class FileIntegrityCheck(
     private val integrityDir: File,
+    /** link2symlink's store: links into it are followed, any other is recorded by its target. */
+    private val l2sDir: File,
     private val threads: Int = Runtime.getRuntime().availableProcessors().coerceIn(1, 8),
 ) {
     private val statOnly = fs(hash = false)
     private val withHash = fs(hash = true)
+
+    private fun fs(hash: Boolean) = FileIntegrity.Fs(
+        isSymlink = { isSymlink(it) },
+        readlink = { if (isSymlink(it)) runCatching { Os.readlink(it.path) }.getOrNull() else null },
+        stat = {
+            runCatching { Os.stat(it.path) }.getOrNull()?.let { s -> Triple(s.st_ino, s.st_ctime, s.st_size) }
+        },
+        sha256 = { if (hash && it.isFile) runCatching { sha256(it) }.getOrNull() else null },
+        isStoreLink = { L2s.storedName(it, l2sDir) != null },
+    )
 
     fun manifestFile(commit: String): File = File(integrityDir, "$commit$SUFFIX")
     fun hasBaseline(commit: String): Boolean = manifestFile(commit).isFile
@@ -49,12 +61,17 @@ class FileIntegrityCheck(
         write(commit, entries)
     }
 
+    /** The leaves [verify] looks at in [files]: [FileIntegrity.walk]'s, without the [ignore]d paths. */
+    fun leaves(files: File, ignore: (String) -> Boolean = { false }, cancelled: () -> Boolean = { false }): List<String> =
+        FileIntegrity.walk(files, statOnly, cancelled).filterNot(ignore)
+
     /**
      * Checks [files] against the baseline for [commit], re-hashing only the files whose shape
      * (symlink target, inode, ctime, size) changed. Null when there is no baseline for [commit].
      * [cancelled] is polled so the user can skip; a cancelled check returns a clean [FileIntegrity.Diff].
      * When everything matches, files whose stat changed but whose content didn't are written back,
-     * so the next check takes the fast path for them again.
+     * so the next check takes the fast path for them again. [listed] is [leaves]' result when the
+     * caller listed them already.
      */
     fun verify(
         commit: String,
@@ -62,12 +79,13 @@ class FileIntegrityCheck(
         ignore: (String) -> Boolean = { false },
         onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
         cancelled: () -> Boolean = { false },
+        listed: List<String>? = null,
     ): FileIntegrity.Diff? {
         // Drop ignored paths from both sides, so an older baseline that still lists one doesn't
         // read as removed once it is left out of the current scan.
         val baseline = (runCatching { FileIntegrity.read(manifestFile(commit).readText()) }.getOrNull() ?: return null)
             .filterKeys { !ignore(it) }
-        val leaves = FileIntegrity.walk(files, statOnly, cancelled).filterNot(ignore)
+        val leaves = listed ?: leaves(files, ignore, cancelled)
         if (cancelled()) return FileIntegrity.Diff(emptyList(), emptyList())
         // Cheap pass: shape only (stat + readlink, no content read).
         val shapes = parallel(leaves, onProgress, cancelled) { rel -> rel to FileIntegrity.entry(File(files, rel), statOnly) }.toMap()
@@ -180,14 +198,6 @@ class FileIntegrityCheck(
         const val POLL_MS = 50L
         const val CHUNK = 64
 
-        fun fs(hash: Boolean) = FileIntegrity.Fs(
-            isSymlink = { isSymlink(it) },
-            readlink = { if (isSymlink(it)) runCatching { Os.readlink(it.path) }.getOrNull() else null },
-            stat = {
-                runCatching { Os.stat(it.path) }.getOrNull()?.let { s -> Triple(s.st_ino, s.st_ctime, s.st_size) }
-            },
-            sha256 = { if (hash && it.isFile) runCatching { sha256(it) }.getOrNull() else null },
-        )
 
         fun isSymlink(file: File): Boolean =
             runCatching { OsConstants.S_ISLNK(Os.lstat(file.path).st_mode) }.getOrDefault(false)

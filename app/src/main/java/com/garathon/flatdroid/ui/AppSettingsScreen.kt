@@ -102,6 +102,8 @@ fun AppSettingsScreen(
     var network by rememberSaveable { mutableStateOf(settings.network ?: networkDefault) }
     var clipboard by rememberSaveable { mutableStateOf(settings.sharesClipboard) }
     var androidFonts by rememberSaveable { mutableStateOf(settings.usesAndroidFonts) }
+    var timeZone by rememberSaveable { mutableStateOf(settings.sharesTimeZone) }
+    var language by rememberSaveable { mutableStateOf(settings.sharesLanguage) }
     var allowExtraSyscalls by rememberSaveable { mutableStateOf(settings.allowExtraSyscalls) }
     var shareHiddenFiles by rememberSaveable { mutableStateOf(settings.shareHiddenFiles) }
     var microphone by rememberSaveable { mutableStateOf(settings.microphone) }
@@ -281,6 +283,14 @@ fun AppSettingsScreen(
             androidFonts, { androidFonts = it },
             stringResource(R.string.app_settings_android_fonts), stringResource(R.string.app_settings_android_fonts_hint),
         )
+        SwitchRow(
+            timeZone, { timeZone = it },
+            stringResource(R.string.app_settings_time_zone), stringResource(R.string.app_settings_time_zone_hint),
+        )
+        SwitchRow(
+            language, { language = it },
+            stringResource(R.string.app_settings_language), stringResource(R.string.app_settings_language_hint),
+        )
 
         SectionTitle(stringResource(R.string.app_settings_files))
         Column(Modifier.selectableGroup()) {
@@ -347,6 +357,8 @@ fun AppSettingsScreen(
                             network = network.takeIf { it != networkDefault },
                             clipboard = clipboard.takeIf { it != settings.defaults.clipboard },
                             androidFonts = androidFonts.takeIf { it != settings.defaults.androidFonts },
+                            timeZone = timeZone.takeIf { it != settings.defaults.timeZone },
+                            language = language.takeIf { it != settings.defaults.language },
                             allowExtraSyscalls = if (developerOptions) allowExtraSyscalls else settings.allowExtraSyscalls,
                             shareHiddenFiles = if (developerOptions) shareHiddenFiles else settings.shareHiddenFiles,
                             microphone = microphone,

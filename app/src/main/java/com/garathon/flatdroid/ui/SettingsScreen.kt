@@ -41,7 +41,8 @@ import com.garathon.flatdroid.ui.theme.FlatdroidTheme
 
 /**
  * Flatdroid's Settings, opened from the home screen: every setting by section, with Save and
- * Back, the Alpine terminal, and a danger section at the end (resetting the Alpine environment,
+ * Back, the Alpine terminal (not while an app runs, unless its developer setting allows:
+ * [canOpenTerminal]), and a danger section at the end (resetting the Alpine environment,
  * not while an app or a Flatpak task runs: [canReset]). The Storage section's actions take
  * effect at once, without Save: changing the shared home ([sharedHome], shown as the user knows
  * it) and All files access ([allFilesAccess], null where Android has no such setting), which
@@ -88,6 +89,7 @@ fun SettingsScreen(
     modifier: Modifier = Modifier,
     canReset: Boolean = true,
     storageBusy: Boolean = false,
+    canOpenTerminal: Boolean = true,
 ) {
     var onlyMyLanguages by rememberSaveable { mutableStateOf(settings.onlyMyLanguages) }
     var developerOptions by rememberSaveable { mutableStateOf(settings.developerOptions) }
@@ -103,6 +105,7 @@ fun SettingsScreen(
     var flatpakTheme by rememberSaveable { mutableStateOf(settings.flatpakTheme) }
     var security by rememberSaveable(stateSaver = SecuritySaver) { mutableStateOf(settings.security) }
     var terminalFilter by rememberSaveable { mutableStateOf(settings.terminalFilter) }
+    var terminalDuringSession by rememberSaveable { mutableStateOf(settings.terminalDuringSession) }
     var confirmResetSettings by rememberSaveable { mutableStateOf(false) }
     var baselineChoice by rememberSaveable { mutableStateOf(false) }
     var cachesCleared by rememberSaveable { mutableStateOf(false) }
@@ -346,6 +349,11 @@ fun SettingsScreen(
                 stringResource(R.string.settings_terminal_filter), stringResource(R.string.settings_terminal_filter_hint),
                 enabled = !applying, developer = true,
             )
+            SwitchRow(
+                terminalDuringSession, { terminalDuringSession = it },
+                stringResource(R.string.settings_terminal_during_session), stringResource(R.string.settings_terminal_during_session_hint),
+                enabled = !applying, developer = true,
+            )
         }
 
         error?.let {
@@ -368,6 +376,7 @@ fun SettingsScreen(
                 flatpakTheme = flatpakTheme,
                 security = security,
                 terminalFilter = terminalFilter,
+                terminalDuringSession = terminalDuringSession,
             )
         }
         if (baselineChoice) {
@@ -395,7 +404,14 @@ fun SettingsScreen(
         }
 
         SectionTitle(stringResource(R.string.settings_section_tools))
-        OutlinedButton(onClick = onTerminal, enabled = !applying) { Text(stringResource(R.string.terminal_title)) }
+        OutlinedButton(onClick = onTerminal, enabled = !applying && canOpenTerminal) { Text(stringResource(R.string.terminal_title)) }
+        if (!canOpenTerminal) {
+            Text(
+                stringResource(R.string.settings_terminal_app_running),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
 
         SectionTitle(stringResource(R.string.settings_section_danger), danger = true)
         OutlinedButton(onClick = { confirmReset = true }, enabled = !applying && canReset) {

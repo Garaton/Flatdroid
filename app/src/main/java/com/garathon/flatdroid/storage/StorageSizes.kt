@@ -3,6 +3,7 @@ package com.garathon.flatdroid.storage
 import android.system.ErrnoException
 import android.system.Os
 import android.system.OsConstants
+import com.garathon.flatdroid.flatpak.L2s
 import java.io.File
 
 /** One app's storage, in bytes, as its Storage section shows it. */
@@ -49,7 +50,6 @@ object StorageSizes {
      * links lead to it: Flatpak keeps one copy of identical files, and deployments share them.
      */
     fun following(files: List<File>, l2sDir: File, stop: () -> Boolean = { false }): Long {
-        val prefix = l2sDir.path + "/"
         val seen = HashSet<Long>()
         fun walk(entry: File): Long {
             val stat = lstat(entry) ?: return 0L
@@ -60,7 +60,7 @@ object StorageSizes {
                 }
                 OsConstants.S_ISLNK(stat.st_mode) -> {
                     val target = try { Os.readlink(entry.path) } catch (_: ErrnoException) { null }
-                    if (target != null && target.startsWith(prefix)) {
+                    if (target != null && L2s.inStore(target, l2sDir)) {
                         val content = try { Os.stat(entry.path) } catch (_: ErrnoException) { null }
                         stat.st_blocks * 512 + if (content != null && seen.add(content.st_ino)) content.st_blocks * 512 else 0L
                     } else {

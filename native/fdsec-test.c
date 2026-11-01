@@ -57,6 +57,17 @@ int main(int argc, char **argv)
 	expect("perf_event_open", syscall(SYS_perf_event_open, 0, 0, -1, -1, 0), base, EPERM);
 	expect("userfaultfd", syscall(SYS_userfaultfd, -1), base, EPERM);
 	expect("x32 getpid", syscall(0x40000000 | SYS_getpid), base, ENOSYS);
+	/* Paths proot doesn't translate; a bad file descriptor makes them harmless (EBADF unfiltered). */
+	expect("statmount", syscall(457, 0, 0, 0, 0), base, ENOSYS);
+	expect("listmount", syscall(458, 0, 0, 0, 0), base, ENOSYS);
+	expect("setxattrat", syscall(463, -1, "", 0, 0, 0, 0), base, ENOSYS);
+	expect("getxattrat", syscall(464, -1, "", 0, 0, 0, 0), base, ENOSYS);
+	expect("listxattrat", syscall(465, -1, "", 0, 0, 0), base, ENOSYS);
+	expect("removexattrat", syscall(466, -1, "", 0, 0), base, ENOSYS);
+	expect("file_getattr", syscall(468, -1, "", 0, 0, 0), base, ENOSYS);
+	expect("file_setattr", syscall(469, -1, "", 0, 0, 0), base, ENOSYS);
+	/* open_tree_attr is the last one proot translates, so it stays allowed (EBADF here). */
+	expect("open_tree_attr", syscall(467, -1, "", 0, 0, 0), 0, ENOSYS);
 	expect("check rule", syscall(SYS_getpriority, 0x66647365, 0), base, ENOTRECOVERABLE);
 	expect("getpriority", syscall(SYS_getpriority, 0 /* PRIO_PROCESS */, 0), 0, 0);
 
