@@ -28,15 +28,21 @@ object LaunchEnvironment {
         kdePlatformTheme: Boolean = false,
         /** The app's session bus is bound at [GuestPaths.SESSION_BUS_DIR]. */
         sessionBus: Boolean = false,
+        /** The locale ([locale]); the generic C.UTF-8 when the device's language isn't shared. */
+        lang: String = GENERIC_LOCALE,
+        /** XDG_RUNTIME_DIR, the app's own `/run/user/<uid>` as in Flatpak. */
+        runtimeDir: String = "/tmp",
+        /** The root looks like Flatpak's (/.flatpak-info), so `container` says so too, as Flatpak sets it. */
+        flatpakContainer: Boolean = false,
     ): LinkedHashMap<String, String> {
         val varApp = "${GuestPaths.HOME}/.var/app/$appId"
         val env = linkedMapOf(
             "PATH" to "/app/bin:/usr/bin",
             "HOME" to GuestPaths.HOME,
-            "LANG" to "C.UTF-8",
-            // Terminals (Konsole) start it; Flatpak passes the host's.
+            "LANG" to lang,
+            // Terminal apps start it; Flatpak passes the host's.
             "SHELL" to "/bin/sh",
-            "XDG_RUNTIME_DIR" to "/tmp",
+            "XDG_RUNTIME_DIR" to runtimeDir,
             "FLATPAK_ID" to appId,
             "XDG_CONFIG_HOME" to "$varApp/config",
             "XDG_DATA_HOME" to "$varApp/data",
@@ -71,6 +77,7 @@ object LaunchEnvironment {
             "ALSOFT_DRIVERS" to "pulse",
         )
         // libadwaita follows only the settings portal, or this (portals are off).
+        if (flatpakContainer) env["container"] = "flatpak"
         if (darkTheme) env["ADW_DEBUG_COLOR_SCHEME"] = "prefer-dark"
         if (kdePlatformTheme) env["QT_QPA_PLATFORMTHEME"] = "kde"
         if (sessionBus) env["DBUS_SESSION_BUS_ADDRESS"] = "unix:path=${GuestPaths.SESSION_BUS_DIR}/${GuestPaths.SESSION_BUS_SOCKET}"
@@ -89,6 +96,32 @@ object LaunchEnvironment {
         for ((key, value) in overrides) if (isName(key)) env[key] = value
         return env
     }
+
+    /** The locale apps get when the device's language isn't shared: no language or region. */
+    const val GENERIC_LOCALE = "C.UTF-8"
+
+    /**
+     * The locale for the device's [languageTags] (BCP 47, most preferred first), among the glibc
+     * locales the runtime has ([available], the names in its `/usr/lib/locale`, e.g. `de_DE.utf8`):
+     * the first tag's language and region; else that language in its own country (`de_DE` for a
+     * `de-AT` the runtime lacks) or in any; then the next tag. [GENERIC_LOCALE] when none fits.
+     */
+    fun locale(languageTags: List<String>, available: Collection<String>): String {
+        val utf8 = available.filter { it.endsWith(".utf8") }.map { it.removeSuffix(".utf8") }.toSet()
+        for (tag in languageTags) {
+            val locale = java.util.Locale.forLanguageTag(tag)
+            // Android still reports a few languages by their old codes; glibc uses the current ones.
+            val language = LEGACY_LANGUAGES[locale.language] ?: locale.language
+            if (!Regex("[a-z]{2,3}").matches(language)) continue
+            val country = locale.country.takeIf { Regex("[A-Z]{2}").matches(it) }
+            val candidates = listOfNotNull(country?.let { "${language}_$it" }, "${language}_${language.uppercase()}") +
+                utf8.filter { it.startsWith("${language}_") }.sorted()
+            candidates.firstOrNull { it in utf8 }?.let { return "$it.UTF-8" }
+        }
+        return GENERIC_LOCALE
+    }
+
+    private val LEGACY_LANGUAGES = mapOf("iw" to "he", "in" to "id", "ji" to "yi")
 
     /** A usable variable name; anything else could be read by `env` as an option or the command. */
     fun isName(key: String) = Regex("[A-Za-z_][A-Za-z0-9_]*").matches(key)

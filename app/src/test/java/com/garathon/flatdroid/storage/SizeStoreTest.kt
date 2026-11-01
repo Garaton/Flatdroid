@@ -81,9 +81,24 @@ class SizeStoreTest {
         store.get("shared", setOf("runtimes")) { mapOf("runtimes" to 5L) }
         store.get("a.App", keys) { mapOf("app" to 1L, "home" to 1L) }
         store.forgetAll(keep = "shared")
-        assertEquals(setOf("shared.sizes"), dir.list()!!.toSet())
+        // The forgotten one is set aside as its last sizes, for showing until measured again.
+        assertEquals(setOf("shared.sizes", "a.App.sizes.last"), dir.list()!!.toSet())
         var measured = false
         store.get("shared", setOf("runtimes")) { measured = true; mapOf("runtimes" to 5L) }
         assertFalse(measured)
+    }
+
+    @Test
+    fun forgottenSizesStayAsTheLastOnesUntilMeasuredAgain() {
+        val dir = tmp.newFolder()
+        val store = SizeStore(dir)
+        assertEquals(null, store.last("a.App", keys))
+        store.get("a.App", keys) { mapOf("app" to 1L, "home" to 2L) }
+        store.forget("a.App")
+        assertEquals(mapOf("app" to 1L, "home" to 2L), store.last("a.App", keys))
+        // Measured again: the new sizes, and nothing set aside any more.
+        store.get("a.App", keys) { mapOf("app" to 3L, "home" to 4L) }
+        assertEquals(mapOf("app" to 3L, "home" to 4L), store.last("a.App", keys))
+        assertEquals(setOf("a.App.sizes"), dir.list()!!.toSet())
     }
 }

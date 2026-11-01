@@ -6,6 +6,7 @@ import android.os.SystemClock
 import android.system.Os
 import com.garathon.flatdroid.proot.AlpineBinds
 import com.garathon.flatdroid.proot.DevNodes
+import com.garathon.flatdroid.proot.Fdsec
 import com.garathon.flatdroid.proot.GuestPaths
 import com.garathon.flatdroid.proot.ProcessResult
 import com.garathon.flatdroid.proot.ProcessStopper
@@ -28,7 +29,7 @@ import java.io.FileInputStream
  * Temporary, in cache: the guest's /tmp and /dev/shm, proot's own temporary files, downloads.
  */
 class AlpineEnvironment private constructor(private val context: Context) {
-    // Fully resolved paths only. Android hands out /data/user/0/<package>, which on the test phone
+    // Fully resolved paths only. Android hands out /data/user/0/<package>, which on some devices
     // resolves elsewhere; link2symlink writes PROOT_L2S_DIR into every link it creates, and proot
     // maps a link target back into the guest only when it starts with the rootfs's resolved path.
     // With the unresolved prefix, every hard link in Alpine dangled (gpg couldn't lock its keyring).
@@ -74,13 +75,15 @@ class AlpineEnvironment private constructor(private val context: Context) {
 
     /**
      * Starts [command] in Alpine as fake root and returns at once; the caller stops it. Used for
-     * the terminal and the long-running display and audio helpers.
+     * the terminal and the long-running display and audio helpers. [filter] is [Fdsec]'s; only
+     * the terminal may pass null (its developer setting), every other start keeps a filter.
      */
     fun start(
         command: List<String>,
         extraBinds: List<Pair<String, String>> = emptyList(),
         /** As the app's own user IDs instead of root ([ProotCommand.alpine]'s ids). */
         asAppUser: Boolean = false,
+        filter: Fdsec.Filter? = Fdsec.Filter(),
         onLine: (String) -> Unit = {},
     ): ProotProcess {
         check(isInstalled()) { "The Alpine rootfs is not installed" }
@@ -91,21 +94,25 @@ class AlpineEnvironment private constructor(private val context: Context) {
             write("passwd", GuestFiles.passwdWith(rootfsFile("etc/passwd"), uid, gid)).path to "/etc/passwd",
             write("group", GuestFiles.groupWith(rootfsFile("etc/group"), gid)).path to "/etc/group",
         )
-        val invocation = ProotCommand.alpine(paths(), prepareBinds(binds), command, ids = ids)
+        val invocation = ProotCommand.alpine(paths(), prepareBinds(binds), command, ids = ids, filter = filter)
         return ProotRunner.start(invocation, alpineDir, onLine = onLine)
     }
 
     /** The Flatpak user installation inside the rootfs. */
     val flatpakDir: File get() = File(installer.rootfs, "root/.local/share/flatpak")
 
-    /** resolv.conf for the current network. */
-    fun resolvConf(): String = GuestFiles.resolvConf(NetworkDns.servers(context))
+    /** The resolv.conf every Alpine proot binds; kept in step with the network during a Flatpak task ([ResolvConfRefresher]). */
+    val resolvConfFile: File get() = File(generatedDir, "resolv.conf")
+
+    /** resolv.conf for the current network (its Private DNS provider's servers when it names one that answers). */
+    fun resolvConf(): String = GuestFiles.resolvConf(NetworkDns.servers(context), NetworkDns.privateDnsServers(context))
 
     fun paths(): ProotPaths = ProotPaths(
         proot = File(libDir, "libproot.so").path,
         loader = File(libDir, "libproot-loader.so").path,
         tmpDir = dir(File(cacheDir, "proot-tmp")).path,
         rootfs = installer.rootfs.path,
+        fdsec = File(libDir, Fdsec.LIBRARY).path,
     )
 
     private fun prepareBinds(extra: List<Pair<String, String>>): AlpineBinds {

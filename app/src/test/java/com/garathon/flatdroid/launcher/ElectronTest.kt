@@ -88,4 +88,19 @@ class ElectronTest {
         File(resources, "app.asar.unpacked/node_modules/x/x.node").writeText("x")
         assertTrue(Electron.hasNativeModules(resources))
     }
+
+    @Test
+    fun zypaksHelperCalledDirectlyAndExecIntoAWrapper() {
+        assertEquals(
+            "/app/share/codium/com.vscodium.codium",
+            Electron.zypakTarget("#!/usr/bin/bash\nfunction exec_editor() {\n  export ZYPAK_BIN=\"/app/bin\"\n  exec \"/app/bin/zypak-helper\" \"host\" \"-\" \"/app/share/codium/com.vscodium.codium\" \"\$@\"\n}\n"),
+        )
+        assertEquals(
+            "/app/bin/com.vscodium.codium-wrapper",
+            Electron.execTarget("#!/usr/bin/bash\nfunction exec_editor() {\n  exec \"/app/bin/com.vscodium.codium-wrapper\" \"/app/share/codium/resources/app/out/cli.js\" \"\$@\"\n}\n"),
+        )
+        // Not into /app (env, the runtime's tools): not followed.
+        assertNull(Electron.execTarget("#!/bin/sh\nexec env ELECTRON_RUN_AS_NODE=1 /app/bin/zypak-wrapper.sh /app/code\n"))
+        assertNull(Electron.execTarget("#!/bin/sh\nexec /usr/bin/python3 \"\$@\"\n"))
+    }
 }

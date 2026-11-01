@@ -1,5 +1,6 @@
 package com.garathon.flatdroid.session
 
+import com.garathon.flatdroid.FlatdroidApplication
 import android.content.Context
 import android.content.res.Configuration
 import android.hardware.display.DisplayManager
@@ -11,6 +12,7 @@ import android.view.Display
 import android.view.Surface
 import com.garathon.flatdroid.R
 import com.garathon.flatdroid.alpine.AlpineEnvironment
+import com.garathon.flatdroid.alpine.ResolvConfRefresher
 import com.garathon.flatdroid.alpine.GuestFiles
 import com.garathon.flatdroid.audio.AudioPlayer
 import com.garathon.flatdroid.audio.MicStreamer
@@ -19,7 +21,9 @@ import com.garathon.flatdroid.camera.CameraScript
 import com.garathon.flatdroid.camera.CameraStreamer
 import com.garathon.flatdroid.flatpak.AndroidLinkFs
 import com.garathon.flatdroid.flatpak.AppData
+import com.garathon.flatdroid.flatpak.FileIntegrity
 import com.garathon.flatdroid.flatpak.FlatpakInstallation
+import com.garathon.flatdroid.flatpak.IntegrityGuard
 import com.garathon.flatdroid.launcher.DesktopConfig
 import com.garathon.flatdroid.launcher.Electron
 import com.garathon.flatdroid.launcher.ElectronSwap
@@ -31,7 +35,10 @@ import com.garathon.flatdroid.launcher.PlanResult
 import com.garathon.flatdroid.launcher.VncPassword
 import com.garathon.flatdroid.proot.AlpineBinds
 import com.garathon.flatdroid.proot.DevNodes
+import com.garathon.flatdroid.proot.Fdsec
 import com.garathon.flatdroid.proot.GuestPaths
+import com.garathon.flatdroid.proot.HelperProcesses
+import com.garathon.flatdroid.proot.LeftoverProcesses
 import com.garathon.flatdroid.proot.ProotCommand
 import com.garathon.flatdroid.proot.ProotProcess
 import com.garathon.flatdroid.proot.ProotRunner
@@ -41,9 +48,11 @@ import com.garathon.flatdroid.settings.AudioOutputMode
 import com.garathon.flatdroid.settings.FlatpakTheme
 import com.garathon.flatdroid.settings.HomeMode
 import com.garathon.flatdroid.settings.Resampler
+import com.garathon.flatdroid.settings.SecuritySettings
 import com.garathon.flatdroid.settings.UserSettings
 import com.garathon.flatdroid.setup.SetupController
 import com.garathon.flatdroid.setup.deleteTree
+import com.garathon.flatdroid.storage.AppFiles
 import com.garathon.flatdroid.storage.HomeFolders
 import com.garathon.flatdroid.storage.SharedHome
 import com.garathon.flatdroid.storage.StorageTaskService
@@ -56,6 +65,7 @@ import com.garathon.flatdroid.util.writeAtomically
 import com.garathon.flatdroid.util.writeTextAtomically
 import java.io.File
 import java.io.IOException
+import java.util.TimeZone
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -85,6 +95,8 @@ class FlatpakLauncher(private val context: Context) {
     private val pipewireDir = File(sessionDir, "pipewire")
     private val cameraPipeDir = File(sessionDir, "camera")
     private val cameraConfigDir = File(sessionDir, "camera-config")
+    /** Bound over the helpers' /proc entries in the app's root, when they are hidden. */
+    private val emptyDir = File(sessionDir, "empty")
 
     fun electronSwap(appId: String) = ElectronSwap(
         dir = File(AppData.electronDir(context), appId),
@@ -99,7 +111,7 @@ class FlatpakLauncher(private val context: Context) {
     /** Prepares the Electron swap the app needs, after the user agreed. */
     fun prepareElectron(appId: String) {
         val app = installation.app(appId) ?: throw LaunchException(context.getString(R.string.launch_not_installed, appId))
-        val needed = planner.plan(appId, hostDirs(appId), options(appId)) as? PlanResult.ElectronSwapNeeded ?: return
+        val needed = plan(appId, AppData.settings(context, appId).load(), SetupController.settings(context).load()) as? PlanResult.ElectronSwapNeeded ?: return
         var last: Pair<String, Int?>? = null
         electronSwap(appId).prepare(app, needed) { step, zip, fraction ->
             val detail = when (step) {
@@ -124,13 +136,19 @@ class FlatpakLauncher(private val context: Context) {
      */
     fun run(appId: String, micAnswer: Boolean? = null): Boolean {
         SessionController.starting(appId, context.getString(R.string.session_reading_metadata), clearLog = true)
+        // Every Flatpak could otherwise open Flatdroid's memory through /proc (same user).
+        if (!FlatdroidApplication.nonDumpable) throw LaunchException(context.getString(R.string.launch_dumpable))
+        // Before the file check: a process left from an earlier session could change files after it.
+        endEscaped()
+        // Read once for the whole launch; the app's settings change only through [store] below.
+        val userSettings = SetupController.settings(context).load()
         val store = AppData.settings(context, appId)
         var settings = store.load()
         // A launch in Temporary Home mode replaces the temporary home, so not while it is exported.
         if (StorageTasks.busyWith(appId) || (settings.homeMode == HomeMode.TEMPORARY && StorageTasks.exportingTempHome(StorageTaskService.pendingTasks(context)))) {
             throw LaunchException(context.getString(R.string.launch_storage_busy))
         }
-        var plan = when (val result = planner.plan(appId, hostDirs(appId), options(appId))) {
+        var plan = when (val result = plan(appId, settings, userSettings)) {
             is PlanResult.Ready -> result.plan
             is PlanResult.ElectronSwapNeeded -> {
                 SessionController.offerElectron(
@@ -149,12 +167,15 @@ class FlatpakLauncher(private val context: Context) {
         }
         store.update { it.copy(lastOpened = System.currentTimeMillis()) }
 
+        if (userSettings?.security?.checkFilesBeforeLaunch == true && !checkFiles(appId)) return false
+
         SessionController.starting(appId, context.getString(R.string.session_preparing_files))
         val home = prepareHome(appId, settings.homeMode)
         // Before prepareDirs, which makes the mount points by what they are bound from.
-        writeDesktopFiles(home, plan)
+        writeDesktopFiles(home, plan, userSettings)
+        writeTimeZone(plan, settings.sharesTimeZone)
         prepareDirs(appId, plan)
-        val userSettings = SetupController.settings(context).load()
+        val security = userSettings?.security ?: SecuritySettings()
         val password = VncPassword.random()
         val audio = plan.binds.pulseSockets != null
         if (settings.microphone && !MicStreamer.hasPermission(context)) {
@@ -197,11 +218,17 @@ class FlatpakLauncher(private val context: Context) {
         }
         SessionController.onMicrophoneAnswer = mic?.let { it::answer }
         val resampler = userSettings?.resampler ?: Resampler.FAST
+        // Any of the proots below: fdsec refused to start its command, so nothing ran in it.
+        val filterRefused = AtomicBoolean(false)
         val helpers = startHelpers(
-            SessionScript.command(settings.geometry, frameRate, audio, microphone = mic != null, resampler, sessionBus = true, camera = cameraNodes.isNotEmpty()),
+            SessionScript.command(
+                settings.geometry, frameRate, audio, resampler, sessionBus = true,
+                camera = cameraNodes.isNotEmpty(), clipboard = settings.sharesClipboard,
+            ),
             audio,
+            Fdsec.Filter(extraSyscalls = security.extraSyscallFilter),
         ) { line ->
-            SessionScript.micUsers(line)?.let { mic?.onUsers(it) }
+            if (Fdsec.refused(line)) filterRefused.set(true)
         }
         var app: ProotProcess? = null
         var player: AudioPlayer? = null
@@ -209,12 +236,18 @@ class FlatpakLauncher(private val context: Context) {
         val streamers = cameraNodes.indices.associate {
             cameraNodes[it].name to CameraStreamer(context, cameras[it], File(cameraPipeDir, cameraNodes[it].name), cameraRotations[it])
         }
+        // A network change during the session (Wi-Fi to mobile data, Private DNS) reaches the app's resolv.conf.
+        val dns = ResolvConfRefresher(context, listOf(File(etcDir, "resolv.conf"))).apply { start() }
         try {
-            waitForFile(File(x11Dir, SessionScript.X_SOCKET), helpers, DISPLAY_TIMEOUT_MS, context.getString(R.string.launch_display_failed))
+            try {
+                waitForFile(File(x11Dir, SessionScript.X_SOCKET), helpers, DISPLAY_TIMEOUT_MS, context.getString(R.string.launch_display_failed))
+            } catch (e: LaunchException) {
+                throw if (filterRefused.get()) LaunchException(context.getString(R.string.launch_filter_refused)) else e
+            }
             if (!waitForFile(File(busProxyDir, SessionBus.SOCKET), helpers, BUS_TIMEOUT_MS, null)) {
                 SessionController.log("[flatdroid] the session bus did not start; the app has none")
             } else if (streamers.isNotEmpty()) {
-                cameraHelpers = startCamera(helpers, streamers)
+                cameraHelpers = startCamera(helpers, streamers, Fdsec.Filter(extraSyscalls = security.extraSyscallFilter, noInternet = true), filterRefused)
             }
             if (!audio) {
                 SessionController.log("[flatdroid] sound is off for this app; PulseAudio isn't started")
@@ -228,6 +261,12 @@ class FlatpakLauncher(private val context: Context) {
                 )
                 player.start()
             }
+            // The helpers run under proot, which keeps them dumpable: hide what runs now from the app.
+            val hidden = if (security.hideHelperProcesses) HelperProcesses.procPaths(listOfNotNull(helpers.pid, cameraHelpers?.pid)) else emptyList()
+            fun hideHelpers(plan: LaunchPlan) =
+                if (hidden.isEmpty()) plan else plan.copy(binds = plan.binds.copy(hiddenProc = hidden, emptyDir = emptyDir.path))
+            plan = hideHelpers(plan)
+            SessionController.log("[flatdroid] " + describeFilter(plan.filter, hidden.size))
             var triedNewerFlags = false
             var triedWithoutFlatpakInfo = false
             while (true) {
@@ -236,10 +275,13 @@ class FlatpakLauncher(private val context: Context) {
                 val gpuFailed = AtomicBoolean(false)
                 val kdeHostProcess = AtomicBoolean(false)
                 val killedBySignal = AtomicBoolean(false)
+                // The app's own: a helper's fdsec refusing later (sound, say) doesn't make the app's exit a failure.
+                val appRefused = AtomicBoolean(false)
                 app = ProotRunner.start(
-                    ProotCommand.flatpak(env.paths(), plan.binds, plan.environment, plan.command),
+                    ProotCommand.flatpak(env.paths(), plan.binds, plan.environment, plan.command, plan.filter),
                     File(plan.binds.root),
                 ) { line ->
+                    if (Fdsec.refused(line)) appRefused.set(true)
                     if (Electron.GPU_FAILURE in line) gpuFailed.set(true)
                     if (LaunchPlanner.KDE_HOST_PROCESS_WARNING in line) kdeHostProcess.set(true)
                     if (LaunchPlanner.PROOT_KILLED_BY_SIGNAL in line) killedBySignal.set(true)
@@ -248,6 +290,7 @@ class FlatpakLauncher(private val context: Context) {
                 SessionController.running(appId, password)
                 val code = app.waitFor()
                 SessionController.log("[flatdroid] the app exited ($code)")
+                if (appRefused.get()) throw LaunchException(context.getString(R.string.launch_filter_refused))
                 if (plan.isElectron && !settings.newerElectronFlags && gpuFailed.get() && !triedNewerFlags) {
                     // Newer Electron: relaunch once with its extra flags, and keep them if they help.
                     triedNewerFlags = true
@@ -255,7 +298,7 @@ class FlatpakLauncher(private val context: Context) {
                     store.update { it.copy(newerElectronFlags = true) }
                     SessionController.log("[flatdroid] relaunching with ${Electron.NEWER_FLAGS.joinToString(" ")}")
                     SessionController.starting(appId, context.getString(R.string.session_relaunching_newer_flags))
-                    plan = (planner.plan(appId, hostDirs(appId), options(appId)) as? PlanResult.Ready)?.plan
+                    plan = (plan(appId, settings, userSettings) as? PlanResult.Ready)?.plan?.let(::hideHelpers)
                         ?: throw LaunchException(context.getString(R.string.launch_app_changed))
                     // The app has run, so it may have replaced its own directories with links meanwhile.
                     prepareDirs(appId, plan)
@@ -264,14 +307,14 @@ class FlatpakLauncher(private val context: Context) {
                 }
                 if (plan.flatpakInfo != null && kdeHostProcess.get()) {
                     // KDE's frameworks would run processes on the host: no /.flatpak-info for this
-                    // app from now on, and if it failed (Konsole crashes), relaunch it without.
+                    // app from now on, and if it failed (KDE terminal apps crash), relaunch it without.
                     settings = settings.copy(withoutFlatpakInfo = true)
                     store.update { it.copy(withoutFlatpakInfo = true) }
                     SessionController.log("[flatdroid] KDE tried to run processes on the host; this app runs without /.flatpak-info from now on")
                     if ((code != 0 || killedBySignal.get()) && !triedWithoutFlatpakInfo) {
                         triedWithoutFlatpakInfo = true
                         SessionController.starting(appId, context.getString(R.string.session_relaunching_without_flatpak_info))
-                        plan = (planner.plan(appId, hostDirs(appId), options(appId)) as? PlanResult.Ready)?.plan
+                        plan = (plan(appId, settings, userSettings) as? PlanResult.Ready)?.plan?.let(::hideHelpers)
                             ?: throw LaunchException(context.getString(R.string.launch_app_changed))
                         prepareDirs(appId, plan)
                         checkBindSources(plan)
@@ -291,6 +334,7 @@ class FlatpakLauncher(private val context: Context) {
                 return true
             }
         } finally {
+            dns.stop()
             app?.stop()
             player?.stop()
             mic?.stop()
@@ -299,8 +343,101 @@ class FlatpakLauncher(private val context: Context) {
             streamers.values.forEach { it.close() }
             SessionController.onMicrophoneAnswer = null
             helpers.stop()
+            endEscaped()
+            // proot leaves the private binds' mount points behind in the shared home, where the
+            // user sees them (empty .ssh, .bashrc, .config and the rest). Remove the empty ones.
+            // A private home gets them too when it shares hidden files (a temporary one goes anyway).
+            if (settings.homeMode == HomeMode.SHARED || (settings.shareHiddenFiles && settings.homeMode == HomeMode.PRIVATE)) {
+                cleanSharedHomeMountPoints(home, plan)
+            }
         }
     }
+
+    /**
+     * Removes the mount points a launch's private binds leave empty in [home] (each bind's path
+     * under [GuestPaths.HOME]), and the folders above one that are left empty, up to the home.
+     * Only an empty file or an empty folder goes, so a real file the user keeps under one of these
+     * names (a hand-written `.bashrc`), or an empty folder of their own elsewhere, stays.
+     */
+    private fun cleanSharedHomeMountPoints(home: File, plan: LaunchPlan) {
+        val prefix = GuestPaths.HOME + "/"
+        val points = (plan.binds.appDirs + plan.binds.privateFiles)
+            .map { it.second }
+            .filter { it.startsWith(prefix) }
+            .map { it.removePrefix(prefix) }
+            .filter { rel -> rel.split('/').none { it.isEmpty() || it == "." || it == ".." } }
+            .distinct()
+            .sortedByDescending { rel -> rel.count { it == '/' } } // deepest first, so parents are empty by their turn
+        for (rel in points) {
+            // The mount point itself, then the folders proot made for it, up to the home.
+            var file: File? = File(home, rel)
+            while (file != null && file != home && deleteIfEmpty(file)) file = file.parentFile
+        }
+    }
+
+    /** Deletes [file] if it is an empty file or an empty folder (never a link); whether it did. */
+    private fun deleteIfEmpty(file: File): Boolean = when {
+        AndroidTarFs.isSymlink(file) -> false
+        file.isDirectory -> file.list()?.isEmpty() == true && file.delete()
+        file.isFile -> file.length() == 0L && file.delete()
+        else -> false
+    }
+
+    /**
+     * The Hardened file check: verifies the app's, its runtime's and their extensions' files
+     * against the baseline recorded at install, reporting progress and letting the user skip.
+     * Returns true to go ahead; false when files changed, having put the refusal and a reinstall
+     * offer in [SessionController].
+     */
+    private fun checkFiles(appId: String): Boolean {
+        val cancelled = AtomicBoolean(false)
+        // False once the check is over (done, skipped or stopped): workers still finishing a file
+        // must not put "Checking files" back over the launch or the ended session.
+        val checking = AtomicBoolean(true)
+        SessionController.onSkipFileCheck = { cancelled.set(true) }
+        val problems = try {
+            IntegrityGuard(context).verify(
+                appId,
+                onProgress = { ref, done, total ->
+                    // Throttled: a per-file UI emission would flood the flow over a large runtime.
+                    // 0 of 0: the deployment's files are still being listed.
+                    val detail = if (total == 0) context.getString(R.string.session_listing_files, ref.name)
+                        else context.getString(R.string.session_checking_files, ref.name, done, total)
+                    if (checking.get() && !cancelled.get() && (done == total || done % 500 == 0))
+                        SessionController.starting(appId, detail, skippable = true)
+                },
+                // Skip, or Stop (which interrupts this thread): either ends the walk and the hashing at once.
+                cancelled = { cancelled.get() || Thread.currentThread().isInterrupted },
+            )
+        } finally {
+            checking.set(false)
+            SessionController.onSkipFileCheck = null
+        }
+        // Stopped: end here, before anything starts (the interrupt is still pending for the caller).
+        if (Thread.currentThread().isInterrupted) throw InterruptedException()
+        // Skip drops the check entirely and launches, even if an earlier deployment already flagged.
+        if (cancelled.get()) return true
+        if (problems.isEmpty()) return true
+        for (p in problems) {
+            p.tampered.forEach { SessionController.log("[flatdroid] changed in ${p.ref.name}: ${FileIntegrity.escape(it)}") }
+            p.removed.forEach { SessionController.log("[flatdroid] removed in ${p.ref.name}: ${FileIntegrity.escape(it)}") }
+        }
+        val detail = context.getString(R.string.session_files_changed) + "\n" +
+            problems.joinToString("\n") { context.getString(R.string.session_files_changed_item, it.ref.name, it.tampered.size, it.removed.size) }
+        SessionController.filesChanged(SessionState.FilesChanged(appId, detail))
+        return false
+    }
+
+    /** Ends processes that left proot ([LeftoverProcesses.killEscaped]), saying so in the session's log. */
+    private fun endEscaped() {
+        val count = LeftoverProcesses.killEscaped()
+        if (count > 0) SessionController.log("[flatdroid] ended $count processes that had left proot")
+    }
+
+    /** The session log's line about the app's filter and the helpers' hidden /proc entries. */
+    private fun describeFilter(filter: Fdsec.Filter, hidden: Int): String =
+        "fdsec: " + (listOf("base list") + listOfNotNull("extra system calls".takeIf { filter.extraSyscalls }, "no Internet".takeIf { filter.noInternet }))
+            .joinToString(", ") + "; $hidden helper /proc entries hidden"
 
     /**
      * How far the device would be turned from its natural orientation to be [landscape] (or
@@ -347,7 +484,7 @@ class FlatpakLauncher(private val context: Context) {
      * the [streamers] writing to their pipes; waits until the nodes exist and the portal has
      * started, so the app sees its cameras from the start. Null when PipeWire didn't start.
      */
-    private fun startCamera(helpers: ProotProcess, streamers: Map<String, CameraStreamer>): ProotProcess? {
+    private fun startCamera(helpers: ProotProcess, streamers: Map<String, CameraStreamer>, filter: Fdsec.Filter, refused: AtomicBoolean): ProotProcess? {
         if (!waitForFile(File(pipewireDir, CameraScript.PIPEWIRE_SOCKET), helpers, CAMERA_TIMEOUT_MS, null)) {
             SessionController.log("[flatdroid] PipeWire did not start; the app has no camera")
             return null
@@ -360,7 +497,8 @@ class FlatpakLauncher(private val context: Context) {
             cameraConfigDir.path to CameraScript.GUEST_CONFIG_DIR,
             busDaemonDir.path to SessionBus.GUEST_DAEMON_DIR,
         )
-        val process = env.start(listOf("/bin/sh", CameraScript.GUEST_SCRIPT), binds, asAppUser = true) { line ->
+        val process = env.start(listOf("/bin/sh", CameraScript.GUEST_SCRIPT), binds, asAppUser = true, filter = filter) { line ->
+            if (Fdsec.refused(line)) refused.set(true)
             CameraScript.users(line)?.let { (node, count) -> streamers[node]?.setUsers(count) }
             if (line == CameraScript.READY) ready.countDown()
             SessionController.log("[camera] $line")
@@ -389,9 +527,9 @@ class FlatpakLauncher(private val context: Context) {
     }
 
     /** Generated for every launch: `user-dirs.dirs` for [home], and the desktop settings ([DesktopConfig]). */
-    private fun writeDesktopFiles(home: File, plan: LaunchPlan) {
+    private fun writeDesktopFiles(home: File, plan: LaunchPlan, user: UserSettings?) {
         File(etcDir, USER_DIRS).writeTextAtomically(HomeFolders.userDirs { File(home, it).isDirectory }, durable = false)
-        val dark = isDarkTheme()
+        val dark = isDarkTheme(user)
         AndroidTarFs.deleteTree(desktopDir)
         for (gtk in listOf("gtk-3.0", "gtk-4.0")) {
             File(desktopDir, "$gtk/settings.ini").apply { parentFile!!.mkdirs() }.writeTextAtomically(DesktopConfig.gtkSettings(dark), durable = false)
@@ -402,29 +540,37 @@ class FlatpakLauncher(private val context: Context) {
     }
 
     /** The theme setting; with System, Android's dark mode now. */
-    private fun isDarkTheme() = when (SetupController.settings(context).load()?.flatpakTheme ?: FlatpakTheme.SYSTEM) {
+    private fun isDarkTheme(user: UserSettings?) = when (user?.flatpakTheme ?: FlatpakTheme.SYSTEM) {
         FlatpakTheme.SYSTEM -> context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
         FlatpakTheme.DARK -> true
         FlatpakTheme.LIGHT -> false
     }
 
-    private fun options(appId: String): LaunchOptions {
-        val settings = AppData.settings(context, appId).load()
+    /** [appId]'s launch with its [settings] and the [user]'s. */
+    private fun plan(appId: String, settings: AppSettings, user: UserSettings?): PlanResult =
+        planner.plan(appId, hostDirs(appId, settings), options(appId, settings, user))
+
+    private fun options(appId: String, settings: AppSettings, user: UserSettings?): LaunchOptions {
         val app = installation.app(appId)
+        val security = user?.security ?: SecuritySettings()
         // Developer settings count only while developer options are on.
-        val developerOptions = SetupController.settings(context).load()?.developerOptions == true
+        val developerOptions = user?.developerOptions == true
         return LaunchOptions(
             environment = if (developerOptions) settings.environment else emptyMap(),
             newerElectronFlags = settings.newerElectronFlags,
             electronSwap = app?.let { electronSwap(appId).preparedFor(it) },
             wholeDev = settings.wholeDev,
             flatpakInfo = !settings.withoutFlatpakInfo,
-            darkTheme = isDarkTheme(),
+            darkTheme = isDarkTheme(user),
+            languageTags = if (settings.sharesLanguage) context.resources.configuration.locales.toLanguageTags().split(',').filter { it.isNotBlank() } else emptyList(),
             audio = settings.audioAllowed(app?.metadata?.context?.sockets.orEmpty()),
+            network = settings.networkAllowed(app?.metadata?.context?.shared.orEmpty()),
+            extraSyscalls = security.extraSyscallFilter && !(developerOptions && settings.allowExtraSyscalls),
+            limitDevices = security.limitDevices,
         )
     }
 
-    private fun hostDirs(appId: String, settings: AppSettings = AppData.settings(context, appId).load()): HostDirs {
+    private fun hostDirs(appId: String, settings: AppSettings): HostDirs {
         val temporary = settings.homeMode == HomeMode.TEMPORARY
         // In Temporary Home mode the app's settings and cache are new at every launch too.
         val appData = if (temporary) TempHomes.root(context) else File(AppData.root(context), appId)
@@ -433,6 +579,13 @@ class FlatpakLauncher(private val context: Context) {
         val launcher = AppData.launcherFiles(context)
         val home = GuestPaths.HOME
         val varApp = "$home/.var/app/$appId"
+        // A shared home's dot-files would be every app's (and readable by other Android apps): the app's
+        // own instead. The developer setting shares one set across the apps that opt in, in any home.
+        val dotFiles = when {
+            settings.shareHiddenFiles -> AppData.sharedDotfilesDir(context)
+            settings.homeMode != HomeMode.SHARED -> null
+            else -> File(appData, AppFiles.DOT_FILES_DIR)
+        }
         return HostDirs(
             root = File(AppData.rootsDir(context), appId),
             tmp = File(tmpBase, "tmp"),
@@ -449,27 +602,35 @@ class FlatpakLauncher(private val context: Context) {
                 File(appData, "var") to varApp,
                 cache to "$home/.cache",
                 cache to "$varApp/cache",
-                // Where Flatpak also binds them; apps' own scripts use these paths (Ghidra's /var/config).
+                // Where Flatpak also binds them; apps' own launch scripts use these paths.
                 File(appData, "var/config") to "/var/config",
                 File(appData, "var/data") to "/var/data",
                 cache to "/var/cache",
                 File(cache, "tmp") to "/var/tmp",
-            ),
-            etc = linkedMapOf(
-                "resolv.conf" to File(etcDir, "resolv.conf"),
-                "hosts" to launcher.hosts,
-                "machine-id" to File(etcDir, "machine-id"),
-                "passwd" to launcher.passwd,
-                "group" to launcher.group,
-            ),
+            ) + dotFiles?.let { dir -> AppFiles.PRIVATE_DOT_DIRS.map { File(dir, it) to "$home/$it" } }.orEmpty(),
+            privateFiles = dotFiles?.let { dir -> AppFiles.PRIVATE_DOT_FILES.map { File(dir, it) to "$home/$it" } }.orEmpty(),
+            // These /etc files are overridden at launch, so the integrity check leaves the
+            // deployment's copies out (IntegrityGuard.OVERRIDDEN_ETC must list the same names).
+            etc = LaunchPlanner.ETC_OVERRIDES.associateWithTo(linkedMapOf()) { name ->
+                when (name) {
+                    "hosts" -> launcher.hosts
+                    "passwd" -> launcher.passwd
+                    "group" -> launcher.group
+                    else -> File(etcDir, name) // resolv.conf and the machine-id's copy, written per launch
+                }
+            },
             x11Sockets = x11Dir,
             pulseSockets = pulseDir,
             fontDirs = launcher.fontDirs,
-            hostFonts = ANDROID_FONTS.takeIf { it.isDirectory },
+            hostFonts = ANDROID_FONTS.takeIf { settings.usesAndroidFonts && it.isDirectory },
             desktopConfig = desktopDir,
             userDirs = File(etcDir, USER_DIRS),
             sdcard = SharedHome.storageRoot().takeIf { settings.sdcard && SharedHome.broadAccess(context) },
             sessionBus = busProxyDir,
+            // Under the app's cache, so clearing caches drops it (fontconfig then regenerates it).
+            runtimeCache = File(cache, RUNTIME_CACHE_DIR),
+            runtimeDir = File(tmpBase, "run"),
+            userId = Os.getuid(),
         )
     }
 
@@ -486,14 +647,35 @@ class FlatpakLauncher(private val context: Context) {
         if (!plan.binds.wholeDev) DevNodes.createMountPoints(root, plan.binds.dev + AlpineBinds.FD_LINKS.keys)
         for (name in plan.usrLinks) Os.symlink("usr/$name", File(root, name).path)
         plan.flatpakInfo?.let { File(root, ".flatpak-info").writeText(it) }
+        File(root, Fdsec.APP_PATH.removePrefix("/")).apply { parentFile!!.mkdirs() }.createNewFile()
 
         AndroidTarFs.deleteTree(File(AppData.appTmpDir(context), appId))
         File(plan.binds.tmp).mkdirs()
         File(plan.binds.shm).mkdirs()
+        prepareRuntimeDir(appId, plan)
+        // As in Flatpak's roots.
+        File(root, "var").mkdirs()
+        Os.symlink("../run", File(root, "var/run").path)
         // The app can write these, so it can replace one with a link (see checkBindSources).
         for (dir in listOf(File(plan.binds.home)) + plan.binds.appDirs.map { File(it.first) }) {
             if (AndroidTarFs.isSymlink(dir)) dir.delete()
             dir.mkdirs()
+        }
+        for ((host, _) in plan.binds.privateFiles) {
+            val file = File(host)
+            if (AndroidTarFs.isSymlink(file)) file.delete()
+            if (!file.exists()) file.apply { parentFile!!.mkdirs() }.createNewFile()
+        }
+        // Flatpak makes the app's XDG directories before it starts; some apps write into them
+        // without making them first.
+        plan.binds.appDirs.firstOrNull { it.second == "${GuestPaths.HOME}/.var/app/$appId" }?.let { (host, _) ->
+            for (dir in listOf("config", "data", ".local/state")) File(host, dir).mkdirs()
+        }
+        // Writable scratch for the runtime caches shadowed over the deployment (their guest paths
+        // are under /usr, so the loop below skips making mount points for them — the runtime already
+        // has those directories). Persisted across launches, so fontconfig regenerates them once.
+        for ((host, guest) in plan.binds.extra) {
+            if (guest in LaunchPlanner.RUNTIME_CACHE_DIRS) File(host).mkdirs()
         }
         // Mount points for the further binds: in the root, or in the app's own directory they fall in.
         for ((host, guest) in plan.binds.extra) {
@@ -506,6 +688,40 @@ class FlatpakLauncher(private val context: Context) {
     }
 
     /**
+     * The app's XDG_RUNTIME_DIR (`/run/user/<uid>`), laid out as Flatpak lays it out: `app/<ID>`
+     * for the app's own sockets (an editor's single-instance socket, say), and links to the
+     * session bus, /.flatpak-info and the sound server's directory where the app has them.
+     */
+    private fun prepareRuntimeDir(appId: String, plan: LaunchPlan) {
+        val guest = GuestPaths.runtimeDir(Os.getuid())
+        val dir = plan.binds.extra.firstOrNull { it.second == guest }?.let { File(it.first) } ?: return
+        File(dir, "app/$appId").mkdirs()
+        // Relative, as Flatpak's: proot resolves them inside the root.
+        if (plan.binds.extra.any { it.second == GuestPaths.SESSION_BUS_DIR }) {
+            Os.symlink("../..${GuestPaths.SESSION_BUS_DIR.removePrefix("/run")}/${GuestPaths.SESSION_BUS_SOCKET}", File(dir, "bus").path)
+        }
+        if (plan.flatpakInfo != null) Os.symlink("../../../.flatpak-info", File(dir, "flatpak-info").path)
+        if (plan.binds.pulseSockets != null) Os.symlink("../..${GuestPaths.PULSE_DIR.removePrefix("/run")}", File(dir, "pulse").path)
+    }
+
+    /**
+     * `/etc/localtime` and `/etc/timezone` for this launch: Android's time zone with [share], as
+     * Flatpak gives the host's, else UTC (no hint at the device's location). localtime is a copy of
+     * the zone's file from the runtime (or its time zone extension), not a link, since binds are
+     * files; an unknown zone falls back to UTC.
+     */
+    private fun writeTimeZone(plan: LaunchPlan, share: Boolean) {
+        val wanted = TimeZone.getDefault().id.takeIf { share && ZONE_ID.matches(it) }
+        val zoneDirs = plan.binds.extensions.filter { it.second == "/usr/share/zoneinfo" }.map { File(it.first) } +
+            File(plan.runtime.files, "share/zoneinfo")
+        fun zoneFile(id: String) = zoneDirs.map { File(it, id) }.firstOrNull { it.isFile }
+        val (id, file) = wanted?.let { zone -> zoneFile(zone)?.let { zone to it } } ?: (UTC to zoneFile(UTC))
+        val bytes = file?.takeIf { it.length() <= MAX_ZONE_BYTES }?.let { runCatching { it.readBytes() }.getOrNull() } ?: ByteArray(0)
+        File(etcDir, LaunchPlanner.LOCALTIME).writeAtomically(durable = false) { it.write(bytes) }
+        File(etcDir, LaunchPlanner.TIMEZONE).writeTextAtomically("$id\n", durable = false)
+    }
+
+    /**
      * Every host path bound into the root must be what Flatdroid named, with no link anywhere in
      * it. Binds are writable: from inside, an app can remove a bound directory and put a link in
      * its place, and proot would follow that link when binding it at the next launch (a home
@@ -514,8 +730,8 @@ class FlatpakLauncher(private val context: Context) {
      */
     private fun checkBindSources(plan: LaunchPlan) {
         val b = plan.binds
-        val sources = listOfNotNull(b.root, b.runtimeFiles, b.appFiles, "${b.runtimeFiles}/etc", b.tmp, b.shm, b.x11Sockets, b.pulseSockets, b.home, env.paths().l2sDir) +
-            b.etc.values + b.extensions.map { it.first } + b.appDirs.map { it.first } + b.extra.map { it.first }
+        val sources = listOfNotNull(b.root, b.runtimeFiles, b.appFiles, "${b.runtimeFiles}/etc", b.tmp, b.shm, b.x11Sockets, b.pulseSockets, b.home, b.emptyDir, env.paths().l2sDir) +
+            b.etc.values + b.extensions.map { it.first } + b.appDirs.map { it.first } + b.privateFiles.map { it.first } + b.extra.map { it.first }
         for (path in sources) {
             val file = File(path)
             if (!file.exists() || file.canonicalPath != file.absolutePath) {
@@ -535,7 +751,7 @@ class FlatpakLauncher(private val context: Context) {
         launcher.write()
         File(etcDir, "machine-id").writeTextAtomically(launcher.machineId.readText(), durable = false)
         File(etcDir, "resolv.conf").writeTextAtomically(env.resolvConf(), durable = false)
-        for (dir in listOf(x11Dir, pulseDir, vncDir, busDaemonDir, busProxyDir, pipewireDir, cameraPipeDir, cameraConfigDir)) {
+        for (dir in listOf(x11Dir, pulseDir, vncDir, busDaemonDir, busProxyDir, pipewireDir, cameraPipeDir, cameraConfigDir, emptyDir)) {
             AndroidTarFs.deleteTree(dir)
             dir.mkdirs()
         }
@@ -562,10 +778,10 @@ class FlatpakLauncher(private val context: Context) {
     }
 
     /**
-     * Starts [command] ([SessionScript.command]), with PulseAudio's script bound when there is
-     * [sound]; [onLine] also gets each line of the helpers' output, before it is logged.
+     * Starts [command] ([SessionScript.command]) behind [filter], with PulseAudio's script bound
+     * when there is [sound]; [onLine] also gets each line of the helpers' output, before it is logged.
      */
-    private fun startHelpers(command: List<String>, sound: Boolean, onLine: (String) -> Unit): ProotProcess {
+    private fun startHelpers(command: List<String>, sound: Boolean, filter: Fdsec.Filter, onLine: (String) -> Unit): ProotProcess {
         val binds = listOf(
             x11Dir.path to GuestPaths.X11_DIR,
             pulseDir.path to GuestPaths.PULSE_DIR,
@@ -578,7 +794,7 @@ class FlatpakLauncher(private val context: Context) {
             File(sessionDir, "dbus.conf").path to SessionBus.GUEST_CONFIG,
             File(sessionDir, "proxy.args").path to SessionBus.GUEST_PROXY_ARGS,
         ) + if (sound) listOf(File(sessionDir, "pulse.pa").path to SessionScript.GUEST_PULSE_SCRIPT) else emptyList()
-        return env.start(command, binds, asAppUser = true) { line ->
+        return env.start(command, binds, asAppUser = true, filter = filter) { line ->
             onLine(line)
             SessionController.log("[display] $line")
         }
@@ -641,5 +857,12 @@ class FlatpakLauncher(private val context: Context) {
         const val HELPER_CHECK_MS = 250L
         const val DEFAULT_OUTPUT_RATE = 48_000
         const val USER_DIRS = "user-dirs.dirs"
+        const val UTC = "UTC"
+        /** An IANA zone ID, as Android reports them ("America/New_York", "Etc/GMT+5"): no `..`, no leading `/`. */
+        val ZONE_ID = Regex("[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+)*")
+        /** Zone files are a few KB. */
+        const val MAX_ZONE_BYTES = 1L shl 16
+        /** Hidden subdirectory of the app's cache holding the runtime-cache scratch overlays. */
+        const val RUNTIME_CACHE_DIR = ".flatdroid-runtime"
     }
 }

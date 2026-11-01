@@ -3,6 +3,7 @@ package com.garathon.flatdroid.launcher
 import com.garathon.flatdroid.flatpak.FlatpakInstallation
 import com.garathon.flatdroid.flatpak.TestInstallation
 import com.garathon.flatdroid.proot.DevNodes
+import com.garathon.flatdroid.proot.Fdsec
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -24,7 +25,7 @@ class LaunchPlannerTest {
             appDirs = listOf(File(d, "config") to "/home/user/.config"),
             etc = mapOf("passwd" to File(d, "passwd")),
             x11Sockets = File(d, "x11"), pulseSockets = File(d, "pulse"), fontDirs = File(d, "font-dirs.xml"),
-            desktopConfig = File(d, "xdg"), userDirs = File(d, "user-dirs.dirs"),
+            desktopConfig = File(d, "xdg"), userDirs = File(d, "user-dirs.dirs"), runtimeCache = File(d, "runtime-cache"),
         )
     }
 
@@ -34,6 +35,7 @@ class LaunchPlannerTest {
         dirs.desktopConfig.path to "/run/flatdroid/xdg",
         dirs.userDirs.path to "/home/user/.var/app/$id/config/user-dirs.dirs",
         dirs.userDirs.path to "/home/user/.config/user-dirs.dirs",
+        LaunchPlanner.runtimeCacheScratch(dirs.runtimeCache, "/usr/lib/fontconfig/cache").path to "/usr/lib/fontconfig/cache",
     )
 
     private fun appMetadata(id: String, command: String, runtime: String = "org.freedesktop.Platform/aarch64/26.08", extra: String = "") =
@@ -73,6 +75,30 @@ class LaunchPlannerTest {
         )
         assertEquals("1", plan.environment["LIBGL_ALWAYS_SOFTWARE"])
         assertEquals(dirs.home.path, plan.binds.home)
+    }
+
+    @Test
+    fun networkOffDropsResolvConfAndInternetSocketsAndDevicesCanBeLimited() {
+        runtimeWithGl()
+        val files = inst.app("org.example.Tool", metadata = appMetadata("org.example.Tool", "tool", extra = "[Context]\ndevices=all;\n"))
+        File(files, "bin").mkdirs()
+        File(files, "bin/tool").writeBytes(ExecutableTest.elf(0xb7))
+        val withEtc = dirs.copy(etc = mapOf("resolv.conf" to File(tmp.root, "resolv.conf"), "passwd" to File(tmp.root, "passwd")))
+        val everything: (String) -> Boolean = { true }
+        val limitedPlanner = LaunchPlanner(FlatpakInstallation(inst.root, "aarch64"), "aarch64", l2s, TestInstallation::readlink, everything)
+
+        val open = Ready(limitedPlanner.plan("org.example.Tool", withEtc))
+        assertEquals(setOf("resolv.conf", "passwd"), open.binds.etc.keys)
+        assertEquals(Fdsec.Filter(extraSyscalls = true, noInternet = false), open.filter)
+        assertEquals(null, open.binds.sys)
+        assertTrue("/dev/input" in open.binds.dev)
+
+        val closed = Ready(limitedPlanner.plan("org.example.Tool", withEtc, LaunchOptions(network = false, extraSyscalls = false, limitDevices = true)))
+        assertEquals(setOf("passwd"), closed.binds.etc.keys)
+        assertEquals(Fdsec.Filter(extraSyscalls = false, noInternet = true), closed.filter)
+        assertEquals(DevNodes.LIMITED_SYS, closed.binds.sys)
+        // `devices=all` with devices limited: only the basic nodes, not even the GPU.
+        assertEquals(DevNodes.BASE, closed.binds.dev)
     }
 
     @Test
@@ -255,5 +281,44 @@ class LaunchPlannerTest {
         File(inst.app("a.Quiet", metadata = appMetadata("a.Quiet", "x")), "bin").mkdirs()
         assertEquals(File(dirs.pulseSockets, "").path, Ready(planner.plan("a.Quiet", dirs)).binds.pulseSockets)
         assertEquals(null, Ready(planner.plan("a.Quiet", dirs, LaunchOptions(audio = false))).binds.pulseSockets)
+    }
+
+    @Test
+    fun electronBehindAnIdeWrapperIsFound() {
+        runtimeWithGl()
+        val id = "com.vscodium.codium"
+        val files = inst.app(id, metadata = appMetadata(id, id))
+        File(files, "bin").mkdirs()
+        // The command script sets things up and hands over to a wrapper, which calls zypak's helper.
+        File(files, "bin/$id").writeText("#!/usr/bin/bash\nexec_editor() {\n  exec \"/app/bin/$id-wrapper\" \"/app/share/codium/resources/app/out/cli.js\" \"\$@\"\n}\nexec_editor \"\$@\"\n")
+        File(files, "bin/$id-wrapper").writeText("#!/usr/bin/bash\nexec \"/app/bin/zypak-helper\" host - /app/share/codium/$id \"\$@\"\n")
+        File(files, "share/codium").mkdirs()
+        File(files, "share/codium/$id").writeBytes(ExecutableTest.elf(0xb7))
+
+        val plan = Ready(planner.plan(id, dirs))
+        assertTrue(plan.isElectron)
+        assertEquals(listOf("/app/share/codium/$id") + Electron.BASE_FLAGS, plan.command)
+    }
+
+    @Test
+    fun runtimeDirLocaleAndContainerAsFlatpaksOrGeneric() {
+        val runtime = runtimeWithGl()
+        File(runtime, "lib/locale/de_DE.utf8").mkdirs()
+        val files = inst.app("org.xfce.mousepad", metadata = appMetadata("org.xfce.mousepad", "mousepad"))
+        File(files, "bin").mkdirs()
+        File(files, "bin/mousepad").writeBytes(ExecutableTest.elf(0xb7))
+        val withRuntimeDir = dirs.copy(runtimeDir = File(tmp.root, "run"), userId = 10235)
+
+        val shared = Ready(planner.plan("org.xfce.mousepad", withRuntimeDir, LaunchOptions(languageTags = listOf("de-DE"))))
+        assertEquals("/run/user/10235", shared.environment["XDG_RUNTIME_DIR"])
+        assertTrue(File(tmp.root, "run").path to "/run/user/10235" in shared.binds.extra)
+        assertEquals("de_DE.UTF-8", shared.environment["LANG"])
+        assertEquals("flatpak", shared.environment["container"])
+
+        // Not shared: the generic locale; without /.flatpak-info, no `container` either.
+        val generic = Ready(planner.plan("org.xfce.mousepad", withRuntimeDir, LaunchOptions(flatpakInfo = false)))
+        assertEquals(LaunchEnvironment.GENERIC_LOCALE, generic.environment["LANG"])
+        assertFalse("container" in generic.environment)
+        assertTrue(LaunchPlanner.LOCALTIME in LaunchPlanner.ETC_OVERRIDES && LaunchPlanner.TIMEZONE in LaunchPlanner.ETC_OVERRIDES)
     }
 }

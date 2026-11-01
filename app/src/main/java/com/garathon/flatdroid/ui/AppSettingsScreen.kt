@@ -33,6 +33,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardType
@@ -50,9 +51,10 @@ import com.garathon.flatdroid.storage.AppStorage
 import com.garathon.flatdroid.ui.theme.FlatdroidTheme
 
 /**
- * One app's settings: its display size, its permissions (sound and microphone), its cache, and
+ * One app's settings: its display size, its permissions (sound, network and microphone), its cache, and
  * uninstalling; with [developerOptions], for apps asking for all devices, also the host's whole
- * /dev. Sound left at its default is saved as unset, so it follows the app's metadata.
+ * /dev, and the security level's extra system calls. Sound, network and the home left at their
+ * defaults are saved as unset, so they follow the security level and the app's metadata.
  * [onRequestMicrophone] asks Android for its microphone permission and reports whether it was
  * granted: the microphone turns on only with it, so a notification can later allow it for a
  * session, unless it is always allowed. The camera likewise ([onRequestCamera]), when the device
@@ -87,13 +89,24 @@ fun AppSettingsScreen(
     broadAccess: Boolean,
     onStorage: (StorageAction) -> Unit,
     modifier: Modifier = Modifier,
+    /** An Electron app or a Chromium browser ([com.garathon.flatdroid.flatpak.InstalledApps.showsWebContent]). */
+    showsWebContent: Boolean = false,
 ) {
     var choice by rememberSaveable { mutableStateOf(settings.displaySize) }
     var width by rememberSaveable { mutableStateOf(settings.customWidth.toString()) }
     var height by rememberSaveable { mutableStateOf(settings.customHeight.toString()) }
     var wholeDev by rememberSaveable { mutableStateOf(settings.wholeDev) }
-    val audioDefault = app.requestsAudio
+    val fromMetadata = settings.defaults.permissionsFromMetadata
+    val audioDefault = fromMetadata && app.requestsAudio
     var audio by rememberSaveable { mutableStateOf(settings.audio ?: audioDefault) }
+    val networkDefault = fromMetadata && app.requestsNetwork
+    var network by rememberSaveable { mutableStateOf(settings.network ?: networkDefault) }
+    var clipboard by rememberSaveable { mutableStateOf(settings.sharesClipboard) }
+    var androidFonts by rememberSaveable { mutableStateOf(settings.usesAndroidFonts) }
+    var timeZone by rememberSaveable { mutableStateOf(settings.sharesTimeZone) }
+    var language by rememberSaveable { mutableStateOf(settings.sharesLanguage) }
+    var allowExtraSyscalls by rememberSaveable { mutableStateOf(settings.allowExtraSyscalls) }
+    var shareHiddenFiles by rememberSaveable { mutableStateOf(settings.shareHiddenFiles) }
     var microphone by rememberSaveable { mutableStateOf(settings.microphone) }
     var alwaysAllowMicrophone by rememberSaveable { mutableStateOf(settings.alwaysAllowMicrophone) }
     var camera by rememberSaveable { mutableStateOf(settings.camera) }
@@ -106,6 +119,9 @@ fun AppSettingsScreen(
     val environmentValue = EnvironmentText.parse(environment)
     var micRefused by rememberSaveable { mutableStateOf(false) }
     val context = LocalContext.current
+    // Configuration-aware (unlike context.getString from LocalContext): used in the label lambdas
+    // below, which run per item and so can't call the composable stringResource.
+    val resources = LocalResources.current
     var confirmUninstall by rememberSaveable { mutableStateOf(false) }
     var confirm by rememberSaveable { mutableStateOf<StorageAction?>(null) }
 
@@ -139,6 +155,9 @@ fun AppSettingsScreen(
                 Text(app.id, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
+        if (showsWebContent) {
+            Text(stringResource(R.string.app_settings_web_content), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+        }
 
         SectionTitle(stringResource(R.string.app_settings_display))
         Text(stringResource(R.string.app_settings_display_hint), style = MaterialTheme.typography.bodySmall)
@@ -164,9 +183,26 @@ fun AppSettingsScreen(
 
         SectionTitle(stringResource(R.string.app_settings_permissions))
         SwitchRow(
+            network, { network = it },
+            stringResource(R.string.app_settings_network),
+            stringResource(
+                when {
+                    !app.requestsNetwork -> R.string.app_settings_network_not_requested
+                    fromMetadata -> R.string.app_settings_network_requested
+                    else -> R.string.app_settings_network_requested_off
+                }
+            ),
+        )
+        SwitchRow(
             audio, { audio = it },
             stringResource(R.string.app_settings_audio),
-            stringResource(if (app.requestsAudio) R.string.app_settings_audio_requested else R.string.app_settings_audio_not_requested),
+            stringResource(
+                when {
+                    !app.requestsAudio -> R.string.app_settings_audio_not_requested
+                    fromMetadata -> R.string.app_settings_audio_requested
+                    else -> R.string.app_settings_audio_requested_off
+                }
+            ),
         )
         if (audio) SwitchRow(
             microphone,
@@ -221,7 +257,7 @@ fun AppSettingsScreen(
                         else sides.firstOrNull { it != AndroidCameras.FULL_RESOLUTION && it < cameraResolution } ?: sides.last()
                     }
                 },
-                label = { context.getString(R.string.app_settings_camera_frame_rate_value, it) },
+                label = { resources.getString(R.string.app_settings_camera_frame_rate_value, it) },
                 title = stringResource(R.string.app_settings_camera_frame_rate),
                 hint = stringResource(R.string.app_settings_camera_frame_rate_hint) +
                     if (cameraFrameRate > AndroidCameras.COMMON_MAX_FRAME_RATE) " " + stringResource(R.string.app_settings_camera_frame_rate_high) else "",
@@ -234,15 +270,31 @@ fun AppSettingsScreen(
                 label = { side ->
                     if (side == AndroidCameras.FULL_RESOLUTION) {
                         val sizes = resolutions.firstOrNull { it.shortSide == side }?.fullSizes.orEmpty()
-                        context.getString(R.string.app_settings_camera_resolution_full, sizes.joinToString(", ") { "${it.width}×${it.height}" })
+                        resources.getString(R.string.app_settings_camera_resolution_full, sizes.joinToString(", ") { "${it.width}×${it.height}" })
                     } else {
-                        context.getString(R.string.app_settings_camera_resolution_value, side)
+                        resources.getString(R.string.app_settings_camera_resolution_value, side)
                     }
                 },
                 title = stringResource(R.string.app_settings_camera_resolution),
                 hint = stringResource(R.string.app_settings_camera_resolution_hint),
             )
         }
+        SwitchRow(
+            clipboard, { clipboard = it },
+            stringResource(R.string.app_settings_clipboard), stringResource(R.string.app_settings_clipboard_hint),
+        )
+        SwitchRow(
+            androidFonts, { androidFonts = it },
+            stringResource(R.string.app_settings_android_fonts), stringResource(R.string.app_settings_android_fonts_hint),
+        )
+        SwitchRow(
+            timeZone, { timeZone = it },
+            stringResource(R.string.app_settings_time_zone), stringResource(R.string.app_settings_time_zone_hint),
+        )
+        SwitchRow(
+            language, { language = it },
+            stringResource(R.string.app_settings_language), stringResource(R.string.app_settings_language_hint),
+        )
 
         SectionTitle(stringResource(R.string.app_settings_files))
         Column(Modifier.selectableGroup()) {
@@ -259,6 +311,13 @@ fun AppSettingsScreen(
                 stringResource(R.string.app_settings_sdcard), stringResource(R.string.app_settings_sdcard_hint),
             )
         }
+        if (developerOptions) {
+            SwitchRow(
+                shareHiddenFiles, { shareHiddenFiles = it },
+                stringResource(R.string.app_settings_share_hidden), stringResource(R.string.app_settings_share_hidden_hint),
+                developer = true,
+            )
+        }
 
         if (developerOptions && app.requestsAllDevices) {
             SectionTitle(stringResource(R.string.app_settings_devices))
@@ -271,6 +330,11 @@ fun AppSettingsScreen(
 
         if (developerOptions) {
             SectionTitle(stringResource(R.string.app_settings_launch))
+            SwitchRow(
+                allowExtraSyscalls, { allowExtraSyscalls = it },
+                stringResource(R.string.app_settings_extra_syscalls), stringResource(R.string.app_settings_extra_syscalls_hint),
+                developer = true,
+            )
             TextRow(
                 content = environment,
                 onChange = { environment = it },
@@ -294,13 +358,20 @@ fun AppSettingsScreen(
                             customHeight = size(height) ?: settings.customHeight,
                             wholeDev = wholeDev,
                             audio = audio.takeIf { it != audioDefault },
+                            network = network.takeIf { it != networkDefault },
+                            clipboard = clipboard.takeIf { it != settings.defaults.clipboard },
+                            androidFonts = androidFonts.takeIf { it != settings.defaults.androidFonts },
+                            timeZone = timeZone.takeIf { it != settings.defaults.timeZone },
+                            language = language.takeIf { it != settings.defaults.language },
+                            allowExtraSyscalls = if (developerOptions) allowExtraSyscalls else settings.allowExtraSyscalls,
+                            shareHiddenFiles = if (developerOptions) shareHiddenFiles else settings.shareHiddenFiles,
                             microphone = microphone,
                             alwaysAllowMicrophone = alwaysAllowMicrophone,
                             camera = camera,
                             cameraResolution = cameraResolution,
                             cameraFrameRate = cameraFrameRate,
                             environment = if (developerOptions) environmentValue.orEmpty() else settings.environment,
-                            homeMode = homeMode,
+                            homeModeChoice = homeMode.takeIf { it != settings.defaults.homeMode },
                             sdcard = if (broadAccess) sdcard else settings.sdcard,
                         )
                     )
@@ -313,7 +384,10 @@ fun AppSettingsScreen(
         SectionTitle(stringResource(R.string.app_settings_storage))
         val context = LocalContext.current
         val measuring = stringResource(R.string.app_settings_measuring)
-        fun size(bytes: Long?) = bytes?.let { Formatter.formatShortFileSize(context, it) } ?: measuring
+        val measuringSize = stringResource(R.string.storage_measuring_size)
+        // The last measured size stays shown while a new measurement runs.
+        fun size(bytes: Long?) = bytes?.let { Formatter.formatShortFileSize(context, it) }
+            ?.let { if (storage?.measuring == true) measuringSize.format(it) else it } ?: measuring
         val hasHome = (storage?.privateHome ?: 0L) > 0L
         Text(stringResource(R.string.app_settings_app_storage, size(storage?.total)), style = MaterialTheme.typography.titleMedium)
 

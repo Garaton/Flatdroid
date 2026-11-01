@@ -20,7 +20,8 @@ class AppSettingsTest {
             DisplaySize.CUSTOM, 960, 640, newerElectronFlags = true, lastOpened = 1234L, wholeDev = true,
             audio = false, microphone = true, alwaysAllowMicrophone = true, withoutFlatpakInfo = true,
             environment = mapOf("VLC_DATA_PATH" to "/app/share/vlc", "VLC_PLUGIN_PATH" to "/app/lib/vlc/plugins"),
-            homeMode = HomeMode.TEMPORARY, sdcard = true, camera = true, cameraResolution = 1080, cameraFrameRate = 15,
+            homeModeChoice = HomeMode.TEMPORARY, sdcard = true, camera = true, cameraResolution = 1080, cameraFrameRate = 15,
+            network = false, allowExtraSyscalls = true, shareHiddenFiles = true,
         )
         store.save(saved)
         assertEquals(saved, store.load())
@@ -53,6 +54,40 @@ class AppSettingsTest {
         val file = File(tmp.root, "p.properties")
         AppSettingsStore(file).save(unset)
         assertFalse("permission." in file.readText())
+        assertFalse("home.mode" in file.readText())
+    }
+
+    @Test
+    fun unchangedSettingsFollowTheSecurityLevelsDefaults() {
+        val hardened = AppDefaults(homeMode = HomeMode.PRIVATE, permissionsFromMetadata = false)
+        val unset = AppSettings(defaults = hardened)
+        assertEquals(HomeMode.PRIVATE, unset.homeMode)
+        assertFalse(unset.audioAllowed(listOf("pulseaudio")))
+        assertFalse(unset.networkAllowed(listOf("network", "ipc")))
+        // What the user chose stays.
+        val chosen = unset.copy(homeModeChoice = HomeMode.SHARED, audio = true, network = true)
+        assertEquals(HomeMode.SHARED, chosen.homeMode)
+        assertTrue(chosen.audioAllowed(emptyList()) && chosen.networkAllowed(emptyList()))
+        // At the default level the metadata decides.
+        assertTrue(AppSettings().networkAllowed(listOf("network")))
+        assertFalse(AppSettings().networkAllowed(listOf("ipc")))
+        assertEquals(HomeMode.SHARED, AppSettings().homeMode)
+        // Android's fonts and the clipboard: shared unless the level or the user says otherwise.
+        assertTrue(AppSettings().usesAndroidFonts && AppSettings().sharesClipboard)
+        val private = AppSettings(defaults = AppDefaults(androidFonts = false, clipboard = false))
+        assertFalse(private.usesAndroidFonts || private.sharesClipboard)
+        assertTrue(private.copy(androidFonts = true, clipboard = true).let { it.usesAndroidFonts && it.sharesClipboard })
+        // The time zone and the language likewise.
+        assertTrue(AppSettings().sharesTimeZone && AppSettings().sharesLanguage)
+        val generic = AppSettings(defaults = AppDefaults(timeZone = false, language = false))
+        assertFalse(generic.sharesTimeZone || generic.sharesLanguage)
+        assertTrue(generic.copy(timeZone = true, language = true).let { it.sharesTimeZone && it.sharesLanguage })
+        // The store hands the defaults to what it loads, saved or not.
+        val file = File(tmp.root, "d.properties")
+        assertEquals(HomeMode.PRIVATE, AppSettingsStore(file, hardened).load().homeMode)
+        AppSettingsStore(file, hardened).save(AppSettings(defaults = hardened, displaySize = DisplaySize.LANDSCAPE))
+        assertEquals(hardened, AppSettingsStore(file, hardened).load().defaults)
+        assertEquals(HomeMode.SHARED, AppSettingsStore(file).load().homeMode)
     }
 
     @Test
@@ -80,16 +115,24 @@ class AppSettingsTest {
     fun anImportLeavesWhatWidensReachAsItIsHere() {
         fun file(text: String) = File(tmp.root, "a.App.properties").apply { writeText(text) }
         val imported = file(
-            "home.mode=private\ndev.whole=true\nstorage.sdcard=true\npermission.microphone=true\npermission.camera=true\n" +
-                "permission.microphone.always=true\nenv.LD_PRELOAD=/home/user/x.so\n",
+            "home.mode=shared\ndev.whole=true\nstorage.sdcard=true\npermission.microphone=true\npermission.camera=true\n" +
+                "permission.microphone.always=true\nenv.LD_PRELOAD=/home/user/x.so\npermission.network=true\n" +
+                "filter.allowExtraSyscalls=true\npermission.audio=false\nhome.shareHiddenFiles=true\n" +
+                "privacy.androidFonts=true\npermission.clipboard=true\nprivacy.timeZone=true\nprivacy.language=true\n",
         ).readBytes()
-        val local = file("home.mode=shared\ndev.whole=false\nenv.LANG=de_DE.UTF-8\n").readBytes()
+        val local = file(
+            "home.mode=private\ndev.whole=false\nenv.LANG=de_DE.UTF-8\npermission.network=false\n" +
+                "privacy.androidFonts=false\npermission.clipboard=false\nprivacy.timeZone=false\n",
+        ).readBytes()
         val loaded = AppSettingsStore(file(AppSettingsStore.imported(imported, local).decodeToString())).load()
         assertEquals(
-            AppSettings(homeMode = HomeMode.PRIVATE, microphone = true, environment = mapOf("LANG" to "de_DE.UTF-8")),
+            AppSettings(
+                homeModeChoice = HomeMode.PRIVATE, microphone = true, network = false, audio = false,
+                androidFonts = false, clipboard = false, timeZone = false, environment = mapOf("LANG" to "de_DE.UTF-8"),
+            ),
             loaded,
         )
         val alone = AppSettingsStore(file(AppSettingsStore.imported(imported, null).decodeToString())).load()
-        assertEquals(AppSettings(homeMode = HomeMode.PRIVATE, microphone = true), alone)
+        assertEquals(AppSettings(microphone = true, audio = false), alone)
     }
 }

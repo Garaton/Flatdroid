@@ -1,0 +1,18 @@
+Software included in Flatdroid, and the license text in this folder each comes with.
+
+Flatdroid                   GPL-3.0-or-later   GPL-3.0.txt
+  https://github.com/Garaton/flatdroid
+PRoot                       GPL-2.0-or-later   PRoot-COPYING.txt
+  https://github.com/termux/proot
+talloc                      LGPL-3.0-or-later  LGPL-3.0.txt (with GPL-3.0.txt)
+  https://talloc.samba.org/
+Kotlin, kotlinx.coroutines  Apache-2.0         Apache-2.0.txt
+  https://kotlinlang.org/
+AndroidX, Jetpack Compose   Apache-2.0         Apache-2.0.txt
+  https://developer.android.com/jetpack/androidx
+AndroidSVG                  Apache-2.0         Apache-2.0.txt
+  https://github.com/BigBadaboom/androidsvg
+
+What Flatdroid downloads at setup and later (Alpine Linux and its packages, Flatpak,
+Xvnc, Openbox, PulseAudio, the camera's helpers, Electron, and apps and runtimes from
+Flathub) comes with its own licenses from where it is downloaded.

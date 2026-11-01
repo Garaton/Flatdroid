@@ -4,8 +4,12 @@ import com.garathon.flatdroid.util.readTextUpTo
 import java.io.File
 
 /** An installed app or runtime: its ref and deployed directory (with `files/` and `metadata`). */
-data class Deployment(val ref: FlatpakRef, val dir: File, val metadata: FlatpakMetadata) {
+data class Deployment(val ref: FlatpakRef, val dir: File, val metadata: FlatpakMetadata, val kind: String = "runtime") {
     val files: File get() = File(dir, "files")
+    /** The ref Flatpak installs it by: `app/…` or `runtime/…`. */
+    val installRef: String get() = "$kind/$ref"
+    /** `<kind>/<ID>/<arch>/<branch>`, relative to the installation. */
+    val branch: String get() = "$kind/${ref.name}/${ref.arch}/${ref.branch}"
     val export: File get() = File(dir, "export")
 }
 
@@ -45,6 +49,28 @@ class FlatpakInstallation(root: File, private val arch: String) {
     fun runtime(ref: FlatpakRef): Deployment? = deployment("runtime", ref)
 
     /**
+     * The deployments a launch of [appId] uses: the app, its runtime, and the extensions mounted
+     * under each (GL, codecs, locales, …). Used to baseline and to check files; a deployment's
+     * `dir.name` is its OSTree commit, which changes on update, so each has its own baseline.
+     */
+    fun deploymentsFor(appId: String): List<Deployment> {
+        val app = app(appId) ?: return emptyList()
+        val runtimeRef = app.metadata.runtime ?: return listOf(app)
+        val runtime = runtime(runtimeRef) ?: return listOf(app)
+        val extensions = extensions(runtime.metadata.extensionPoints, runtimeRef.branch) +
+            extensions(app.metadata.extensionPoints, app.ref.branch)
+        return listOf(app, runtime) + extensions.map { it.deployment }
+    }
+
+    /**
+     * Flathub refs to reinstall to restore every deployment [appId] uses — the app, its runtime and
+     * their extensions — so a reinstall after the file check flags a change restores the changed
+     * extension too, not only the app and base runtime. `deploymentsFor` returns the app first and
+     * the runtime and extensions (all runtime-type refs) after it.
+     */
+    fun reinstallRefsFor(appId: String): List<String> = deploymentsFor(appId).map { it.installRef }.distinct()
+
+    /**
      * Installed extensions for [points] of a parent on [parentBranch]: for each point, the first of
      * its versions that is installed (or the parent's branch when it lists none). With
      * subdirectories, every installed `<point>.<suffix>` is mounted at `<directory>/<suffix>`.
@@ -77,7 +103,7 @@ class FlatpakInstallation(root: File, private val arch: String) {
             return null
         }
         if (!File(dir, "files").isDirectory) return null
-        return Deployment(ref, dir, metadata)
+        return Deployment(ref, dir, metadata, kind)
     }
 
     /** [file] resolved, or null if it doesn't exist or resolves outside the installation. */

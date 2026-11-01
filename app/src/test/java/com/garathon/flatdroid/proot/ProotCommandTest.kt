@@ -10,6 +10,7 @@ class ProotCommandTest {
         loader = "/lib/libproot-loader.so",
         tmpDir = "/cache/proot-tmp",
         rootfs = "/files/alpine/rootfs",
+        fdsec = "/lib/libfdsec.so",
     )
     private val binds = AlpineBinds(
         resolvConf = "/files/alpine/generated/resolv.conf",
@@ -37,10 +38,19 @@ class ProotCommandTest {
                 "--bind=/files/alpine/generated/resolv.conf:/run/host/monitor/resolv.conf",
                 "--bind=/files/alpine/generated/hosts:/etc/hosts",
                 "--bind=/files/alpine/generated/empty:/sys/fs/selinux",
-                "/sbin/apk", "--version",
+                "--bind=/lib/libfdsec.so:/run/flatdroid/fdsec",
+                "/run/flatdroid/fdsec", "--", "/sbin/apk", "--version",
             ),
             inv.argv,
         )
+    }
+
+    @Test
+    fun alpineWithoutAFilterStillHasFdsecBoundForItsScripts() {
+        val argv = ProotCommand.alpine(paths, binds, listOf("/bin/sh", "-c", "x"), filter = null).argv
+        assertEquals(listOf("--bind=/lib/libfdsec.so:/run/flatdroid/fdsec", "/bin/sh", "-c", "x"), argv.takeLast(4))
+        val filtered = ProotCommand.alpine(paths, binds, listOf("/bin/sh"), filter = Fdsec.Filter(extraSyscalls = true, noInternet = true)).argv
+        assertEquals(listOf("/run/flatdroid/fdsec", "--extra", "--no-inet", "--", "/bin/sh"), filtered.takeLast(5))
     }
 
     @Test
@@ -55,7 +65,7 @@ class ProotCommandTest {
         )
         val argv = inv.argv
         assertTrue("--bind=/files/alpine/generated/proc/stat:/proc/stat" in argv)
-        assertEquals("--bind=/cache/apk-cache:/var/cache/apk", argv[argv.size - 2])
+        assertEquals("--bind=/cache/apk-cache:/var/cache/apk", argv[argv.size - 5])
         assertEquals("/bin/true", argv.last())
     }
 
@@ -75,7 +85,8 @@ class ProotCommandTest {
         val inv = ProotCommand.applyExtra(paths, "/cache/extra-data/root", "/rt/files", "/deploy/files", "/cache/extra-data/tmp")
         assertTrue("--bind=/rt/files:/usr" in inv.argv && "--bind=/deploy/files:/app" in inv.argv && "--cwd=/app/extra" in inv.argv)
         assertTrue(inv.argv.none { it.contains("/home") || it.contains("sdcard") || it == "--change-id=0:0" || it == "-0" })
-        assertEquals("/app/bin/apply_extra", inv.argv.last())
+        // Behind the filter, without Internet sockets (Flatpak gives it no network).
+        assertEquals(listOf("--bind=/lib/libfdsec.so:/.flatdroid/fdsec", "/.flatdroid/fdsec", "--extra", "--no-inet", "--", "/app/bin/apply_extra"), inv.argv.takeLast(6))
         assertEquals("/app/bin:/usr/bin", inv.env["PATH"])
         // No runtime ([Extra Data] NoRuntime=true): nothing on /usr.
         assertTrue(ProotCommand.applyExtra(paths, "/r", null, "/d", "/t").argv.none { it.endsWith(":/usr") })
@@ -114,7 +125,7 @@ class ProotCommandTest {
 
     @Test
     fun wholeDevReplacesTheList() {
-        val argv = ProotCommand.flatpak(paths, flatpakBinds.copy(wholeDev = true), emptyMap(), listOf("/app/bin/x")).argv
+        val argv = ProotCommand.flatpak(paths, flatpakBinds.copy(wholeDev = true), emptyMap(), listOf("/app/bin/x"), Fdsec.Filter()).argv
         assertTrue("--bind=/dev" in argv)
         assertTrue("--bind=/dev/null" !in argv)
         assertTrue("--bind=/proc/self/fd:/dev/fd" in argv)
@@ -122,9 +133,9 @@ class ProotCommandTest {
 
     @Test
     fun noSoundMeansNoPulseAudioSocket() {
-        val argv = ProotCommand.flatpak(paths, flatpakBinds.copy(pulseSockets = null), emptyMap(), listOf("/app/bin/x")).argv
+        val argv = ProotCommand.flatpak(paths, flatpakBinds.copy(pulseSockets = null), emptyMap(), listOf("/app/bin/x"), Fdsec.Filter()).argv
         assertTrue(argv.none { it.endsWith(":/run/pulse") })
-        assertTrue("--bind=/cache/session/pulse:/run/pulse" in ProotCommand.flatpak(paths, flatpakBinds, emptyMap(), listOf("/app/bin/x")).argv)
+        assertTrue("--bind=/cache/session/pulse:/run/pulse" in ProotCommand.flatpak(paths, flatpakBinds, emptyMap(), listOf("/app/bin/x"), Fdsec.Filter()).argv)
     }
 
     private val flatpakBinds = FlatpakBinds(
@@ -146,7 +157,7 @@ class ProotCommandTest {
     /** The same binds, in the same order, as the tested shell launcher (fdrun). */
     @Test
     fun flatpakArgvMatchesTheTestedLauncher() {
-        val inv = ProotCommand.flatpak(paths, flatpakBinds, linkedMapOf("PATH" to "/app/bin:/usr/bin", "A" to "x y"), listOf("/app/bin/mousepad", "--flag"))
+        val inv = ProotCommand.flatpak(paths, flatpakBinds, linkedMapOf("PATH" to "/app/bin:/usr/bin", "A" to "x y"), listOf("/app/bin/mousepad", "--flag"), Fdsec.Filter())
         assertEquals(
             listOf(
                 "/lib/libproot.so", "--sysvipc", "--link2symlink", "-L",
@@ -168,6 +179,8 @@ class ProotCommandTest {
                 "--bind=/files/appdata/org.xfce.mousepad/home:/home/user",
                 "--bind=/files/appdata/org.xfce.mousepad/config:/home/user/.config",
                 "--bind=/files/electron/x:/app/x",
+                "--bind=/lib/libfdsec.so:/.flatdroid/fdsec",
+                "/.flatdroid/fdsec", "--",
                 "/usr/bin/env", "PATH=/app/bin:/usr/bin", "A=x y",
                 "/app/bin/mousepad", "--flag",
             ),
@@ -178,19 +191,43 @@ class ProotCommandTest {
     }
 
     @Test
-    fun flatpakPrefixRunsBeforeEnv() {
-        val argv = ProotCommand.flatpak(paths, flatpakBinds, emptyMap(), listOf("/app/bin/x"), prefix = listOf("/.flatdroid/fdsec")).argv
-        assertEquals(listOf("/.flatdroid/fdsec", "/usr/bin/env", "/app/bin/x"), argv.takeLast(3))
+    fun theFilterRunsBeforeEnv() {
+        val argv = ProotCommand.flatpak(paths, flatpakBinds, emptyMap(), listOf("/app/bin/x"), Fdsec.Filter(extraSyscalls = true, noInternet = true)).argv
+        assertEquals(listOf("/.flatdroid/fdsec", "--extra", "--no-inet", "--", "/usr/bin/env", "/app/bin/x"), argv.takeLast(6))
+    }
+
+    @Test
+    fun hiddenHelperProcessesReducedSysAndPrivateFiles() {
+        val binds = flatpakBinds.copy(
+            hiddenProc = listOf("/proc/700", "/proc/701"), emptyDir = "/cache/session/empty",
+            sys = listOf("/sys/devices/system/cpu"),
+            privateFiles = listOf("/files/appdata/org.xfce.mousepad/dotfiles/.bashrc" to "/home/user/.bashrc"),
+        )
+        val argv = ProotCommand.flatpak(paths, binds, emptyMap(), listOf("/app/bin/x"), Fdsec.Filter()).argv
+        val proc = argv.indexOf("--bind=/proc")
+        assertEquals(listOf("--bind=/cache/session/empty:/proc/700", "--bind=/cache/session/empty:/proc/701", "--bind=/sys/devices/system/cpu"), argv.subList(proc + 1, proc + 4))
+        assertTrue("--bind=/sys" !in argv)
+        assertTrue("--bind=/files/appdata/org.xfce.mousepad/dotfiles/.bashrc:/home/user/.bashrc" in argv)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun onlyProcessEntriesCanBeHidden() {
+        flatpakBinds.copy(hiddenProc = listOf("/proc/self"), emptyDir = "/cache/session/empty")
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun reducedSysStaysInSys() {
+        flatpakBinds.copy(sys = listOf("/sys/../data"))
     }
 
     @Test(expected = IllegalArgumentException::class)
     fun flatpakCommandThatEnvWouldReadAsAVariableIsRejected() {
-        ProotCommand.flatpak(paths, flatpakBinds, emptyMap(), listOf("/app/bin/a=b"))
+        ProotCommand.flatpak(paths, flatpakBinds, emptyMap(), listOf("/app/bin/a=b"), Fdsec.Filter())
     }
 
     @Test(expected = IllegalArgumentException::class)
     fun flatpakEnvironmentNameIsChecked() {
-        ProotCommand.flatpak(paths, flatpakBinds, mapOf("--help" to "x"), listOf("/app/bin/x"))
+        ProotCommand.flatpak(paths, flatpakBinds, mapOf("--help" to "x"), listOf("/app/bin/x"), Fdsec.Filter())
     }
 
     @Test(expected = IllegalArgumentException::class)

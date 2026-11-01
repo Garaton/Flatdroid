@@ -44,10 +44,11 @@ object SetupController {
         pendingFile = File(context.filesDir, "alpine/reset-pending"),
         installer = env.installer,
         state = store(context),
+        // Apps' caches go in every mode: an app that isn't installed again has its cache removed at
+        // the next start anyway (Leftovers).
         temporary = env.temporaryFiles() + listOf(AppData.rootsDir(context), AppData.appTmpDir(context), AppData.sessionDir(context), TempHomes.root(context)) +
-            ElectronSwap.temporaryFiles(env.cacheDir),
-        appCaches = listOf(AppData.cacheRoot(context)),
-        flatpakFiles = listOf(AppData.electronDir(context)),
+            ElectronSwap.temporaryFiles(env.cacheDir) + AppData.cacheRoot(context),
+        flatpakFiles = listOf(AppData.electronDir(context), AppData.integrityDir(context), AppData.extraDataState(context)),
         userData = listOf(
             AppData.root(context), AppData.launcherDir(context), AppData.settingsDir(context), File(context.filesDir, SETTINGS_FILE),
         ),

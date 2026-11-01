@@ -3,7 +3,9 @@ package com.garathon.flatdroid.launcher
 import com.garathon.flatdroid.flatpak.Deployment
 import com.garathon.flatdroid.flatpak.FlatpakInstallation
 import com.garathon.flatdroid.flatpak.FlatpakRef
+import com.garathon.flatdroid.flatpak.L2s
 import com.garathon.flatdroid.proot.DevNodes
+import com.garathon.flatdroid.proot.Fdsec
 import com.garathon.flatdroid.proot.FlatpakBinds
 import com.garathon.flatdroid.proot.GuestPaths
 import java.io.File
@@ -16,6 +18,8 @@ data class HostDirs(
     val home: File,
     /** The app's own private directories, over parts of the home and at Flatpak's /var ones: host to guest path. */
     val appDirs: List<Pair<File, String>>,
+    /** The app's own single files over the home's ([FlatpakBinds.privateFiles]): host to guest path. */
+    val privateFiles: List<Pair<File, String>> = emptyList(),
     /** Generated /etc files: name to host file. */
     val etc: Map<String, File>,
     val x11Sockets: File,
@@ -33,6 +37,18 @@ data class HostDirs(
     val sdcard: File? = null,
     /** Holds the session bus proxy's socket, bound at [GuestPaths.SESSION_BUS_DIR]; null for no bus. */
     val sessionBus: File? = null,
+    /**
+     * Writable per-app base for the runtime caches a tool rewrites at launch ([LaunchPlanner.RUNTIME_CACHE_DIRS]):
+     * a scratch for each is bound over the deployment's copy, so the file-integrity check doesn't
+     * see the app's own writes as tampering. Persisted (regenerated once), not bound anywhere else.
+     */
+    val runtimeCache: File,
+    /**
+     * The app's own XDG_RUNTIME_DIR, bound at `/run/user/<[userId]>` as in Flatpak (its `app/<ID>`
+     * and the links to the bus and the sound socket are made at launch); null keeps /tmp.
+     */
+    val runtimeDir: File? = null,
+    val userId: Int = 0,
 )
 
 /** Per-app choices that change a launch. */
@@ -47,10 +63,18 @@ data class LaunchOptions(
     val wholeDev: Boolean = false,
     /** The app gets PulseAudio's socket (see AppSettings.audioAllowed). */
     val audio: Boolean = true,
+    /** The app gets the Internet (see AppSettings.networkAllowed): resolv.conf, and Internet sockets. */
+    val network: Boolean = true,
+    /** fdsec also refuses the security level's extra system calls ([Fdsec.Filter.extraSyscalls]). */
+    val extraSyscalls: Boolean = true,
+    /** Only CPU and memory information from /sys, and `devices=all` gives no device group ([DevNodes.forApp]). */
+    val limitDevices: Boolean = false,
     /** The root gets /.flatpak-info ([LaunchPlanner.flatpakInfo]). */
     val flatpakInfo: Boolean = true,
     /** Android is in dark mode; apps are asked to follow it. */
     val darkTheme: Boolean = false,
+    /** The device's languages (BCP 47) for the app's locale; empty gives the generic C.UTF-8. */
+    val languageTags: List<String> = emptyList(),
 )
 
 /** Everything needed to start an app: its proot binds, environment and command, and its root's layout. */
@@ -67,6 +91,8 @@ data class LaunchPlan(
     val usrLinks: List<String>,
     /** Electron or a Chromium browser, started without zypak or cobalt ([Electron]). */
     val isElectron: Boolean,
+    /** What fdsec refuses for this app. */
+    val filter: Fdsec.Filter,
 )
 
 sealed interface PlanResult {
@@ -129,13 +155,17 @@ class LaunchPlanner(
             dirs.userDirs.path to "$varApp/config/user-dirs.dirs",
             dirs.userDirs.path to "${GuestPaths.HOME}/.config/user-dirs.dirs",
         )
+        // A writable scratch over each runtime cache a tool rewrites at launch, so the deployment
+        // (what the file check baselines) isn't changed by the app's own normal operation.
+        for (guest in RUNTIME_CACHE_DIRS) extraBinds += runtimeCacheScratch(dirs.runtimeCache, guest).path to guest
         dirs.hostFonts?.let { extraBinds += it.path to GuestPaths.HOST_FONTS }
         dirs.sdcard?.let { extraBinds += it.path to GuestPaths.SDCARD }
         dirs.sessionBus?.let { extraBinds += it.path to GuestPaths.SESSION_BUS_DIR }
-        val script = (hostPath(app, commandPath)?.let { Executable.of(it) } as? Executable.Script)?.text
-        val electronBinary = script?.let(Electron::zypakTarget)
+        val runtimeDir = dirs.runtimeDir?.let { host -> GuestPaths.runtimeDir(dirs.userId).also { extraBinds += host.path to it } }
+        val scripts = launchScripts(app, commandPath)
+        val electronBinary = scripts.firstNotNullOfOrNull(Electron::zypakTarget)
         val cobaltBrowser = if (electronBinary != null) null
-            else script?.let { Electron.cobaltTarget(it, appId) { path -> hostPath(app, path)?.isFile == true } }
+            else scripts.firstNotNullOfOrNull { Electron.cobaltTarget(it, appId) { path -> hostPath(app, path)?.isFile == true } }
         if (electronBinary != null) {
             isElectron = true
             val host = hostPath(app, electronBinary) ?: return PlanResult.NoCommand(appId)
@@ -183,13 +213,18 @@ class LaunchPlanner(
             darkTheme = options.darkTheme,
             kdePlatformTheme = DesktopConfig.KDE_PLATFORM_THEMES.any { File(runtime.files, it).exists() },
             sessionBus = dirs.sessionBus != null,
+            lang = if (options.languageTags.isEmpty()) LaunchEnvironment.GENERIC_LOCALE
+                else LaunchEnvironment.locale(options.languageTags, File(runtime.files, "lib/locale").list()?.toList().orEmpty()),
+            runtimeDir = runtimeDir ?: "/tmp",
+            flatpakContainer = options.flatpakInfo,
         )
         val devices = app.metadata.context.devices
         val binds = FlatpakBinds(
             root = dirs.root.path,
             runtimeFiles = runtime.files.path,
             appFiles = app.files.path,
-            etc = dirs.etc.mapValues { it.value.path },
+            // Without the network, no DNS: the runtime's resolv.conf is a link that leads nowhere here.
+            etc = dirs.etc.filterKeys { options.network || it != RESOLV_CONF }.mapValues { it.value.path },
             extensions = extensions.map { (base, ext) -> ext.deployment.files.path to "$base/${ext.guestPath}" },
             tmp = dirs.tmp.path,
             shm = dirs.shm.path,
@@ -197,8 +232,10 @@ class LaunchPlanner(
             pulseSockets = dirs.pulseSockets?.takeIf { options.audio }?.path,
             home = dirs.home.path,
             appDirs = dirs.appDirs.map { it.first.path to it.second },
-            dev = DevNodes.forApp(devices, devExists),
+            privateFiles = dirs.privateFiles.map { it.first.path to it.second },
+            dev = DevNodes.forApp(devices, devExists, limited = options.limitDevices),
             wholeDev = options.wholeDev && DevNodes.ALL in devices,
+            sys = if (options.limitDevices) DevNodes.LIMITED_SYS.filter(devExists) else null,
             extra = extraBinds,
         )
         return PlanResult.Ready(
@@ -212,8 +249,25 @@ class LaunchPlanner(
                 flatpakInfo = if (options.flatpakInfo) flatpakInfo(appId, runtimeRef) else null,
                 usrLinks = USR_LINKS.filter { File(runtime.files, it).exists() },
                 isElectron = isElectron,
+                filter = Fdsec.Filter(extraSyscalls = options.extraSyscalls, noInternet = !options.network),
             )
         )
+    }
+
+    /**
+     * The text of the script at [commandPath] and of the scripts under /app it hands over to with
+     * `exec` ([Electron.execTarget]), in that order, at most [MAX_SCRIPTS]: an IDE's command
+     * script may set up its tools and only then call zypak, in a wrapper of its own.
+     */
+    private fun launchScripts(app: Deployment, commandPath: String): List<String> {
+        val scripts = mutableListOf<String>()
+        var path: String? = commandPath
+        while (path != null && scripts.size < MAX_SCRIPTS) {
+            val text = (hostPath(app, path)?.let { Executable.of(it) } as? Executable.Script)?.text ?: break
+            scripts += text
+            path = Electron.execTarget(text)?.takeIf { it != path }
+        }
+        return scripts
     }
 
     /**
@@ -231,7 +285,7 @@ class LaunchPlanner(
             val target = readlink(file) ?: return file
             when {
                 target.startsWith("/app/") -> { path = target; return@repeat }
-                target.startsWith(l2sDir.path + "/") -> return File(target)
+                L2s.inStore(target, l2sDir) -> return File(target)
                 target.startsWith("/") -> return null
                 else -> {
                     file = File(file.parentFile, target).normalize()
@@ -245,7 +299,26 @@ class LaunchPlanner(
 
     companion object {
         const val GL_DEFAULT = "org.freedesktop.Platform.GL.default"
+        const val RESOLV_CONF = "resolv.conf"
+        /** The `/etc` files every launch binds Flatdroid's own over (the runtime's are never read). */
+        val ETC_OVERRIDES = listOf(RESOLV_CONF, "hosts", "machine-id", "passwd", "group", LOCALTIME, TIMEZONE)
+        /** The time zone's files: Android's zone (or UTC when it isn't shared), written at every launch. */
+        const val LOCALTIME = "localtime"
+        const val TIMEZONE = "timezone"
         private const val MAX_LINKS = 8
+        private const val MAX_SCRIPTS = 3
+
+        /**
+         * Runtime cache directories some tool regenerates into at launch (a read-only Flatpak
+         * runtime would write these to the home instead). A writable scratch is bound over each so
+         * the deployment stays unchanged for the file-integrity check. Add a directory here if the
+         * check reports its files changing on an ordinary launch.
+         */
+        val RUNTIME_CACHE_DIRS = listOf("/usr/lib/fontconfig/cache")
+
+        /** The scratch directory under [HostDirs.runtimeCache] that shadows [guest]. */
+        fun runtimeCacheScratch(base: File, guest: String): File =
+            File(base, guest.removePrefix("/").replace('/', '_'))
 
         /** Flatpak links these to /usr when the runtime has them. */
         val USR_LINKS = listOf("bin", "lib", "lib32", "lib64", "sbin")
@@ -259,8 +332,8 @@ class LaunchPlanner(
 
         /**
          * Printed by KDE's frameworks (KSandbox) when /.flatpak-info makes them run a process on
-         * the host but the app may not ask Flatpak to: there is no host here, and Konsole crashes
-         * in that mode. Such an app runs without the file ([LaunchOptions.flatpakInfo]).
+         * the host but the app may not ask Flatpak to: there is no host here, and KDE terminal
+         * apps crash in that mode. Such an app runs without the file ([LaunchOptions.flatpakInfo]).
          */
         const val KDE_HOST_PROCESS_WARNING = "Process execution expects 'org.freedesktop.Flatpak=talk'"
 

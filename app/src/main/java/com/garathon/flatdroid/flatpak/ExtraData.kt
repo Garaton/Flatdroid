@@ -4,6 +4,7 @@ import android.system.ErrnoException
 import android.system.Os
 import com.garathon.flatdroid.alpine.AlpineEnvironment
 import com.garathon.flatdroid.launcher.LaunchPlanner
+import com.garathon.flatdroid.proot.Fdsec
 import com.garathon.flatdroid.proot.ProotCommand
 import com.garathon.flatdroid.proot.ProotRunner
 import com.garathon.flatdroid.setup.AndroidTarFs
@@ -33,10 +34,37 @@ class ExtraData(private val env: AlpineEnvironment, private val stateFile: File,
         }.filter { !AndroidTarFs.isSymlink(it) && File(it, "files/bin/apply_extra").exists() && it.path !in done }
     }
 
-    /** Runs every pending script, [onLine] getting their output; records each as applied. */
-    fun applyAll(onLine: (String) -> Unit): List<Result> = pending().map { deployment ->
+    /**
+     * Forgets that the scripts under [branches] (`<kind>/<ID>/<arch>/<branch>`, relative to the
+     * installation) ran, or every script's with null: a reinstall redeploys the same commit at the
+     * same path, without the files its script made.
+     */
+    fun forget(branches: List<String>? = null) {
+        val prefix = env.flatpakDir.path + "/"
+        val keep = if (branches == null) emptyList() else applied().filter { path ->
+            branches.none { path.removePrefix(prefix).startsWith("$it/") }
+        }
+        stateFile.writeTextAtomically(keep.joinToString("\n", postfix = if (keep.isEmpty()) "" else "\n"))
+    }
+
+    /**
+     * Forgets the scripts of deployments that are gone: one removed and installed again (the same
+     * commit at the same path) gets its extra data again.
+     */
+    fun prune() {
+        val recorded = runCatching { stateFile.readLines() }.getOrDefault(emptyList()).filter { it.isNotBlank() }
+        val kept = applied()
+        if (recorded.size != kept.size) stateFile.writeTextAtomically(kept.joinToString("\n", postfix = if (kept.isEmpty()) "" else "\n"))
+    }
+
+    /**
+     * Runs every pending script, [onLine] getting their output; records each as applied, then
+     * calls [onApplied] with its deployment.
+     */
+    fun applyAll(onLine: (String) -> Unit, onApplied: (File) -> Unit = {}): List<Result> = pending().map { deployment ->
         val result = Result(deployment, deployment.parentFile!!.parentFile!!.parentFile!!.parentFile!!.name == "app", run(deployment, onLine))
         stateFile.writeTextAtomically((applied() + deployment.path).joinToString("\n", postfix = "\n"))
+        onApplied(deployment)
         result
     }
 
@@ -59,6 +87,7 @@ class ExtraData(private val env: AlpineEnvironment, private val stateFile: File,
             for (dir in listOf("usr", "app", "tmp", "dev")) File(root, dir).mkdirs()
             tmp.mkdirs()
             for (dev in listOf("null", "zero", "urandom")) File(root, "dev/$dev").createNewFile()
+            File(root, Fdsec.APP_PATH.removePrefix("/")).apply { parentFile!!.mkdirs() }.createNewFile()
             if (runtime != null) {
                 for (link in LaunchPlanner.USR_LINKS.filter { File(runtime, it).exists() }) Os.symlink("usr/$link", File(root, link).path)
             }

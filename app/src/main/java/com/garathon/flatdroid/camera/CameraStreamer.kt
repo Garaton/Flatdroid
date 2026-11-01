@@ -78,9 +78,12 @@ class CameraStreamer(private val context: Context, private val camera: AndroidCa
         try {
             val stream = FileOutputStream(pipe)
             output = stream
-            // A frame then fits the pipe whole, so the source reads it at once (fewer reads through proot).
-            runCatching { Os.fcntlInt(stream.fd, F_SETPIPE_SZ, CameraScript.PIPE_BYTES) }
-                .onFailure { DebugLog.w("Camera ${camera.id}: pipe size: ${it.message}") }
+            // A frame then fits the pipe whole, so the source reads it at once (fewer reads through
+            // proot). Os.fcntlInt is public from Android 11; before, the pipe keeps its size.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                runCatching { Os.fcntlInt(stream.fd, F_SETPIPE_SZ, CameraScript.PIPE_BYTES) }
+                    .onFailure { DebugLog.w("Camera ${camera.id}: pipe size: ${it.message}") }
+            }
             writeFrame(stream, Nv21.black(outWidth, outHeight))
             meter.reset()
             manager?.registerAvailabilityCallback(availability, handler)

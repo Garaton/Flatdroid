@@ -24,6 +24,7 @@ import java.util.concurrent.atomic.AtomicInteger
  * once done ([forget]): a change that stops part-way leaves nothing stale, and a file that is
  * missing or unreadable (cut off while written) is measured again. A measurement that a [forget]
  * overtook isn't saved; one name is measured once at a time (a second caller waits for it).
+ * What a forget set aside is still there as the [last] sizes, for showing until new ones are in.
  */
 class SizeStore(private val dir: File, private val onMeasured: (name: String, millis: Long) -> Unit = { _, _ -> }) {
     private val generations = HashMap<String, Int>()
@@ -47,20 +48,33 @@ class SizeStore(private val dir: File, private val onMeasured: (name: String, mi
 
     fun forget(name: String) = synchronized(this) {
         generations[name] = (generations[name] ?: 0) + 1
-        file(name).delete()
+        setAside(file(name))
     }
 
     /** Every saved size, or with [keep], all but that one. */
     fun forgetAll(keep: String? = null) = synchronized(this) {
         allGeneration++
-        dir.listFiles()?.filter { it.name != keep?.let { name -> name + SUFFIX } }?.forEach { it.delete() }
+        dir.listFiles()?.filter { it.name.endsWith(SUFFIX) && it.name != keep?.let { name -> name + SUFFIX } }?.forEach(::setAside)
         // The kept one's measurement in progress may still be saved.
         if (keep != null) generations[keep] = (generations[keep] ?: 0) - 1
     }
 
     private fun generation(name: String) = synchronized(this) { allGeneration + (generations[name] ?: 0) }
 
+    /**
+     * The sizes saved as [name] with exactly [keys], or those a forget set aside (from before a
+     * change, so possibly out of date); null when there are none. Never measures.
+     */
+    fun last(name: String, keys: Set<String>): Map<String, Long>? =
+        (read(file(name)) ?: read(lastFile(name)))?.takeIf { it.keys == keys }
+
     private fun file(name: String) = File(dir, name + SUFFIX)
+    private fun lastFile(name: String) = File(dir, name + SUFFIX + LAST)
+
+    /** Keeps a forgotten file's sizes as the last ones (a newer set replaces an older). */
+    private fun setAside(file: File) {
+        if (read(file) != null) file.renameTo(File(file.path + LAST)) else file.delete()
+    }
 
     /** `key=value` lines, then [END]; anything else (a file cut off part-way) is unreadable. */
     private fun read(file: File): Map<String, Long>? {
@@ -86,6 +100,7 @@ class SizeStore(private val dir: File, private val onMeasured: (name: String, mi
             dir.mkdirs()
             file.delete()
             file.writeText(sizes.entries.joinToString("") { (key, value) -> "$key=$value\n" } + END + "\n")
+            File(file.path + LAST).delete()
         } catch (_: Exception) {
             file.delete()
         }
@@ -93,6 +108,7 @@ class SizeStore(private val dir: File, private val onMeasured: (name: String, mi
 
     private companion object {
         const val SUFFIX = ".sizes"
+        const val LAST = ".last"
         const val END = "end"
     }
 }
@@ -112,6 +128,8 @@ class SizeStore(private val dir: File, private val onMeasured: (name: String, mi
  */
 object SavedSizes {
     private const val SHARED = "shared"
+    private val APP_KEYS = setOf("app", "flatpak", "home", "settings")
+    private val SHARED_KEYS = setOf("runtimes", "other")
 
     private val _updates = MutableStateFlow(0)
     /** Bumped each time background measuring has caught up, so screens read the sizes again. */
@@ -128,6 +146,8 @@ object SavedSizes {
     data class App(
         /** Its own Flatpak files (deployments, its own extensions such as translations) and its Electron swap. */
         val app: Long,
+        /** Of [app], the Flatpak files alone ([shared] subtracts them from everything Flatdroid keeps). */
+        val flatpak: Long,
         val privateHome: Long,
         /** Its settings and other files of its own ([AppFiles]), with Flatdroid's settings for it. */
         val settings: Long,
@@ -150,35 +170,48 @@ object SavedSizes {
         store ?: synchronized(this) { store ?: SizeStore(File(context.filesDir, "storage-sizes")) { name, millis -> DebugLog.i("Measured $name in $millis ms") }
             .also { store = it } }
 
+    /** [appId]'s sizes as last saved, perhaps from before a change; null when never measured. Never measures. */
+    fun lastApp(context: Context, appId: String): App? =
+        store(context).last(appId, APP_KEYS)?.let(::app)
+
+    private fun app(sizes: Map<String, Long>) = App(sizes.getValue("app"), sizes.getValue("flatpak"), sizes.getValue("home"), sizes.getValue("settings"))
+
+    /** The shared sizes as last saved, perhaps from before a change; null when never measured. Never measures. */
+    fun lastShared(context: Context): Shared? =
+        store(context).last(SHARED, SHARED_KEYS)?.let { Shared(it.getValue("runtimes"), it.getValue("other")) }
+
     /** Null while everything is changing ([forgetAll]). */
     fun app(context: Context, appId: String): App? {
         require(InstalledApps.isValidId(appId))
         val sizes = measuring {
-            store(context).get(appId, setOf("app", "home", "settings")) {
+            store(context).get(appId, APP_KEYS) {
                 val env = AlpineEnvironment.get(context)
                 val l2s = File(env.paths().l2sDir)
+                val flatpak = StorageSizes.following(flatpakFiles(env, appId), l2s, stop)
                 mapOf(
-                    "app" to StorageSizes.following(flatpakFiles(env, appId) + File(AppData.electronDir(context), appId), l2s, stop),
+                    "app" to flatpak + StorageSizes.of(File(AppData.electronDir(context), appId), stop),
+                    "flatpak" to flatpak,
                     "home" to StorageSizes.of(AppData.privateHome(context, appId), stop),
                     "settings" to AppFiles.dirs(File(AppData.root(context), appId), appId).sumOf { StorageSizes.of(it, stop) } +
                         StorageSizes.of(AppData.settingsFile(context, appId)),
                 )
             }
         } ?: return null
-        return App(sizes.getValue("app"), sizes.getValue("home"), sizes.getValue("settings"))
+        return app(sizes)
     }
 
     /** Null while everything is changing ([forgetAll]). */
     fun shared(context: Context): Shared? {
-        val sizes = measuring { store(context).get(SHARED, setOf("runtimes", "other")) {
+        val sizes = measuring { store(context).get(SHARED, SHARED_KEYS) {
             val env = AlpineEnvironment.get(context)
             val l2s = File(env.paths().l2sDir)
             val apps = FlatpakInstallation(env.flatpakDir, env.arch).appIds()
             val runtimes = StorageSizes.following(
                 File(env.flatpakDir, "runtime").listFiles().orEmpty().filter { dir -> apps.none { dir.name.startsWith("$it.") } }, l2s, stop,
             )
-            // As each app's own size counts them, so that the rest is what neither counts.
-            val appFiles = apps.sumOf { id -> StorageSizes.following(flatpakFiles(env, id), l2s, stop) }
+            // As each app's own size counts them, so that the rest is what neither counts. Saved with
+            // the app's sizes (apps are measured before this), so read rather than walked again.
+            val appFiles = apps.sumOf { id -> (app(context, id) ?: throw MeasureStopped()).flatpak }
             // Measured per app instead: their data, settings and Electron swaps, and these sizes.
             val perApp = setOf(AppData.root(context), AppData.electronDir(context), AppData.settingsDir(context), File(context.filesDir, "storage-sizes"))
                 .map { it.canonicalPath }
@@ -224,10 +257,14 @@ object SavedSizes {
         measureLater(context, appIds(context))
     }
 
-    /** After a change that may touch any of it: everything forgotten and measured again in the background. */
-    fun changedAll(context: Context) {
+    /**
+     * After a change that may touch any of it: everything forgotten, and measured again in the
+     * background, or with [measureNow] false only once a screen shows it (after a terminal
+     * command, which seldom changes anything).
+     */
+    fun changedAll(context: Context, measureNow: Boolean = true) {
         store(context).forgetAll()
-        if (changingAll.updateAndGet { maxOf(0, it - 1) } > 0) return
+        if (changingAll.updateAndGet { maxOf(0, it - 1) } > 0 || !measureNow) return
         measureLater(context, appIds(context) + SHARED)
     }
 

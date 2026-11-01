@@ -124,13 +124,6 @@ object CameraScript {
             |wireplumber &
             |/usr/libexec/xdg-desktop-portal &
             |$sources
-            |report() {
-            |  links=${'$'}(pw-link -l -o 2>/dev/null | awk '/^[^ ]/ { node = ${'$'}0; sub(/:.*/, "", node); next } /\|->/ { count[node]++ } END { for (n in count) print n, count[n] }')
-            |  for node in $names; do
-            |    n=${'$'}(echo "${'$'}links" | awk -v node="${'$'}node" '${'$'}1 == node { print ${'$'}2 }')
-            |    echo "$USERS_PREFIX${'$'}node ${'$'}{n:-0}"
-            |  done
-            |}
             |i=0
             |for node in $names; do
             |  until pw-link -o 2>/dev/null | grep -q "^${'$'}node:"; do
@@ -147,11 +140,28 @@ object CameraScript {
             |  [ "${'$'}i" -gt 100 ] && break
             |  sleep 0.1
             |done
+            |# One process for the users, started now: one started later (for each change) would be
+            |# visible to the app. pw-link prints each output port's name ("*" when it changed), then
+            |# each of its links as "  |-> <input port>", with "+", "-" or " " in front.
+            |pw-link -m -l 2>/dev/null | awk -v nodes="$names" -v prefix="$USERS_PREFIX" '
+            |  function report(   i, k, c) {
+            |    for (i = 1; i <= n; i++) {
+            |      c = 0
+            |      for (k in links) if (index(k, list[i] ":") == 1) c++
+            |      if (c != shown[list[i]]) { shown[list[i]] = c; print prefix list[i] " " c; fflush() }
+            |    }
+            |  }
+            |  BEGIN { n = split(nodes, list, " "); for (i = 1; i <= n; i++) shown[list[i]] = -1; report() }
+            |  substr(${'$'}0, 2, 6) == "  |-> " {
+            |    key = port "|" substr(${'$'}0, 8)
+            |    if (substr(${'$'}0, 1, 1) == "-") delete links[key]; else links[key] = 1
+            |    report()
+            |    next
+            |  }
+            |  substr(${'$'}0, 2, 6) == "  |<- " { next }
+            |  { port = substr(${'$'}0, 2) }
+            |' &
             |echo "$READY"
-            |report
-            |pw-link -m -l | while read -r line; do
-            |  case "${'$'}line" in [+-]*) report ;; esac
-            |done &
             |wait
             |""".trimMargin()
     }

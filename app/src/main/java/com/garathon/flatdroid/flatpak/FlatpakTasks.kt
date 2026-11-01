@@ -20,6 +20,15 @@ sealed interface FlatpakTask {
     data class Uninstall(val appId: String, val deleteData: Boolean, val keepRuntimes: Boolean = false) : FlatpakTask
     /** The repository clean-up on its own, after an update or uninstall Flatdroid didn't see end. */
     data object Repair : FlatpakTask
+    /** Reinstalls [appId] and its runtime, to restore files the integrity check found changed. */
+    data class Reinstall(val appId: String) : FlatpakTask
+    /**
+     * Reinstalls every installed app and its runtimes from Flathub, to record a baseline from
+     * known-good files when the file check is turned on and no deployment has one yet.
+     */
+    data object ReinstallAll : FlatpakTask
+    /** Records the file baseline of every installed app that has none yet (with the file check on). */
+    data object BaselineAll : FlatpakTask
 }
 
 data class FlatpakTaskUi(

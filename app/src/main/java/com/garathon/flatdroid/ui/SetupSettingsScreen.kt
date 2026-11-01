@@ -37,6 +37,7 @@ fun SetupSettingsScreen(
     modifier: Modifier = Modifier,
 ) {
     var onlyMyLanguages by rememberSaveable { mutableStateOf(settings.onlyMyLanguages) }
+    var security by rememberSaveable(stateSaver = SecuritySaver) { mutableStateOf(settings.security) }
 
     Column(
         modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
@@ -48,7 +49,8 @@ fun SetupSettingsScreen(
         	onlyMyLanguages, { onlyMyLanguages = it },
         	stringResource(R.string.settings_languages, deviceLanguages.replace(";", ", ")), stringResource(R.string.settings_languages_hint),
         )
-        Button(onClick = { onContinue(settings.copy(flatpakLanguages = if (onlyMyLanguages) deviceLanguages else GuestFiles.ALL_LANGUAGES)) }) {
+        SecuritySection(security, { security = it }, details = false)
+        Button(onClick = { onContinue(settings.copy(flatpakLanguages = if (onlyMyLanguages) deviceLanguages else GuestFiles.ALL_LANGUAGES, security = security)) }) {
             Text(stringResource(R.string.setup_settings_continue))
         }
     }

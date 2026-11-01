@@ -28,6 +28,7 @@ import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
+import com.garathon.flatdroid.alpine.AlpineCommands
 import com.garathon.flatdroid.alpine.AlpineEnvironment
 import com.garathon.flatdroid.alpine.GuestFiles
 import com.garathon.flatdroid.audio.MicStreamer
@@ -52,6 +53,7 @@ import com.garathon.flatdroid.setup.SetupStep
 import com.garathon.flatdroid.ui.AppSettingsScreen
 import com.garathon.flatdroid.ui.CommandState
 import com.garathon.flatdroid.ui.ElectronDialog
+import com.garathon.flatdroid.ui.FilesChangedDialog
 import com.garathon.flatdroid.ui.HomeScreen
 import com.garathon.flatdroid.ui.InstallDialog
 import com.garathon.flatdroid.ui.LogDialog
@@ -147,11 +149,12 @@ class MainActivity : ComponentActivity() {
         val apps by home.apps.collectAsState()
         val session by SessionController.ui.collectAsState()
         val task by FlatpakTasks.ui.collectAsState()
-        val sessionBusy = SessionController.isBusy || session.state is SessionState.ElectronOffer
+        val sessionBusy = SessionController.isBusy || session.state is SessionState.ElectronOffer || session.state is SessionState.FilesChanged
         val taskRunning = task.running != null
-        // Installing adds new files only, so it can run alongside an app; update and uninstall
-        // change or remove files a running app may use.
-        val installRunning = task.running is FlatpakTask.Install
+        // No task while an app runs, and no app while a task or (unless allowed) a terminal command
+        // runs: a running app could take over Alpine processes started after it ([AlpineCommands]).
+        val terminalWithApps = remember(screen) { AlpineCommands.terminalWithApps(this) }
+        val terminalRunning = running
         val nameOf = { id: String -> apps?.firstOrNull { it.id == id }?.name ?: id }
         BackHandler(enabled = screen != Screen.Home) {
             navigate(screen.parent ?: Screen.Home)
@@ -175,6 +178,18 @@ class MainActivity : ComponentActivity() {
                 error = settingsError,
                 // The shared home is saved when it is changed, so keep the saved one.
                 onSave = { new -> viewModel.applySettings(new.copy(sharedHome = SetupController.settings(this).load()?.sharedHome)) { navigate(Screen.Home) } },
+                // Settings are persisted before onApplied runs, so the reinstall's baseline sees the check on.
+                onSaveAndReinstallAll = { new ->
+                    viewModel.applySettings(new.copy(sharedHome = SetupController.settings(this).load()?.sharedHome)) {
+                        navigate(Screen.Home); FlatpakTaskService.start(this, FlatpakTask.ReinstallAll)
+                    }
+                },
+                onSaveAndBaselineAll = { new ->
+                    viewModel.applySettings(new.copy(sharedHome = SetupController.settings(this).load()?.sharedHome)) {
+                        if (FlatpakTaskService.start(this, FlatpakTask.BaselineAll)) navigate(Screen.Home)
+                        else Toast.makeText(this, R.string.task_busy, Toast.LENGTH_LONG).show()
+                    }
+                },
                 onBack = { navigate(Screen.Home); viewModel.clearSettingsError() },
                 onReset = { mode -> navigate(Screen.Home); resetAlpine(mode) },
                 onTerminal = { navigate(Screen.Terminal) },
@@ -190,11 +205,15 @@ class MainActivity : ComponentActivity() {
                 onImportAllHomes = storage::importAllHomes,
                 onExportAllAppFiles = storage::exportAllAppFiles,
                 onImportAllAppFiles = storage::importAllAppFiles,
+                onExportSharedDotfiles = storage::exportSharedDotfiles,
+                onImportSharedDotfiles = storage::importSharedDotfiles,
+                onResetSharedDotfiles = home::resetSharedDotfiles,
                 onExportSettings = storage::exportFlatdroidSettings,
                 // Back to the home screen once applied, as Save does: this screen shows the old values.
                 onImportSettings = { storage.importFlatdroidSettings { navigate(Screen.Home) } },
                 onResetSettings = { viewModel.applySettings(UserSettings.defaults(languages)) { navigate(Screen.Home) } },
                 canReset = !sessionBusy && !taskRunning,
+                canOpenTerminal = !SessionController.isBusy || terminalWithApps,
                 storageBusy = storageTasks.running != null || storageTasks.queued.isNotEmpty(),
                 modifier = modifier,
             )
@@ -214,8 +233,12 @@ class MainActivity : ComponentActivity() {
                 // Again after every copy, export, import or reset.
                 LaunchedEffect(app.id, storageTasks.generation, savedSizes) { home.measureStorage(app.id) }
                 val appBusy = storageTasks.busyWith(app.id)
+                val showsWebContent by produceState(false, app.id) {
+                    value = withContext(Dispatchers.IO) { InstalledApps(this@MainActivity).showsWebContent(app.id) }
+                }
                 AppSettingsScreen(
                     app = app,
+                    showsWebContent = showsWebContent,
                     storage = appStorage[app.id],
                     settings = remember(app.id) { store.load() },
                     canChangeFiles = session.state.appIdOrNull != app.id && !appBusy,
@@ -256,7 +279,12 @@ class MainActivity : ComponentActivity() {
                 var log by rememberSaveable { mutableStateOf<LogKind?>(null) }
                 if (installDialog) {
                     InstallDialog(
-                        onInstall = { FlatpakTaskService.start(this, FlatpakTask.Install(it)); installDialog = false },
+                        onInstall = {
+                            if (!FlatpakTaskService.start(this, FlatpakTask.Install(it)) && SessionController.isBusy) {
+                                Toast.makeText(this, R.string.task_install_waits, Toast.LENGTH_LONG).show()
+                            }
+                            installDialog = false
+                        },
                         onDismiss = { installDialog = false },
                     )
                 }
@@ -264,6 +292,13 @@ class MainActivity : ComponentActivity() {
                     ElectronDialog(
                         offer, nameOf(offer.appId), remember { AlpineEnvironment.get(this).arch },
                         onAccept = { SessionController.ended(null); continueLaunch(PendingLaunch(offer.appId, prepareElectron = true)) },
+                        onDismiss = { SessionController.ended(null) },
+                    )
+                }
+                (session.state as? SessionState.FilesChanged)?.let { changed ->
+                    FilesChangedDialog(
+                        changed, nameOf(changed.appId),
+                        onReinstall = { SessionController.ended(null); FlatpakTaskService.start(this, FlatpakTask.Reinstall(changed.appId)) },
                         onDismiss = { SessionController.ended(null) },
                     )
                 }
@@ -288,8 +323,8 @@ class MainActivity : ComponentActivity() {
                 HomeScreen(
                     apps = apps,
                     runningAppId = session.state.appIdOrNull,
-                    canLaunch = !sessionBusy && (!taskRunning || installRunning),
-                    canInstall = !taskRunning,
+                    canLaunch = !sessionBusy && !taskRunning && (!terminalRunning || terminalWithApps),
+                    canInstall = !sessionBusy && !taskRunning,
                     canUpdate = !sessionBusy && !taskRunning,
                     onLaunch = { launch(it.id) },
                     onAppSettings = { navigate(Screen.AppSettings(it.id)) },
@@ -312,6 +347,7 @@ class MainActivity : ComponentActivity() {
                         onStop = { SessionService.stop(this) },
                         onShowLog = { log = LogKind.SESSION },
                         onDismiss = SessionController::dismissMessage,
+                        protectPassword = remember { savedSettings(languages).security.protectPassword },
                     )
                 }
             }
@@ -365,12 +401,16 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun openViewer(password: String) {
+        val settings = SetupController.settings(this).load()
+        // With the password protected, it goes only to the viewer chosen in Settings, never through a chooser.
+        val protect = settings?.security?.protectPassword == true
         try {
-            val intent = Viewer.intent(this, password, SetupController.settings(this).load()?.vncViewer)
+            val intent = Viewer.intent(this, password, settings?.vncViewer, allowChooser = !protect)
                 ?: throw ActivityNotFoundException()
             startActivity(intent)
         } catch (_: ActivityNotFoundException) {
-            Toast.makeText(this, R.string.session_no_viewer, Toast.LENGTH_LONG).show()
+            val noChosen = protect && Viewer.installed(this).isNotEmpty()
+            Toast.makeText(this, if (noChosen) R.string.session_choose_viewer else R.string.session_no_viewer, Toast.LENGTH_LONG).show()
         }
     }
 
@@ -384,6 +424,7 @@ class MainActivity : ComponentActivity() {
             storage.checkTempHomes()
         }
         repairAfterKilledTask()
+        resumeBaselines()
     }
 
     /**
@@ -396,6 +437,21 @@ class MainActivity : ComponentActivity() {
         if (!AppData.taskMarker(this).exists() || !setup.isComplete || setup.running) return
         if (FlatpakTasks.ui.value.running != null || SessionController.isBusy) return
         FlatpakTaskService.start(this, FlatpakTask.Repair)
+    }
+
+    /**
+     * File baselines a task didn't get to record (it was cancelled, failed or Flatdroid was killed):
+     * recorded now, unless a Repair runs first (it records them itself). Not while anything else runs.
+     */
+    private fun resumeBaselines() {
+        val setup = SetupController.state.value
+        if (!AppData.baselineMarker(this).exists() || !setup.isComplete || setup.running) return
+        if (SetupController.settings(this).load()?.security?.checkFilesBeforeLaunch != true) {
+            AppData.baselineMarker(this).delete()
+            return
+        }
+        if (FlatpakTasks.ui.value.running != null || SessionController.isBusy) return
+        FlatpakTaskService.start(this, FlatpakTask.BaselineAll)
     }
 
     private fun startSetup() {

@@ -48,4 +48,19 @@ class LaunchEnvironmentTest {
     fun tripletFollowsTheArchitecture() {
         assertEquals("x86_64-linux-gnu", LaunchEnvironment.triplet("x86_64"))
     }
+
+    @Test
+    fun theLocaleFollowsTheDevicesLanguagesAmongTheRuntimes() {
+        val available = listOf("C.utf8", "de_DE", "de_DE.utf8", "de_AT.utf8", "en_US.utf8", "es_ES.utf8", "es_MX.utf8", "he_IL.utf8")
+        assertEquals("de_AT.UTF-8", LaunchEnvironment.locale(listOf("de-AT", "en-US"), available))
+        // A region the runtime lacks: the language's own country, else any of its locales.
+        assertEquals("de_DE.UTF-8", LaunchEnvironment.locale(listOf("de-CH"), available))
+        assertEquals("es_ES.UTF-8", LaunchEnvironment.locale(listOf("es-419"), available))
+        // Android's old code for Hebrew.
+        assertEquals("he_IL.UTF-8", LaunchEnvironment.locale(listOf("iw-IL"), available))
+        // Nothing fits: the next language, then the generic locale.
+        assertEquals("en_US.UTF-8", LaunchEnvironment.locale(listOf("ja-JP", "en-GB"), available))
+        assertEquals(LaunchEnvironment.GENERIC_LOCALE, LaunchEnvironment.locale(listOf("ja-JP"), available))
+        assertEquals(LaunchEnvironment.GENERIC_LOCALE, LaunchEnvironment.locale(emptyList(), available))
+    }
 }

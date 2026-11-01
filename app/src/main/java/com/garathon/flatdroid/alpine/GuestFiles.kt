@@ -11,16 +11,18 @@ object GuestFiles {
     /**
      * resolv.conf for [servers] (textual IPv4/IPv6 addresses, as Android reports them). IPv6
      * scope suffixes are dropped and link-local IPv6 servers skipped, since the guest can't name
-     * the interface. Falls back to [FALLBACK_DNS] when nothing usable remains.
+     * the interface. [preferred] (the Private DNS provider's addresses, already known to answer)
+     * replace the network's servers entirely: musl asks every listed server at once, so any of the
+     * network's left in would still see each lookup. Falls back to [FALLBACK_DNS] when nothing
+     * usable remains.
      */
-    fun resolvConf(servers: List<String>): String {
-        val usable = servers
+    fun resolvConf(servers: List<String>, preferred: List<String> = emptyList()): String {
+        fun usable(list: List<String>) = list
             .map { it.substringBefore('%').trim() }
             .filter { it.isNotEmpty() && !it.lowercase().startsWith("fe80:") }
             .distinct()
-            .take(MAX_NAMESERVERS)
-            .ifEmpty { FALLBACK_DNS }
-        return usable.joinToString("") { "nameserver $it\n" }
+        val chosen = usable(preferred).ifEmpty { usable(servers) }
+        return chosen.take(MAX_NAMESERVERS).ifEmpty { FALLBACK_DNS }.joinToString("") { "nameserver $it\n" }
     }
 
     /**

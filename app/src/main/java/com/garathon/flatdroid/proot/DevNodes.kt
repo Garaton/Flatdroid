@@ -27,10 +27,27 @@ object DevNodes {
     /** Android-only names never bound from these lists: Binder, system properties, init's sockets. */
     val DENIED = setOf("binder", "hwbinder", "vndbinder", "__properties__", "socket")
 
-    /** Host paths (bound at the same guest path) for an app whose metadata asks for [devices]. */
-    fun forApp(devices: List<String>, exists: (String) -> Boolean): List<String> {
-        val groups = if (ALL in devices) GROUPS.keys.toList() else devices.filter { it in GROUPS }
-        return select(BASE + groups.flatMap { GROUPS.getValue(it) }, exists)
+    /**
+     * `devices=all` when devices are limited ([forApp]): no group. Not even the GPU: OpenGL renders
+     * in software (`LIBGL_ALWAYS_SOFTWARE`), and the limited /sys lacks what Mesa needs to identify
+     * a GPU node anyway, so it would only open the GPU driver's kernel interface to the app.
+     */
+    val LIMITED_ALL = emptyList<String>()
+
+    /**
+     * The /sys paths an app gets when devices are limited, instead of the whole of /sys: CPU and
+     * NUMA information, which runtimes and apps read to size their thread pools and memory.
+     */
+    val LIMITED_SYS = listOf("/sys/devices/system/cpu", "/sys/devices/system/node")
+
+    /**
+     * Host paths (bound at the same guest path) for an app whose metadata asks for [devices].
+     * With [limited], `all` gives only [LIMITED_ALL]; groups the metadata names stay.
+     */
+    fun forApp(devices: List<String>, exists: (String) -> Boolean, limited: Boolean = false): List<String> {
+        val all = if (limited) LIMITED_ALL else GROUPS.keys.toList()
+        val groups = (if (ALL in devices) all else emptyList()) + devices.filter { it in GROUPS }
+        return select(BASE + groups.distinct().flatMap { GROUPS.getValue(it) }, exists)
     }
 
     /** Alpine's roots: the base set, except /dev/random, which Alpine gets from /dev/urandom. */
@@ -38,7 +55,7 @@ object DevNodes {
 
     /**
      * Whether the device has [path] in a form proot can bind. Uses stat(), as proot does: Android
-     * may let an app see that a node exists but not stat it (`/dev/full` on the test phone), and
+     * may let an app see that a node exists but not stat it (`/dev/full` on some devices), and
      * proot then skips the bind with a warning.
      */
     fun hostHas(path: String): Boolean = try {

@@ -24,7 +24,7 @@ android {
         minSdk = 24
         targetSdk = 35
         versionCode = 1
-        versionName = "0.5.5"
+        versionName = "0.6"
 
         buildConfigField("String", "ALPINE_BRANCH", "\"${alpine.getProperty("branch")}\"")
         buildConfigField("String", "ALPINE_VERSION", "\"${alpine.getProperty("version")}\"")
@@ -115,6 +115,34 @@ abstract class BuildProotTask @Inject constructor(private val exec: ExecOperatio
     }
 }
 
+/** Runs native/build-fdsec.sh for one ABI; output is a jniLibs root (<dir>/<abi>/libfdsec.so). */
+abstract class BuildFdsecTask @Inject constructor(private val exec: ExecOperations) : DefaultTask() {
+    @get:Input abstract val abi: Property<String>
+    @get:InputFile abstract val script: RegularFileProperty
+    @get:InputFile abstract val source: RegularFileProperty
+    @get:Internal abstract val ndkDirectory: DirectoryProperty
+    @get:Input val ndkPath: Provider<String> get() = ndkDirectory.map { it.asFile.absolutePath }
+    @get:OutputDirectory abstract val outputDirectory: DirectoryProperty
+
+    @TaskAction
+    fun build() {
+        val out = outputDirectory.get().asFile.also { it.deleteRecursively() }
+        exec.exec {
+            commandLine(script.get().asFile.absolutePath, abi.get(), ndkPath.get(), File(out, abi.get()).absolutePath)
+        }
+    }
+}
+
+val fdsecTasks = architectures.keys.associateWith { abi ->
+    tasks.register<BuildFdsecTask>("buildFdsec_$abi") {
+        this.abi = abi
+        script = rootProject.file("native/build-fdsec.sh")
+        source = rootProject.file("native/fdsec.c")
+        ndkDirectory = androidComponents.sdkComponents.ndkDirectory
+        outputDirectory = layout.buildDirectory.dir("generated/fdsec/$abi")
+    }
+}
+
 val prootTasks = architectures.keys.associateWith { abi ->
     tasks.register<BuildProotTask>("buildProot_$abi") {
         this.abi = abi
@@ -136,6 +164,7 @@ androidComponents {
         }
         for (abi in abis) {
             variant.sources.jniLibs?.addGeneratedSourceDirectory(prootTasks.getValue(abi), BuildProotTask::outputDirectory)
+            variant.sources.jniLibs?.addGeneratedSourceDirectory(fdsecTasks.getValue(abi), BuildFdsecTask::outputDirectory)
         }
     }
 }

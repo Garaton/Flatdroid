@@ -1,5 +1,6 @@
 package com.garathon.flatdroid.ui
 
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
@@ -7,6 +8,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.res.stringResource
 import com.garathon.flatdroid.R
 import com.garathon.flatdroid.storage.HomeZip
@@ -34,6 +36,31 @@ fun TempHomeDialog(appName: String, onExport: () -> Unit, onDelete: () -> Unit) 
         text = { Text(stringResource(R.string.temp_home_prompt_text)) },
         confirmButton = { Button(onClick = onExport) { Text(stringResource(R.string.temp_home_export)) } },
         dismissButton = { TextButton(onClick = onDelete) { Text(stringResource(R.string.temp_home_delete)) } },
+    )
+}
+
+/**
+ * Shown when the file check is turned on with apps installed (turning it off dropped their baselines): reinstall
+ * everything (changed files are downloaded again) and record baselines from the reinstalled files,
+ * or trust what is installed and record its baselines now or at each app's first launch. The two
+ * tasks need no app or task running ([canStartTask]).
+ * Every choice saves the settings; the dialog has no cancel, so one of them is always made.
+ */
+@Composable
+fun BaselineChoiceDialog(canStartTask: Boolean, onReinstall: () -> Unit, onRecordNow: () -> Unit, onAtFirstLaunch: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = {},
+        title = { Text(stringResource(R.string.baseline_choice_title)) },
+        text = {
+            Text(stringResource(R.string.baseline_choice_message) + if (canStartTask) "" else "\n\n" + stringResource(R.string.baseline_choice_busy))
+        },
+        confirmButton = {
+            Column(horizontalAlignment = Alignment.End) {
+                Button(onClick = onReinstall, enabled = canStartTask) { Text(stringResource(R.string.baseline_choice_reinstall)) }
+                TextButton(onClick = onRecordNow, enabled = canStartTask) { Text(stringResource(R.string.baseline_choice_record_now)) }
+                TextButton(onClick = onAtFirstLaunch) { Text(stringResource(R.string.baseline_choice_first_launch)) }
+            }
+        },
     )
 }
 

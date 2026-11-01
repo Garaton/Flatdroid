@@ -76,43 +76,19 @@ class ProcessStopper(
     /**
      * Processes below [pid], found through /proc (the app sees its own processes there): its
      * children and theirs, and every process one of them traces. A process that went into the
-     * background (Kate) or restarted itself (Electron's relaunch) belongs to init, but proot still
+     * background (some editors) or restarted itself (Electron's relaunch) belongs to init, but proot still
      * traces it.
      */
     fun descendants(pid: Int): List<Int> {
-        val links = procDir.listFiles()
-            ?.mapNotNull { dir -> dir.name.toIntOrNull()?.let { it to linksOf(dir) } }
-            ?.filter { it.second != null }
-            ?.associate { it.first to it.second!! }
-            ?: return emptyList()
+        val links = ProcTable.read(procDir)
         val found = mutableListOf<Int>()
         var frontier = listOf(pid)
         while (frontier.isNotEmpty()) {
-            val children = links.filter { (_, link) -> link.parent in frontier || link.tracer in frontier }.keys.filter { it !in found && it != pid }
+            val children = links.filter { (_, proc) -> proc.ppid in frontier || proc.tracer in frontier }.keys.filter { it !in found && it != pid }
             found += children
             frontier = children
         }
         return found
-    }
-
-    /** A process's parent and tracer (0 when not traced). */
-    private class Links(val parent: Int, val tracer: Int)
-
-    private fun linksOf(dir: File): Links? = try {
-        var parent: Int? = null
-        var tracer = 0
-        File(dir, "status").useLines { lines ->
-            for (line in lines) {
-                when {
-                    line.startsWith("PPid:") -> parent = line.substringAfter(':').trim().toIntOrNull()
-                    line.startsWith("TracerPid:") -> tracer = line.substringAfter(':').trim().toIntOrNull() ?: 0
-                }
-                if (parent != null && line.startsWith("TracerPid:")) break
-            }
-        }
-        parent?.let { Links(it, tracer) }
-    } catch (_: Exception) {
-        null
     }
 
     companion object {

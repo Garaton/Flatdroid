@@ -43,6 +43,8 @@ object StorageTaskCodec {
             "exportAllSettings" -> StorageTask.ExportAllAppFiles
             "importAllHomes" -> StorageTask.ImportAllHomes
             "importAllSettings" -> StorageTask.ImportAllAppFiles
+            "exportSharedDotfiles" -> StorageTask.ExportSharedDotfiles
+            "importSharedDotfiles" -> StorageTask.ImportSharedDotfiles
             "importHome" -> appId?.let { StorageTask.ImportHome(it) }
             "importSettings" -> appId?.let { StorageTask.ImportAppFiles(it) }
             "importSharedZip" -> HomeZip.Clash.entries.firstOrNull { it.name == values[CLASH] }?.let { StorageTask.ImportSharedZip(it) }
@@ -61,6 +63,8 @@ object StorageTaskCodec {
         StorageTask.ExportAllAppFiles -> "exportAllSettings"
         StorageTask.ImportAllHomes -> "importAllHomes"
         StorageTask.ImportAllAppFiles -> "importAllSettings"
+        StorageTask.ExportSharedDotfiles -> "exportSharedDotfiles"
+        StorageTask.ImportSharedDotfiles -> "importSharedDotfiles"
         is StorageTask.ImportHome -> "importHome"
         is StorageTask.ImportAppFiles -> "importSettings"
         is StorageTask.ImportSharedZip -> "importSharedZip"
@@ -90,12 +94,12 @@ class PendingTasks(private val dir: File) {
         Record(UUID.randomUUID().toString(), task, uris, resumable = resumable, created = System.currentTimeMillis()).also(::save)
 
     /**
-     * Records that [done] items are finished, after each one, so a continued task never does one
-     * twice (which Keep both would turn into a copy). Not synced to disk: a kill keeps what was
-     * written, and only a power loss could lose the last few.
+     * Records that [done] items of [record] are finished, after each one, so a continued task never
+     * does one twice (which Keep both would turn into a copy). [record] is the task's own (only its
+     * service changes it), so it isn't read again for every item. Not synced to disk: a kill keeps
+     * what was written, and only a power loss could lose the last few.
      */
-    fun progress(id: String, done: Int) {
-        val record = get(id) ?: return
+    fun progress(record: Record, done: Int) {
         if (record.done != done) save(record.copy(done = done), durable = false)
     }
 

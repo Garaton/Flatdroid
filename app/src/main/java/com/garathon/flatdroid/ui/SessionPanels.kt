@@ -2,6 +2,8 @@ package com.garathon.flatdroid.ui
 
 import android.content.ClipData
 import android.os.PersistableBundle
+import android.view.WindowManager
+import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -24,6 +26,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -42,13 +45,18 @@ import com.garathon.flatdroid.R
 import com.garathon.flatdroid.flatpak.FlatpakTask
 import com.garathon.flatdroid.flatpak.FlatpakTaskUi
 import com.garathon.flatdroid.flatpak.InstalledApps
+import com.garathon.flatdroid.session.SessionController
 import com.garathon.flatdroid.session.SessionScript
 import com.garathon.flatdroid.session.SessionState
 import com.garathon.flatdroid.session.SessionUi
 import com.garathon.flatdroid.session.Viewer
 import kotlinx.coroutines.launch
 
-/** The running session, or how the last one ended. Nothing when idle with no message. */
+/**
+ * The running session, or how the last one ended. Nothing when idle with no message. With
+ * [protectPassword] (the security setting), the screen can't be captured while the password is on
+ * it, and the password shows only on tap.
+ */
 @Composable
 fun SessionPanel(
     session: SessionUi,
@@ -57,10 +65,12 @@ fun SessionPanel(
     onStop: () -> Unit,
     onShowLog: () -> Unit,
     onDismiss: () -> Unit,
+    protectPassword: Boolean = false,
 ) {
     val state = session.state
     if (state is SessionState.Idle && session.message == null) return
     if (state is SessionState.ElectronOffer) return
+    if (state is SessionState.FilesChanged) return
     val colors = MaterialTheme.colorScheme
     val failed = state is SessionState.Idle && session.failed
     Surface(
@@ -84,13 +94,15 @@ fun SessionPanel(
                 }
                 is SessionState.Running -> {
                     Text(stringResource(R.string.session_running_app, nameOf(state.appId)), style = MaterialTheme.typography.titleSmall)
-                    PasswordLine(state.password)
+                    if (protectPassword) SecureWindow()
+                    PasswordLine(state.password, hidden = protectPassword)
                 }
                 is SessionState.Stopping -> Text(stringResource(R.string.session_stopping, nameOf(state.appId)), style = MaterialTheme.typography.titleSmall)
                 else -> session.message?.let { SelectionContainer { Text(it, style = MaterialTheme.typography.bodyMedium) } }
             }
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (state is SessionState.Running) Button(onClick = { onOpenViewer(state.password) }) { Text(stringResource(R.string.session_open_viewer)) }
+                if (state is SessionState.Starting && state.skippable) OutlinedButton(onClick = { SessionController.skipFileCheck() }) { Text(stringResource(R.string.session_skip_check)) }
                 when (state) {
                     is SessionState.Starting, is SessionState.Running, is SessionState.PreparingElectron ->
                         OutlinedButton(onClick = onStop) { Text(stringResource(R.string.session_stop)) }
@@ -103,20 +115,36 @@ fun SessionPanel(
     }
 }
 
+/** While shown: the activity's window can't be captured (screenshots, screen recording, Recents). */
 @Composable
-private fun PasswordLine(password: String) {
+private fun SecureWindow() {
+    val window = LocalActivity.current?.window ?: return
+    DisposableEffect(window) {
+        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        onDispose { window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE) }
+    }
+}
+
+/** The display's address and password; with [hidden], the password only once tapped. */
+@Composable
+private fun PasswordLine(password: String, hidden: Boolean) {
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
+    var shown by rememberSaveable { mutableStateOf(false) }
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
             stringResource(R.string.session_address, Viewer.HOST, SessionScript.VNC_PORT),
             style = MaterialTheme.typography.bodyMedium,
         )
-        Text(
-            stringResource(R.string.session_password, password),
-            style = MaterialTheme.typography.bodyMedium,
-            fontFamily = FontFamily.Monospace,
-        )
+        if (hidden && !shown) {
+            TextButton(onClick = { shown = true }) { Text(stringResource(R.string.session_show_password)) }
+        } else {
+            Text(
+                stringResource(R.string.session_password, password),
+                style = MaterialTheme.typography.bodyMedium,
+                fontFamily = FontFamily.Monospace,
+            )
+        }
         TextButton(onClick = { scope.launch { clipboard.setClipEntry(ClipEntry(sensitiveText("VNC password", password))) } }) {
             Text(stringResource(R.string.session_copy_password))
         }
@@ -233,6 +261,18 @@ fun ElectronDialog(offer: SessionState.ElectronOffer, appName: String, deviceArc
             else TextButton(onClick = onDismiss) { Text(stringResource(R.string.dismiss)) }
         },
         dismissButton = { if (offer.problem == null) TextButton(onClick = onDismiss) { Text(stringResource(R.string.reset_cancel)) } },
+    )
+}
+
+/** The file check found changed files: the launch was refused; Reinstall restores the packages. */
+@Composable
+fun FilesChangedDialog(state: SessionState.FilesChanged, appName: String, onReinstall: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.files_changed_title, appName)) },
+        text = { SelectionContainer { Text(state.detail, style = MaterialTheme.typography.bodyMedium) } },
+        confirmButton = { Button(onClick = onReinstall) { Text(stringResource(R.string.session_reinstall)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.reset_cancel)) } },
     )
 }
 

@@ -1,6 +1,10 @@
 package com.garathon.flatdroid
 
 import android.app.Application
+import android.content.Context
+import android.system.ErrnoException
+import android.system.Os
+import android.system.OsConstants
 import com.garathon.flatdroid.alpine.AlpineEnvironment
 import com.garathon.flatdroid.flatpak.AppData
 import com.garathon.flatdroid.flatpak.FlatpakInstallation
@@ -15,8 +19,31 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.io.File
 
-/** Clears what an earlier run left behind, once per process start. */
+/**
+ * Makes Flatdroid's process non-dumpable, then clears what an earlier run left behind, once per
+ * process start.
+ */
 class FlatdroidApplication : Application() {
+    override fun attachBaseContext(base: Context) {
+        // Before any other code of Flatdroid's runs (content providers start before onCreate).
+        // Every Flatpak runs as Flatdroid's user and sees /proc: a dumpable process (debug builds
+        // are) could have its memory opened through /proc/<pid>/mem, which seccomp can't tell
+        // from any other open().
+        try {
+            Os.prctl(OsConstants.PR_SET_DUMPABLE, 0, 0, 0, 0)
+            nonDumpable = Os.prctl(OsConstants.PR_GET_DUMPABLE, 0, 0, 0, 0) == 0
+        } catch (e: ErrnoException) {
+            DebugLog.w("Could not make the process non-dumpable: $e")
+        }
+        super.attachBaseContext(base)
+    }
+
+    companion object {
+        /** Whether this process is non-dumpable; launches refuse otherwise, as they do when fdsec's filter isn't in place. */
+        @Volatile var nonDumpable = false
+            private set
+    }
+
     override fun onCreate() {
         super.onCreate()
         DebugLog.init(cacheDir)

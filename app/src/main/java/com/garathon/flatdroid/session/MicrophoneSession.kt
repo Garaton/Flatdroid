@@ -17,11 +17,11 @@ enum class MicAction {
 
     companion object {
         /**
-         * [users] streams record from the app's microphone; the app is [alwaysAllowed] it, or the
-         * user's [answer] for this session is allowed, denied or not given yet (null).
+         * The app is [recording] from its microphone; it is [alwaysAllowed] it, or the user's
+         * [answer] for this session is allowed, denied or not given yet (null).
          */
-        fun of(alwaysAllowed: Boolean, answer: Boolean?, users: Int): MicAction = when {
-            users == 0 -> IDLE
+        fun of(alwaysAllowed: Boolean, answer: Boolean?, recording: Boolean): MicAction = when {
+            !recording -> IDLE
             alwaysAllowed || answer == true -> STREAM
             answer == null -> ASK
             else -> IDLE
@@ -31,7 +31,7 @@ enum class MicAction {
 
 /**
  * The microphone for one session of [appId], whose microphone setting is on: Android's microphone
- * goes into PulseAudio only while the app records ([onUsers]). Unless [alwaysAllowed], the user is
+ * goes into PulseAudio only while the app records ([MicStreamer] tells). Unless [alwaysAllowed], the user is
  * asked through [SessionController] (a notification) the first time the app records; the answer
  * holds for the rest of the session and isn't saved. The question waits [ASK_DELAY_MS]: apps
  * such as Audacity open and close a recording stream while starting, which isn't a request.
@@ -45,17 +45,19 @@ class MicrophoneSession(
     private val alwaysAllowed: Boolean,
     initialAnswer: Boolean? = null,
 ) {
-    private val streamer = MicStreamer(context.applicationContext, pipe, rate)
-    private var users = 0
+    private var recording = false
     private var answer: Boolean? = initialAnswer
     private val timer = Timer("microphone-ask", true)
     private var pendingAsk: TimerTask? = null
     private var stopped = false
+    // Last: its thread starts at once and may call back.
+    private val streamer = MicStreamer(context.applicationContext, pipe, rate, ::onRecording)
 
+    /** Whether the app records from the microphone (from [MicStreamer], on its thread). */
     @Synchronized
-    fun onUsers(count: Int) {
+    private fun onRecording(now: Boolean) {
         if (stopped) return
-        users = count
+        recording = now
         update()
     }
 
@@ -68,16 +70,18 @@ class MicrophoneSession(
         update()
     }
 
-    @Synchronized
     fun stop() {
-        stopped = true
-        timer.cancel()
+        synchronized(this) {
+            stopped = true
+            timer.cancel()
+            SessionController.requestMicrophone(null)
+        }
+        // Outside the lock: the streamer's thread may be waiting for it in onRecording.
         streamer.close()
-        SessionController.requestMicrophone(null)
     }
 
     private fun update() {
-        val action = MicAction.of(alwaysAllowed, answer, users)
+        val action = MicAction.of(alwaysAllowed, answer, recording)
         if (action == MicAction.STREAM) {
             if (!streamer.start()) SessionController.log("[flatdroid] Android's microphone permission is missing; the app records silence")
         } else {
@@ -95,7 +99,7 @@ class MicrophoneSession(
     @Synchronized
     private fun askIfStillRecording() {
         pendingAsk = null
-        if (!stopped && MicAction.of(alwaysAllowed, answer, users) == MicAction.ASK) SessionController.requestMicrophone(appId)
+        if (!stopped && MicAction.of(alwaysAllowed, answer, recording) == MicAction.ASK) SessionController.requestMicrophone(appId)
     }
 
     private companion object {

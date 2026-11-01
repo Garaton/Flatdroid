@@ -5,6 +5,7 @@ import android.graphics.Canvas
 import android.graphics.RectF
 import android.util.LruCache
 import androidx.core.graphics.createBitmap
+import androidx.core.graphics.drawable.toBitmap
 import com.caverock.androidsvg.SVG
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -49,6 +50,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -127,6 +130,7 @@ fun HomeScreen(
             modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            FlatdroidIcon()
             Text(stringResource(R.string.app_name), style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
             IconButton(onClick = onInstall, enabled = canInstall) {
                 Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.home_install))
@@ -312,4 +316,15 @@ private fun HomeScreenPreview() {
             onLaunch = {}, onAppSettings = {}, onInstall = {}, onUpdateAll = {}, onSettings = {}, onImportFiles = {}, onImportZip = {},
         )
     }
+}
+
+/** Flatdroid's launcher icon, as the launcher shapes it (adaptive icons can't be drawn from resources). */
+@Composable
+private fun FlatdroidIcon() {
+    val context = LocalContext.current
+    val px = with(LocalDensity.current) { 32.dp.roundToPx() }
+    val icon = remember(px) {
+        runCatching { context.packageManager.getApplicationIcon(context.packageName).toBitmap(px, px).asImageBitmap() }.getOrNull()
+    } ?: return
+    Image(icon, contentDescription = null, modifier = Modifier.padding(end = 12.dp).size(32.dp))
 }

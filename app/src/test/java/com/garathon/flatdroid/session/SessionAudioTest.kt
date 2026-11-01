@@ -2,7 +2,6 @@ package com.garathon.flatdroid.session
 
 import com.garathon.flatdroid.settings.Resampler
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -26,46 +25,68 @@ class SessionAudioTest {
     }
 
     @Test
-    fun helpersGetSoundMicrophoneAndResampler() {
+    fun helpersGetSoundAndResampler() {
         assertEquals(
-            listOf("/bin/sh", SessionScript.GUEST_SCRIPT, "1000x1400", "14400", "30", "on", "on", "speex-float-0", "on", "on"),
-            SessionScript.command("1000x1400", 30, sound = true, microphone = true, Resampler.FAST, sessionBus = true, camera = true),
+            listOf("/bin/sh", SessionScript.GUEST_SCRIPT, "1000x1400", "14400", "30", "on", "speex-float-0", "on", "on", "on"),
+            SessionScript.command("1000x1400", 30, sound = true, Resampler.FAST, sessionBus = true, camera = true),
         )
-        // Without sound there is no PulseAudio, so no microphone either.
         assertEquals(
             // PipeWire only with the bus, which the camera's portal needs.
-            listOf("off", "off", "speex-float-1", "off", "off"),
-            SessionScript.command("1000x1400", 30, sound = false, microphone = true, Resampler.STANDARD, sessionBus = false, camera = true).takeLast(5),
+            listOf("off", "speex-float-1", "off", "off"),
+            SessionScript.command("1000x1400", 30, sound = false, Resampler.STANDARD, sessionBus = false, camera = true).subList(5, 9),
         )
     }
 
     @Test
-    fun pulseAudioAndTheMicrophoneWatcherStartOnlyWithSound() {
+    fun anUnsharedClipboardTurnsOffXvncsCutText() {
+        val args = SessionScript.command("1000x1400", 30, sound = false, Resampler.FAST, sessionBus = true, clipboard = false)
+        assertEquals("off", args.last())
         val lines = SessionScript.TEXT.lines().map { it.trim() }
-        val soundCheck = lines.indexOf("if [ \"${'$'}sound\" = on ]; then")
-        val pulse = lines.indexOfFirst { it.startsWith("pulseaudio ") }
-        assertTrue(soundCheck in 0 until pulse && lines.subList(soundCheck, pulse).none { it == "fi" })
-        assertTrue("sound=${'$'}4" in lines && "microphone=${'$'}5" in lines && "resampler=${'$'}6" in lines)
+        assertTrue("clipboard=${'$'}8" in lines)
+        assertTrue("[ \"${'$'}clipboard\" = on ] || clipboard_args=\"-AcceptCutText=0 -SendCutText=0\"" in lines)
+        assertTrue(lines.single { it.startsWith("-nolisten local") }.endsWith("${'$'}clipboard_args &"))
     }
 
     @Test
-    fun micUsersAreReadFromTheHelpersOutput() {
-        assertEquals(2, SessionScript.micUsers("flatdroid: microphone users 2"))
-        assertEquals(0, SessionScript.micUsers("flatdroid: microphone users 0"))
-        assertNull(SessionScript.micUsers("flatdroid: display ready"))
-        assertNull(SessionScript.micUsers("flatdroid: microphone users x"))
+    fun pulseAudioStartsOnlyWithSoundAndNothingWatchesItLater() {
+        val lines = SessionScript.TEXT.lines().map { it.trim() }
+        val soundCheck = lines.indexOf("if [ \"${'$'}sound\" = on ]; then")
+        val pulse = lines.indexOfFirst { "/usr/bin/pulseaudio " in it }
+        assertTrue(soundCheck in 0 until pulse && lines.subList(soundCheck, pulse).none { it == "fi" })
+        assertTrue("sound=${'$'}4" in lines && "resampler=${'$'}5" in lines)
+        // Whether the app records comes from the microphone's pipe, not from a process started later.
+        assertTrue(lines.none { "pactl" in it })
+    }
+
+    @Test
+    fun everyHelperButXvncRunsWithoutInternetSockets() {
+        val lines = SessionScript.TEXT.lines().map { it.trim() }
+        for (helper in listOf("openbox", "dbus-daemon", "xdg-dbus-proxy", "pipewire", "pulseaudio")) {
+            val line = lines.single { "/usr/bin/$helper" in it }
+            assertTrue(line, "/run/flatdroid/fdsec --no-inet -- /usr/bin/$helper" in line)
+        }
+        assertTrue(lines.single { it.startsWith("Xvnc ") }.let { "fdsec" !in it })
     }
 
     @Test
     fun microphoneStreamsOnlyWhileAllowedAndRecording() {
         // Not recording: nothing, whatever the answer.
-        assertEquals(MicAction.IDLE, MicAction.of(alwaysAllowed = true, answer = null, users = 0))
-        assertEquals(MicAction.IDLE, MicAction.of(alwaysAllowed = false, answer = null, users = 0))
+        assertEquals(MicAction.IDLE, MicAction.of(alwaysAllowed = true, answer = null, recording = false))
+        assertEquals(MicAction.IDLE, MicAction.of(alwaysAllowed = false, answer = null, recording = false))
         // Recording, not answered yet this session: ask; allowed: record; denied: silence, no asking.
-        assertEquals(MicAction.ASK, MicAction.of(alwaysAllowed = false, answer = null, users = 2))
-        assertEquals(MicAction.STREAM, MicAction.of(alwaysAllowed = false, answer = true, users = 1))
-        assertEquals(MicAction.IDLE, MicAction.of(alwaysAllowed = false, answer = false, users = 1))
+        assertEquals(MicAction.ASK, MicAction.of(alwaysAllowed = false, answer = null, recording = true))
+        assertEquals(MicAction.STREAM, MicAction.of(alwaysAllowed = false, answer = true, recording = true))
+        assertEquals(MicAction.IDLE, MicAction.of(alwaysAllowed = false, answer = false, recording = true))
         // Always allowed: records without asking.
-        assertEquals(MicAction.STREAM, MicAction.of(alwaysAllowed = true, answer = null, users = 1))
+        assertEquals(MicAction.STREAM, MicAction.of(alwaysAllowed = true, answer = null, recording = true))
+    }
+
+    @Test
+    fun theAppCantLoadPulseAudioModules() {
+        val line = SessionScript.TEXT.lines().map { it.trim() }.let { lines ->
+            val start = lines.indexOfFirst { "/usr/bin/pulseaudio" in it }
+            lines[start] + " " + lines[start + 1]
+        }
+        assertTrue(line, "--disallow-module-loading" in line && "--disallow-exit" in line)
     }
 }
