@@ -33,6 +33,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardType
@@ -118,6 +119,9 @@ fun AppSettingsScreen(
     val environmentValue = EnvironmentText.parse(environment)
     var micRefused by rememberSaveable { mutableStateOf(false) }
     val context = LocalContext.current
+    // Configuration-aware (unlike context.getString from LocalContext): used in the label lambdas
+    // below, which run per item and so can't call the composable stringResource.
+    val resources = LocalResources.current
     var confirmUninstall by rememberSaveable { mutableStateOf(false) }
     var confirm by rememberSaveable { mutableStateOf<StorageAction?>(null) }
 
@@ -253,7 +257,7 @@ fun AppSettingsScreen(
                         else sides.firstOrNull { it != AndroidCameras.FULL_RESOLUTION && it < cameraResolution } ?: sides.last()
                     }
                 },
-                label = { context.getString(R.string.app_settings_camera_frame_rate_value, it) },
+                label = { resources.getString(R.string.app_settings_camera_frame_rate_value, it) },
                 title = stringResource(R.string.app_settings_camera_frame_rate),
                 hint = stringResource(R.string.app_settings_camera_frame_rate_hint) +
                     if (cameraFrameRate > AndroidCameras.COMMON_MAX_FRAME_RATE) " " + stringResource(R.string.app_settings_camera_frame_rate_high) else "",
@@ -266,9 +270,9 @@ fun AppSettingsScreen(
                 label = { side ->
                     if (side == AndroidCameras.FULL_RESOLUTION) {
                         val sizes = resolutions.firstOrNull { it.shortSide == side }?.fullSizes.orEmpty()
-                        context.getString(R.string.app_settings_camera_resolution_full, sizes.joinToString(", ") { "${it.width}×${it.height}" })
+                        resources.getString(R.string.app_settings_camera_resolution_full, sizes.joinToString(", ") { "${it.width}×${it.height}" })
                     } else {
-                        context.getString(R.string.app_settings_camera_resolution_value, side)
+                        resources.getString(R.string.app_settings_camera_resolution_value, side)
                     }
                 },
                 title = stringResource(R.string.app_settings_camera_resolution),

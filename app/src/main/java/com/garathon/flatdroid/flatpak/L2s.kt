@@ -41,8 +41,10 @@ object L2s {
         )
     }
 
-    private const val USER_0 = "/data/user/0/"
-    private const val DATA = "/data/data/"
+    // The two paths Android reaches app data by; compared as prefixes, not built, so the
+    // SdCardPath hint (use getFilesDir()) doesn't apply.
+    @Suppress("SdCardPath") private const val USER_0 = "/data/user/0/"
+    @Suppress("SdCardPath") private const val DATA = "/data/data/"
 
     /** The repository object name an intermediate was first linked from (without its `xx/` folder). */
     fun firstName(intermediate: String): String = intermediate.removePrefix(PREFIX).dropLast(UNIQUIFIER_LENGTH)

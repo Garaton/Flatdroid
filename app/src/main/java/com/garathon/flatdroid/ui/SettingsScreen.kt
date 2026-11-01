@@ -405,13 +405,6 @@ fun SettingsScreen(
 
         SectionTitle(stringResource(R.string.settings_section_tools))
         OutlinedButton(onClick = onTerminal, enabled = !applying && canOpenTerminal) { Text(stringResource(R.string.terminal_title)) }
-        if (!canOpenTerminal) {
-            Text(
-                stringResource(R.string.settings_terminal_app_running),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
 
         SectionTitle(stringResource(R.string.settings_section_danger), danger = true)
         OutlinedButton(onClick = { confirmReset = true }, enabled = !applying && canReset) {

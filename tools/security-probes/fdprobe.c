@@ -17,6 +17,35 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+/* Path/mount system calls proot (pinned at 5.1.107.97) does not translate: its table stops at
+ * open_tree_attr (467). fdsec returns ENOSYS for these and for every number above 467, so they
+ * can never reach the host's files. Numbered the same on arm64 and x86_64 (Linux >= 5.1); older
+ * kernel headers (the NDK's, musl's) may not name them yet, so define them here. */
+#ifndef __NR_statmount
+#define __NR_statmount 457
+#endif
+#ifndef __NR_listmount
+#define __NR_listmount 458
+#endif
+#ifndef __NR_setxattrat
+#define __NR_setxattrat 463
+#endif
+#ifndef __NR_getxattrat
+#define __NR_getxattrat 464
+#endif
+#ifndef __NR_listxattrat
+#define __NR_listxattrat 465
+#endif
+#ifndef __NR_removexattrat
+#define __NR_removexattrat 466
+#endif
+#ifndef __NR_file_getattr
+#define __NR_file_getattr 468
+#endif
+#ifndef __NR_file_setattr
+#define __NR_file_setattr 469
+#endif
+
 /* The kernel's file handle. bionic (Termux) forward-declares struct file_handle but doesn't
  * define it, so embedding it fails to compile; this matches the ABI with an inline buffer and
  * needs no libc type. */
@@ -75,6 +104,17 @@ static void filter_checks(void) {
 #ifdef __NR_request_key
         { "request_key+",        __NR_request_key,      ENOSYS },
 #endif
+        /* Path/mount calls proot does not translate; fdsec forces ENOSYS so they never reach the
+         * host. Always blocked (not only --extra). "OPEN" here means fdsec let an untranslated
+         * path call through — a potential host-path escape on a new-enough kernel. */
+        { "statmount",           __NR_statmount,        ENOSYS },
+        { "listmount",           __NR_listmount,        ENOSYS },
+        { "setxattrat",          __NR_setxattrat,       ENOSYS },
+        { "getxattrat",          __NR_getxattrat,       ENOSYS },
+        { "listxattrat",         __NR_listxattrat,      ENOSYS },
+        { "removexattrat",       __NR_removexattrat,    ENOSYS },
+        { "file_getattr",        __NR_file_getattr,     ENOSYS },
+        { "file_setattr",        __NR_file_setattr,     ENOSYS },
     };
     for (size_t i = 0; i < sizeof list / sizeof *list; i++) {
         errno = 0;
