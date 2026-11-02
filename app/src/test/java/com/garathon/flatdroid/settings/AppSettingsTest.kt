@@ -135,4 +135,16 @@ class AppSettingsTest {
         val alone = AppSettingsStore(file(AppSettingsStore.imported(imported, null).decodeToString())).load()
         assertEquals(AppSettings(microphone = true, audio = false), alone)
     }
+
+    @Test
+    fun launchArgumentsRoundTripAndAreKeptLocalOnImport() {
+        assertEquals(listOf("--hold", "-e", "x"), LaunchArgs.parse("  --hold  -e\tx "))
+        assertEquals(emptyList<String>(), LaunchArgs.parse(" "))
+        val f = File(tmp.root, "appsettings/b.App.properties")
+        val store = AppSettingsStore(f)
+        store.save(AppSettings(launchArgs = listOf("--hold", "--x=1")))
+        assertEquals(listOf("--hold", "--x=1"), store.load().launchArgs)
+        val imported = File(tmp.root, "appsettings/c.App.properties").apply { writeBytes(AppSettingsStore.imported(f.readBytes(), null)) }
+        assertEquals(emptyList<String>(), AppSettingsStore(imported).load().launchArgs)
+    }
 }

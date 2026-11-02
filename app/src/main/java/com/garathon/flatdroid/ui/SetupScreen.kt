@@ -31,7 +31,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.garathon.flatdroid.R
@@ -104,8 +103,8 @@ fun SetupScreen(
 
         if (command != null && command.output.isNotEmpty() && !ui.running) {
             LaunchedEffect(command.output) { scroll.scrollTo(scroll.maxValue) }
-            SelectionContainer(modifier = Modifier.fillMaxWidth().height(OUTPUT_HEIGHT).verticalScroll(scroll)) {
-                Text(command.output, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+            Box(modifier = Modifier.fillMaxWidth().height(OUTPUT_HEIGHT).verticalScroll(scroll)) {
+                LogText(command.output, Modifier.fillMaxWidth())
             }
         } else if (ui.log.isNotEmpty()) {
             TextButton(onClick = { showLog = !showLog }) {
@@ -113,12 +112,8 @@ fun SetupScreen(
             }
             LaunchedEffect(ui.log.size, showLog) { scroll.scrollTo(scroll.maxValue) }
             val logModifier = if (showLog) Modifier.height(OUTPUT_HEIGHT).verticalScroll(scroll) else Modifier
-            SelectionContainer(modifier = Modifier.fillMaxWidth().then(logModifier)) {
-                Text(
-                    text = (if (showLog) ui.log else ui.log.takeLast(5)).joinToString("\n"),
-                    fontFamily = FontFamily.Monospace,
-                    style = MaterialTheme.typography.bodySmall,
-                )
+            Box(modifier = Modifier.fillMaxWidth().then(logModifier)) {
+                LogText((if (showLog) ui.log else ui.log.takeLast(5)).joinToString("\n"), Modifier.fillMaxWidth())
             }
         }
     }

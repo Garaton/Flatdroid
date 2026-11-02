@@ -140,6 +140,28 @@ class LaunchPlannerTest {
     }
 
     @Test
+    fun onlyAppsWithoutX11GetAWaylandSession() {
+        runtimeWithGl()
+        val wayland = tmp.newFolder("wayland")
+        fun plan(id: String, sockets: String): LaunchPlan {
+            val files = inst.app(id, metadata = appMetadata(id, "app", extra = "[Context]\nsockets=$sockets\n"))
+            File(files, "bin").mkdirs()
+            File(files, "bin/app").writeBytes(ExecutableTest.elf(0xb7))
+            return Ready(planner.plan(id, dirs.copy(waylandSockets = wayland)))
+        }
+        val only = plan("page.codeberg.dnkl.foot", "wayland;")
+        assertTrue(only.wayland)
+        assertEquals(wayland.path, only.binds.waylandSockets)
+        assertEquals("/run/flatdroid/wayland/wayland-0", only.environment["WAYLAND_DISPLAY"])
+        for (sockets in listOf("wayland;fallback-x11;", "x11;wayland;", "x11;")) {
+            val both = plan("org.example.App" + sockets.length, sockets)
+            assertFalse(sockets, both.wayland)
+            assertEquals(null, both.binds.waylandSockets)
+            assertEquals(":1", both.environment["DISPLAY"])
+        }
+    }
+
+    @Test
     fun theSessionBusIsBoundWithItsAddress() {
         inst.runtime("org.kde.Platform", "6.10", "[Runtime]\nname=org.kde.Platform\n")
         val files = inst.app("org.kde.kmines", metadata = appMetadata("org.kde.kmines", "kmines", "org.kde.Platform/aarch64/6.10"))

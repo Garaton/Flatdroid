@@ -94,8 +94,8 @@
     <string name="dismiss">Close</string>
 
     <string name="install_title">Install from Flathub</string>
-    <string name="install_text">Enter the app\'s ID, as shown on its Flathub page.</string>
-    <string name="install_id_label">App ID</string>
+    <string name="install_text">Enter the app\'s ID, as shown on its Flathub page. Separate several IDs with spaces to install them together.</string>
+    <string name="install_id_label">App IDs</string>
     <string name="install_confirm">Install</string>
 
     <string name="task_channel">Installing and updating</string>
@@ -105,6 +105,10 @@
     <string name="task_reinstalling">Reinstalling %1$s</string>
     <string name="task_reinstalling_all">Reinstalling all apps</string>
     <string name="task_baselining_all">Recording file baselines</string>
+    <string name="task_installing_wayland">Installing Wayland support</string>
+    <string name="wayland_title">Download Wayland support?</string>
+    <string name="wayland_offer">%1$s can only draw through Wayland, which Flatdroid runs only for the few apps that need it. Downloading it (the cage compositor and the wayvnc server) takes about 66 MB of storage. Once it is installed, start the app again.</string>
+    <string name="wayland_download">Download</string>
     <string name="task_busy">That can\'t start while an app or a Flatpak task runs.</string>
     <string name="task_recording_baseline">Recording file baseline</string>
     <string name="task_checking_files">Checking app files</string>
@@ -200,6 +204,7 @@
     <string name="session_notification_running">Open it in a VNC viewer at localhost:%1$d</string>
     <string name="session_address">Address: %1$s:%2$d</string>
     <string name="session_password">Password: %1$s</string>
+    <string name="session_username">Username: %1$s</string>
     <string name="session_copy_password">Copy password</string>
     <string name="session_open_viewer">Open viewer</string>
     <string name="session_stop">Stop</string>
@@ -219,7 +224,6 @@
     <string name="launch_display_failed">Xvnc did not start</string>
     <string name="launch_app_changed">The app changed while it was running</string>
     <string name="session_relaunching_without_flatpak_info">Relaunching without /.flatpak-info</string>
-    <string name="launch_needs_wayland">This app needs Wayland, which Flatdroid doesn\'t provide yet (only X11). It exited with code %1$d.</string>
     <string name="launch_newer_flags_failed">The app failed with and without newer Electron\'s flags (exit %1$d)</string>
 
     <string name="electron_title">Download Electron for this device?</string>
@@ -274,6 +278,8 @@
     <string name="app_settings_launch">Launch</string>
     <string name="app_settings_environment">Environment variables</string>
     <string name="app_settings_environment_hint">One NAME=value per line, added to the app\'s environment over Flatdroid\'s own. Lines starting with # are skipped.</string>
+    <string name="app_settings_launch_args">Launch arguments</string>
+    <string name="app_settings_launch_args_hint">Added after the app\'s own command, separated by spaces. Each is passed as it is: no quoting.</string>
     <string name="app_settings_environment_invalid">Each line needs NAME=value; names use letters, digits and _, not starting with a digit.</string>
     <string name="app_settings_storage">Storage</string>
     <string name="app_settings_clear_cache">Clear cache</string>

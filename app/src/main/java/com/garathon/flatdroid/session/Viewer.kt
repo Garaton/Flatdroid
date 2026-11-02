@@ -15,13 +15,14 @@ object Viewer {
     data class App(val packageName: String, val label: String)
 
     /**
-     * A `vnc://` link with the password as the `VncPassword` parameter (RFC 7869 style), which
-     * AVNC and bVNC are expected to read (verify per viewer). The password is shown in the app too,
-     * in case a viewer ignores it.
+     * A `vnc://` link with the password as the `VncPassword` parameter (RFC 7869 style), and the
+     * [username] as `VncUsername` when there is one, which AVNC and bVNC are expected to read
+     * (verify per viewer). Both are shown in the app too, in case a viewer ignores them.
      */
-    fun uri(password: String): Uri = Uri.Builder()
+    fun uri(password: String, username: String? = null): Uri = Uri.Builder()
         .scheme("vnc")
         .encodedAuthority("$HOST:${SessionScript.VNC_PORT}")
+        .apply { if (username != null) appendQueryParameter("VncUsername", username) }
         .appendQueryParameter("VncPassword", password)
         .build()
 
@@ -41,10 +42,10 @@ object Viewer {
      * app made itself the default for `vnc:` links. Null when no viewer is installed, or, without
      * [allowChooser] (the password protection setting), when the chosen one isn't.
      */
-    fun intent(context: Context, password: String, chosen: String?, allowChooser: Boolean = true): Intent? {
+    fun intent(context: Context, password: String, chosen: String?, allowChooser: Boolean = true, username: String? = null): Intent? {
         val viewers = installed(context)
         if (viewers.isEmpty()) return null
-        val view = Intent(Intent.ACTION_VIEW, uri(password))
+        val view = Intent(Intent.ACTION_VIEW, uri(password, username))
         val target = chosen?.takeIf { pkg -> viewers.any { it.packageName == pkg } }
         if (target == null && !allowChooser) return null
         val intent = if (target != null) view.setPackage(target) else Intent.createChooser(view, context.getString(R.string.session_open_viewer))

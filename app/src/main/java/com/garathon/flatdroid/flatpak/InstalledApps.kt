@@ -88,6 +88,10 @@ class InstalledApps(private val context: Context) {
         fun isValidId(id: String): Boolean =
             id.length <= 255 && Regex("[A-Za-z_][A-Za-z0-9_-]*(\\.[A-Za-z0-9_-]+)+").matches(id)
 
+        /** The app IDs in [text], separated by whitespace, each once; null if there are none or any isn't valid. */
+        fun parseIds(text: String): List<String>? =
+            text.split(Regex("\\s+")).filter { it.isNotEmpty() }.distinct().takeIf { ids -> ids.isNotEmpty() && ids.all(::isValidId) }
+
         /** `Name[ll_CC]`, then `Name[ll]`, then `Name`, from a desktop file's `[Desktop Entry]`. */
         fun localizedName(desktop: Keyfile, locale: Locale): String? {
             val group = "Desktop Entry"

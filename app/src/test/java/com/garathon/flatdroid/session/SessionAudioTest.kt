@@ -27,7 +27,7 @@ class SessionAudioTest {
     @Test
     fun helpersGetSoundAndResampler() {
         assertEquals(
-            listOf("/bin/sh", SessionScript.GUEST_SCRIPT, "1000x1400", "14400", "30", "on", "speex-float-0", "on", "on", "on"),
+            listOf("/bin/sh", SessionScript.GUEST_SCRIPT, "1000x1400", "14400", "30", "on", "speex-float-0", "on", "on", "on", "off"),
             SessionScript.command("1000x1400", 30, sound = true, Resampler.FAST, sessionBus = true, camera = true),
         )
         assertEquals(
@@ -38,9 +38,33 @@ class SessionAudioTest {
     }
 
     @Test
+    fun aWaylandSessionStartsCageAndWayvncInsteadOfXvnc() {
+        assertEquals("on", SessionScript.command("1000x1400", 30, sound = false, Resampler.FAST, sessionBus = true, wayland = true).last())
+        val text = SessionScript.TEXT
+        assertTrue("wayland=${'$'}9" in text.lines().map { it.trim() })
+        assertTrue("LD_PRELOAD=/run/flatdroid/fdshm.so XDG_RUNTIME_DIR=/run/flatdroid/wayland" in text)
+        // wayvnc's control socket stays among the helpers, never in the app's Wayland directory.
+        assertTrue("-S \"${'$'}3\"" in text && "/run/flatdroid/vnc/wayvncctl" in text)
+        assertTrue("/run/flatdroid/vnc/wayvnc.conf" in text)
+    }
+
+    @Test
+    fun wayvncsLoginHasAUsernameAndRefusesOddPasswords() {
+        assertEquals(
+            "enable_auth=true\nusername=flatdroid\npassword=abcDEF234567wxyz\nrelax_encryption=true\n",
+            WaylandVnc.config("abcDEF234567wxyz"),
+        )
+        try {
+            WaylandVnc.config("pass word\nenable_auth=false")
+            throw AssertionError("expected a refusal")
+        } catch (_: IllegalArgumentException) {
+        }
+    }
+
+    @Test
     fun anUnsharedClipboardTurnsOffXvncsCutText() {
         val args = SessionScript.command("1000x1400", 30, sound = false, Resampler.FAST, sessionBus = true, clipboard = false)
-        assertEquals("off", args.last())
+        assertEquals("off", args[args.size - 2])
         val lines = SessionScript.TEXT.lines().map { it.trim() }
         assertTrue("clipboard=${'$'}8" in lines)
         assertTrue("[ \"${'$'}clipboard\" = on ] || clipboard_args=\"-AcceptCutText=0 -SendCutText=0\"" in lines)

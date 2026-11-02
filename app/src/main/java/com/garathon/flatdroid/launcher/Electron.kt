@@ -17,7 +17,10 @@ object Electron {
      * Newer Electron (Obsidian) also needs these, or its GPU process fails a /proc check and it
      * exits; they break Electron 9 (no window). Added only after [GPU_FAILURE] shows up.
      */
-    val NEWER_FLAGS = listOf("--no-zygote", "--disable-gpu-sandbox", "--in-process-gpu", "--ozone-platform=x11")
+    const val OZONE_X11 = "--ozone-platform=x11"
+    /** In place of [OZONE_X11] in a Wayland session. */
+    const val OZONE_WAYLAND = "--ozone-platform=wayland"
+    val NEWER_FLAGS = listOf("--no-zygote", "--disable-gpu-sandbox", "--in-process-gpu", OZONE_X11)
 
     /** The log line that triggers a relaunch with [NEWER_FLAGS]. */
     const val GPU_FAILURE = "GPU process isn't usable"

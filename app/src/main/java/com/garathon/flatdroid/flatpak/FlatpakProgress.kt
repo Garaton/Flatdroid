@@ -55,6 +55,21 @@ class FlatpakProgress {
         private val TABLE_ROW = Regex("""^\s*(\d+)\.\s+([A-Za-z0-9_.-]+)\s+(\S+)\s+[a-z]\b""")
         private val PROGRESS = Regex("""^(\p{L}+)(?: (\d+)/(\d+))?…(?:.*?(\d+)%)?""")
         private val COMPLETE = Regex("""^(Changes|Installation|Uninstall) complete\.""")
+
+        /**
+         * Output lines worth showing as the task's status: what flatpak is doing ("Looking for
+         * updates…"), that there is nothing to do, that it finished, or that an app is already
+         * installed. Everything else (end-of-life notices, warnings, pinned runtimes, tables, apk's
+         * package list) stays in the log only. Progress lines are shown as steps instead.
+         */
+        private val STATUS = listOf(
+            Regex("""\p{L}[\p{L} ]{0,40}…"""),
+            Regex("""Nothing [\p{L} ]{0,40}\.?"""),
+            Regex("""(Changes|Installation|Uninstall) complete\."""),
+            Regex("""Skipping: \S+ is already installed"""),
+        )
+
+        fun isStatus(line: String): Boolean = line.trim().let { text -> STATUS.any { it.matches(text) } }
         /** True if [a] and [b] report the same operation, so [b] can replace [a] in a log. */
         fun sameStep(a: String, b: String): Boolean {
             val x = PROGRESS.find(a) ?: return false

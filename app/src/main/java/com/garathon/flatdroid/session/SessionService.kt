@@ -100,7 +100,7 @@ class SessionService : Service() {
         val notifications = getSystemService(NotificationManager::class.java)
         val updates = scope.launch {
             SessionController.ui.distinctUntilChangedBy { it.state::class to it.state.appIdOrNull }
-                .filter { it.state !is SessionState.Idle && it.state !is SessionState.ElectronOffer && it.state !is SessionState.FilesChanged }
+                .filter { it.state !is SessionState.Idle && it.state !is SessionState.Question }
                 .collect { notifications.notify(NOTIFICATION_ID, notification(it.state)) }
         }
         val micRequests = scope.launch {
@@ -144,10 +144,8 @@ class SessionService : Service() {
                 if (AppData.settings(applicationContext, appId).load().homeMode == HomeMode.TEMPORARY) {
                     TempHomePrompt.sessionEnded(applicationContext, appId)
                 }
-                // An Electron offer or a files-changed report stays up for the UI to answer.
-                val awaitingUi = SessionController.ui.value.state.let {
-                    it is SessionState.ElectronOffer || it is SessionState.FilesChanged
-                }
+                // A question (an Electron or Wayland offer, a files-changed report) stays up for the UI to answer.
+                val awaitingUi = SessionController.ui.value.state is SessionState.Question
                 if (!awaitingUi) SessionController.ended(message, failed)
                 stopSelf()
             }
@@ -235,7 +233,7 @@ class SessionService : Service() {
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setGroup(CHANNEL_ID)
-        val viewerIntent = (state as? SessionState.Running)?.let { Viewer.intent(this, it.password, SetupController.settings(this).load()?.vncViewer) }
+        val viewerIntent = (state as? SessionState.Running)?.let { Viewer.intent(this, it.password, SetupController.settings(this).load()?.vncViewer, username = it.username) }
         if (viewerIntent != null) {
             val viewer = PendingIntent.getActivity(this, 1, viewerIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
             builder.addAction(0, getString(R.string.session_open_viewer), viewer)

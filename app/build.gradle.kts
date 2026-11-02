@@ -115,8 +115,8 @@ abstract class BuildProotTask @Inject constructor(private val exec: ExecOperatio
     }
 }
 
-/** Runs native/build-fdsec.sh for one ABI; output is a jniLibs root (<dir>/<abi>/libfdsec.so). */
-abstract class BuildFdsecTask @Inject constructor(private val exec: ExecOperations) : DefaultTask() {
+/** Runs a native helper's build script (native/build-fdsec.sh, build-fdshm.sh) for one ABI; output is a jniLibs root (<dir>/<abi>/lib*.so). */
+abstract class BuildHelperTask @Inject constructor(private val exec: ExecOperations) : DefaultTask() {
     @get:Input abstract val abi: Property<String>
     @get:InputFile abstract val script: RegularFileProperty
     @get:InputFile abstract val source: RegularFileProperty
@@ -134,12 +134,22 @@ abstract class BuildFdsecTask @Inject constructor(private val exec: ExecOperatio
 }
 
 val fdsecTasks = architectures.keys.associateWith { abi ->
-    tasks.register<BuildFdsecTask>("buildFdsec_$abi") {
+    tasks.register<BuildHelperTask>("buildFdsec_$abi") {
         this.abi = abi
         script = rootProject.file("native/build-fdsec.sh")
         source = rootProject.file("native/fdsec.c")
         ndkDirectory = androidComponents.sdkComponents.ndkDirectory
         outputDirectory = layout.buildDirectory.dir("generated/fdsec/$abi")
+    }
+}
+
+val fdshmTasks = architectures.keys.associateWith { abi ->
+    tasks.register<BuildHelperTask>("buildFdshm_$abi") {
+        this.abi = abi
+        script = rootProject.file("native/build-fdshm.sh")
+        source = rootProject.file("native/fdshm.c")
+        ndkDirectory = androidComponents.sdkComponents.ndkDirectory
+        outputDirectory = layout.buildDirectory.dir("generated/fdshm/$abi")
     }
 }
 
@@ -164,7 +174,8 @@ androidComponents {
         }
         for (abi in abis) {
             variant.sources.jniLibs?.addGeneratedSourceDirectory(prootTasks.getValue(abi), BuildProotTask::outputDirectory)
-            variant.sources.jniLibs?.addGeneratedSourceDirectory(fdsecTasks.getValue(abi), BuildFdsecTask::outputDirectory)
+            variant.sources.jniLibs?.addGeneratedSourceDirectory(fdsecTasks.getValue(abi), BuildHelperTask::outputDirectory)
+            variant.sources.jniLibs?.addGeneratedSourceDirectory(fdshmTasks.getValue(abi), BuildHelperTask::outputDirectory)
         }
     }
 }

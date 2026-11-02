@@ -5,6 +5,7 @@ import android.os.PersistableBundle
 import android.view.WindowManager
 import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
@@ -61,7 +62,7 @@ import kotlinx.coroutines.launch
 fun SessionPanel(
     session: SessionUi,
     nameOf: (String) -> String,
-    onOpenViewer: (password: String) -> Unit,
+    onOpenViewer: (SessionState.Running) -> Unit,
     onStop: () -> Unit,
     onShowLog: () -> Unit,
     onDismiss: () -> Unit,
@@ -69,8 +70,7 @@ fun SessionPanel(
 ) {
     val state = session.state
     if (state is SessionState.Idle && session.message == null) return
-    if (state is SessionState.ElectronOffer) return
-    if (state is SessionState.FilesChanged) return
+    if (state is SessionState.Question) return
     val colors = MaterialTheme.colorScheme
     val failed = state is SessionState.Idle && session.failed
     Surface(
@@ -95,13 +95,14 @@ fun SessionPanel(
                 is SessionState.Running -> {
                     Text(stringResource(R.string.session_running_app, nameOf(state.appId)), style = MaterialTheme.typography.titleSmall)
                     if (protectPassword) SecureWindow()
+                    state.username?.let { Text(stringResource(R.string.session_username, it), style = MaterialTheme.typography.bodyMedium) }
                     PasswordLine(state.password, hidden = protectPassword)
                 }
                 is SessionState.Stopping -> Text(stringResource(R.string.session_stopping, nameOf(state.appId)), style = MaterialTheme.typography.titleSmall)
                 else -> session.message?.let { SelectionContainer { Text(it, style = MaterialTheme.typography.bodyMedium) } }
             }
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (state is SessionState.Running) Button(onClick = { onOpenViewer(state.password) }) { Text(stringResource(R.string.session_open_viewer)) }
+                if (state is SessionState.Running) Button(onClick = { onOpenViewer(state) }) { Text(stringResource(R.string.session_open_viewer)) }
                 if (state is SessionState.Starting && state.skippable) OutlinedButton(onClick = { SessionController.skipFileCheck() }) { Text(stringResource(R.string.session_skip_check)) }
                 when (state) {
                     is SessionState.Starting, is SessionState.Running, is SessionState.PreparingElectron ->
@@ -213,11 +214,11 @@ fun TaskPanel(task: FlatpakTaskUi, describe: (FlatpakTask) -> String, onCancel: 
     }
 }
 
-/** Asks for an app ID to install from Flathub. */
+/** Asks for one or more app IDs (separated by spaces) to install from Flathub. */
 @Composable
-fun InstallDialog(onInstall: (String) -> Unit, onDismiss: () -> Unit) {
+fun InstallDialog(onInstall: (List<String>) -> Unit, onDismiss: () -> Unit) {
     var id by rememberSaveable { mutableStateOf("") }
-    val valid = InstalledApps.isValidId(id.trim())
+    val ids = InstalledApps.parseIds(id)
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.install_title)) },
@@ -230,16 +231,28 @@ fun InstallDialog(onInstall: (String) -> Unit, onDismiss: () -> Unit) {
                     label = { Text(stringResource(R.string.install_id_label)) },
                     placeholder = { Text("org.xfce.mousepad") },
                     singleLine = true,
-                    isError = id.isNotBlank() && !valid,
+                    isError = id.isNotBlank() && ids == null,
                     // The keyboard's action key installs, like the button.
                     keyboardOptions = KeyboardOptions(
                         capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false, imeAction = ImeAction.Go,
                     ),
-                    keyboardActions = KeyboardActions(onGo = { if (valid) onInstall(id.trim()) }),
+                    keyboardActions = KeyboardActions(onGo = { ids?.let(onInstall) }),
                 )
             }
         },
-        confirmButton = { Button(onClick = { onInstall(id.trim()) }, enabled = valid) { Text(stringResource(R.string.install_confirm)) } },
+        confirmButton = { Button(onClick = { ids?.let(onInstall) }, enabled = ids != null) { Text(stringResource(R.string.install_confirm)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.reset_cancel)) } },
+    )
+}
+
+/** Asks before downloading Alpine's Wayland packages, which only apps that can't use X11 need. */
+@Composable
+fun WaylandDialog(appName: String, onAccept: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.wayland_title)) },
+        text = { Text(stringResource(R.string.wayland_offer, appName)) },
+        confirmButton = { Button(onClick = onAccept) { Text(stringResource(R.string.wayland_download)) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.reset_cancel)) } },
     )
 }
@@ -302,12 +315,8 @@ fun LogDialog(title: String, lines: List<String>, onDismiss: () -> Unit) {
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
-            SelectionContainer(modifier = Modifier.heightIn(max = 480.dp).verticalScroll(scroll)) {
-                Text(
-                    lines.joinToString("\n").ifEmpty { "—" },
-                    fontFamily = FontFamily.Monospace,
-                    style = MaterialTheme.typography.bodySmall,
-                )
+            Box(modifier = Modifier.heightIn(max = 480.dp).verticalScroll(scroll)) {
+                LogText(lines.joinToString("\n").ifEmpty { "—" })
             }
         },
         dismissButton = {

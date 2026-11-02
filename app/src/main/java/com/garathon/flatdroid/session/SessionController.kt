@@ -13,20 +13,28 @@ import kotlinx.coroutines.flow.update
 sealed interface SessionState {
     data object Idle : SessionState
     data class Starting(val appId: String, val detail: String, val skippable: Boolean = false) : SessionState
-    /** The app runs; the viewer connects to localhost:[SessionScript.VNC_PORT] with [password]. */
-    data class Running(val appId: String, val password: String) : SessionState
+    /**
+     * The app runs; the viewer connects to localhost:[SessionScript.VNC_PORT] with [password], and
+     * [username] when the session is Wayland ([WaylandVnc]).
+     */
+    data class Running(val appId: String, val password: String, val username: String? = null) : SessionState
     data class Stopping(val appId: String) : SessionState
     /**
      * The app ships Electron [version] for [fromArch]; the user is asked before Flatdroid
      * downloads one for this device. [problem] is set when a swap can't work.
      */
-    data class ElectronOffer(val appId: String, val version: String?, val fromArch: String, val problem: String?) : SessionState
+    data class ElectronOffer(val appId: String, val version: String?, val fromArch: String, val problem: String?) : SessionState, Question
+    /** The app can only use Wayland, whose packages aren't installed; the user is asked before Flatdroid downloads them. */
+    data class WaylandOffer(val appId: String) : SessionState, Question
     data class PreparingElectron(val appId: String, val detail: String, val fraction: Float?) : SessionState
     /**
      * The file check found changed files before launch; [detail] lists the affected packages and
      * the launch was refused. The reinstall path restores them by [appId] (see FlatpakTask.Reinstall).
      */
-    data class FilesChanged(val appId: String, val detail: String) : SessionState
+    data class FilesChanged(val appId: String, val detail: String) : SessionState, Question
+
+    /** No session runs: a launch stopped to ask the user something, which stays up until answered. */
+    sealed interface Question
 
     val appIdOrNull: String?
         get() = when (this) {
@@ -35,6 +43,7 @@ sealed interface SessionState {
             is Running -> appId
             is Stopping -> appId
             is ElectronOffer -> appId
+            is WaylandOffer -> appId
             is PreparingElectron -> appId
             is FilesChanged -> appId
         }
@@ -61,7 +70,7 @@ object SessionController {
     /** Where answers to [SessionUi.micRequest] go: the running session's microphone, while one has it. */
     @Volatile var onMicrophoneAnswer: ((Boolean) -> Unit)? = null
 
-    val isBusy: Boolean get() = _ui.value.state !is SessionState.Idle && _ui.value.state !is SessionState.ElectronOffer && _ui.value.state !is SessionState.FilesChanged
+    val isBusy: Boolean get() = _ui.value.state !is SessionState.Idle && _ui.value.state !is SessionState.Question
 
     /** Also clears a finished Flatpak task's banner: one banner at a time. */
     fun starting(appId: String, detail: String, clearLog: Boolean = false, skippable: Boolean = false) {
@@ -74,11 +83,13 @@ object SessionController {
     @Volatile var onSkipFileCheck: (() -> Unit)? = null
     fun skipFileCheck() { onSkipFileCheck?.invoke() }
 
-    fun running(appId: String, password: String) = _ui.update { it.copy(state = SessionState.Running(appId, password)) }
+    fun running(appId: String, password: String, username: String? = null) =
+        _ui.update { it.copy(state = SessionState.Running(appId, password, username)) }
 
     fun stopping(appId: String) = _ui.update { it.copy(state = SessionState.Stopping(appId)) }
 
     fun offerElectron(offer: SessionState.ElectronOffer) = _ui.update { it.copy(state = offer) }
+    fun offerWayland(appId: String) = _ui.update { it.copy(state = SessionState.WaylandOffer(appId)) }
 
     fun filesChanged(state: SessionState.FilesChanged) = _ui.update { it.copy(state = state, message = null) }
 

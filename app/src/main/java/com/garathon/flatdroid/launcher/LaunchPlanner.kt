@@ -23,6 +23,8 @@ data class HostDirs(
     /** Generated /etc files: name to host file. */
     val etc: Map<String, File>,
     val x11Sockets: File,
+    /** The Wayland compositor's socket directory, bound only for apps that ask only for Wayland. */
+    val waylandSockets: File? = null,
     /** PulseAudio's socket directory; null when the app gets no sound. */
     val pulseSockets: File?,
     /** Bound at [GuestPaths.FONT_DIRS]. */
@@ -91,6 +93,8 @@ data class LaunchPlan(
     val usrLinks: List<String>,
     /** Electron or a Chromium browser, started without zypak or cobalt ([Electron]). */
     val isElectron: Boolean,
+    /** The app asks only for Wayland, so its session is Wayland (cage and wayvnc) instead of Xvnc. */
+    val wayland: Boolean = false,
     /** What fdsec refuses for this app. */
     val filter: Fdsec.Filter,
 )
@@ -202,6 +206,9 @@ class LaunchPlanner(
         }
         command = command + options.extraArgs
 
+        // Only apps that can't use X11 get a Wayland session: for the rest, Xvnc costs less (measured).
+        val wayland = app.metadata.context.waylandOnly
+        if (wayland) command = command.map { if (it == Electron.OZONE_X11) Electron.OZONE_WAYLAND else it }
         val environment = LaunchEnvironment.build(
             appId = appId,
             triplet = LaunchEnvironment.triplet(arch),
@@ -217,6 +224,7 @@ class LaunchPlanner(
                 else LaunchEnvironment.locale(options.languageTags, File(runtime.files, "lib/locale").list()?.toList().orEmpty()),
             runtimeDir = runtimeDir ?: "/tmp",
             flatpakContainer = options.flatpakInfo,
+            wayland = wayland,
         )
         val devices = app.metadata.context.devices
         val binds = FlatpakBinds(
@@ -229,6 +237,7 @@ class LaunchPlanner(
             tmp = dirs.tmp.path,
             shm = dirs.shm.path,
             x11Sockets = dirs.x11Sockets.path,
+            waylandSockets = dirs.waylandSockets?.path?.takeIf { wayland },
             pulseSockets = dirs.pulseSockets?.takeIf { options.audio }?.path,
             home = dirs.home.path,
             appDirs = dirs.appDirs.map { it.first.path to it.second },
@@ -249,6 +258,7 @@ class LaunchPlanner(
                 flatpakInfo = if (options.flatpakInfo) flatpakInfo(appId, runtimeRef) else null,
                 usrLinks = USR_LINKS.filter { File(runtime.files, it).exists() },
                 isElectron = isElectron,
+                wayland = wayland,
                 filter = Fdsec.Filter(extraSyscalls = options.extraSyscalls, noInternet = !options.network),
             )
         )

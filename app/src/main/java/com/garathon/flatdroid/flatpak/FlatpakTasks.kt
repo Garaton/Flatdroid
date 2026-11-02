@@ -11,7 +11,8 @@ import kotlinx.coroutines.flow.update
 
 /** One Flatpak operation run in Alpine. */
 sealed interface FlatpakTask {
-    data class Install(val appId: String) : FlatpakTask
+    /** Installs [appIds] (one or more) from Flathub in one transaction, so shared runtimes download once. */
+    data class Install(val appIds: List<String>) : FlatpakTask
     data object UpdateAll : FlatpakTask
     /**
      * [deleteData] also removes the app's private settings, data and home; [keepRuntimes] leaves
@@ -29,6 +30,8 @@ sealed interface FlatpakTask {
     data object ReinstallAll : FlatpakTask
     /** Records the file baseline of every installed app that has none yet (with the file check on). */
     data object BaselineAll : FlatpakTask
+    /** Installs Alpine's Wayland packages (AlpineSetup.WAYLAND_PACKAGES), for apps that can't use X11. */
+    data object InstallWayland : FlatpakTask
 }
 
 data class FlatpakTaskUi(
@@ -37,7 +40,7 @@ data class FlatpakTaskUi(
     val step: FlatpakProgress.Step? = null,
     /** Flatpak finished its steps and is cleaning up ([FlatpakProgress.finishing]). */
     val finishing: Boolean = false,
-    /** The last non-blank output line. */
+    /** The last status line: Flatdroid's own, or a command's that [FlatpakProgress.isStatus] lets through. */
     val status: String? = null,
     /** What the running task is doing when that differs from the task itself (removing unused runtimes). */
     val phase: String? = null,
@@ -73,13 +76,17 @@ object FlatpakTasks {
         return started
     }
 
-    internal fun log(line: String) {
+    /** A line of Flatdroid's own; [status] also shows it as the task's status line. */
+    internal fun log(line: String, status: Boolean = true) {
         DebugLog.i(line)
         val isProgress = progress.feed(line)
         // Each step reports its progress many times: keep only its latest line.
         logBuffer.add(line) { last -> isProgress && FlatpakProgress.sameStep(last, line) }
-        _ui.update { it.copy(step = progress.current, finishing = progress.finishing, status = if (line.isNotBlank()) line else it.status) }
+        _ui.update { it.copy(step = progress.current, finishing = progress.finishing, status = if (status && line.isNotBlank()) line else it.status) }
     }
+
+    /** A line of a command's output: logged, and the status line only if it is one ([FlatpakProgress.isStatus]). */
+    internal fun output(line: String) = log(line, status = FlatpakProgress.isStatus(line))
 
     internal fun cancelling(phase: String) = _ui.update { it.copy(phase = phase, cancelling = true) }
 

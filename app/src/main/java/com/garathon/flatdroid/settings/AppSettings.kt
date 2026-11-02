@@ -119,6 +119,8 @@ data class AppSettings(
     val cameraFrameRate: Int = AndroidCameras.DEFAULT_FRAME_RATE,
     /** Developer setting: variables added to the app's environment, over Flatdroid's own. */
     val environment: Map<String, String> = emptyMap(),
+    /** Developer setting: arguments added after the app's command (one argument each; no quoting). */
+    val launchArgs: List<String> = emptyList(),
     /** The user's choice of home; null follows [defaults] ([homeMode]). */
     val homeModeChoice: HomeMode? = null,
     /**
@@ -234,6 +236,7 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
                 .filter(LaunchEnvironment::isName)
                 .sorted()
                 .associateWith { props.getProperty(KEY_ENV_PREFIX + it) },
+            launchArgs = LaunchArgs.parse(props.getProperty(KEY_LAUNCH_ARGS).orEmpty()),
             homeModeChoice = HomeMode.entries.firstOrNull { it.name.lowercase() == props.getProperty(KEY_HOME_MODE) },
             sdcard = props.getProperty(KEY_SDCARD) == "true",
             defaults = appDefaults,
@@ -264,6 +267,7 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
         props.setProperty(KEY_CAMERA_RESOLUTION, settings.cameraResolution.toString())
         props.setProperty(KEY_CAMERA_FRAME_RATE, settings.cameraFrameRate.toString())
         for ((name, value) in settings.environment) props.setProperty(KEY_ENV_PREFIX + name, value)
+        if (settings.launchArgs.isNotEmpty()) props.setProperty(KEY_LAUNCH_ARGS, LaunchArgs.format(settings.launchArgs))
         settings.homeModeChoice?.let { props.setProperty(KEY_HOME_MODE, it.name.lowercase()) }
         if (settings.sdcard) props.setProperty(KEY_SDCARD, "true")
         file.writeTextAtomically(StringWriter().also { props.store(it, null) }.toString())
@@ -281,7 +285,7 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
          * app can reach left as they are on this device ([local], its current file, or null for
          * none): whole /dev (with Binder), all of shared storage, the microphone without asking,
          * the camera, the network, Android's fonts, the clipboard, the time zone, the language, the
-         * extra system calls, its home and its environment. A shared
+         * extra system calls, its home, its environment and its launch arguments. A shared
          * settings file can't turn them on.
          */
         fun imported(imported: ByteArray, local: ByteArray?): ByteArray {
@@ -310,6 +314,7 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
         private const val KEY_CAMERA_RESOLUTION = "camera.resolution"
         private const val KEY_CAMERA_FRAME_RATE = "camera.frameRate"
         private const val KEY_ENV_PREFIX = "env."
+        private const val KEY_LAUNCH_ARGS = "launch.args"
         private const val KEY_HOME_MODE = "home.mode"
         private const val KEY_SDCARD = "storage.sdcard"
         private const val KEY_NETWORK = "permission.network"
@@ -321,7 +326,14 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
         private const val KEY_SHARE_HIDDEN_FILES = "home.shareHiddenFiles"
         private val WIDENING_KEYS = setOf(
             KEY_WHOLE_DEV, KEY_SDCARD, KEY_MICROPHONE_ALWAYS, KEY_CAMERA, KEY_NETWORK, KEY_EXTRA_SYSCALLS, KEY_HOME_MODE,
-            KEY_SHARE_HIDDEN_FILES, KEY_ANDROID_FONTS, KEY_CLIPBOARD, KEY_TIME_ZONE, KEY_LANGUAGE,
+            KEY_SHARE_HIDDEN_FILES, KEY_ANDROID_FONTS, KEY_CLIPBOARD, KEY_TIME_ZONE, KEY_LANGUAGE, KEY_LAUNCH_ARGS,
         )
     }
+}
+
+/** [AppSettings.launchArgs] as the user edits it: arguments separated by whitespace, each taken as it is (no quoting). */
+object LaunchArgs {
+    fun parse(text: String): List<String> = text.split(Regex("\\s+")).filter { it.isNotEmpty() }
+
+    fun format(args: List<String>): String = args.joinToString(" ")
 }

@@ -173,7 +173,8 @@ class AlpineSetup(
 
     companion object {
         /**
-         * Alpine's tigervnc stays until our own Xvnc build replaces it. Openbox needs a font: without
+         * Xvnc is Alpine's tigervnc (an own build would save little: the camera stack needs Mesa
+         * too). Openbox needs a font: without
          * one its title bars collapse to a few pixels. ostree repairs the Flatpak repository after
          * an interrupted removal (FlatpakTaskService). dbus and xdg-dbus-proxy give apps their session bus
          * (SessionBus); PipeWire, WirePlumber, the portal and GStreamer's PipeWire elements carry
@@ -184,6 +185,13 @@ class AlpineSetup(
             "dbus", "xdg-dbus-proxy", "pipewire", "wireplumber", "xdg-desktop-portal", "gst-plugin-pipewire", "gstreamer-tools", "gst-plugins-good",
             "pipewire-tools",
         )
+
+        /**
+         * Wayland support, only for apps that can't use X11 (very few on Flathub): the compositor,
+         * its VNC server and what sets the output's size. Installed when such an app is first
+         * started and the user agrees, not by setup; "Update all apps" then keeps them current.
+         */
+        val WAYLAND_PACKAGES = listOf("cage", "wayvnc", "wlr-randr")
         /** Where apk's package cache is bound: a directory in Flatdroid's cache, deleted afterwards. */
         const val APK_CACHE = "/var/cache/apk"
 

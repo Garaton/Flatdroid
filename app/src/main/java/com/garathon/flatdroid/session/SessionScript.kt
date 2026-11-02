@@ -2,6 +2,7 @@ package com.garathon.flatdroid.session
 
 import com.garathon.flatdroid.camera.CameraScript
 import com.garathon.flatdroid.proot.Fdsec
+import com.garathon.flatdroid.proot.Fdshm
 import com.garathon.flatdroid.proot.GuestPaths
 import com.garathon.flatdroid.settings.Resampler
 
@@ -33,22 +34,25 @@ object SessionScript {
      */
     fun command(
         geometry: String, frameRate: Int, sound: Boolean, resampler: Resampler, sessionBus: Boolean,
-        camera: Boolean = false, clipboard: Boolean = true,
+        camera: Boolean = false, clipboard: Boolean = true, wayland: Boolean = false,
     ): List<String> =
         listOf(
             "/bin/sh", GUEST_SCRIPT, geometry, VNC_PORT.toString(), frameRate.toString(),
             onOff(sound), resampler.pulseName, onOff(sessionBus), onOff(sessionBus && camera),
-            onOff(clipboard),
+            onOff(clipboard), onOff(wayland),
         )
+
+    /** wayvnc's configuration ([WaylandVnc.config]), next to Xvnc's password file. */
+    const val GUEST_WAYVNC_CONFIG = "$GUEST_VNC_DIR/wayvnc.conf"
 
     private fun onOff(value: Boolean) = if (value) "on" else "off"
 
     /**
      * Arguments: geometry (WxH), VNC port, frame rate, "on" when the app gets sound (PulseAudio
-     * starts only then), PulseAudio's resample method, "on" for the session bus, "on" for PipeWire, and "on" when the clipboard is shared ([command]
-     * builds them; off adds `-AcceptCutText=0 -SendCutText=0` to Xvnc). Exits when Xvnc does; Flatdroid ends the session by stopping this proot.
-     * `-extension GLX` turns GLX off in Alpine's Xvnc, which still has it (apps use EGL);
-     * Flatdroid's own Xvnc build won't need it. `-nolisten local` drops the abstract socket
+     * starts only then), PulseAudio's resample method, "on" for the session bus, "on" for PipeWire, "on" when the clipboard is shared ([command]
+     * builds them; off adds `-AcceptCutText=0 -SendCutText=0` to Xvnc), and "on" for a Wayland session (cage and wayvnc instead of
+     * Xvnc and Openbox). Exits when the display does; Flatdroid ends the session by stopping this proot.
+     * `-extension GLX` turns GLX off in Alpine's Xvnc, which has it (apps use EGL). `-nolisten local` drops the abstract socket
      * `@/tmp/.X11-unix/X1`: proot doesn't translate abstract names, so it would be open to other
      * users of the device, with no authentication; clients use the socket file in private storage
      * instead. `-NeverShared -DisconnectClients=0`: while a viewer is connected, Xvnc refuses
@@ -76,23 +80,44 @@ object SessionScript {
         |session_bus=$6
         |camera=$7
         |clipboard=$8
+        |wayland=$9
         |clipboard_args=
         |[ "${'$'}clipboard" = on ] || clipboard_args="-AcceptCutText=0 -SendCutText=0"
         |rm -f /tmp/.X1-lock ${GuestPaths.X11_DIR}/$X_SOCKET ${GuestPaths.PULSE_DIR}/*
         |
-        |Xvnc :1 -geometry "${'$'}geometry" -depth 24 -rfbport "${'$'}port" -localhost \
-        |  -SecurityTypes VncAuth -PasswordFile $GUEST_VNC_DIR/passwd -NeverShared -DisconnectClients=0 -FrameRate "${'$'}frame_rate" \
-        |  -nolisten local -extension MIT-SHM -extension GLX ${'$'}clipboard_args &
-        |xvnc=${'$'}!
-        |i=0
-        |while [ ! -S ${GuestPaths.X11_DIR}/$X_SOCKET ]; do
-        |  kill -0 "${'$'}xvnc" 2>/dev/null || { echo "flatdroid: Xvnc exited"; exit 1; }
-        |  i=${'$'}((i + 1))
-        |  [ "${'$'}i" -gt 300 ] && { echo "flatdroid: Xvnc did not start"; exit 1; }
-        |  sleep 0.1
-        |done
+        |if [ "${'$'}wayland" = on ]; then
+        |  # An app that asks only for Wayland: cage (headless, drawn in software) with wayvnc as its
+        |  # one client, on the VNC port. Their buffers come from fdshm (Android has no /dev/shm).
+        |  # wayvnc's control socket stays here, out of the app's reach. No Openbox: cage shows one
+        |  # app full screen.
+        |  rm -f ${GuestPaths.WAYLAND_DIR}/*
+        |  LD_PRELOAD=${Fdshm.ALPINE_PATH} XDG_RUNTIME_DIR=${GuestPaths.WAYLAND_DIR} WLR_BACKENDS=headless WLR_RENDERER=pixman \
+        |    WLR_LIBINPUT_NO_DEVICES=1 WLR_HEADLESS_OUTPUTS=1 /usr/bin/cage -- /bin/sh -c \
+        |    '/usr/bin/wlr-randr --output HEADLESS-1 --custom-mode "${'$'}1"; exec /usr/bin/wayvnc -C "${'$'}2" -S "${'$'}3" -f "${'$'}4" 127.0.0.1 "${'$'}5"' \
+        |    sh "${'$'}geometry" $GUEST_WAYVNC_CONFIG $GUEST_VNC_DIR/wayvncctl "${'$'}frame_rate" "${'$'}port" &
+        |  display=${'$'}!
+        |  i=0
+        |  while [ ! -S ${GuestPaths.WAYLAND_DIR}/${GuestPaths.WAYLAND_SOCKET} ]; do
+        |    kill -0 "${'$'}display" 2>/dev/null || { echo "flatdroid: the Wayland compositor exited"; exit 1; }
+        |    i=${'$'}((i + 1))
+        |    [ "${'$'}i" -gt 300 ] && { echo "flatdroid: the Wayland compositor did not start"; exit 1; }
+        |    sleep 0.1
+        |  done
+        |else
+        |  Xvnc :1 -geometry "${'$'}geometry" -depth 24 -rfbport "${'$'}port" -localhost \
+        |    -SecurityTypes VncAuth -PasswordFile $GUEST_VNC_DIR/passwd -NeverShared -DisconnectClients=0 -FrameRate "${'$'}frame_rate" \
+        |    -nolisten local -extension MIT-SHM -extension GLX ${'$'}clipboard_args &
+        |  display=${'$'}!
+        |  i=0
+        |  while [ ! -S ${GuestPaths.X11_DIR}/$X_SOCKET ]; do
+        |    kill -0 "${'$'}display" 2>/dev/null || { echo "flatdroid: Xvnc exited"; exit 1; }
+        |    i=${'$'}((i + 1))
+        |    [ "${'$'}i" -gt 300 ] && { echo "flatdroid: Xvnc did not start"; exit 1; }
+        |    sleep 0.1
+        |  done
         |
-        |DISPLAY=:1 $NO_INTERNET /usr/bin/openbox &
+        |  DISPLAY=:1 $NO_INTERNET /usr/bin/openbox &
+        |fi
         |if [ "${'$'}session_bus" = on ]; then
         |  rm -f ${SessionBus.GUEST_DAEMON_DIR}/${SessionBus.SOCKET} ${SessionBus.GUEST_PROXY_DIR}/${SessionBus.SOCKET}
         |  $NO_INTERNET /usr/bin/dbus-daemon --config-file=${SessionBus.GUEST_CONFIG} --nofork --nopidfile --nosyslog &
@@ -117,7 +142,7 @@ object SessionScript {
         |    --disallow-module-loading --disallow-exit --resample-method="${'$'}resampler" -F $GUEST_PULSE_SCRIPT &
         |fi
         |echo "flatdroid: display ready"
-        |wait "${'$'}xvnc"
-        |echo "flatdroid: Xvnc exited"
+        |wait "${'$'}display"
+        |echo "flatdroid: the display exited"
         |""".trimMargin()
 }

@@ -47,6 +47,7 @@ import com.garathon.flatdroid.settings.AppSettings
 import com.garathon.flatdroid.settings.DisplaySize
 import com.garathon.flatdroid.settings.EnvironmentText
 import com.garathon.flatdroid.settings.HomeMode
+import com.garathon.flatdroid.settings.LaunchArgs
 import com.garathon.flatdroid.storage.AppStorage
 import com.garathon.flatdroid.ui.theme.FlatdroidTheme
 
@@ -114,6 +115,7 @@ fun AppSettingsScreen(
     var cameraFrameRate by rememberSaveable { mutableStateOf(settings.cameraFrameRate) }
     var cameraRefused by rememberSaveable { mutableStateOf(false) }
     var environment by rememberSaveable { mutableStateOf(EnvironmentText.format(settings.environment)) }
+    var launchArgs by rememberSaveable { mutableStateOf(LaunchArgs.format(settings.launchArgs)) }
     var homeMode by rememberSaveable { mutableStateOf(settings.homeMode) }
     var sdcard by rememberSaveable { mutableStateOf(settings.sdcard) }
     val environmentValue = EnvironmentText.parse(environment)
@@ -345,6 +347,15 @@ fun AppSettingsScreen(
                 singleLine = false,
                 keyboardType = KeyboardType.Ascii,
             )
+            TextRow(
+                content = launchArgs,
+                onChange = { launchArgs = it },
+                title = stringResource(R.string.app_settings_launch_args),
+                hint = stringResource(R.string.app_settings_launch_args_hint),
+                isError = false,
+                developer = true,
+                keyboardType = KeyboardType.Ascii,
+            )
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -371,6 +382,7 @@ fun AppSettingsScreen(
                             cameraResolution = cameraResolution,
                             cameraFrameRate = cameraFrameRate,
                             environment = if (developerOptions) environmentValue.orEmpty() else settings.environment,
+                            launchArgs = if (developerOptions) LaunchArgs.parse(launchArgs) else settings.launchArgs,
                             homeModeChoice = homeMode.takeIf { it != settings.defaults.homeMode },
                             sdcard = if (broadAccess) sdcard else settings.sdcard,
                         )

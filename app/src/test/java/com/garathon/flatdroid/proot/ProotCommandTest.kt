@@ -11,6 +11,7 @@ class ProotCommandTest {
         tmpDir = "/cache/proot-tmp",
         rootfs = "/files/alpine/rootfs",
         fdsec = "/lib/libfdsec.so",
+        fdshm = "/lib/libfdshm.so",
     )
     private val binds = AlpineBinds(
         resolvConf = "/files/alpine/generated/resolv.conf",
@@ -38,6 +39,7 @@ class ProotCommandTest {
                 "--bind=/files/alpine/generated/resolv.conf:/run/host/monitor/resolv.conf",
                 "--bind=/files/alpine/generated/hosts:/etc/hosts",
                 "--bind=/files/alpine/generated/empty:/sys/fs/selinux",
+                "--bind=/lib/libfdshm.so:/run/flatdroid/fdshm.so",
                 "--bind=/lib/libfdsec.so:/run/flatdroid/fdsec",
                 "/run/flatdroid/fdsec", "--", "/sbin/apk", "--version",
             ),
@@ -65,7 +67,7 @@ class ProotCommandTest {
         )
         val argv = inv.argv
         assertTrue("--bind=/files/alpine/generated/proc/stat:/proc/stat" in argv)
-        assertEquals("--bind=/cache/apk-cache:/var/cache/apk", argv[argv.size - 5])
+        assertEquals("--bind=/cache/apk-cache:/var/cache/apk", argv[argv.size - 6])
         assertEquals("/bin/true", argv.last())
     }
 

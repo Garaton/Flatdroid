@@ -69,4 +69,27 @@ class FlatpakProgressTest {
         assertFalse(FlatpakProgress.sameStep("Installing 1/2… 100%", "Installing 2/2…"))
         assertFalse(FlatpakProgress.sameStep("Looking for matches…", "Installing 1/2…"))
     }
+
+    @Test
+    fun onlyStatusLinesReachTheStatus() {
+        for (line in listOf("Looking for updates…", "Looking for matches…", "Nothing to do.", "Nothing unused to uninstall",
+                "Installation complete.", "Changes complete.", "Skipping: org.xfce.mousepad/aarch64/stable is already installed")) {
+            assertTrue(line, FlatpakProgress.isStatus(line))
+        }
+        for (line in listOf(
+            "Info: runtime org.freedesktop.Platform branch 24.08 is end-of-life, with reason:",
+            "   org.freedesktop.Platform 24.08 is no longer receiving fixes and security updates. Please update to a supported runtime version.",
+            "Info: applications using this runtime:",
+            "   dev.bambosh.UnofficialHomestuckCollection",
+            "Warning: Commit metadata for runtime/org.freedesktop.Platform/aarch64/24.08 not matching expected metadata",
+            "These runtimes in installation 'user' are pinned and won't be removed; see flatpak-pin(1):",
+            "  runtime/org.freedesktop.Platform/aarch64/26.08",
+            " 1.           org.xfce.mousepad.Locale    stable    i    flathub    < 2.3 MB (partial)",
+            "(1/1) Upgrading libexpat (2.9.0-r0 -> 2.10.0-r0)",
+            "OK: 521.1 MiB in 329 packages",
+            "",
+        )) {
+            assertFalse(line, FlatpakProgress.isStatus(line))
+        }
+    }
 }

@@ -50,8 +50,8 @@ object FlatpakCommands {
         "sh",
     ) + patterns
 
-    // [id] must pass InstalledApps.isValidId, so it can't be read as an option.
-    fun install(id: String) = listOf(FLATPAK, "--user", "install", "-y", "flathub", checked(id))
+    // Each ID must pass InstalledApps.isValidId, so it can't be read as an option.
+    fun install(ids: List<String>) = listOf(FLATPAK, "--user", "install", "-y", "flathub") + ids.map(::checked)
     fun uninstall(id: String) = listOf(FLATPAK, "--user", "uninstall", "-y", checked(id))
     val update = listOf(FLATPAK, "--user", "update", "-y")
     /** Re-deploys [refs] (IDs or full refs) from Flathub, replacing their files. */

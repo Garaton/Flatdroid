@@ -87,6 +87,7 @@ class FlatpakLauncher(private val context: Context) {
     private val x11Dir = File(sessionDir, "x11")
     private val pulseDir = File(sessionDir, "pulse")
     private val vncDir = File(sessionDir, "vnc")
+    private val waylandDir = File(sessionDir, "wayland")
     private val etcDir = File(sessionDir, "etc")
     private val desktopDir = File(sessionDir, "xdg")
     // The daemon's socket stays among the helpers; the app's root gets only the proxy's directory.
@@ -165,6 +166,11 @@ class FlatpakLauncher(private val context: Context) {
             }
             else -> throw LaunchException(describe(result))
         }
+        // Wayland's packages come only when a Wayland-only app first needs them, and the user agrees.
+        if (plan.wayland && !File(env.paths().rootfs, "usr/bin/cage").isFile) {
+            SessionController.offerWayland(appId)
+            return false
+        }
         store.update { it.copy(lastOpened = System.currentTimeMillis()) }
 
         if (userSettings?.security?.checkFilesBeforeLaunch == true && !checkFiles(appId)) return false
@@ -176,7 +182,7 @@ class FlatpakLauncher(private val context: Context) {
         writeTimeZone(plan, settings.sharesTimeZone)
         prepareDirs(appId, plan)
         val security = userSettings?.security ?: SecuritySettings()
-        val password = VncPassword.random()
+        val password = if (plan.wayland) VncPassword.random(length = WaylandVnc.PASSWORD_LENGTH) else VncPassword.random()
         val audio = plan.binds.pulseSockets != null
         if (settings.microphone && !MicStreamer.hasPermission(context)) {
             // Android's permission was revoked since the microphone was turned on: off again, as
@@ -202,7 +208,7 @@ class FlatpakLauncher(private val context: Context) {
         val outputRate = outputRate()
         val micRate = MicStreamer.rate()
         writeSessionFiles(
-            password, titleBars = userSettings?.windowTitleBars ?: true,
+            password, wayland = plan.wayland, titleBars = userSettings?.windowTitleBars ?: true,
             pulseScript = if (audio) PulseScript.text(outputRate, microphone, micRate) else null,
             busArgs = SessionBus.proxyArgs(appId, plan.app.metadata.sessionBusPolicy, camera = cameraNodes.isNotEmpty()),
             cameraNodes = cameraNodes,
@@ -223,7 +229,7 @@ class FlatpakLauncher(private val context: Context) {
         val helpers = startHelpers(
             SessionScript.command(
                 settings.geometry, frameRate, audio, resampler, sessionBus = true,
-                camera = cameraNodes.isNotEmpty(), clipboard = settings.sharesClipboard,
+                camera = cameraNodes.isNotEmpty(), clipboard = settings.sharesClipboard, wayland = plan.wayland,
             ),
             audio,
             Fdsec.Filter(extraSyscalls = security.extraSyscallFilter),
@@ -240,7 +246,8 @@ class FlatpakLauncher(private val context: Context) {
         val dns = ResolvConfRefresher(context, listOf(File(etcDir, "resolv.conf"))).apply { start() }
         try {
             try {
-                waitForFile(File(x11Dir, SessionScript.X_SOCKET), helpers, DISPLAY_TIMEOUT_MS, context.getString(R.string.launch_display_failed))
+                val display = if (plan.wayland) File(waylandDir, GuestPaths.WAYLAND_SOCKET) else File(x11Dir, SessionScript.X_SOCKET)
+                waitForFile(display, helpers, DISPLAY_TIMEOUT_MS, context.getString(R.string.launch_display_failed))
             } catch (e: LaunchException) {
                 throw if (filterRefused.get()) LaunchException(context.getString(R.string.launch_filter_refused)) else e
             }
@@ -287,7 +294,7 @@ class FlatpakLauncher(private val context: Context) {
                     if (LaunchPlanner.PROOT_KILLED_BY_SIGNAL in line) killedBySignal.set(true)
                     SessionController.log(line)
                 }
-                SessionController.running(appId, password)
+                SessionController.running(appId, password, username = WaylandVnc.USERNAME.takeIf { plan.wayland })
                 val code = app.waitFor()
                 SessionController.log("[flatdroid] the app exited ($code)")
                 if (appRefused.get()) throw LaunchException(context.getString(R.string.launch_filter_refused))
@@ -326,10 +333,6 @@ class FlatpakLauncher(private val context: Context) {
                     store.update { it.copy(newerElectronFlags = false) }
                     SessionController.log("[flatdroid] the newer Electron flags didn't help; turned them off again")
                     throw LaunchException(context.getString(R.string.launch_newer_flags_failed, code))
-                }
-                if (code != 0 && plan.app.metadata.context.waylandOnly) {
-                    // Most likely why: the app asks only for Wayland, and Flatdroid has only X11.
-                    throw LaunchException(context.getString(R.string.launch_needs_wayland, code))
                 }
                 return true
             }
@@ -558,6 +561,7 @@ class FlatpakLauncher(private val context: Context) {
         return LaunchOptions(
             environment = if (developerOptions) settings.environment else emptyMap(),
             newerElectronFlags = settings.newerElectronFlags,
+            extraArgs = if (developerOptions) settings.launchArgs else emptyList(),
             electronSwap = app?.let { electronSwap(appId).preparedFor(it) },
             wholeDev = settings.wholeDev,
             flatpakInfo = !settings.withoutFlatpakInfo,
@@ -620,6 +624,7 @@ class FlatpakLauncher(private val context: Context) {
                 }
             },
             x11Sockets = x11Dir,
+            waylandSockets = waylandDir,
             pulseSockets = pulseDir,
             fontDirs = launcher.fontDirs,
             hostFonts = ANDROID_FONTS.takeIf { settings.usesAndroidFonts && it.isDirectory },
@@ -730,7 +735,7 @@ class FlatpakLauncher(private val context: Context) {
      */
     private fun checkBindSources(plan: LaunchPlan) {
         val b = plan.binds
-        val sources = listOfNotNull(b.root, b.runtimeFiles, b.appFiles, "${b.runtimeFiles}/etc", b.tmp, b.shm, b.x11Sockets, b.pulseSockets, b.home, b.emptyDir, env.paths().l2sDir) +
+        val sources = listOfNotNull(b.root, b.runtimeFiles, b.appFiles, "${b.runtimeFiles}/etc", b.tmp, b.shm, b.x11Sockets, b.pulseSockets, b.waylandSockets, b.home, b.emptyDir, env.paths().l2sDir) +
             b.etc.values + b.extensions.map { it.first } + b.appDirs.map { it.first } + b.privateFiles.map { it.first } + b.extra.map { it.first }
         for (path in sources) {
             val file = File(path)
@@ -746,18 +751,25 @@ class FlatpakLauncher(private val context: Context) {
      * VNC password file, and the helpers' scripts ([pulseScript] only with sound) and the session
      * bus's configuration and proxy arguments ([busArgs]). Old sockets are removed.
      */
-    private fun writeSessionFiles(password: String, titleBars: Boolean, pulseScript: String?, busArgs: List<String>, cameraNodes: List<CameraScript.Node>) {
+    private fun writeSessionFiles(password: String, wayland: Boolean, titleBars: Boolean, pulseScript: String?, busArgs: List<String>, cameraNodes: List<CameraScript.Node>) {
         val launcher = AppData.launcherFiles(context)
         launcher.write()
         File(etcDir, "machine-id").writeTextAtomically(launcher.machineId.readText(), durable = false)
         File(etcDir, "resolv.conf").writeTextAtomically(env.resolvConf(), durable = false)
-        for (dir in listOf(x11Dir, pulseDir, vncDir, busDaemonDir, busProxyDir, pipewireDir, cameraPipeDir, cameraConfigDir, emptyDir)) {
+        for (dir in listOf(x11Dir, pulseDir, vncDir, waylandDir, busDaemonDir, busProxyDir, pipewireDir, cameraPipeDir, cameraConfigDir, emptyDir)) {
             AndroidTarFs.deleteTree(dir)
             dir.mkdirs()
         }
+        // The compositor's XDG_RUNTIME_DIR: wlroots wants it private.
+        Os.chmod(waylandDir.path, 0x1c0) // 0700
         File(vncDir, "passwd").apply {
             writeBytes(VncPassword.file(password))
             Os.chmod(path, 0x180) // 0600
+        }
+        val wayvncConfig = File(vncDir, File(SessionScript.GUEST_WAYVNC_CONFIG).name)
+        if (wayland) {
+            wayvncConfig.writeText(WaylandVnc.config(password))
+            Os.chmod(wayvncConfig.path, 0x180) // 0600
         }
         File(sessionDir, "session.sh").writeTextAtomically(SessionScript.TEXT, durable = false)
         File(sessionDir, "openbox-rc.xml").writeTextAtomically(GuestFiles.openboxRc(titleBars), durable = false)
@@ -786,6 +798,7 @@ class FlatpakLauncher(private val context: Context) {
             x11Dir.path to GuestPaths.X11_DIR,
             pulseDir.path to GuestPaths.PULSE_DIR,
             vncDir.path to SessionScript.GUEST_VNC_DIR,
+            waylandDir.path to GuestPaths.WAYLAND_DIR,
             File(sessionDir, "session.sh").path to SessionScript.GUEST_SCRIPT,
             File(sessionDir, "openbox-rc.xml").path to SessionScript.GUEST_OPENBOX_RC,
             busDaemonDir.path to SessionBus.GUEST_DAEMON_DIR,
