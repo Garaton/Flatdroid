@@ -79,6 +79,32 @@ object GuestFiles {
     fun group(gid: Int): String = "root:x:0:\nuser:x:$gid:\n"
 
     /**
+     * labwc's configuration, as [openboxRc]'s: normal windows maximised, the same keys, no
+     * minimise button, tapping the empty desktop lists the windows. Without [titleBars] windows
+     * have none, and apps are asked not to draw their own. Only these key bindings and no root
+     * menu: labwc's defaults start a terminal and offer to exit. Primary selection off: only
+     * copies are a clipboard here, as with X11.
+     */
+    fun labwcRc(titleBars: Boolean = true): String {
+        fun list(button: String) =
+            "<mousebind button=\"$button\" action=\"Press\"><action name=\"ShowMenu\" menu=\"client-list-combined-menu\"/></mousebind>"
+        return """
+            |<?xml version="1.0" encoding="UTF-8"?>
+            |<labwc_config>
+            |<core><decoration>server</decoration><primarySelection>no</primarySelection></core>
+            |<focus><followMouse>no</followMouse></focus>
+            |<theme><titlebar><layout>:max,close</layout></titlebar></theme>
+            |<keyboard>
+            |<keybind key="A-F4"><action name="Close"/></keybind>
+            |<keybind key="A-Tab"><action name="NextWindow"/></keybind>
+            |</keyboard>
+            |<mouse><default/><context name="Root">${list("Left")}${list("Right")}${list("Middle")}</context></mouse>
+            |<windowRules><windowRule identifier="*" type="normal"${if (titleBars) "" else " serverDecoration=\"no\""}><action name="Maximize"/></windowRule></windowRules>
+            |</labwc_config>
+            |""".trimMargin()
+    }
+
+    /**
      * Openbox's whole configuration (a user rc.xml replaces Openbox's defaults, it isn't merged):
      * normal windows maximised with their title bars kept (GTK3/Qt windows need them to close);
      * no minimise button, since there is no taskbar to bring a window back; tapping the empty

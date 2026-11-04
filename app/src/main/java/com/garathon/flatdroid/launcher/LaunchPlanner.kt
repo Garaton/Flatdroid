@@ -23,7 +23,7 @@ data class HostDirs(
     /** Generated /etc files: name to host file. */
     val etc: Map<String, File>,
     val x11Sockets: File,
-    /** The Wayland compositor's socket directory, bound only for apps that ask only for Wayland. */
+    /** The Wayland compositor's socket directory, bound only for apps in a Wayland session. */
     val waylandSockets: File? = null,
     /** PulseAudio's socket directory; null when the app gets no sound. */
     val pulseSockets: File?,
@@ -60,6 +60,8 @@ data class LaunchOptions(
     /** A prepared arm64/x64 Electron for an app that ships the other architecture's, if any. */
     val electronSwap: File? = null,
     val extraArgs: List<String> = emptyList(),
+    /** An X11 session for an app that asks for both Wayland and X11 (its Force X11 setting); ignored for others. */
+    val forceX11: Boolean = false,
     val environment: Map<String, String> = emptyMap(),
     /** For an app asking for `devices=all`: the host's whole /dev, Binder included (the app's own setting). */
     val wholeDev: Boolean = false,
@@ -93,7 +95,7 @@ data class LaunchPlan(
     val usrLinks: List<String>,
     /** Electron or a Chromium browser, started without zypak or cobalt ([Electron]). */
     val isElectron: Boolean,
-    /** The app asks only for Wayland, so its session is Wayland (cage and wayvnc) instead of Xvnc. */
+    /** The app takes Wayland, so its session is Wayland (labwc and wayvnc) instead of Xvnc. */
     val wayland: Boolean = false,
     /** What fdsec refuses for this app. */
     val filter: Fdsec.Filter,
@@ -206,8 +208,9 @@ class LaunchPlanner(
         }
         command = command + options.extraArgs
 
-        // Only apps that can't use X11 get a Wayland session: for the rest, Xvnc costs less (measured).
-        val wayland = app.metadata.context.waylandOnly
+        // Wayland for every app that takes it, unless one that also takes X11 is set to Force X11.
+        val context = app.metadata.context
+        val wayland = context.wayland && !(options.forceX11 && context.waylandAndX11)
         if (wayland) command = command.map { if (it == Electron.OZONE_X11) Electron.OZONE_WAYLAND else it }
         val environment = LaunchEnvironment.build(
             appId = appId,

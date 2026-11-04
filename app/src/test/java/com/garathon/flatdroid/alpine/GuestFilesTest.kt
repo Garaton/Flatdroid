@@ -1,6 +1,7 @@
 package com.garathon.flatdroid.alpine
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -78,5 +79,14 @@ class GuestFilesTest {
         val a = GuestFiles.machineId()
         assertTrue(Regex("^[0-9a-f]{32}\n$").matches(a))
         assertTrue(a != GuestFiles.machineId())
+    }
+
+    @Test
+    fun labwcHasOnlyItsOwnKeysAndAsksAppsNotToDrawTitleBarsWithoutThem() {
+        val rc = GuestFiles.labwcRc(titleBars = false)
+        assertTrue("key=\"A-F4\"" in rc)
+        assertFalse("<default/></keyboard>" in rc || "<keyboard><default" in rc)
+        assertTrue("serverDecoration=\"no\"" in rc)
+        assertFalse("serverDecoration" in GuestFiles.labwcRc(titleBars = true))
     }
 }

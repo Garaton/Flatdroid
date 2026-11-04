@@ -24,6 +24,8 @@ data class InstalledApp(
     val requestsAudio: Boolean = false,
     /** Its metadata asks for the network (`shared=network`). */
     val requestsNetwork: Boolean = false,
+    /** Its metadata asks for Wayland as well as X11, so X11 can be forced ([FlatpakContext.waylandAndX11]). */
+    val waylandAndX11: Boolean = false,
 )
 
 /** Installed apps with their names and icons, read from what each app exports. */
@@ -42,6 +44,7 @@ class InstalledApps(private val context: Context) {
             requestsAllDevices = DevNodes.ALL in app.metadata.context.devices,
             requestsAudio = AppSettings.PULSEAUDIO_SOCKET in app.metadata.context.sockets,
             requestsNetwork = AppSettings.NETWORK in app.metadata.context.shared,
+            waylandAndX11 = app.metadata.context.waylandAndX11,
         )
     }
 

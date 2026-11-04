@@ -143,22 +143,29 @@ class LaunchPlannerTest {
     fun onlyAppsWithoutX11GetAWaylandSession() {
         runtimeWithGl()
         val wayland = tmp.newFolder("wayland")
-        fun plan(id: String, sockets: String): LaunchPlan {
+        fun plan(id: String, sockets: String, force: Boolean = false): LaunchPlan {
             val files = inst.app(id, metadata = appMetadata(id, "app", extra = "[Context]\nsockets=$sockets\n"))
             File(files, "bin").mkdirs()
             File(files, "bin/app").writeBytes(ExecutableTest.elf(0xb7))
-            return Ready(planner.plan(id, dirs.copy(waylandSockets = wayland)))
+            return Ready(planner.plan(id, dirs.copy(waylandSockets = wayland), LaunchOptions(forceX11 = force)))
         }
-        val only = plan("page.codeberg.dnkl.foot", "wayland;")
-        assertTrue(only.wayland)
-        assertEquals(wayland.path, only.binds.waylandSockets)
-        assertEquals("/run/flatdroid/wayland/wayland-0", only.environment["WAYLAND_DISPLAY"])
-        for (sockets in listOf("wayland;fallback-x11;", "x11;wayland;", "x11;")) {
-            val both = plan("org.example.App" + sockets.length, sockets)
-            assertFalse(sockets, both.wayland)
-            assertEquals(null, both.binds.waylandSockets)
-            assertEquals(":1", both.environment["DISPLAY"])
+        for (sockets in listOf("wayland;", "wayland;fallback-x11;", "x11;wayland;")) {
+            val app = plan("org.example.App" + sockets.length, sockets)
+            assertTrue(sockets, app.wayland)
+            assertEquals(wayland.path, app.binds.waylandSockets)
+            assertEquals("/run/flatdroid/wayland/wayland-0", app.environment["WAYLAND_DISPLAY"])
+            assertEquals(null, app.environment["DISPLAY"])
         }
+        // Force X11, for an app that takes both.
+        val forced = plan("org.example.Forced", "x11;wayland;", force = true)
+        assertFalse(forced.wayland)
+        assertEquals(null, forced.binds.waylandSockets)
+        assertEquals(":1", forced.environment["DISPLAY"])
+        // An app that takes only Wayland keeps it: the setting is ignored.
+        assertTrue(plan("org.example.WaylandOnly", "wayland;", force = true).wayland)
+        val x11Only = plan("org.example.X11Only", "x11;")
+        assertFalse(x11Only.wayland)
+        assertEquals(":1", x11Only.environment["DISPLAY"])
     }
 
     @Test

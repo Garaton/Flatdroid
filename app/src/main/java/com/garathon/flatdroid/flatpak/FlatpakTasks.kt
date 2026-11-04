@@ -30,8 +30,6 @@ sealed interface FlatpakTask {
     data object ReinstallAll : FlatpakTask
     /** Records the file baseline of every installed app that has none yet (with the file check on). */
     data object BaselineAll : FlatpakTask
-    /** Installs Alpine's Wayland packages (AlpineSetup.WAYLAND_PACKAGES), for apps that can't use X11. */
-    data object InstallWayland : FlatpakTask
 }
 
 data class FlatpakTaskUi(

@@ -2,7 +2,7 @@
  * fdsec: installs Flatdroid's seccomp filter on itself, checks that it is in effect, then
  * executes a command, which inherits the filter and can't remove it.
  *
- *   fdsec [--extra] [--no-inet] [--] /absolute/command args...
+ *   fdsec [--extra] [--no-inet] [--no-connect] [--] /absolute/command args...
  *
  * Always blocked: io_uring and openat2 (ENOSYS, so programs fall back to what proot
  * translates), open_by_handle_at, name_to_handle_at, pidfd_getfd, bpf, perf_event_open,
@@ -13,6 +13,7 @@
  * calls of other ABIs (i386 and x32 on x86_64, AArch32 on aarch64) get ENOSYS.
  *   --extra    also pidfd_open, process_madvise, kcmp, keyctl, add_key, request_key (ENOSYS)
  *   --no-inet  socket(AF_INET or AF_INET6) fails with EACCES; Unix and netlink sockets stay
+ *   --no-connect  connect fails with EACCES, for a server that only accepts connections
  *
  * The check: a rule only this filter has answers getpriority(CHECK_WHICH, 0) with CHECK_ERRNO
  * (the kernel itself would say EINVAL); where the kernel reports Seccomp_filters (5.9 and
@@ -191,7 +192,7 @@ _Static_assert(5 + 2 + 2 + 2 * (sizeof ALWAYS / sizeof *ALWAYS) + 2 * (sizeof EX
 #define RETURN(action) BPF_STMT(BPF_RET | BPF_K, (action))
 #define IF_EQUAL(k, skip_if_not) BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, (k), 0, (skip_if_not))
 
-static unsigned build(struct sock_filter *f, int extra, int no_inet)
+static unsigned build(struct sock_filter *f, int extra, int no_inet, int no_connect)
 {
 	unsigned n = 0;
 	f[n++] = (struct sock_filter)LOAD(arch);
@@ -214,6 +215,10 @@ static unsigned build(struct sock_filter *f, int extra, int no_inet)
 			f[n++] = (struct sock_filter)IF_EQUAL(EXTRA[i].nr, 1);
 			f[n++] = (struct sock_filter)RETURN(SECCOMP_RET_ERRNO | EXTRA[i].err);
 		}
+	}
+	if (no_connect) {
+		f[n++] = (struct sock_filter)IF_EQUAL(__NR_connect, 1);
+		f[n++] = (struct sock_filter)RETURN(SECCOMP_RET_ERRNO | EACCES);
 	}
 	if (no_inet) {
 		f[n++] = (struct sock_filter)IF_EQUAL(__NR_socket, 6);
@@ -241,21 +246,22 @@ __attribute__((used)) static void start(long *sp)
 	long argc = sp[0];
 	char **argv = (char **)(sp + 1);
 	char **envp = argv + argc + 1;
-	int extra = 0, no_inet = 0;
+	int extra = 0, no_inet = 0, no_connect = 0;
 	int i = 1;
 	for (; i < argc && argv[i][0] == '-'; i++) {
 		if (equal(argv[i], "--extra")) extra = 1;
 		else if (equal(argv[i], "--no-inet")) no_inet = 1;
+		else if (equal(argv[i], "--no-connect")) no_connect = 1;
 		else if (equal(argv[i], "--")) { i++; break; }
 		else { say("fdsec: unknown option ", argv[i]); leave(EXIT_USAGE); }
 	}
 	if (i >= argc || argv[i][0] != '/') {
-		say("fdsec: usage: fdsec [--extra] [--no-inet] [--] /absolute/command args...", 0);
+		say("fdsec: usage: fdsec [--extra] [--no-inet] [--no-connect] [--] /absolute/command args...", 0);
 		leave(EXIT_USAGE);
 	}
 
 	struct sock_filter filter[MAX_FILTER];
-	struct sock_fprog prog = { .len = (unsigned short)build(filter, extra, no_inet), .filter = filter };
+	struct sock_fprog prog = { .len = (unsigned short)build(filter, extra, no_inet, no_connect), .filter = filter };
 	long before = filter_count();
 	if (sys3(__NR_prctl, PR_SET_NO_NEW_PRIVS, 1, 0) != 0) {
 		say("fdsec: refused: prctl(PR_SET_NO_NEW_PRIVS) failed", 0);

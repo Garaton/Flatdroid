@@ -27,7 +27,7 @@ class SessionAudioTest {
     @Test
     fun helpersGetSoundAndResampler() {
         assertEquals(
-            listOf("/bin/sh", SessionScript.GUEST_SCRIPT, "1000x1400", "14400", "30", "on", "speex-float-0", "on", "on", "on", "off"),
+            listOf("/bin/sh", SessionScript.GUEST_SCRIPT, "1000x1400", "14400", "30", "on", "speex-float-0", "on", "on", "on", "off", "off"),
             SessionScript.command("1000x1400", 30, sound = true, Resampler.FAST, sessionBus = true, camera = true),
         )
         assertEquals(
@@ -38,14 +38,34 @@ class SessionAudioTest {
     }
 
     @Test
-    fun aWaylandSessionStartsCageAndWayvncInsteadOfXvnc() {
-        assertEquals("on", SessionScript.command("1000x1400", 30, sound = false, Resampler.FAST, sessionBus = true, wayland = true).last())
+    fun aWaylandSessionStartsLabwcAndWayvncInsteadOfXvnc() {
+        assertEquals("on", SessionScript.command("1000x1400", 30, sound = false, Resampler.FAST, sessionBus = true, wayland = true)[10])
         val text = SessionScript.TEXT
         assertTrue("wayland=${'$'}9" in text.lines().map { it.trim() })
         assertTrue("LD_PRELOAD=/run/flatdroid/fdshm.so XDG_RUNTIME_DIR=/run/flatdroid/wayland" in text)
         // wayvnc's control socket stays among the helpers, never in the app's Wayland directory.
-        assertTrue("-S \"${'$'}3\"" in text && "/run/flatdroid/vnc/wayvncctl" in text)
-        assertTrue("/run/flatdroid/vnc/wayvnc.conf" in text)
+        assertTrue("exec /usr/bin/wayvnc -S /run/flatdroid/vnc/wayvncctl -f" in text)
+        // labwc ends with wayvnc (-S), its configuration among the helpers.
+        assertTrue("/usr/bin/labwc -C /run/flatdroid/vnc/labwc -S" in text)
+        // The output refreshes at the frame rate sent, unless uncapped.
+        assertTrue("[ \"${'$'}frame_rate\" -le 240 ] && mode=\"${'$'}geometry@${'$'}{frame_rate}Hz\"" in text)
+        // Flatdroid's viewer: a Unix socket, no login, no network; an external viewer: the port and the login.
+        assertTrue(text.lines().any { it.trim().startsWith("guard=\"") && it.endsWith(" --no-inet --\" listen=\"-u /run/flatdroid/vnc/vnc.sock\"") })
+        assertTrue("guard= listen=\"-C /run/flatdroid/vnc/wayvnc.conf 127.0.0.1 ${'$'}port\"" in text)
+    }
+
+    @Test
+    fun xvncListensOnAUnixSocketUnlessTheViewerIsExternal() {
+        assertEquals("on", SessionScript.command("1000x1400", 30, sound = false, Resampler.FAST, sessionBus = true, externalViewer = true)[11])
+        val lines = SessionScript.TEXT.lines().map { it.trim() }
+        assertTrue("external=${'$'}{10}" in lines)
+        assertTrue("listen=\"-rfbport -1 -rfbunixpath /run/flatdroid/vnc/vnc.sock -rfbunixmode 0600 -SecurityTypes None\"" in lines)
+        assertTrue("listen=\"-rfbport ${'$'}port -localhost -SecurityTypes VncAuth -PasswordFile /run/flatdroid/vnc/passwd\"" in lines)
+        // An external viewer needs the network, so Xvnc may not connect anywhere (the VNC extension's reverse connections).
+        assertTrue(lines.any { it.startsWith("guard=\"") && it.endsWith(" --no-connect --\"") })
+        assertTrue(lines.any { it.startsWith("guard=\"") && it.endsWith(" --no-inet --\"") })
+        // No parameter overrides through the VNC extension.
+        assertTrue(lines.single { it.startsWith("-AllowOverride= -nolisten local") }.isNotEmpty())
     }
 
     @Test
@@ -64,11 +84,13 @@ class SessionAudioTest {
     @Test
     fun anUnsharedClipboardTurnsOffXvncsCutText() {
         val args = SessionScript.command("1000x1400", 30, sound = false, Resampler.FAST, sessionBus = true, clipboard = false)
-        assertEquals("off", args[args.size - 2])
+        assertEquals("off", args[9])
         val lines = SessionScript.TEXT.lines().map { it.trim() }
         assertTrue("clipboard=${'$'}8" in lines)
         assertTrue("[ \"${'$'}clipboard\" = on ] || clipboard_args=\"-AcceptCutText=0 -SendCutText=0\"" in lines)
-        assertTrue(lines.single { it.startsWith("-nolisten local") }.endsWith("${'$'}clipboard_args &"))
+        assertTrue(lines.single { it.startsWith("-AllowOverride= -nolisten local") }.endsWith("${'$'}clipboard_args &"))
+        // Selecting text isn't copying: X's selection (PRIMARY) never goes to the viewer.
+        assertTrue(lines.single { it.startsWith("-AllowOverride= -nolisten local") }.endsWith("-SendPrimary=0 ${'$'}clipboard_args &"))
     }
 
     @Test
@@ -83,13 +105,14 @@ class SessionAudioTest {
     }
 
     @Test
-    fun everyHelperButXvncRunsWithoutInternetSockets() {
+    fun everyHelperRunsWithoutInternetSockets() {
         val lines = SessionScript.TEXT.lines().map { it.trim() }
         for (helper in listOf("openbox", "dbus-daemon", "xdg-dbus-proxy", "pipewire", "pulseaudio")) {
             val line = lines.single { "/usr/bin/$helper" in it }
             assertTrue(line, "/run/flatdroid/fdsec --no-inet -- /usr/bin/$helper" in line)
         }
-        assertTrue(lines.single { it.startsWith("Xvnc ") }.let { "fdsec" !in it })
+        // Xvnc too, behind the filter chosen for the viewer (no internet sockets, or no connecting for an external viewer).
+        assertTrue(lines.single { "Xvnc :1" in it }.startsWith("${'$'}guard /usr/bin/Xvnc "))
     }
 
     @Test

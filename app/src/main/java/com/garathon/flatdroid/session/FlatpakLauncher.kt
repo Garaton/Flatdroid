@@ -58,6 +58,7 @@ import com.garathon.flatdroid.storage.SharedHome
 import com.garathon.flatdroid.storage.StorageTaskService
 import com.garathon.flatdroid.storage.StorageTasks
 import com.garathon.flatdroid.storage.TempHomes
+import com.garathon.flatdroid.viewer.ViewerSize
 import com.garathon.flatdroid.util.readTextUpTo
 import com.garathon.flatdroid.util.httpDownload
 import com.garathon.flatdroid.util.sha256
@@ -166,11 +167,6 @@ class FlatpakLauncher(private val context: Context) {
             }
             else -> throw LaunchException(describe(result))
         }
-        // Wayland's packages come only when a Wayland-only app first needs them, and the user agrees.
-        if (plan.wayland && !File(env.paths().rootfs, "usr/bin/cage").isFile) {
-            SessionController.offerWayland(appId)
-            return false
-        }
         store.update { it.copy(lastOpened = System.currentTimeMillis()) }
 
         if (userSettings?.security?.checkFilesBeforeLaunch == true && !checkFiles(appId)) return false
@@ -202,13 +198,17 @@ class FlatpakLauncher(private val context: Context) {
         if (settings.camera && cameras.isEmpty()) SessionController.log("[flatdroid] the app's camera is on, but Android has no camera Flatdroid can use")
         // Upright for the app's display: a landscape display as the device held landscape, a
         // portrait one as held portrait (Flatdroid itself is in portrait at launch whatever the app).
-        val displayRotation = displayRotation(landscape = settings.width > settings.height)
+        val externalViewer = userSettings?.externalViewer == true
+        // The screen starts at the size the viewer will show it in (Flatdroid's viewer then keeps it so).
+        val (viewWidth, viewHeight) = ViewerSize.expected(context, bar = !externalViewer)
+        val (screenWidth, screenHeight) = settings.size(viewWidth, viewHeight)
+        val displayRotation = displayRotation(landscape = screenWidth > screenHeight)
         val cameraRotations = cameras.map { it.rotation(displayRotation) }
         val cameraNodes = cameraNodes(cameras, cameraRotations)
         val outputRate = outputRate()
         val micRate = MicStreamer.rate()
         writeSessionFiles(
-            password, wayland = plan.wayland, titleBars = userSettings?.windowTitleBars ?: true,
+            password, wayvncLogin = plan.wayland && externalViewer, titleBars = userSettings?.windowTitleBars ?: true,
             pulseScript = if (audio) PulseScript.text(outputRate, microphone, micRate) else null,
             busArgs = SessionBus.proxyArgs(appId, plan.app.metadata.sessionBusPolicy, camera = cameraNodes.isNotEmpty()),
             cameraNodes = cameraNodes,
@@ -228,8 +228,9 @@ class FlatpakLauncher(private val context: Context) {
         val filterRefused = AtomicBoolean(false)
         val helpers = startHelpers(
             SessionScript.command(
-                settings.geometry, frameRate, audio, resampler, sessionBus = true,
+                "${screenWidth}x$screenHeight", frameRate, audio, resampler, sessionBus = true,
                 camera = cameraNodes.isNotEmpty(), clipboard = settings.sharesClipboard, wayland = plan.wayland,
+                externalViewer = externalViewer,
             ),
             audio,
             Fdsec.Filter(extraSyscalls = security.extraSyscallFilter),
@@ -294,7 +295,13 @@ class FlatpakLauncher(private val context: Context) {
                     if (LaunchPlanner.PROOT_KILLED_BY_SIGNAL in line) killedBySignal.set(true)
                     SessionController.log(line)
                 }
-                SessionController.running(appId, password, username = WaylandVnc.USERNAME.takeIf { plan.wayland })
+                if (externalViewer) SessionController.running(appId, password, username = WaylandVnc.USERNAME.takeIf { plan.wayland })
+                else SessionController.running(
+                    appId, password, socket = File(vncDir, SessionScript.VNC_SOCKET).path, wayland = plan.wayland,
+                    followPercent = settings.resolution.percent,
+                    clipboardSocket = File(waylandDir, GuestPaths.WAYLAND_SOCKET).path.takeIf { plan.wayland && settings.sharesClipboard },
+                    shareClipboard = settings.sharesClipboard,
+                )
                 val code = app.waitFor()
                 SessionController.log("[flatdroid] the app exited ($code)")
                 if (appRefused.get()) throw LaunchException(context.getString(R.string.launch_filter_refused))
@@ -562,6 +569,7 @@ class FlatpakLauncher(private val context: Context) {
             environment = if (developerOptions) settings.environment else emptyMap(),
             newerElectronFlags = settings.newerElectronFlags,
             extraArgs = if (developerOptions) settings.launchArgs else emptyList(),
+            forceX11 = settings.forceX11,
             electronSwap = app?.let { electronSwap(appId).preparedFor(it) },
             wholeDev = settings.wholeDev,
             flatpakInfo = !settings.withoutFlatpakInfo,
@@ -751,7 +759,7 @@ class FlatpakLauncher(private val context: Context) {
      * VNC password file, and the helpers' scripts ([pulseScript] only with sound) and the session
      * bus's configuration and proxy arguments ([busArgs]). Old sockets are removed.
      */
-    private fun writeSessionFiles(password: String, wayland: Boolean, titleBars: Boolean, pulseScript: String?, busArgs: List<String>, cameraNodes: List<CameraScript.Node>) {
+    private fun writeSessionFiles(password: String, wayvncLogin: Boolean, titleBars: Boolean, pulseScript: String?, busArgs: List<String>, cameraNodes: List<CameraScript.Node>) {
         val launcher = AppData.launcherFiles(context)
         launcher.write()
         File(etcDir, "machine-id").writeTextAtomically(launcher.machineId.readText(), durable = false)
@@ -767,12 +775,14 @@ class FlatpakLauncher(private val context: Context) {
             Os.chmod(path, 0x180) // 0600
         }
         val wayvncConfig = File(vncDir, File(SessionScript.GUEST_WAYVNC_CONFIG).name)
-        if (wayland) {
+        // Only an external viewer logs in; Flatdroid's own uses the private socket.
+        if (wayvncLogin) {
             wayvncConfig.writeText(WaylandVnc.config(password))
             Os.chmod(wayvncConfig.path, 0x180) // 0600
         }
         File(sessionDir, "session.sh").writeTextAtomically(SessionScript.TEXT, durable = false)
         File(sessionDir, "openbox-rc.xml").writeTextAtomically(GuestFiles.openboxRc(titleBars), durable = false)
+        File(vncDir, "${File(SessionScript.GUEST_LABWC_DIR).name}/rc.xml").apply { parentFile!!.mkdirs() }.writeTextAtomically(GuestFiles.labwcRc(titleBars), durable = false)
         val pulseFile = File(sessionDir, "pulse.pa")
         if (pulseScript != null) pulseFile.writeTextAtomically(pulseScript, durable = false) else pulseFile.delete()
         File(sessionDir, "dbus.conf").writeTextAtomically(SessionBus.CONFIG, durable = false)

@@ -30,6 +30,8 @@ object Fdsec {
         val extraSyscalls: Boolean = false,
         /** Internet sockets (AF_INET, AF_INET6; EACCES). Unix and netlink sockets stay. */
         val noInternet: Boolean = false,
+        /** Outgoing connections (`connect`, EACCES), for a server that only accepts them. */
+        val noConnect: Boolean = false,
     )
 
     /** [command] behind the filter, with fdsec at [guestPath]. */
@@ -37,7 +39,7 @@ object Fdsec {
         listOf(guestPath) + flags(filter) + "--" + command
 
     fun flags(filter: Filter): List<String> =
-        listOfNotNull("--extra".takeIf { filter.extraSyscalls }, "--no-inet".takeIf { filter.noInternet })
+        listOfNotNull("--extra".takeIf { filter.extraSyscalls }, "--no-inet".takeIf { filter.noInternet }, "--no-connect".takeIf { filter.noConnect })
 
     /** Whether [line] of a proot's output is fdsec refusing to start its command. */
     fun refused(line: String) = line.startsWith(REFUSED_PREFIX)

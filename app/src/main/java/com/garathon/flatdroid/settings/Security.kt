@@ -22,7 +22,7 @@ data class SecuritySettings(
     /** Only CPU and memory information from /sys, and `devices=all` gives no device group. */
     val limitDevices: Boolean = false,
     /** The VNC password screen can't be captured, the password shows only on tap, and the viewer must be chosen in Settings. */
-    val protectPassword: Boolean = false,
+    val hideScreen: Boolean = false,
     /** Exports go through Android's "save as" picker instead of straight into Download. */
     val exportWithPicker: Boolean = false,
     /** Each app's and its runtime's deployed files are checked against a baseline before launch. */
@@ -60,7 +60,7 @@ enum class SecurityLevel(
             permissionsFromMetadata = false,
             defaultHomeMode = HomeMode.PRIVATE,
             limitDevices = true,
-            protectPassword = true,
+            hideScreen = true,
             exportWithPicker = true,
             checkFilesBeforeLaunch = true,
             androidFonts = false,

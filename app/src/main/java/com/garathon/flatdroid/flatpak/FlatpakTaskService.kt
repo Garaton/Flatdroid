@@ -74,12 +74,12 @@ class FlatpakTaskService : Service() {
         // Installs are left out: an interrupted download is already safe (see cleanUpAfter); so is a
         // baseline, which changes no Flatpak files.
         val marker = AppData.taskMarker(applicationContext).takeIf {
-            task !is FlatpakTask.Install && task != FlatpakTask.BaselineAll && task != FlatpakTask.InstallWayland
+            task !is FlatpakTask.Install && task != FlatpakTask.BaselineAll
         }
         // A task that ends with baselines: if it doesn't finish (cancelled, failed, killed), they are
         // recorded at the next start instead. A Repair finishes them too, if they were pending.
         val baselineMarker = AppData.baselineMarker(applicationContext).takeIf {
-            checkFilesOn(this) && task !is FlatpakTask.Uninstall && task != FlatpakTask.InstallWayland && (task != FlatpakTask.Repair || it.exists())
+            checkFilesOn(this) && task !is FlatpakTask.Uninstall && (task != FlatpakTask.Repair || it.exists())
         }
         killed = false
         job = scope.launch {
@@ -186,21 +186,6 @@ class FlatpakTaskService : Service() {
     }
 
     /** `apk add` [packages], its package cache in Flatdroid's cache (deleted afterwards); fails the task if apk does. */
-    private fun installAlpinePackages(env: AlpineEnvironment, packages: List<String>) {
-        val cache = File(cacheDir, "apk-cache").apply { mkdirs() }
-        try {
-            val command = AlpineSetup.apkCommand(listOf("add") + packages)
-            FlatpakTasks.newCommand(null)
-            FlatpakTasks.log("$ ${command.joinToString(" ")}", status = false)
-            val result = env.run(command, ALPINE_TIMEOUT_SECONDS, extraBinds = listOf(cache.path to AlpineSetup.APK_CACHE), onLine = FlatpakTasks::output)
-            when {
-                result.timedOut -> throw IOException(getString(R.string.task_timed_out))
-                result.exitCode != 0 -> throw IOException(result.output.lines().lastOrNull { it.isNotBlank() } ?: "exit ${result.exitCode}")
-            }
-        } finally {
-            AndroidTarFs.deleteTree(cache)
-        }
-    }
 
     private fun perform(task: FlatpakTask) {
         val env = AlpineEnvironment.get(applicationContext)
@@ -235,7 +220,6 @@ class FlatpakTaskService : Service() {
                 if (AppData.baselineMarker(applicationContext).exists()) baseline(env, FlatpakInstallation(env.flatpakDir, env.arch).appIds())
             }
             FlatpakTask.BaselineAll -> baseline(env, FlatpakInstallation(env.flatpakDir, env.arch).appIds())
-            FlatpakTask.InstallWayland -> installAlpinePackages(env, AlpineSetup.WAYLAND_PACKAGES)
             is FlatpakTask.Uninstall -> {
                 run(env, FlatpakCommands.uninstall(task.appId))
                 if (!task.keepRuntimes) run(env, FlatpakCommands.uninstallUnused, getString(R.string.task_removing_unused))
@@ -373,7 +357,7 @@ class FlatpakTaskService : Service() {
      * stopped between system calls, which leaves them whole.
      */
     private fun cleanUpAfter(task: FlatpakTask) {
-        if (task is FlatpakTask.Install || task == FlatpakTask.InstallWayland) return
+        if (task is FlatpakTask.Install) return
         try {
             cleanRepository(AlpineEnvironment.get(applicationContext), checkLinks = killed)
         } catch (e: Exception) {
@@ -485,7 +469,6 @@ class FlatpakTaskService : Service() {
                 FlatpakTask.UpdateAll -> intent.putExtra(EXTRA_TASK, "update")
                 FlatpakTask.Repair -> intent.putExtra(EXTRA_TASK, "repair")
                 FlatpakTask.BaselineAll -> intent.putExtra(EXTRA_TASK, "baselineAll")
-                FlatpakTask.InstallWayland -> intent.putExtra(EXTRA_TASK, "installWayland")
                 is FlatpakTask.Uninstall -> intent.putExtra(EXTRA_TASK, "uninstall").putExtra(EXTRA_APP_ID, task.appId)
                     .putExtra(EXTRA_DELETE_DATA, task.deleteData).putExtra(EXTRA_KEEP_RUNTIMES, task.keepRuntimes)
                 is FlatpakTask.Reinstall -> intent.putExtra(EXTRA_TASK, "reinstall").putExtra(EXTRA_APP_ID, task.appId)
@@ -505,7 +488,6 @@ class FlatpakTaskService : Service() {
                 "update" -> FlatpakTask.UpdateAll
                 "repair" -> FlatpakTask.Repair
                 "baselineAll" -> FlatpakTask.BaselineAll
-                "installWayland" -> FlatpakTask.InstallWayland
                 "reinstall" -> appId?.let { FlatpakTask.Reinstall(it) }
                 "reinstallAll" -> FlatpakTask.ReinstallAll
                 "uninstall" -> appId?.let {
@@ -525,7 +507,6 @@ class FlatpakTaskService : Service() {
             FlatpakTask.UpdateAll -> context.getString(R.string.task_updating)
             FlatpakTask.Repair -> context.getString(R.string.task_repairing)
             FlatpakTask.BaselineAll -> context.getString(R.string.task_baselining_all)
-            FlatpakTask.InstallWayland -> context.getString(R.string.task_installing_wayland)
             is FlatpakTask.Uninstall -> context.getString(R.string.task_uninstalling, task.appId)
             is FlatpakTask.Reinstall -> context.getString(R.string.task_reinstalling, task.appId)
             FlatpakTask.ReinstallAll -> context.getString(R.string.task_reinstalling_all)

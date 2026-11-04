@@ -1,3 +1,4 @@
+import com.android.build.api.variant.HostTestBuilder
 import java.util.Properties
 import javax.inject.Inject
 
@@ -153,6 +154,16 @@ val fdshmTasks = architectures.keys.associateWith { abi ->
     }
 }
 
+val fdviewTasks = architectures.keys.associateWith { abi ->
+    tasks.register<BuildHelperTask>("buildFdview_$abi") {
+        this.abi = abi
+        script = rootProject.file("native/build-fdview.sh")
+        source = rootProject.file("native/fdview.c")
+        ndkDirectory = androidComponents.sdkComponents.ndkDirectory
+        outputDirectory = layout.buildDirectory.dir("generated/fdview/$abi")
+    }
+}
+
 val prootTasks = architectures.keys.associateWith { abi ->
     tasks.register<BuildProotTask>("buildProot_$abi") {
         this.abi = abi
@@ -166,6 +177,11 @@ val prootTasks = architectures.keys.associateWith { abi ->
 }
 
 androidComponents {
+    beforeVariants { variant ->
+        // Unit tests for release builds too (the plugin makes them only for debug by default):
+        // release has its own source set, without debug builds' measuring.
+        variant.hostTests[HostTestBuilder.UNIT_TEST_TYPE]?.enable = true
+    }
     onVariants { variant ->
         val abis = when (variant.flavorName) {
             "arm64" -> listOf("arm64-v8a")
@@ -176,6 +192,7 @@ androidComponents {
             variant.sources.jniLibs?.addGeneratedSourceDirectory(prootTasks.getValue(abi), BuildProotTask::outputDirectory)
             variant.sources.jniLibs?.addGeneratedSourceDirectory(fdsecTasks.getValue(abi), BuildHelperTask::outputDirectory)
             variant.sources.jniLibs?.addGeneratedSourceDirectory(fdshmTasks.getValue(abi), BuildHelperTask::outputDirectory)
+            variant.sources.jniLibs?.addGeneratedSourceDirectory(fdviewTasks.getValue(abi), BuildHelperTask::outputDirectory)
         }
     }
 }

@@ -37,18 +37,12 @@ object Viewer {
     }
 
     /**
-     * Opens the display in [chosen] (a package from Settings) if it is still installed, else
-     * through a chooser every time: the link carries the password, so it must not go to whichever
-     * app made itself the default for `vnc:` links. Null when no viewer is installed, or, without
-     * [allowChooser] (the password protection setting), when the chosen one isn't.
+     * Opens the display in [chosen] (a package from Settings), never through Android's chooser or
+     * a default app: the link carries the password, so it goes only to the app the user picked.
+     * Null when none is picked or it isn't installed any more.
      */
-    fun intent(context: Context, password: String, chosen: String?, allowChooser: Boolean = true, username: String? = null): Intent? {
-        val viewers = installed(context)
-        if (viewers.isEmpty()) return null
-        val view = Intent(Intent.ACTION_VIEW, uri(password, username))
-        val target = chosen?.takeIf { pkg -> viewers.any { it.packageName == pkg } }
-        if (target == null && !allowChooser) return null
-        val intent = if (target != null) view.setPackage(target) else Intent.createChooser(view, context.getString(R.string.session_open_viewer))
-        return intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    fun intent(context: Context, password: String, chosen: String?, username: String? = null): Intent? {
+        val target = chosen?.takeIf { pkg -> installed(context).any { it.packageName == pkg } } ?: return null
+        return Intent(Intent.ACTION_VIEW, uri(password, username)).setPackage(target).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
 }

@@ -1,6 +1,6 @@
 # Flatdroid
 
-Android app (`com.garathon.flatdroid`, Kotlin, GPL-3.0-or-later) that installs Flatpak apps from Flathub and runs them without root. A static proot (shipped as native libraries) runs an Alpine rootfs in private storage; Flatpak inside Alpine only installs and updates apps. Each app runs through our own launcher in its own proot root (runtime on `/usr`, app on `/app`). Windows go to Xvnc + Openbox, viewed in an external VNC viewer; audio goes through PulseAudio in Alpine to an AudioTrack player in the app. One Flatpak runs at a time. HOME is `Documents/Flatdroid`.
+Android app (`com.garathon.flatdroid`, Kotlin, GPL-3.0-or-later) that installs Flatpak apps from Flathub and runs them without root. A static proot (shipped as native libraries) runs an Alpine rootfs in private storage; Flatpak inside Alpine only installs and updates apps. Each app runs through our own launcher in its own proot root (runtime on `/usr`, app on `/app`). Windows go to labwc + wayvnc (Wayland, the default) or Xvnc + Openbox (apps that only take X11, or Force X11), viewed in Flatdroid's own viewer (an external VNC viewer stays possible); audio goes through PulseAudio in Alpine to an AudioTrack player in the app. One Flatpak runs at a time. HOME is `Documents/Flatdroid`.
 
 ## Hard rules
 
@@ -30,13 +30,13 @@ Android app (`com.garathon.flatdroid`, Kotlin, GPL-3.0-or-later) that installs F
 
 <!-- Fill in once the Gradle project exists. -->
 - Build: `./gradlew assembleDebug` (flavors `arm64`, `x86_64`, `universal`; native/build-proot.sh runs from Gradle and needs make, git, curl, gawk, readelf on the host)
-- Unit tests: `./gradlew testDebugUnitTest`
+- Unit tests: `./gradlew testDebugUnitTest testReleaseUnitTest` (release builds have their own source set)
 - Install and run: `./gradlew installArm64Debug` (Waydroid: `installX86_64Debug`), then `adb shell am start -n com.garathon.flatdroid/.MainActivity`
 - Logs: `adb logcat --pid=$(adb shell pidof com.garathon.flatdroid)`
 
 ## Code conventions
 
-- Kotlin for the app; POSIX sh for guest glue (Alpine setup, helper start-up); C only for native helpers (proot build, `fdsec`).
+- Kotlin for the app; POSIX sh for guest glue (Alpine setup, helper start-up); C only for native helpers (proot build, `fdsec`, `fdshm`) and the viewer's frames (`fdview`).
 - Build the proot invocation as an argument list in one place, used by setup and the launcher. Never build it as a shell string.
 - Start every proot from a cleared environment (`env -i` equivalent) with absolute paths; never rely on ambient state.
 - Pure Kotlin, unit-tested: metadata parser (keyfile; trim spaces around `=`), bind and argument builders, path mapping, ELF architecture check.
@@ -55,7 +55,7 @@ Android app (`com.garathon.flatdroid`, Kotlin, GPL-3.0-or-later) that installs F
 5. **Files:** HOME on `Documents/Flatdroid`, private dot-dir binds, standard home folders (Pictures, Documents, …), Import picker, DocumentsProvider, optional All files access toggle; a Storage category (clear, reset, export and import of Flatdroid's settings, per-app settings and app data); no minimise button in GTK apps' own title bars. (By this point something resembling the final UI should be implemented, since there's app interactions and setting toggles). Possible version number `0.5`.
 5.5. **Camera:** Flatpak's camera portal fed by Android's camera (D-Bus, PipeWire, WirePlumber, `xdg-desktop-portal` and a GStreamer source in the helpers; the app's bus through `xdg-dbus-proxy`), which also gives every app a session bus (KDE single-instance apps such as KMines need one). Off for every app by default, at every security level; turned on per app.
 6. **Hardening:** build proot non-dumpable and add the `fdsec` seccomp helper to every launch; refuse to launch if `Seccomp_filters` shows no filter. Adds the security level setup setting, which needs the shared home from milestone 5.
-7. **Embedded viewer:** Flatdroid's own RFB viewer (Kotlin) reading Xvnc's Unix socket (`-rfbunixpath`; no TCP port, no password); the external viewer stays as a setting, off by default. Mobile-style input (tap, one-finger scroll, long-press for right-click, long-press-and-move to drag, pinch to zoom), the soft keyboard with an extra-keys row, hardware keyboard and mouse. The X screen follows the view (Resolution 100/75/50/25% for portrait and landscape, plus Custom); updates pause while hidden. Xvnc hardening: no parameter overrides through the VNC extension, no outgoing connections. Alpine's `tigervnc` stays: an own build would save only about 45 MB since the camera stack needs Mesa (measured), and would make Flatdroid responsible for shipping X server fixes.
+7. **Embedded viewer:** Flatdroid's own RFB viewer (Kotlin, with `fdview` reading frames straight into GPU buffers on Android 10 and later) on the display's Unix socket (no TCP port, no password); the external viewer stays as a setting, off by default. Mobile-style input (tap, one-finger scroll, long-press for right-click, long-press-and-move to drag, pinch to zoom), the soft keyboard with an extra-keys row, hardware keyboard and mouse. The X screen follows the view (Resolution 100/75/50/25% for portrait and landscape, plus Custom); updates pause while hidden. Xvnc hardening: no parameter overrides through the VNC extension, no outgoing connections. Alpine's `tigervnc` stays: an own build would save only about 45 MB since the camera stack needs Mesa (measured), and would make Flatdroid responsible for shipping X server fixes.
 8. **UI:** if not fully done yet, it should be done here. It is expected that by this point most UI will already be done, and the UI Document has already been requested.
 9. **Feature cleanup:** It is expected that some requested features will be missed as they have not fully pertained to what was needed in the previous milestones, this milestone is aimed at getting ther est of the features that could have been missed. Also handle links using possibly OpenURI portal and/or `xdg-open` stand-in. Also at this point with a mostly working app we consider what else might be nice before initial release.
 10. **Testing:** experiment 9 (background survival and child-process limits); a review of the codebase for device- or app-specific code and comments, removed or made general. Possible version number `1.0`. Also handle release aspects here like signing.

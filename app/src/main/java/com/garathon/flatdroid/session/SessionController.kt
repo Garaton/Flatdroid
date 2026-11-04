@@ -4,6 +4,7 @@ import com.garathon.flatdroid.flatpak.FlatpakTasks
 import com.garathon.flatdroid.util.DebugLog
 import com.garathon.flatdroid.util.LineBuffer
 import com.garathon.flatdroid.util.appScope
+import com.garathon.flatdroid.viewer.ViewerConnection
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -14,10 +15,23 @@ sealed interface SessionState {
     data object Idle : SessionState
     data class Starting(val appId: String, val detail: String, val skippable: Boolean = false) : SessionState
     /**
-     * The app runs; the viewer connects to localhost:[SessionScript.VNC_PORT] with [password], and
-     * [username] when the session is Wayland ([WaylandVnc]).
+     * The app runs. Flatdroid's own viewer connects to [socket] (a host path); with the external
+     * viewer setting there is none, and a viewer connects to localhost:[SessionScript.VNC_PORT]
+     * with [password], and [username] when the session is Wayland ([WaylandVnc]). [wayland]: the
+     * display is labwc rather than Xvnc and Openbox. [followPercent]:
+     * the screen is that share of the viewer's size and follows it (null: a fixed size).
      */
-    data class Running(val appId: String, val password: String, val username: String? = null) : SessionState
+    data class Running(
+        val appId: String,
+        val password: String,
+        val username: String? = null,
+        val socket: String? = null,
+        val wayland: Boolean = false,
+        val followPercent: Int? = null,
+        /** The compositor's socket for [com.garathon.flatdroid.viewer.WaylandClipboard]; null without a shared clipboard or Wayland. */
+        val clipboardSocket: String? = null,
+        val shareClipboard: Boolean = true,
+    ) : SessionState
     data class Stopping(val appId: String) : SessionState
     /**
      * The app ships Electron [version] for [fromArch]; the user is asked before Flatdroid
@@ -25,7 +39,6 @@ sealed interface SessionState {
      */
     data class ElectronOffer(val appId: String, val version: String?, val fromArch: String, val problem: String?) : SessionState, Question
     /** The app can only use Wayland, whose packages aren't installed; the user is asked before Flatdroid downloads them. */
-    data class WaylandOffer(val appId: String) : SessionState, Question
     data class PreparingElectron(val appId: String, val detail: String, val fraction: Float?) : SessionState
     /**
      * The file check found changed files before launch; [detail] lists the affected packages and
@@ -43,7 +56,6 @@ sealed interface SessionState {
             is Running -> appId
             is Stopping -> appId
             is ElectronOffer -> appId
-            is WaylandOffer -> appId
             is PreparingElectron -> appId
             is FilesChanged -> appId
         }
@@ -83,13 +95,17 @@ object SessionController {
     @Volatile var onSkipFileCheck: (() -> Unit)? = null
     fun skipFileCheck() { onSkipFileCheck?.invoke() }
 
-    fun running(appId: String, password: String, username: String? = null) =
-        _ui.update { it.copy(state = SessionState.Running(appId, password, username)) }
+    fun running(
+        appId: String, password: String, username: String? = null, socket: String? = null, wayland: Boolean = false, followPercent: Int? = null,
+        clipboardSocket: String? = null, shareClipboard: Boolean = true,
+    ) = _ui.update { it.copy(state = SessionState.Running(appId, password, username, socket, wayland, followPercent, clipboardSocket, shareClipboard)) }
 
-    fun stopping(appId: String) = _ui.update { it.copy(state = SessionState.Stopping(appId)) }
+    fun stopping(appId: String) {
+        ViewerConnection.closeOnMain()
+        _ui.update { it.copy(state = SessionState.Stopping(appId)) }
+    }
 
     fun offerElectron(offer: SessionState.ElectronOffer) = _ui.update { it.copy(state = offer) }
-    fun offerWayland(appId: String) = _ui.update { it.copy(state = SessionState.WaylandOffer(appId)) }
 
     fun filesChanged(state: SessionState.FilesChanged) = _ui.update { it.copy(state = state, message = null) }
 
@@ -98,6 +114,7 @@ object SessionController {
 
     /** Back to idle, with [message] describing the outcome (null for a plain stop). */
     fun ended(message: String?, failed: Boolean = false) {
+        ViewerConnection.closeOnMain()
         message?.let { DebugLog.i("Session: $it") }
         _ui.update { it.copy(state = SessionState.Idle, message = message, failed = failed && message != null, micRequest = null) }
     }

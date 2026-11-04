@@ -2,8 +2,6 @@ package com.garathon.flatdroid.ui
 
 import android.content.ClipData
 import android.os.PersistableBundle
-import android.view.WindowManager
-import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,7 +25,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -54,9 +51,8 @@ import com.garathon.flatdroid.session.Viewer
 import kotlinx.coroutines.launch
 
 /**
- * The running session, or how the last one ended. Nothing when idle with no message. With
- * [protectPassword] (the security setting), the screen can't be captured while the password is on
- * it, and the password shows only on tap.
+ * The running session, or how the last one ended. Nothing when idle with no message. An external
+ * viewer's password shows only on tap.
  */
 @Composable
 fun SessionPanel(
@@ -66,7 +62,6 @@ fun SessionPanel(
     onStop: () -> Unit,
     onShowLog: () -> Unit,
     onDismiss: () -> Unit,
-    protectPassword: Boolean = false,
 ) {
     val state = session.state
     if (state is SessionState.Idle && session.message == null) return
@@ -94,15 +89,17 @@ fun SessionPanel(
                 }
                 is SessionState.Running -> {
                     Text(stringResource(R.string.session_running_app, nameOf(state.appId)), style = MaterialTheme.typography.titleSmall)
-                    if (protectPassword) SecureWindow()
-                    state.username?.let { Text(stringResource(R.string.session_username, it), style = MaterialTheme.typography.bodyMedium) }
-                    PasswordLine(state.password, hidden = protectPassword)
+                    // Flatdroid's own viewer needs no address or login: only an external one does.
+                    if (state.socket == null) {
+                        state.username?.let { Text(stringResource(R.string.session_username, it), style = MaterialTheme.typography.bodyMedium) }
+                        PasswordLine(state.password)
+                    }
                 }
                 is SessionState.Stopping -> Text(stringResource(R.string.session_stopping, nameOf(state.appId)), style = MaterialTheme.typography.titleSmall)
                 else -> session.message?.let { SelectionContainer { Text(it, style = MaterialTheme.typography.bodyMedium) } }
             }
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (state is SessionState.Running) Button(onClick = { onOpenViewer(state) }) { Text(stringResource(R.string.session_open_viewer)) }
+                if (state is SessionState.Running) Button(onClick = { onOpenViewer(state) }) { Text(stringResource(if (state.socket != null) R.string.session_open_app else R.string.session_open_viewer)) }
                 if (state is SessionState.Starting && state.skippable) OutlinedButton(onClick = { SessionController.skipFileCheck() }) { Text(stringResource(R.string.session_skip_check)) }
                 when (state) {
                     is SessionState.Starting, is SessionState.Running, is SessionState.PreparingElectron ->
@@ -116,19 +113,9 @@ fun SessionPanel(
     }
 }
 
-/** While shown: the activity's window can't be captured (screenshots, screen recording, Recents). */
+/** The display's address and password; the password only once Show is tapped. */
 @Composable
-private fun SecureWindow() {
-    val window = LocalActivity.current?.window ?: return
-    DisposableEffect(window) {
-        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-        onDispose { window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE) }
-    }
-}
-
-/** The display's address and password; with [hidden], the password only once tapped. */
-@Composable
-private fun PasswordLine(password: String, hidden: Boolean) {
+private fun PasswordLine(password: String) {
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
     var shown by rememberSaveable { mutableStateOf(false) }
@@ -137,7 +124,7 @@ private fun PasswordLine(password: String, hidden: Boolean) {
             stringResource(R.string.session_address, Viewer.HOST, SessionScript.VNC_PORT),
             style = MaterialTheme.typography.bodyMedium,
         )
-        if (hidden && !shown) {
+        if (!shown) {
             TextButton(onClick = { shown = true }) { Text(stringResource(R.string.session_show_password)) }
         } else {
             Text(
@@ -241,18 +228,6 @@ fun InstallDialog(onInstall: (List<String>) -> Unit, onDismiss: () -> Unit) {
             }
         },
         confirmButton = { Button(onClick = { ids?.let(onInstall) }, enabled = ids != null) { Text(stringResource(R.string.install_confirm)) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.reset_cancel)) } },
-    )
-}
-
-/** Asks before downloading Alpine's Wayland packages, which only apps that can't use X11 need. */
-@Composable
-fun WaylandDialog(appName: String, onAccept: () -> Unit, onDismiss: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.wayland_title)) },
-        text = { Text(stringResource(R.string.wayland_offer, appName)) },
-        confirmButton = { Button(onClick = onAccept) { Text(stringResource(R.string.wayland_download)) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.reset_cancel)) } },
     )
 }

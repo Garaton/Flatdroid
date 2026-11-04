@@ -11,8 +11,10 @@ import com.garathon.flatdroid.settings.Resampler
  * root, and with nothing from shared storage bound). Started fresh for every launch.
  */
 object SessionScript {
-    /** VNC port, on localhost only; not the default 5901. */
+    /** VNC port, on localhost only, for an external viewer; not the default 5901. */
     const val VNC_PORT = 14400
+    /** Flatdroid's own viewer connects here, in [GUEST_VNC_DIR] (private storage, mode 0600): no port, no password. */
+    const val VNC_SOCKET = "vnc.sock"
     const val X_SOCKET = "X1"
 
     // Guest paths of the binds Flatdroid adds to the helpers' proot.
@@ -25,6 +27,13 @@ object SessionScript {
     private val NO_INTERNET = (listOf(Fdsec.ALPINE_PATH) + Fdsec.flags(Fdsec.Filter(noInternet = true)) + "--").joinToString(" ")
 
     /**
+     * In front of a display server that external viewers reach on [VNC_PORT]: no outgoing
+     * connections, so an app can't have it connect out (TigerVNC's reverse connections, which any
+     * X client can request) where the app itself may have no network.
+     */
+    private val NO_CONNECT = (listOf(Fdsec.ALPINE_PATH) + Fdsec.flags(Fdsec.Filter(noConnect = true)) + "--").joinToString(" ")
+
+    /**
      * The helpers' command: [TEXT] at [GUEST_SCRIPT] with its arguments. Without [sound],
      * PulseAudio doesn't start, and so neither does the microphone (whose source [PulseScript]
      * sets up). With [sessionBus], the app's
@@ -34,24 +43,29 @@ object SessionScript {
      */
     fun command(
         geometry: String, frameRate: Int, sound: Boolean, resampler: Resampler, sessionBus: Boolean,
-        camera: Boolean = false, clipboard: Boolean = true, wayland: Boolean = false,
+        camera: Boolean = false, clipboard: Boolean = true, wayland: Boolean = false, externalViewer: Boolean = false,
     ): List<String> =
         listOf(
             "/bin/sh", GUEST_SCRIPT, geometry, VNC_PORT.toString(), frameRate.toString(),
             onOff(sound), resampler.pulseName, onOff(sessionBus), onOff(sessionBus && camera),
-            onOff(clipboard), onOff(wayland),
+            onOff(clipboard), onOff(wayland), onOff(externalViewer),
         )
 
     /** wayvnc's configuration ([WaylandVnc.config]), next to Xvnc's password file. */
     const val GUEST_WAYVNC_CONFIG = "$GUEST_VNC_DIR/wayvnc.conf"
+    /** labwc's configuration directory ([com.garathon.flatdroid.alpine.GuestFiles.labwcRc]). */
+    const val GUEST_LABWC_DIR = "$GUEST_VNC_DIR/labwc"
+    /** Above this frame rate (uncapped) the output keeps the headless backend's refresh. */
+    private const val MAX_OUTPUT_REFRESH = 240
 
     private fun onOff(value: Boolean) = if (value) "on" else "off"
 
     /**
      * Arguments: geometry (WxH), VNC port, frame rate, "on" when the app gets sound (PulseAudio
      * starts only then), PulseAudio's resample method, "on" for the session bus, "on" for PipeWire, "on" when the clipboard is shared ([command]
-     * builds them; off adds `-AcceptCutText=0 -SendCutText=0` to Xvnc), and "on" for a Wayland session (cage and wayvnc instead of
-     * Xvnc and Openbox). Exits when the display does; Flatdroid ends the session by stopping this proot.
+     * builds them; off adds `-AcceptCutText=0 -SendCutText=0` to Xvnc), "on" for a Wayland session (labwc and wayvnc instead of
+     * Xvnc and Openbox), and "on" for an external viewer (the TCP port and login; else the viewer's Unix
+     * socket); title bars come from Openbox's and labwc's configurations. Exits when the display does; Flatdroid ends the session by stopping this proot.
      * `-extension GLX` turns GLX off in Alpine's Xvnc, which has it (apps use EGL). `-nolisten local` drops the abstract socket
      * `@/tmp/.X11-unix/X1`: proot doesn't translate abstract names, so it would be open to other
      * users of the device, with no authentication; clients use the socket file in private storage
@@ -81,20 +95,28 @@ object SessionScript {
         |camera=$7
         |clipboard=$8
         |wayland=$9
+        |external=${'$'}{10}
         |clipboard_args=
         |[ "${'$'}clipboard" = on ] || clipboard_args="-AcceptCutText=0 -SendCutText=0"
-        |rm -f /tmp/.X1-lock ${GuestPaths.X11_DIR}/$X_SOCKET ${GuestPaths.PULSE_DIR}/*
+        |rm -f /tmp/.X1-lock ${GuestPaths.X11_DIR}/$X_SOCKET ${GuestPaths.PULSE_DIR}/* $GUEST_VNC_DIR/$VNC_SOCKET
         |
         |if [ "${'$'}wayland" = on ]; then
-        |  # An app that asks only for Wayland: cage (headless, drawn in software) with wayvnc as its
-        |  # one client, on the VNC port. Their buffers come from fdshm (Android has no /dev/shm).
-        |  # wayvnc's control socket stays here, out of the app's reach. No Openbox: cage shows one
-        |  # app full screen.
+        |  # labwc (headless, drawn in software) with wayvnc as a client, on the viewer's socket (or
+        |  # the VNC port for an external viewer). Their buffers come from fdshm (Android has no
+        |  # /dev/shm). wayvnc's control socket stays here, out of the app's reach. The output
+        |  # refreshes at the frame rate sent, not the headless backend's 60: apps are told to draw,
+        |  # and labwc renders, only as often as a frame can go out.
         |  rm -f ${GuestPaths.WAYLAND_DIR}/*
+        |  mode=${'$'}geometry
+        |  [ "${'$'}frame_rate" -le $MAX_OUTPUT_REFRESH ] && mode="${'$'}geometry@${'$'}{frame_rate}Hz"
+        |  if [ "${'$'}external" = on ]; then
+        |    guard= listen="-C $GUEST_WAYVNC_CONFIG 127.0.0.1 ${'$'}port"
+        |  else
+        |    guard="$NO_INTERNET" listen="-u $GUEST_VNC_DIR/$VNC_SOCKET"
+        |  fi
         |  LD_PRELOAD=${Fdshm.ALPINE_PATH} XDG_RUNTIME_DIR=${GuestPaths.WAYLAND_DIR} WLR_BACKENDS=headless WLR_RENDERER=pixman \
-        |    WLR_LIBINPUT_NO_DEVICES=1 WLR_HEADLESS_OUTPUTS=1 /usr/bin/cage -- /bin/sh -c \
-        |    '/usr/bin/wlr-randr --output HEADLESS-1 --custom-mode "${'$'}1"; exec /usr/bin/wayvnc -C "${'$'}2" -S "${'$'}3" -f "${'$'}4" 127.0.0.1 "${'$'}5"' \
-        |    sh "${'$'}geometry" $GUEST_WAYVNC_CONFIG $GUEST_VNC_DIR/wayvncctl "${'$'}frame_rate" "${'$'}port" &
+        |    WLR_LIBINPUT_NO_DEVICES=1 WLR_HEADLESS_OUTPUTS=1 ${'$'}guard /usr/bin/labwc -C $GUEST_LABWC_DIR -S \
+        |    "/bin/sh -c '/usr/bin/wlr-randr --output HEADLESS-1 --custom-mode ${'$'}mode; exec /usr/bin/wayvnc -S $GUEST_VNC_DIR/wayvncctl -f ${'$'}frame_rate ${'$'}listen'" &
         |  display=${'$'}!
         |  i=0
         |  while [ ! -S ${GuestPaths.WAYLAND_DIR}/${GuestPaths.WAYLAND_SOCKET} ]; do
@@ -104,9 +126,17 @@ object SessionScript {
         |    sleep 0.1
         |  done
         |else
-        |  Xvnc :1 -geometry "${'$'}geometry" -depth 24 -rfbport "${'$'}port" -localhost \
-        |    -SecurityTypes VncAuth -PasswordFile $GUEST_VNC_DIR/passwd -NeverShared -DisconnectClients=0 -FrameRate "${'$'}frame_rate" \
-        |    -nolisten local -extension MIT-SHM -extension GLX ${'$'}clipboard_args &
+        |  if [ "${'$'}external" = on ]; then
+        |    guard="$NO_CONNECT"
+        |    listen="-rfbport ${'$'}port -localhost -SecurityTypes VncAuth -PasswordFile $GUEST_VNC_DIR/passwd"
+        |  else
+        |    guard="$NO_INTERNET"
+        |    listen="-rfbport -1 -rfbunixpath $GUEST_VNC_DIR/$VNC_SOCKET -rfbunixmode 0600 -SecurityTypes None"
+        |  fi
+        |  # No parameters changeable through the VNC extension: any X client could otherwise turn the clipboard back on.
+        |  # Only copies reach the viewer, not every selection (PRIMARY).
+        |  ${'$'}guard /usr/bin/Xvnc :1 -geometry "${'$'}geometry" -depth 24 ${'$'}listen -NeverShared -DisconnectClients=0 -FrameRate "${'$'}frame_rate" \
+        |    -AllowOverride= -nolisten local -extension MIT-SHM -extension GLX -SendPrimary=0 ${'$'}clipboard_args &
         |  display=${'$'}!
         |  i=0
         |  while [ ! -S ${GuestPaths.X11_DIR}/$X_SOCKET ]; do
