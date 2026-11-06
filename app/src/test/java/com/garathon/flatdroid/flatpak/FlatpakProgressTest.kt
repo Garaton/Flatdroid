@@ -71,6 +71,20 @@ class FlatpakProgressTest {
     }
 
     @Test
+    fun alpinePackagesAreSteps() {
+        val progress = FlatpakProgress()
+        assertTrue(progress.feed("(  3/186) Upgrading glib (2.88.1-r1 -> 2.88.2-r0)"))
+        assertEquals(FlatpakProgress.Step("Upgrading", 3, 186, "glib", 1), progress.current)
+        assertTrue(progress.feed("(186/186) Installing wayvnc (0.10.0-r0)"))
+        assertEquals(99, progress.current?.percent)
+        assertFalse(progress.current!!.deploying)
+        assertTrue(progress.feed("(1/1) Purging libfoo (1.0-r0)"))
+        assertEquals(0, progress.current?.percent)
+        assertFalse(progress.feed("Executing busybox-1.37.0-r30.trigger"))
+        assertFalse(progress.feed("OK: 521.1 MiB in 329 packages"))
+    }
+
+    @Test
     fun onlyStatusLinesReachTheStatus() {
         for (line in listOf("Looking for updates…", "Looking for matches…", "Nothing to do.", "Nothing unused to uninstall",
                 "Installation complete.", "Changes complete.", "Skipping: org.xfce.mousepad/aarch64/stable is already installed")) {

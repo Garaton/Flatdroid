@@ -9,6 +9,7 @@ import android.view.ViewConfiguration
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.compose.animation.core.animateIntAsState
 import androidx.compose.foundation.background
@@ -94,8 +95,9 @@ import kotlinx.coroutines.launch
 
 /**
  * The running session's screen, full screen under a slim bar (back to the app list, the soft
- * keyboard, close the focused window, stop the app), with an extra keys row above the keyboard. Leaving it (Back, Home) keeps the session and its connection; it closes itself when the
- * session ends. Rotation doesn't recreate it (manifest).
+ * keyboard, close the focused window, stop the app), with an extra keys row above the keyboard.
+ * Android's Back goes to the app, as its own back. Leaving (the bar's back, Home) keeps the session
+ * and its connection; it closes itself when the session ends. Rotation doesn't recreate it (manifest).
  */
 @OptIn(ExperimentalLayoutApi::class)
 class ViewerActivity : ComponentActivity() {
@@ -172,6 +174,9 @@ class ViewerActivity : ComponentActivity() {
                 }
             }
         }
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() = view.keys.chord(Keysyms.BACK)
+        })
         view.requestFocus()
         ViewerConnection.attach(view)
         ViewerConnection.open(socket, cacheDir, session.wayland, session.clipboardSocket)

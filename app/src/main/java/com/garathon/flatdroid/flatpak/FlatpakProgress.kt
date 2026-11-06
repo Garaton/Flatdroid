@@ -1,10 +1,12 @@
 package com.garathon.flatdroid.flatpak
 
+import com.garathon.flatdroid.setup.ApkProgress
+
 /**
  * Follows `flatpak install/update/uninstall -y` output (not on a terminal): first a table of
  * what it will do (` 1.  <ID>  <branch>  <op>  <remote>  <size>`, tab-separated), then lines
  * such as `Installing 2/4… ███  45%  1.2 MB/s` while each one runs (`Installing… ███  45%` when
- * there is only one).
+ * there is only one). Alpine's packages update as steps too ([ApkProgress]).
  */
 class FlatpakProgress {
     /** The operation running: [verb] as flatpak prints it, which of [total], its ref, and its percent. */
@@ -30,6 +32,10 @@ class FlatpakProgress {
 
     /** Reads one output line; returns true if it was a progress line. */
     fun feed(line: String): Boolean {
+        apkStep(line)?.let {
+            current = it
+            return true
+        }
         if (COMPLETE.containsMatchIn(line)) {
             current = null
             finishing = true
@@ -49,6 +55,13 @@ class FlatpakProgress {
             percent = progress.groupValues[4].toIntOrNull()?.coerceIn(0, 100),
         )
         return true
+    }
+
+    /** A package among [Step.total]: the percent counts those before it, so it never reads as [Step.deploying]. */
+    private fun apkStep(line: String): Step? {
+        val (index, total) = ApkProgress.parse(line) ?: return null
+        val (verb, name) = ApkProgress.action(line) ?: return null
+        return Step(verb, index, total, name, (index - 1) * 100 / total)
     }
 
     companion object {

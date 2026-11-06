@@ -7,6 +7,7 @@ import android.hardware.display.DisplayManager
 import android.media.AudioManager
 import android.os.Build
 import android.os.FileObserver
+import android.os.Process
 import android.system.Os
 import android.view.Display
 import android.view.Surface
@@ -226,6 +227,7 @@ class FlatpakLauncher(private val context: Context) {
         val resampler = userSettings?.resampler ?: Resampler.FAST
         // Any of the proots below: fdsec refused to start its command, so nothing ran in it.
         val filterRefused = AtomicBoolean(false)
+        val helpersStarted = CountDownLatch(1)
         val helpers = startHelpers(
             SessionScript.command(
                 "${screenWidth}x$screenHeight", frameRate, audio, resampler, sessionBus = true,
@@ -236,12 +238,18 @@ class FlatpakLauncher(private val context: Context) {
             Fdsec.Filter(extraSyscalls = security.extraSyscallFilter),
         ) { line ->
             if (Fdsec.refused(line)) filterRefused.set(true)
+            if (line == SessionScript.DISPLAY_READY) helpersStarted.countDown()
         }
         var app: ProotProcess? = null
         var player: AudioPlayer? = null
         var cameraHelpers: ProotProcess? = null
         val streamers = cameraNodes.indices.associate {
             cameraNodes[it].name to CameraStreamer(context, cameras[it], File(cameraPipeDir, cameraNodes[it].name), cameraRotations[it])
+        }
+        // The app's display turned with the phone: the pictures turn with it, staying upright.
+        if (streamers.isNotEmpty()) SessionController.onDisplayResized = { width, height ->
+            val rotation = displayRotation(landscape = width > height)
+            cameraNodes.forEachIndexed { index, node -> streamers[node.name]?.turn(cameras[index].rotation(rotation)) }
         }
         // A network change during the session (Wi-Fi to mobile data, Private DNS) reaches the app's resolv.conf.
         val dns = ResolvConfRefresher(context, listOf(File(etcDir, "resolv.conf"))).apply { start() }
@@ -269,8 +277,10 @@ class FlatpakLauncher(private val context: Context) {
                 )
                 player.start()
             }
-            // The helpers run under proot, which keeps them dumpable: hide what runs now from the app.
-            val hidden = if (security.hideHelperProcesses) HelperProcesses.procPaths(listOfNotNull(helpers.pid, cameraHelpers?.pid)) else emptyList()
+            // The helpers run under proot, which keeps them dumpable: hide what runs now from the
+            // app, once all of them run.
+            if (!helpersStarted.await(DISPLAY_TIMEOUT_MS, TimeUnit.MILLISECONDS)) SessionController.log("[flatdroid] the helpers did not all start in time")
+            val hidden = if (security.hideHelperProcesses) HelperProcesses.procPaths(Process.myPid()) else emptyList()
             fun hideHelpers(plan: LaunchPlan) =
                 if (hidden.isEmpty()) plan else plan.copy(binds = plan.binds.copy(hiddenProc = hidden, emptyDir = emptyDir.path))
             plan = hideHelpers(plan)
@@ -352,6 +362,7 @@ class FlatpakLauncher(private val context: Context) {
             cameraHelpers?.stop()
             streamers.values.forEach { it.close() }
             SessionController.onMicrophoneAnswer = null
+            SessionController.onDisplayResized = null
             helpers.stop()
             endEscaped()
             // proot leaves the private binds' mount points behind in the shared home, where the

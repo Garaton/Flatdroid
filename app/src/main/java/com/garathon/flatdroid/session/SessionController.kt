@@ -93,6 +93,8 @@ object SessionController {
 
     /** Set while the file check runs; the Skip button calls [skipFileCheck]. */
     @Volatile var onSkipFileCheck: (() -> Unit)? = null
+    /** The viewer's display took a new size (width, height), while a session with cameras runs. */
+    @Volatile var onDisplayResized: ((Int, Int) -> Unit)? = null
     fun skipFileCheck() { onSkipFileCheck?.invoke() }
 
     fun running(

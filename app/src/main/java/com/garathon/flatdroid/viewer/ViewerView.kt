@@ -1,5 +1,6 @@
 package com.garathon.flatdroid.viewer
 
+import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Canvas
@@ -31,8 +32,10 @@ import kotlin.math.roundToInt
 
 /**
  * The session's screen: the framebuffer ([FrameDrawer]) drawn fitted to the view (black bars around it), with
- * pinch to zoom and two-finger pan. One finger drives the pointer through [TouchGestures]; a
- * mouse drives it directly (Android draws its pointer; the server draws none, see [Rfb.ENCODINGS]).
+ * pinch to zoom and two-finger pan (let go at speed, it goes on). While the keyboard or the extra
+ * keys are up, the frame can also be zoomed out and moved above them; it goes back when they close.
+ * One finger drives the pointer through [TouchGestures]; a mouse drives it directly (Android draws
+ * its pointer; the server draws none, see [Rfb.ENCODINGS]).
  */
 @SuppressLint("ViewConstructor")
 class ViewerView(context: Context, private val connection: ViewerConnection) : View(context), ViewerSink, PointerOutput {
@@ -58,6 +61,7 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
     private val visibleRect = RectF()
     private val paint = Paint(Paint.FILTER_BITMAP_FLAG)
     private val matrix = Matrix()
+    private val placement = Matrix()
     private val inverse = Matrix()
     private val point = FloatArray(2)
 
@@ -75,34 +79,72 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
         connection.resize(wanted.first, wanted.second)
     }
 
+    /** Pixels at the bottom of the view under the keyboard and the extra keys now: the frame can be moved above them. */
+    private var coverHeight = 0
     /**
-     * Pixels at the bottom of the view under the keyboard and the extra keys, as far as asking
-     * and copying go ([setCovered]): what lies there isn't asked for or copied until uncovered.
+     * The same, as far as asking and copying go: what lies there isn't asked for or copied until
+     * uncovered. Follows [coverHeight] once it has settled, as the keyboard slides in over several frames.
      */
     private var covered = 0
-    private var coveredNext = 0
     private val coverSettled = Runnable {
-        covered = coveredNext
+        covered = coverHeight
         reportVisible()
     }
 
+    /** How the frame lay before the keyboard came up. */
+    private class Placement(val zoom: Float, val x: Float, val y: Float, val moved: Boolean)
+    private var beforeCover: Placement? = null
+    private var placing: ValueAnimator? = null
+
     /**
-     * The keyboard and the extra keys cover [px] at the bottom of the view. Uncovering counts at
-     * once (what comes into sight is caught up); covering only once it has settled, as the
-     * keyboard slides in over several frames.
+     * The keyboard and the extra keys cover [px] at the bottom of the view. The moment they start
+     * closing all of the view counts again; once closed, the frame goes back to how it lay.
      */
     fun setCovered(px: Int) {
         val value = px.coerceAtLeast(0)
+        if (value == coverHeight) return
+        val closing = value < coverHeight
+        if (coverHeight == 0) beforeCover = Placement(zoom, offsetX, offsetY, moved)
+        coverHeight = value
         removeCallbacks(coverSettled)
-        if (value < covered) {
+        postDelayed(coverSettled, COVER_SETTLE_MS)
+        if (closing && covered > 0) {
             covered = 0
             reportVisible()
             copyHidden()
         }
-        if (value > covered) {
-            coveredNext = value
-            postDelayed(coverSettled, COVER_SETTLE_MS)
+        zoom = zoom.coerceAtLeast(minZoom())
+        layoutFrame()
+        if (value == 0) {
+            beforeCover?.let(::placeBack)
+            beforeCover = null
         }
+    }
+
+    /** Moves the frame back to [to], smoothly. */
+    private fun placeBack(to: Placement) {
+        if (zoom == to.zoom && offsetX == to.x && offsetY == to.y) return
+        val fromZoom = zoom
+        val fromX = offsetX
+        val fromY = offsetY
+        moved = to.moved
+        placing = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = PLACE_BACK_MS
+            addUpdateListener {
+                val t = it.animatedFraction
+                zoom = fromZoom + (to.zoom - fromZoom) * t
+                offsetX = fromX + (to.x - fromX) * t
+                offsetY = fromY + (to.y - fromY) * t
+                layoutFrame()
+                if (t == 1f) reportVisible()
+            }
+            start()
+        }
+    }
+
+    private fun stopPlacing() {
+        placing?.cancel()
+        placing = null
     }
 
     /** Two fingers moved the frame: no longer kept centred in the black bars ([layoutFrame]). */
@@ -149,6 +191,31 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
             if (!flinger.isFinished) postOnAnimation(this)
         }
     }
+    /** Two fingers let go at speed: the frame goes on moving, slowing down. */
+    private val panFlinger = OverScroller(context)
+    private var panFlungX = 0
+    private var panFlungY = 0
+    private val panFlingStep = object : Runnable {
+        override fun run() {
+            if (!panFlinger.computeScrollOffset()) return reportVisible()
+            val dx = panFlinger.currX - panFlungX
+            val dy = panFlinger.currY - panFlungY
+            panFlungX = panFlinger.currX
+            panFlungY = panFlinger.currY
+            val x = offsetX
+            val y = offsetY
+            offsetX += dx
+            offsetY += dy
+            layoutFrame()
+            // Against the edges: nothing left to move.
+            val stuck = (dx != 0 || dy != 0) && offsetX == x && offsetY == y
+            when {
+                stuck -> stopPanFling()
+                panFlinger.isFinished -> reportVisible()
+                else -> postOnAnimation(this)
+            }
+        }
+    }
     private var mouseButtons = 0
     private var pinching = false
 
@@ -171,7 +238,7 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
 
         override fun onScale(detector: ScaleGestureDetector): Boolean {
             val old = scale()
-            zoom = (zoom * detector.scaleFactor).coerceIn(1f, MAX_ZOOM)
+            zoom = (zoom * detector.scaleFactor).coerceIn(minZoom(), MAX_ZOOM)
             val ratio = scale() / old
             // The point under the fingers stays under them.
             offsetX = detector.focusX - (detector.focusX - offsetX) * ratio
@@ -205,6 +272,7 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
             copyMeter.step(0)
             if (fb.width != frameWidth || fb.height != frameHeight) {
                 moved = false
+                beforeCover = null
                 frameWidth = fb.width
                 frameHeight = fb.height
                 layoutFrame()
@@ -339,6 +407,7 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         moved = false
+        beforeCover = null
         layoutFrame()
         reportVisible()
         // Turning the phone changes the size in steps: resize once it settles.
@@ -353,28 +422,49 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
 
     private fun scale() = fitScale() * zoom
 
+    /** The height above the keyboard and the extra keys. */
+    private fun uncovered() = (height - coverHeight).coerceAtLeast(1).toFloat()
+
+    /** Fitted, or while something covers the view, all of the frame above it. */
+    private fun minZoom(): Float {
+        if (coverHeight == 0 || frameWidth == 0 || width == 0) return 1f
+        return (min(width.toFloat() / frameWidth, uncovered() / frameHeight) / fitScale()).coerceAtMost(1f)
+    }
+
     /**
      * Clamps the offset (inside the view when smaller than it, centred until [moved]; else no
-     * black past the edges) and updates the matrix.
+     * black past the edges, but what the keyboard covers can be moved above it) and updates the matrix.
      */
     private fun layoutFrame() {
         if (frameWidth == 0) return
         val s = scale()
         val w = frameWidth * s
         val h = frameHeight * s
+        val room = uncovered()
         // Smaller than the view: centred until moved, then anywhere within the black bars.
         offsetX = if (w <= width) (if (moved) offsetX.coerceIn(0f, width - w) else (width - w) / 2) else offsetX.coerceIn(width - w, 0f)
-        offsetY = if (h <= height) (if (moved) offsetY.coerceIn(0f, height - h) else (height - h) / 2) else offsetY.coerceIn(height - h, 0f)
-        matrix.setScale(s, s)
-        matrix.postTranslate(offsetX, offsetY)
+        offsetY = when {
+            h > height -> offsetY.coerceIn(room - h, 0f)
+            // Fitted: what the keyboard covers can be moved above it.
+            moved && h >= height - 1 -> offsetY.coerceIn(min(0f, room - h), height - h)
+            // Shorter than the view: it stops at the top; only the keyboard and the extra keys go over it.
+            moved -> offsetY.coerceIn(0f, height - h)
+            zoom < 1f -> max(0f, (room - h) / 2)
+            else -> (height - h) / 2
+        }
+        placement.setScale(s, s)
+        placement.postTranslate(offsetX, offsetY)
+        // The keyboard's every frame comes here: nothing to redraw unless the frame moved.
+        if (placement == matrix) return
+        matrix.set(placement)
         matrix.invert(inverse)
         copyHidden()
         invalidate()
     }
 
-    /** Tells the connection which part of the framebuffer is on screen (all of it while two fingers move it). */
+    /** Tells the connection which part of the framebuffer is on screen (all of it while two fingers move it, and it flies on). */
     private fun reportVisible() {
-        if (twoFingers) return
+        if (twoFingers || !panFlinger.isFinished) return
         if (frameWidth == 0) return
         if (zoom <= 1f && covered == 0) return connection.visibleRegion(0, 0, frameWidth, frameHeight, whole = true)
         val rect = RectF(0f, 0f, width.toFloat(), (height - covered).coerceAtLeast(1).toFloat())
@@ -419,6 +509,7 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (event.getToolType(0) == MotionEvent.TOOL_TYPE_MOUSE) return mouse(event)
+        if (twoFingers) velocity?.addMovement(event)
         if (twoFingers && event.actionMasked == MotionEvent.ACTION_MOVE) pan(event)
         if (threeFingerTap && event.actionMasked == MotionEvent.ACTION_MOVE) {
             val slop = config.scaledTouchSlop
@@ -434,6 +525,8 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
                 if (!hasFocus()) requestFocus()
                 // A touch stops a fling, as in Android's lists.
                 stopFling()
+                stopPanFling()
+                stopPlacing()
                 (velocity ?: VelocityTracker.obtain().also { velocity = it }).clear()
                 velocity?.addMovement(event)
                 // A notch's worth of the framebuffer, at the current zoom: the content follows the finger.
@@ -453,6 +546,8 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
                 }
                 if (!twoFingers) {
                     twoFingers = true
+                    velocity?.clear()
+                    velocity?.addMovement(event)
                     // Zooming and panning reveal parts not asked for while zoomed in: the whole screen until the fingers lift.
                     if (frameWidth > 0) connection.visibleRegion(0, 0, frameWidth, frameHeight, whole = true)
                 }
@@ -461,7 +556,10 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
             MotionEvent.ACTION_POINTER_UP -> {
                 // The midpoint of the fingers left, so the next move doesn't jump.
                 midpoint(event, event.actionIndex).let { (x, y) -> panX = x; panY = y }
-                if (event.pointerCount - 1 < 2) endTwoFingers()
+                if (event.pointerCount - 1 < 2) {
+                    if (twoFingers) panFling(event)
+                    endTwoFingers()
+                }
             }
             MotionEvent.ACTION_MOVE -> if (event.pointerCount == 1 && !twoFingers && !pinching) {
                 velocity?.addMovement(event)
@@ -480,6 +578,7 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
             MotionEvent.ACTION_CANCEL -> {
                 removeCallbacks(hold)
                 stopFling()
+                stopPanFling()
                 gestures.cancel()
                 endTwoFingers()
                 threeFingerTap = false
@@ -507,8 +606,36 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
         removeCallbacks(flingStep)
     }
 
+    /** The fingers' pan goes on from their speed as the first lifts ([event]), its limits Android's. */
+    private fun panFling(event: MotionEvent) {
+        val tracker = velocity ?: return
+        tracker.computeCurrentVelocity(1000, config.scaledMaximumFlingVelocity.toFloat())
+        var vx = 0f
+        var vy = 0f
+        for (i in 0 until event.pointerCount) {
+            vx += tracker.getXVelocity(event.getPointerId(i))
+            vy += tracker.getYVelocity(event.getPointerId(i))
+        }
+        vx /= event.pointerCount
+        vy /= event.pointerCount
+        if (kotlin.math.hypot(vx, vy) < config.scaledMinimumFlingVelocity) return
+        panFlungX = 0
+        panFlungY = 0
+        panFlinger.fling(0, 0, vx.roundToInt(), vy.roundToInt(), Int.MIN_VALUE, Int.MAX_VALUE, Int.MIN_VALUE, Int.MAX_VALUE)
+        postOnAnimation(panFlingStep)
+    }
+
+    private fun stopPanFling() {
+        if (panFlinger.isFinished) return
+        panFlinger.forceFinished(true)
+        removeCallbacks(panFlingStep)
+        reportVisible()
+    }
+
     override fun onDetachedFromWindow() {
         stopFling()
+        stopPanFling()
+        stopPlacing()
         velocity?.recycle()
         velocity = null
         super.onDetachedFromWindow()
@@ -676,6 +803,8 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
         private const val SCROLL_SETTLE_MS = 600L
         /** The keyboard has stopped moving when the covered height stays this long. */
         private const val COVER_SETTLE_MS = 150L
+        /** The frame's way back to where it lay, once the keyboard has closed. */
+        private const val PLACE_BACK_MS = 200L
         /** The first notch's measurement ends once the content stood still this long, or after [PROBE_MAX_MS]. */
         private const val PROBE_QUIET_MS = 120L
         private const val PROBE_MAX_MS = 500L

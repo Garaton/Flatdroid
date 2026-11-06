@@ -16,6 +16,8 @@ object SessionScript {
     /** Flatdroid's own viewer connects here, in [GUEST_VNC_DIR] (private storage, mode 0600): no port, no password. */
     const val VNC_SOCKET = "vnc.sock"
     const val X_SOCKET = "X1"
+    /** Printed once every helper of the script has started. */
+    const val DISPLAY_READY = "flatdroid: display ready"
 
     // Guest paths of the binds Flatdroid adds to the helpers' proot.
     const val GUEST_SCRIPT = "/run/flatdroid/session.sh"
@@ -100,13 +102,24 @@ object SessionScript {
         |[ "${'$'}clipboard" = on ] || clipboard_args="-AcceptCutText=0 -SendCutText=0"
         |rm -f /tmp/.X1-lock ${GuestPaths.X11_DIR}/$X_SOCKET ${GuestPaths.PULSE_DIR}/* $GUEST_VNC_DIR/$VNC_SOCKET
         |
+        |# Waits for the socket $1 of $2, which the display's process stands or falls with.
+        |wait_socket() {
+        |  i=0
+        |  while [ ! -S "${'$'}1" ]; do
+        |    kill -0 "${'$'}display" 2>/dev/null || { echo "flatdroid: ${'$'}2 exited"; exit 1; }
+        |    i=${'$'}((i + 1))
+        |    [ "${'$'}i" -gt 300 ] && { echo "flatdroid: ${'$'}2 did not start"; exit 1; }
+        |    sleep 0.1
+        |  done
+        |}
+        |
         |if [ "${'$'}wayland" = on ]; then
         |  # labwc (headless, drawn in software) with wayvnc as a client, on the viewer's socket (or
         |  # the VNC port for an external viewer). Their buffers come from fdshm (Android has no
         |  # /dev/shm). wayvnc's control socket stays here, out of the app's reach. The output
         |  # refreshes at the frame rate sent, not the headless backend's 60: apps are told to draw,
         |  # and labwc renders, only as often as a frame can go out.
-        |  rm -f ${GuestPaths.WAYLAND_DIR}/*
+        |  rm -f ${GuestPaths.WAYLAND_DIR}/* $GUEST_VNC_DIR/wayvncctl
         |  mode=${'$'}geometry
         |  [ "${'$'}frame_rate" -le $MAX_OUTPUT_REFRESH ] && mode="${'$'}geometry@${'$'}{frame_rate}Hz"
         |  if [ "${'$'}external" = on ]; then
@@ -118,13 +131,9 @@ object SessionScript {
         |    WLR_LIBINPUT_NO_DEVICES=1 WLR_HEADLESS_OUTPUTS=1 ${'$'}guard /usr/bin/labwc -C $GUEST_LABWC_DIR -S \
         |    "/bin/sh -c '/usr/bin/wlr-randr --output HEADLESS-1 --custom-mode ${'$'}mode; exec /usr/bin/wayvnc -S $GUEST_VNC_DIR/wayvncctl -f ${'$'}frame_rate ${'$'}listen'" &
         |  display=${'$'}!
-        |  i=0
-        |  while [ ! -S ${GuestPaths.WAYLAND_DIR}/${GuestPaths.WAYLAND_SOCKET} ]; do
-        |    kill -0 "${'$'}display" 2>/dev/null || { echo "flatdroid: the Wayland compositor exited"; exit 1; }
-        |    i=${'$'}((i + 1))
-        |    [ "${'$'}i" -gt 300 ] && { echo "flatdroid: the Wayland compositor did not start"; exit 1; }
-        |    sleep 0.1
-        |  done
+        |  wait_socket ${GuestPaths.WAYLAND_DIR}/${GuestPaths.WAYLAND_SOCKET} "the Wayland compositor"
+        |  # labwc starts wayvnc itself, once its own socket is there.
+        |  wait_socket $GUEST_VNC_DIR/wayvncctl wayvnc
         |else
         |  if [ "${'$'}external" = on ]; then
         |    guard="$NO_CONNECT"
@@ -138,13 +147,7 @@ object SessionScript {
         |  ${'$'}guard /usr/bin/Xvnc :1 -geometry "${'$'}geometry" -depth 24 ${'$'}listen -NeverShared -DisconnectClients=0 -FrameRate "${'$'}frame_rate" \
         |    -AllowOverride= -nolisten local -extension MIT-SHM -extension GLX -SendPrimary=0 ${'$'}clipboard_args &
         |  display=${'$'}!
-        |  i=0
-        |  while [ ! -S ${GuestPaths.X11_DIR}/$X_SOCKET ]; do
-        |    kill -0 "${'$'}display" 2>/dev/null || { echo "flatdroid: Xvnc exited"; exit 1; }
-        |    i=${'$'}((i + 1))
-        |    [ "${'$'}i" -gt 300 ] && { echo "flatdroid: Xvnc did not start"; exit 1; }
-        |    sleep 0.1
-        |  done
+        |  wait_socket ${GuestPaths.X11_DIR}/$X_SOCKET Xvnc
         |
         |  DISPLAY=:1 $NO_INTERNET /usr/bin/openbox &
         |fi
@@ -171,7 +174,7 @@ object SessionScript {
         |  $NO_INTERNET /usr/bin/pulseaudio -n --use-pid-file=no --daemonize=no --exit-idle-time=-1 --disable-shm=yes \
         |    --disallow-module-loading --disallow-exit --resample-method="${'$'}resampler" -F $GUEST_PULSE_SCRIPT &
         |fi
-        |echo "flatdroid: display ready"
+        |echo "$DISPLAY_READY"
         |wait "${'$'}display"
         |echo "flatdroid: the display exited"
         |""".trimMargin()

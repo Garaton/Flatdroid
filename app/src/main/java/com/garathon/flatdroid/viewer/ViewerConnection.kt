@@ -4,6 +4,7 @@ import android.net.LocalSocket
 import android.net.LocalSocketAddress
 import android.os.Handler
 import android.os.Looper
+import com.garathon.flatdroid.session.SessionController
 import com.garathon.flatdroid.util.DebugLog
 import java.io.EOFException
 import java.io.File
@@ -55,8 +56,6 @@ object ViewerConnection {
     @Volatile private var framePosted = false
     /** The part of the screen to ask for (x, y, width, height); null for all of it. */
     @Volatile private var region: IntArray? = null
-    /** The region grew since the last request: ask for it whole once (parts never asked for may be stale). */
-    private var regionGrew = false
 
     /**
      * Connects to [socketPath] unless already connected there. In a [wayland] session Android's
@@ -113,6 +112,7 @@ object ViewerConnection {
                 }
 
                 override fun resized(width: Int, height: Int) {
+                    SessionController.onDisplayResized?.invoke(width, height)
                     // X keeps the pointer inside a smaller screen: follow it there, as above.
                     pointerX = pointerX.coerceAtMost(width - 1)
                     pointerY = pointerY.coerceAtMost(height - 1)
@@ -164,14 +164,12 @@ object ViewerConnection {
         val client = client ?: return
         if (awaiting || !shown) return
         awaiting = true
-        val full = regionGrew
-        regionGrew = false
-        send { requestNow(client, incremental = !full) }
+        send { requestNow(client) }
     }
 
-    private fun requestNow(client: RfbClient, incremental: Boolean = true) {
+    private fun requestNow(client: RfbClient) {
         val r = region
-        if (r == null) client.requestUpdate(incremental) else client.requestUpdate(incremental, r[0], r[1], r[2], r[3])
+        if (r == null) client.requestUpdate() else client.requestUpdate(x = r[0], y = r[1], width = r[2], height = r[3])
     }
 
     /** The viewer that gets frames (shown or not: see [shown]). Main thread. */
@@ -201,14 +199,20 @@ object ViewerConnection {
      * settles. Main thread.
      */
     fun visibleRegion(x: Int, y: Int, width: Int, height: Int, whole: Boolean) {
+        // wayvnc sends every change whatever part is asked for: nothing to narrow or catch up.
+        if (wayland) return
         val old = region
         val new = if (whole) null else intArrayOf(x, y, width, height)
         if (old.contentEquals(new)) return
         region = new
         DebugLog.i("Viewer: asking for ${new?.joinToString(",") ?: "all"}")
-        regionGrew = new == null || old != null && !contains(old, new)
-        // A region never asked for while paced may wait on a request that won't come: ask now.
-        requestIfWanted()
+        val grew = new == null || old != null && !contains(old, new)
+        val client = client
+        if (!grew || !shown || client == null) return
+        // At once, even with a request out: that one is for the old part, which may stay still and
+        // never be answered. Xvnc kept what it didn't send, so this brings just what changed there.
+        awaiting = true
+        send { requestNow(client) }
     }
 
     private fun contains(outer: IntArray, inner: IntArray) =

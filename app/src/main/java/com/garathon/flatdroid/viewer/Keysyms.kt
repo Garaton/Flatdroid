@@ -81,6 +81,9 @@ object Keysyms {
     val CUT = SHIFT_L to DELETE
     val PASTE = SHIFT_L to INSERT
 
+    /** Back, as browsers and file managers bind it. */
+    val BACK = ALT_L to LEFT
+
     /** Android's Copy, Cut and Paste keys, as [COPY], [CUT] and [PASTE]. */
     fun editKey(keyCode: Int): Pair<Int, Int>? = when (keyCode) {
         KeyEvent.KEYCODE_COPY -> COPY
