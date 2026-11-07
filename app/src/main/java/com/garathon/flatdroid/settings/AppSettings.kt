@@ -139,8 +139,10 @@ data class AppSettings(
     val environment: Map<String, String> = emptyMap(),
     /** Developer setting: arguments added after the app's command (one argument each; no quoting). */
     val launchArgs: List<String> = emptyList(),
-    /** A Wayland session for an app that can also use X11 (by default only Wayland-only apps get one). */
+    /** X11 for an app that takes both (by default such an app gets Wayland). */
     val forceX11: Boolean = false,
+    /** On Wayland, how large the app draws everything, in percent ([INTERFACE_SIZES]); X11 apps keep their size. */
+    val interfaceSize: Int = 100,
     /** The user's choice of home; null follows [defaults] ([homeMode]). */
     val homeModeChoice: HomeMode? = null,
     /**
@@ -170,6 +172,8 @@ data class AppSettings(
     companion object {
         const val CUSTOM_WIDTH = 1000
         const val CUSTOM_HEIGHT = 1400
+        /** The interface sizes offered, in percent. */
+        val INTERFACE_SIZES = listOf(50, 75, 100, 125, 150, 175, 200)
         const val MIN_SIZE = 320
         const val MAX_SIZE = 4096
         /** Flatpak's `sockets=` name for sound. */
@@ -248,6 +252,7 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
                 .associateWith { props.getProperty(KEY_ENV_PREFIX + it) },
             launchArgs = LaunchArgs.parse(props.getProperty(KEY_LAUNCH_ARGS).orEmpty()),
             forceX11 = props.getProperty(KEY_FORCE_X11) == "true",
+            interfaceSize = props.getProperty(KEY_INTERFACE_SIZE)?.toIntOrNull()?.takeIf { it in AppSettings.INTERFACE_SIZES } ?: 100,
             homeModeChoice = HomeMode.entries.firstOrNull { it.name.lowercase() == props.getProperty(KEY_HOME_MODE) },
             sdcard = props.getProperty(KEY_SDCARD) == "true",
             defaults = appDefaults,
@@ -280,6 +285,7 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
         for ((name, value) in settings.environment) props.setProperty(KEY_ENV_PREFIX + name, value)
         if (settings.launchArgs.isNotEmpty()) props.setProperty(KEY_LAUNCH_ARGS, LaunchArgs.format(settings.launchArgs))
         if (settings.forceX11) props.setProperty(KEY_FORCE_X11, "true")
+        if (settings.interfaceSize != 100) props.setProperty(KEY_INTERFACE_SIZE, settings.interfaceSize.toString())
         settings.homeModeChoice?.let { props.setProperty(KEY_HOME_MODE, it.name.lowercase()) }
         if (settings.sdcard) props.setProperty(KEY_SDCARD, "true")
         file.writeTextAtomically(StringWriter().also { props.store(it, null) }.toString())
@@ -328,6 +334,7 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
         private const val KEY_ENV_PREFIX = "env."
         private const val KEY_LAUNCH_ARGS = "launch.args"
         private const val KEY_FORCE_X11 = "display.x11"
+        private const val KEY_INTERFACE_SIZE = "display.interfaceSize"
         private const val KEY_HOME_MODE = "home.mode"
         private const val KEY_SDCARD = "storage.sdcard"
         private const val KEY_NETWORK = "permission.network"

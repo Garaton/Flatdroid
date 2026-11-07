@@ -16,10 +16,9 @@ class HelperProcessesTest {
     }
 
     @Test
-    fun everyProcessUnderFlatdroidWithItsThreads() {
+    fun everyProcessUnderTheProotsWithItsThreads() {
         val dir = tmp.newFolder("proc")
-        proc(dir, 50, 10, 0) // the helpers' proot, started by Flatdroid (10)
-        proc(dir, 60, 10, 0) // the camera's proot
+        // The proots themselves (50, 60) aren't listed: Android may not show them to Flatdroid.
         proc(dir, 100, 50, 50, threads = listOf(103, 104)) // Xvnc and two threads
         proc(dir, 101, 1, 50) // went into the background, still traced
         proc(dir, 102, 100, 50) // a child
@@ -27,8 +26,8 @@ class HelperProcessesTest {
         proc(dir, 200, 1, 0) // something else
         assertEquals(
             listOf("/proc/50", "/proc/60", "/proc/100", "/proc/101", "/proc/102", "/proc/103", "/proc/104", "/proc/300"),
-            HelperProcesses.procPaths(10, dir, settleMs = 0),
+            HelperProcesses.procPaths(listOf(50, 60), dir),
         )
-        assertEquals(emptyList<String>(), HelperProcesses.procPaths(999, dir, settleMs = 0))
+        assertEquals(emptyList<String>(), HelperProcesses.procPaths(emptyList(), dir))
     }
 }

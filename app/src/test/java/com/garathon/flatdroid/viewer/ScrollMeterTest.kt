@@ -88,4 +88,18 @@ class ScrollMeterTest {
         meter.movedBy(-40)
         assertNull(meter.finish())
     }
+
+    @Test
+    fun rowsVoteWhateverTheirHashesTopBit() {
+        val rows = 40
+        // Hashes on both sides of the sign bit, in each band, so the two halves of the sort both vote.
+        fun frame(shift: Int) = IntArray(ScrollMeter.BANDS * rows) { i ->
+            val band = i / rows
+            val row = i % rows + shift
+            (row * 0x9e3779b1.toInt()) xor band
+        }
+        val meter = ScrollMeter()
+        meter.start(frame(0), rows)
+        assertEquals(-5, meter.shift(frame(5)))
+    }
 }

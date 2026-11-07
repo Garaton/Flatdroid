@@ -232,7 +232,14 @@ class LaunchPlannerTest {
         assertEquals(listOf("/app/obsidian") + Electron.BASE_FLAGS + "--x", plan.command)
 
         val newer = Ready(planner.plan("md.obsidian.Obsidian", dirs, LaunchOptions(newerElectronFlags = true)))
-        assertEquals(listOf("/app/obsidian") + Electron.BASE_FLAGS + Electron.NEWER_FLAGS, newer.command)
+        assertEquals(listOf("/app/obsidian") + Electron.BASE_FLAGS + Electron.NEWER_FLAGS + Electron.OZONE_X11, newer.command)
+    }
+
+    @Test
+    fun electronFlagsNameTheSession() {
+        assertEquals(Electron.BASE_FLAGS, Electron.flags(newer = false, wayland = false))
+        assertEquals(Electron.BASE_FLAGS + Electron.OZONE_WAYLAND, Electron.flags(newer = false, wayland = true))
+        assertEquals(Electron.BASE_FLAGS + Electron.NEWER_FLAGS + Electron.OZONE_WAYLAND, Electron.flags(newer = true, wayland = true))
     }
 
     @Test

@@ -33,10 +33,16 @@ object Keysyms {
     const val SUPER_L = 0xffeb
     const val SUPER_R = 0xffec
     const val DELETE = 0xffff
+    /** Added to a code point beyond Latin-1 for its keysym. */
+    private const val UNICODE = 0x01000000
 
     private val MODIFIERS = setOf(SHIFT_L, SHIFT_R, CONTROL_L, CONTROL_R, ALT_L, ALT_R, SUPER_L, SUPER_R, CAPS_LOCK, NUM_LOCK)
 
     fun isModifier(keysym: Int) = keysym in MODIFIERS
+
+    /** A character beyond ASCII: not in the plain keymap wayvnc looks keys up in, and Xvnc adds such keys itself. */
+    fun outsideKeymap(keysym: Int) = keysym in 0xa0..0xff || keysym >= UNICODE
+
 
     /** Keys that aren't characters; the rest are sent as the character they type. */
     private val KEYS: Map<Int, Int> = buildMap {
@@ -105,7 +111,7 @@ object Keysyms {
         '\b'.code -> BACKSPACE
         in 0x20..0x7e, in 0xa0..0xff -> codePoint
         in 0..0x1f, in 0x7f..0x9f -> null
-        else -> 0x01000000 or codePoint
+        else -> UNICODE or codePoint
     }
 }
 
@@ -114,7 +120,11 @@ object Keysyms {
  * held for the next key only (pressed before it, released after it); held down, for every key
  * pressed until it is lifted. Not thread-safe: UI thread.
  */
-class ViewerKeys(private val send: (down: Boolean, keysym: Int) -> Unit) {
+class ViewerKeys(
+    private val send: (down: Boolean, keysym: Int) -> Unit,
+    /** Sends what [type] types of text that needs it ([ViewerConnection.typed]). */
+    private val typed: (down: Boolean, keysym: Int) -> Unit = send,
+) {
     /** Latched modifiers, in the order they are pressed. */
     private val latched = linkedSetOf<Int>()
     /** A latch was set or released (to redraw the row). */
@@ -195,11 +205,24 @@ class ViewerKeys(private val send: (down: Boolean, keysym: Int) -> Unit) {
 
     /** Types [text] character by character (what a soft keyboard commits). */
     fun type(text: String) {
-        var i = 0
-        while (i < text.length) {
-            val cp = text.codePointAt(i)
-            Keysyms.ofChar(cp)?.let(::tap)
-            i += Character.charCount(cp)
+        val keysyms = text.codePoints().toArray().toList().mapNotNull(Keysyms::ofChar)
+        if (keysyms.size > 1 && keysyms.any(Keysyms::outsideKeymap)) {
+            keysyms.forEach {
+                typed(true, it)
+                typed(false, it)
+            }
+        } else {
+            keysyms.forEach(::tap)
         }
+    }
+
+    /** Lets go of what is pressed on the row (it is leaving the screen, or the view the keys). */
+    fun releaseAll() {
+        for ((modifier, sent) in held) if (sent) send(false, modifier)
+        held.clear()
+        applied.asReversed().forEach { send(false, it) }
+        applied = emptyList()
+        if (latchTaken) latched.clear()
+        latchTaken = false
     }
 }

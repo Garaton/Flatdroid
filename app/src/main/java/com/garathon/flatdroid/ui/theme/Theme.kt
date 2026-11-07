@@ -3,7 +3,7 @@ package com.garathon.flatdroid.ui.theme
 import android.app.Activity
 import android.app.ActivityManager
 import androidx.activity.compose.LocalActivity
-import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.graphics.toArgb
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -61,7 +61,7 @@ fun FlatdroidTheme(
     // the one shown now, not the XML theme's (settable from Android 13).
     val activity = LocalActivity.current
     val background = colorScheme.background.toArgb()
-    SideEffect {
+    LaunchedEffect(background) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             activity?.setTaskDescription(ActivityManager.TaskDescription.Builder().setBackgroundColor(background).build())
         }

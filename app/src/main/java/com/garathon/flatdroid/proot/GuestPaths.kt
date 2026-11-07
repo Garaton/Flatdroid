@@ -6,8 +6,8 @@ object GuestPaths {
     const val X11_DIR = "/tmp/.X11-unix"
 
     /**
-     * The Wayland compositor's socket directory, for apps that ask only for Wayland: its
-     * XDG_RUNTIME_DIR among the helpers, bound into such an app's root.
+     * The Wayland compositor's socket directory: its XDG_RUNTIME_DIR among the helpers, bound
+     * into the root of an app that runs on Wayland.
      */
     const val WAYLAND_DIR = "/run/flatdroid/wayland"
     const val WAYLAND_SOCKET = "wayland-0"

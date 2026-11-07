@@ -151,6 +151,9 @@ class LaunchPlanner(
         val ldPaths = extensions.mapNotNull { (base, ext) -> ext.addLdPath?.let { "$base/${ext.guestPath}/$it" } }
 
         // Electron apps start through zypak, and some Chromium browsers through cobalt: both skipped.
+        // Wayland for every app that takes it, unless one that also takes X11 is set to Force X11.
+        val context = app.metadata.context
+        val wayland = context.wayland && !(options.forceX11 && context.waylandAndX11)
         var command = listOf(commandPath)
         var isElectron = false
         val varApp = "${GuestPaths.HOME}/.var/app/$appId"
@@ -194,24 +197,18 @@ class LaunchPlanner(
                 }
                 extraBinds += swap.path to appDir
             }
-            command = listOf(electronBinary) + Electron.BASE_FLAGS +
-                (if (options.newerElectronFlags) Electron.NEWER_FLAGS else emptyList())
+            command = listOf(electronBinary) + Electron.flags(options.newerElectronFlags, wayland)
         } else if (cobaltBrowser != null) {
             isElectron = true
             val binaryArch = (hostPath(app, cobaltBrowser)?.let(Executable::of) as? Executable.Elf)?.arch
             if (binaryArch != null && binaryArch != arch) return PlanResult.WrongArchitecture(cobaltBrowser, binaryArch)
-            command = listOf(cobaltBrowser) + Electron.BASE_FLAGS +
-                (if (options.newerElectronFlags) Electron.NEWER_FLAGS else emptyList())
+            command = listOf(cobaltBrowser) + Electron.flags(options.newerElectronFlags, wayland)
         } else {
             val binaryArch = (hostPath(app, commandPath)?.let(Executable::of) as? Executable.Elf)?.arch
             if (binaryArch != null && binaryArch != arch) return PlanResult.WrongArchitecture(commandPath, binaryArch)
         }
         command = command + options.extraArgs
 
-        // Wayland for every app that takes it, unless one that also takes X11 is set to Force X11.
-        val context = app.metadata.context
-        val wayland = context.wayland && !(options.forceX11 && context.waylandAndX11)
-        if (wayland) command = command.map { if (it == Electron.OZONE_X11) Electron.OZONE_WAYLAND else it }
         val environment = LaunchEnvironment.build(
             appId = appId,
             triplet = LaunchEnvironment.triplet(arch),

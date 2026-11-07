@@ -60,8 +60,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
@@ -89,9 +87,11 @@ import com.garathon.flatdroid.session.SessionService
 import com.garathon.flatdroid.session.SessionState
 import com.garathon.flatdroid.ui.followHideScreen
 import com.garathon.flatdroid.ui.theme.FlatdroidTheme
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * The running session's screen, full screen under a slim bar (back to the app list, the soft
@@ -123,6 +123,11 @@ class ViewerActivity : ComponentActivity() {
             // Wayland has no server option for it: the app's copies stop here.
             if (session.shareClipboard) onClipboard = ::copiedInApp
             onClipboardRequested = ::androidClipboardText
+            // A keyboard pasting what is on Android's clipboard: the app pastes it itself, at once.
+            onLongText = { text ->
+                if (session.shareClipboard && androidClipboardText() == text) keys.chord(Keysyms.PASTE)
+                else Toast.makeText(this@ViewerActivity, R.string.viewer_text_too_long, Toast.LENGTH_LONG).show()
+            }
             onThreeFingerTap = {
                 val shown = ViewCompat.getRootWindowInsets(this)?.isVisible(WindowInsetsCompat.Type.ime()) == true
                 showKeyboard(!shown)
@@ -179,7 +184,11 @@ class ViewerActivity : ComponentActivity() {
         })
         view.requestFocus()
         ViewerConnection.attach(view)
-        ViewerConnection.open(socket, cacheDir, session.wayland, session.clipboardSocket)
+        ViewerConnection.open(socket, cacheDir, session.waylandSocket, session.shareClipboard, session.outputRefresh)
+        appLabel = session.appId
+        lifecycleScope.launch(Dispatchers.IO) {
+            InstalledApps(applicationContext).name(session.appId)?.let { name -> withContext(Dispatchers.Main) { appLabel = name } }
+        }
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.CREATED) {
                 SessionController.ui.collect { ui ->
@@ -203,14 +212,13 @@ class ViewerActivity : ComponentActivity() {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.viewer_back))
                 }
                 Text(
-                    label(),
+                    appLabel,
                     style = MaterialTheme.typography.titleSmall,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
                 // Tap: the Android keyboard (with the extra keys above it); hold: the extra keys alone.
-                val haptics = LocalHapticFeedback.current
                 Box(
                     contentAlignment = Alignment.Center,
                     modifier = NO_KEY_FOCUS
@@ -219,10 +227,7 @@ class ViewerActivity : ComponentActivity() {
                         .combinedClickable(
                             onClickLabel = stringResource(R.string.viewer_keyboard),
                             onLongClickLabel = stringResource(R.string.viewer_extra_keys),
-                            onLongClick = {
-                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                onToggleKeys()
-                            },
+                            onLongClick = onToggleKeys,
                             onClick = { showKeyboard(!keyboardShown) },
                         ),
                 ) {
@@ -239,7 +244,7 @@ class ViewerActivity : ComponentActivity() {
         if (confirmStop) {
             AlertDialog(
                 onDismissRequest = { confirmStop = false },
-                title = { Text(stringResource(R.string.viewer_stop_title, label())) },
+                title = { Text(stringResource(R.string.viewer_stop_title, appLabel)) },
                 text = { Text(stringResource(R.string.viewer_stop_text)) },
                 confirmButton = {
                     TextButton(onClick = {
@@ -252,20 +257,16 @@ class ViewerActivity : ComponentActivity() {
         }
     }
 
-    private val appLabel by lazy {
-        val appId = SessionController.ui.value.state.appIdOrNull.orEmpty()
-        InstalledApps(applicationContext).name(appId) ?: appId
-    }
+    /** The app's ID until its name has been read. */
+    private var appLabel by mutableStateOf("")
 
-    private fun label() = appLabel
+    private val viewLocation = IntArray(2)
 
     /**
      * Keys a phone keyboard lacks, in two rows above it while it is shown, the arrows where a
      * keyboard has them. Shift, Ctrl and Alt hold for the next key (highlighted until then); the
      * others are held as long as they are touched, so X repeats them.
      */
-    private val viewLocation = IntArray(2)
-
     @Composable
     private fun ExtraKeys(modifier: Modifier) {
         var latches by remember { mutableIntStateOf(0) }
@@ -312,22 +313,30 @@ class ViewerActivity : ComponentActivity() {
                             if (latchable) {
                                 // Held: down for the keys pressed meanwhile; tapped: latched for the next key.
                                 view.keys.hold(keysym)
-                                view.keys.release(keysym, tapped = tryAwaitRelease())
+                                var tapped = false
+                                try {
+                                    tapped = tryAwaitRelease()
+                                } finally {
+                                    view.keys.release(keysym, tapped)
+                                }
                             } else {
                                 view.keys.down(keysym)
-                                // Xvnc leaves key repeat to the viewer: repeated presses while held, at Android's rates.
-                                coroutineScope {
-                                    val repeat = launch {
-                                        delay(ViewConfiguration.getKeyRepeatTimeout().toLong())
-                                        while (true) {
-                                            view.keys.down(keysym)
-                                            delay(ViewConfiguration.getKeyRepeatDelay().toLong())
+                                try {
+                                    // Xvnc leaves key repeat to the viewer: repeated presses while held, at Android's rates.
+                                    coroutineScope {
+                                        val repeat = launch {
+                                            delay(ViewConfiguration.getKeyRepeatTimeout().toLong())
+                                            while (true) {
+                                                view.keys.down(keysym)
+                                                delay(ViewConfiguration.getKeyRepeatDelay().toLong())
+                                            }
                                         }
+                                        tryAwaitRelease()
+                                        repeat.cancel()
                                     }
-                                    tryAwaitRelease()
-                                    repeat.cancel()
+                                } finally {
+                                    view.keys.up(keysym)
                                 }
-                                view.keys.up(keysym)
                             }
                             pressed = false
                         },
@@ -362,13 +371,13 @@ class ViewerActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         if (!::view.isInitialized) return
-        ViewerConnection.shown(true)
+        ViewerConnection.shown(view, true)
         clipboard.addPrimaryClipChangedListener(clipChanged)
     }
 
     override fun onStop() {
         if (::view.isInitialized) {
-            ViewerConnection.shown(false)
+            ViewerConnection.shown(view, false)
             clipboard.removePrimaryClipChangedListener(clipChanged)
         }
         super.onStop()
@@ -404,7 +413,13 @@ class ViewerActivity : ComponentActivity() {
         clipboard.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(this)?.toString()
 
     private fun copiedInApp(text: String) {
-        clipboard.setPrimaryClip(ClipData.newPlainText(appLabel, text))
+        try {
+            clipboard.setPrimaryClip(ClipData.newPlainText(appLabel, text))
+        } catch (_: RuntimeException) {
+            // Android takes about 1 MB at most through its clipboard.
+            Toast.makeText(this, R.string.viewer_copy_too_large, Toast.LENGTH_LONG).show()
+            return
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) ownClip = clipboard.primaryClipDescription?.timestamp ?: NO_CLIP
     }
 

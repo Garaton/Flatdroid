@@ -58,21 +58,27 @@ object ViewerConnection {
     @Volatile private var region: IntArray? = null
 
     /**
-     * Connects to [socketPath] unless already connected there. In a [wayland] session Android's
-     * text goes through [WaylandClipboard] on [clipboardSocket] (null: not shared). Main thread.
+     * Connects to [socketPath] unless already connected there. In a Wayland session (a
+     * [waylandSocket]) a [WaylandClient] there also carries Android's text, if [shareClipboard],
+     * and keeps the output at [outputRefresh] (per second; null to leave it). Main thread.
      */
-    fun open(socketPath: String, cacheDir: File, wayland: Boolean = false, clipboardSocket: String? = null) {
+    fun open(
+        socketPath: String, cacheDir: File, waylandSocket: String? = null,
+        shareClipboard: Boolean = false, outputRefresh: Int? = null,
+    ) {
         if (path == socketPath && client != null) return
         close()
         path = socketPath
-        this.wayland = wayland
-        waylandClipboard = clipboardSocket?.let { WaylandClipboard(it, ::androidText).apply { start() } }
-        val executor = Executors.newSingleThreadExecutor().also { sender = it }
+        wayland = waylandSocket != null
+        waylandClient = waylandSocket?.let { socket ->
+            WaylandClient(socket, ::androidText.takeIf { shareClipboard }, outputRefresh?.let { it * 1000 }, cacheDir).apply { start() }
+        }
+        sender = Executors.newSingleThreadExecutor()
         val socket = LocalSocket().also { socket = it }
-        Thread({ read(socket, socketPath, executor, cacheDir) }, "viewer-reader").start()
+        Thread({ read(socket, socketPath, cacheDir) }, "viewer-reader").start()
     }
 
-    private fun read(socket: LocalSocket, socketPath: String, executor: ExecutorService, cacheDir: File) {
+    private fun read(socket: LocalSocket, socketPath: String, cacheDir: File) {
         var error: String? = null
         var native: NativeFrames? = null
         try {
@@ -108,17 +114,18 @@ object ViewerConnection {
                 override fun pointerMoved(x: Int, y: Int) {
                     pointerX = x
                     pointerY = y
-                    executor.execute { runCatching { client.pointer(buttons, x, y) } }
+                    send { client.pointer(buttons, x, y) }
                 }
 
                 override fun resized(width: Int, height: Int) {
                     SessionController.onDisplayResized?.invoke(width, height)
+                    waylandClient?.outputResized(width, height)
                     // X keeps the pointer inside a smaller screen: follow it there, as above.
                     pointerX = pointerX.coerceAtMost(width - 1)
                     pointerY = pointerY.coerceAtMost(height - 1)
                     val x = pointerX
                     val y = pointerY
-                    executor.execute { runCatching { client.pointer(buttons, x, y) } }
+                    send { client.pointer(buttons, x, y) }
                 }
 
                 override fun clipboard(text: String) {
@@ -130,7 +137,7 @@ object ViewerConnection {
                     main.post {
                         if (this@ViewerConnection.client !== client) return@post
                         val text = sink?.clipboardText().orEmpty()
-                        executor.execute { runCatching { client.provideClipboard(text) } }
+                        send { client.provideClipboard(text) }
                     }
                 }
             }
@@ -138,6 +145,10 @@ object ViewerConnection {
         } catch (_: EOFException) {
             // The server closed the connection: the session is ending.
         } catch (e: IOException) {
+            if (this.socket === socket) error = e.message ?: e.javaClass.simpleName
+        } catch (e: RuntimeException) {
+            // The server's frames couldn't be taken (a size the GPU refuses, or none at all): the
+            // viewer closes, the session stays.
             if (this.socket === socket) error = e.message ?: e.javaClass.simpleName
         }
         native?.close()
@@ -184,12 +195,15 @@ object ViewerConnection {
         shown = false
     }
 
-    /** The viewer became visible or hidden. Main thread. */
-    fun shown(visible: Boolean) {
+    /** [sink] became visible or hidden; a newer viewer may already be the one attached. Main thread. */
+    fun shown(sink: ViewerSink, visible: Boolean) {
+        if (this.sink !== sink) return
         shown = visible
+        // Nobody sees the output while hidden: the apps needn't draw more than about once a second.
+        client?.framebuffer?.let { fb -> waylandClient?.hidden(!visible, fb.width, fb.height) }
         if (visible) {
             val frames = frames
-            if (frames != null) client?.let { sink?.frame(it, frames) } // what arrived while hidden
+            if (frames != null) client?.let { sink.frame(it, frames) } // what arrived while hidden
             requestIfWanted()
         }
     }
@@ -237,24 +251,35 @@ object ViewerConnection {
         send { c.pointer(buttons, x, y) }
     }
 
-    fun key(down: Boolean, keysym: Int) = client?.let { c -> send { c.key(down, keysym) } }
+    fun key(down: Boolean, keysym: Int) {
+        if (Keysyms.outsideKeymap(keysym)) typed(down, keysym) else client?.let { c -> send { c.key(down, keysym) } }
+    }
+
+    /**
+     * [keysym] as typed text: on Wayland, on [WaylandClient]'s keyboard, which wayvnc's would drop
+     * if it isn't in its keymap. Text mixing the two all goes this way: the two paths could overtake each other.
+     */
+    fun typed(down: Boolean, keysym: Int) {
+        val wayland = waylandClient?.takeIf { it.canType }
+        if (wayland != null) wayland.key(down, keysym) else client?.let { c -> send { c.key(down, keysym) } }
+    }
 
     fun resize(width: Int, height: Int) = client?.let { c -> send { c.resize(width, height) } }
 
     /** Android's clipboard has new text: announced (also to a connection still being made); read only when an app pastes. */
     @Volatile private var clipboardOffered = false
     private var wayland = false
-    private var waylandClipboard: WaylandClipboard? = null
+    @Volatile private var waylandClient: WaylandClient? = null
     private const val CLIPBOARD_WAIT_MS = 2_000L
 
     fun announceClipboard() {
         // wayvnc would take the text at once, not when an app pastes.
-        if (wayland) return waylandClipboard?.offer() ?: Unit
+        if (wayland) return waylandClient?.offer() ?: Unit
         clipboardOffered = true
         client?.let { c -> send { c.announceClipboard() } }
     }
 
-    /** Android's text for an app pasting, from [WaylandClipboard]'s thread (Android gives it on the main one). */
+    /** Android's text for an app pasting, from [WaylandClient]'s thread (Android gives it on the main one). */
     private fun androidText(): String? {
         val done = CountDownLatch(1)
         var text: String? = null
@@ -282,8 +307,8 @@ object ViewerConnection {
         scrollNotch = ScrollMeter.DEFAULT_NOTCH
         scrollNotchMeasured = false
         clipboardOffered = false
-        waylandClipboard?.close()
-        waylandClipboard = null
+        waylandClient?.close()
+        waylandClient = null
         wayland = false
         awaiting = false
         framePosted = false

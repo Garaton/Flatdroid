@@ -1,0 +1,5 @@
+# Flatdroid's own code, compiled ahead of time when the app is installed (or, sideloaded, at the
+# device's next idle compile) instead of interpreted and compiled while used: a cold app list
+# otherwise drops frames on its first scroll.
+HSPLcom/garathon/flatdroid/**->**(**)**
+Lcom/garathon/flatdroid/**;

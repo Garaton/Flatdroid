@@ -202,7 +202,7 @@
     <string name="session_starting_app">Starting %1$s</string>
     <string name="session_running_app">%1$s is running</string>
     <string name="session_stopping">Stopping %1$s…</string>
-    <string name="session_notification_viewer">Running. Open the viewer to see it.</string>
+    <string name="session_notification_viewer">Running. Open the app to see it.</string>
     <string name="viewer_back">Back to the app list</string>
     <string name="viewer_keyboard">Keyboard</string>
     <string name="viewer_extra_keys">Show or hide the extra keys</string>
@@ -210,6 +210,8 @@
     <string name="viewer_stop_title">Stop %1$s?</string>
     <string name="viewer_stop_text">The app is closed at once; anything unsaved in it is lost.</string>
     <string name="viewer_disconnected">Display disconnected: %1$s</string>
+    <string name="viewer_text_too_long">That\'s too much text to type. Copy it on Android and paste it in the app instead.</string>
+    <string name="viewer_copy_too_large">That\'s too much text for Android\'s clipboard, so it wasn\'t copied</string>
     <string name="session_notification_running">Open it in a VNC viewer at localhost:%1$d</string>
     <string name="session_address">Address: %1$s:%2$d</string>
     <string name="session_password">Password: %1$s</string>
@@ -221,7 +223,7 @@
     <string name="session_stop">Stop</string>
     <string name="session_ended">%1$s has closed.</string>
     <string name="session_failed">Could not run the app: %1$s</string>
-    <string name="session_choose_viewer">Choose the VNC viewer under Settings → Default viewer first.</string>
+    <string name="session_choose_viewer">Choose the VNC viewer under Settings → Viewer first.</string>
     <string name="session_no_viewer">No VNC viewer is installed. Install one (such as AVNC) then connect to the address shown with the password.</string>
     <string name="session_log_title">App output</string>
     <string name="session_reading_metadata">Reading the app\'s metadata</string>
@@ -234,6 +236,7 @@
     <string name="launch_wrong_arch">%1$s is built for %2$s, not %3$s; this app can\'t run here</string>
     <string name="launch_bind_replaced">%1$s was replaced by a link or is missing; not launching. Reinstalling the app recreates it.</string>
     <string name="launch_display_failed">The display did not start</string>
+    <string name="launch_needs_terminal">This app runs in a terminal, which Flatdroid doesn\'t have</string>
     <string name="launch_app_changed">The app changed while it was running</string>
     <string name="session_relaunching_without_flatpak_info">Relaunching without /.flatpak-info</string>
     <string name="launch_newer_flags_failed">The app failed with and without newer Electron\'s flags (exit %1$d)</string>
@@ -291,6 +294,8 @@
     <string name="app_settings_environment">Environment variables</string>
     <string name="app_settings_environment_hint">One NAME=value per line, added to the app\'s environment over Flatdroid\'s own. Lines starting with # are skipped.</string>
     <string name="app_settings_launch_args">Launch arguments</string>
+    <string name="app_settings_interface_size">Interface size</string>
+    <string name="app_settings_interface_size_hint">Draws the app\'s text and controls larger, staying sharp, or smaller to fit more on the screen (smaller may be less sharp). With a higher Resolution, a larger size shows more detail at the same size. Apps on X11 keep their size.</string>
     <string name="app_settings_force_x11">Force X11</string>
     <string name="app_settings_force_x11_hint">Runs the app on X11 instead of Wayland. Wayland is quicker to respond in Flatdroid\'s tests; try this if the app misbehaves on it.</string>
     <string name="app_settings_launch_args_hint">Added after the app\'s own command, separated by spaces. Each is passed as it is: no quoting.</string>

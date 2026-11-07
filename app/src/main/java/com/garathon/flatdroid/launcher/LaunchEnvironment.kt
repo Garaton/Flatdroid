@@ -34,7 +34,7 @@ object LaunchEnvironment {
         runtimeDir: String = "/tmp",
         /** The root looks like Flatpak's (/.flatpak-info), so `container` says so too, as Flatpak sets it. */
         flatpakContainer: Boolean = false,
-        /** The session is Wayland (an app that asks only for Wayland): the toolkits are pointed at it instead of X11. */
+        /** The session is Wayland: the toolkits are pointed at it instead of X11. */
         wayland: Boolean = false,
     ): LinkedHashMap<String, String> {
         val varApp = "${GuestPaths.HOME}/.var/app/$appId"

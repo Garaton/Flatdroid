@@ -144,7 +144,8 @@ class RfbClient(
     /** Reads and handles one server message; throws when the connection ends. */
     fun readMessage(listener: RfbListener) {
         when (val type = input.readUnsignedByte()) {
-            Rfb.FRAMEBUFFER_UPDATE -> synchronized(frameLock) { readUpdate(listener) }
+            // A sink reads into a buffer nothing shows yet: the lock is taken only to change what shows.
+            Rfb.FRAMEBUFFER_UPDATE -> if (pixelSink != null) readUpdate(listener) else synchronized(frameLock) { readUpdate(listener) }
             Rfb.SET_COLOUR_MAP -> { // never sent for a true-colour format; skipped if it is
                 input.skipFully(3)
                 input.skipFully(input.readUnsignedShort() * 6)
@@ -158,7 +159,7 @@ class RfbClient(
     private fun readUpdate(listener: RfbListener) {
         input.skipFully(1)
         val count = input.readUnsignedShort()
-        pixelSink?.begin(framebuffer.width, framebuffer.height)
+        pixelSink?.let { synchronized(frameLock) { it.begin(framebuffer.width, framebuffer.height) } }
         for (i in 0 until count) {
             val x = input.readUnsignedShort()
             val y = input.readUnsignedShort()
@@ -216,15 +217,17 @@ class RfbClient(
                 else -> throw RfbException("unrequested encoding $encoding")
             }
         }
-        pixelSink?.end()
+        pixelSink?.let { synchronized(frameLock) { it.end() } }
         listener.updateDone()
     }
 
     private fun resize(width: Int, height: Int, listener: RfbListener) {
-        framebuffer = Framebuffer(width, height, keepPixels = pixelSink == null)
-        pixelSink?.let {
-            it.end()
-            it.begin(width, height)
+        synchronized(frameLock) {
+            framebuffer = Framebuffer(width, height, keepPixels = pixelSink == null)
+            pixelSink?.let {
+                it.end()
+                it.begin(width, height)
+            }
         }
         listener.resized(width, height)
     }

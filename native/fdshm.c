@@ -1,7 +1,8 @@
 /*
  * fdshm: shm_open(3) and shm_unlink(3) backed by memfd, preloaded (LD_PRELOAD) into the Wayland
  * compositor and its VNC server, which allocate their buffers with shm_open. Android has no
- * /dev/shm, and a folder in its place would put every frame on flash.
+ * /dev/shm, and a folder in its place would put every frame on flash. Where the kernel has no
+ * memfd, both this and memfd_create(2) fall back on a temporary file.
  *
  * A name stays known from shm_open with O_CREAT until shm_unlink, as with /dev/shm: opening it
  * again in that time reopens the same memory through /proc/self/fd (with the new access mode),
@@ -102,6 +103,31 @@ static void fd_path(int fd, char *out)
     *out = 0;
 }
 
+/*
+ * Kernels before 3.17 (some Android 7 phones) have no memfd: an unlinked file in the helpers' /tmp
+ * instead, which reopens the same way. The page cache holds what is in use, but it can reach flash.
+ */
+static long temp_file(const char *key)
+{
+    const char *prefix = "/tmp/.fdshm-";
+    char path[16 + NAME_MAX_LEN];
+    size_t at = 0;
+    while (prefix[at]) { path[at] = prefix[at]; at++; }
+    for (size_t i = 0; key[i] && i < NAME_MAX_LEN; i++) path[at++] = key[i] == '/' ? '_' : key[i];
+    path[at] = 0;
+    long fd = syscall4(__NR_openat, AT_FDCWD, (long)path, O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+    if (fd >= 0) syscall3(__NR_unlinkat, AT_FDCWD, (long)path, 0);
+    return fd;
+}
+
+/* wayvnc asks for memfd itself. */
+int memfd_create(const char *name, unsigned flags)
+{
+    long fd = syscall3(__NR_memfd_create, (long)name, flags, 0);
+    if (fd == -ENOSYS) fd = temp_file(name);
+    return fd < 0 ? (int)fail(fd) : (int)fd;
+}
+
 int shm_open(const char *name, int flags, unsigned mode)
 {
     (void)mode;
@@ -126,6 +152,7 @@ int shm_open(const char *name, int flags, unsigned mode)
     }
     if (free_slot < 0) { give(); return (int)fail(-ENFILE); }
     long fd = syscall3(__NR_memfd_create, (long)key, MFD_CLOEXEC | MFD_ALLOW_SEALING, 0);
+    if (fd == -ENOSYS) fd = temp_file(key);
     if (fd < 0) { give(); return (int)fail(fd); }
     size_t i = 0;
     for (; key[i]; i++) names[free_slot].name[i] = key[i];

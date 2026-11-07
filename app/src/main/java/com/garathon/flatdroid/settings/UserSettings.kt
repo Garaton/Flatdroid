@@ -46,7 +46,7 @@ data class UserSettings(
      * private storage.
      */
     val externalViewer: Boolean = false,
-    /** The external VNC viewer's package; null to choose every time. */
+    /** The external VNC viewer's package; null when none is chosen yet. */
     val vncViewer: String? = null,
     /** Xvnc sends up to 60 frames a second instead of 30: smoother, more CPU when the picture moves. */
     val frameRate60: Boolean = false,

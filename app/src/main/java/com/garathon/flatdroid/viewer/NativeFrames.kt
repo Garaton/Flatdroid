@@ -15,6 +15,7 @@ import android.os.ParcelFileDescriptor
 import androidx.annotation.RequiresApi
 import com.garathon.flatdroid.util.DebugLog
 import java.io.EOFException
+import java.io.IOException
 import java.io.InputStream
 
 /**
@@ -57,7 +58,7 @@ class NativeFrames private constructor(private val descriptor: ParcelFileDescrip
     override fun begin(width: Int, height: Int) {
         if (width != this.width || height != this.height) allocate(width, height)
         target = (newest + 1) % frames.size
-        pixels = lock(frames[target].buffer)
+        pixels = locked(frames[target].buffer)
         written.setEmpty()
     }
 
@@ -67,10 +68,16 @@ class NativeFrames private constructor(private val descriptor: ParcelFileDescrip
         this.height = height
         frames = List(3) {
             val buffer = HardwareBuffer.create(width, height, HardwareBuffer.RGBX_8888, 1, USAGE)
-            Frame(buffer, Bitmap.wrapHardwareBuffer(buffer, ColorSpace.get(ColorSpace.Named.SRGB))!!, stride(buffer))
+            val bitmap = Bitmap.wrapHardwareBuffer(buffer, ColorSpace.get(ColorSpace.Named.SRGB))
+                ?: throw IOException("the GPU refused a ${width}x$height screen")
+            Frame(buffer, bitmap, stride(buffer))
         }
         newest = 0
     }
+
+    /** The [buffer]'s pixels: a null pointer must not reach the native code. */
+    private fun locked(buffer: HardwareBuffer): Long =
+        lock(buffer).also { if (it == 0L) throw IOException("the frame buffer couldn't be locked") }
 
     override fun raw(x: Int, y: Int, width: Int, height: Int) {
         if (readRect(fd, pixels, frames[target].stride, x, y, width, height) != 0) throw EOFException()
@@ -89,7 +96,7 @@ class NativeFrames private constructor(private val descriptor: ParcelFileDescrip
         frame.stale.op(written, Region.Op.DIFFERENCE)
         if (frame.stale.isEmpty) return
         val source = frames[newest]
-        val from = lock(source.buffer)
+        val from = locked(source.buffer)
         val rects = RegionIterator(frame.stale)
         while (rects.next(rect)) copyRect(pixels, from, frame.stride, rect.left, rect.top, rect.width(), rect.height())
         unlock(source.buffer)
@@ -122,6 +129,7 @@ class NativeFrames private constructor(private val descriptor: ParcelFileDescrip
     override fun hashRows(fb: Framebuffer, out: IntArray) {
         val frame = frames.getOrNull(newest) ?: return
         val pixels = lock(frame.buffer)
+        if (pixels == 0L) return
         hashRows(pixels, frame.stride, width, height, ScrollMeter.BANDS, out)
         unlock(frame.buffer)
     }

@@ -2,6 +2,7 @@ package com.garathon.flatdroid.proot
 
 import com.garathon.flatdroid.util.forEachLineLimited
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
@@ -103,7 +104,16 @@ object ProotRunner {
                 // The stream closed while the process was being stopped.
             }
         }
-        return ProotProcess(process, signals, reader, writer)
+        return ProotProcess(process, signals, reader, writer).also(started::add)
+    }
+
+    /** Every proot started and still running. */
+    private val started = ConcurrentHashMap.newKeySet<ProotProcess>()
+
+    /** The pids of the proots running now. */
+    fun runningPids(): List<Int> {
+        started.removeAll { !it.isAlive }
+        return started.mapNotNull { it.pid }
     }
 
     /**

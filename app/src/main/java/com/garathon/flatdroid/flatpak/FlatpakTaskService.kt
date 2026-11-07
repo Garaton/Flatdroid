@@ -185,8 +185,6 @@ class FlatpakTaskService : Service() {
         }
     }
 
-    /** `apk add` [packages], its package cache in Flatdroid's cache (deleted afterwards); fails the task if apk does. */
-
     private fun perform(task: FlatpakTask) {
         val env = AlpineEnvironment.get(applicationContext)
         // Deployments removed since (by the last task, or from the terminal) get their extra data

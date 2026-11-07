@@ -39,4 +39,24 @@ class WaylandWireTest {
         assertEquals("wl_seat", event.string())
         assertEquals(9, event.int())
     }
+
+    @Test(expected = java.io.IOException::class)
+    fun aStringLongerThanItsMessageIsRefused() {
+        val (events, _) = WaylandWire.parse(ints(2, (16 shl 16), 1, 0x7ffffff0), 16)
+        events[0].int()
+        events[0].string()
+    }
+
+    @Test(expected = java.io.IOException::class)
+    fun aNegativeStringLengthIsRefused() {
+        val (events, _) = WaylandWire.parse(ints(2, (12 shl 16), -16), 12)
+        events[0].string()
+    }
+
+    @Test
+    fun theKeymapHasEachKeysymOnItsOwnKey() {
+        val keymap = WaylandWire.keymap(listOf(0xe9, 0x0101f600))
+        assert("<K1> = 9;" in keymap && "<K2> = 10;" in keymap)
+        assert("key <K1> {[ 0xe9 ]};" in keymap && "key <K2> {[ 0x101f600 ]};" in keymap)
+    }
 }

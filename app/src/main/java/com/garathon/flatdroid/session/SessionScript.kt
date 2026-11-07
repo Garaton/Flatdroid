@@ -24,6 +24,8 @@ object SessionScript {
     const val GUEST_PULSE_SCRIPT = "/run/flatdroid/pulse.pa"
     const val GUEST_VNC_DIR = "/run/flatdroid/vnc"
     const val GUEST_OPENBOX_RC = "/root/.config/openbox/rc.xml"
+    /** Openbox's theme ([com.garathon.flatdroid.alpine.GuestFiles.OPENBOX_THEMERC]), where Openbox looks for the user's themes. */
+    const val GUEST_OPENBOX_THEMERC = "/root/.themes/${com.garathon.flatdroid.alpine.GuestFiles.OPENBOX_THEME}/openbox-3/themerc"
 
     /** In front of a helper's command: fdsec again, adding no Internet sockets to the filter it already has. */
     private val NO_INTERNET = (listOf(Fdsec.ALPINE_PATH) + Fdsec.flags(Fdsec.Filter(noInternet = true)) + "--").joinToString(" ")
@@ -46,19 +48,23 @@ object SessionScript {
     fun command(
         geometry: String, frameRate: Int, sound: Boolean, resampler: Resampler, sessionBus: Boolean,
         camera: Boolean = false, clipboard: Boolean = true, wayland: Boolean = false, externalViewer: Boolean = false,
+        interfaceSize: Int = 100,
     ): List<String> =
         listOf(
             "/bin/sh", GUEST_SCRIPT, geometry, VNC_PORT.toString(), frameRate.toString(),
             onOff(sound), resampler.pulseName, onOff(sessionBus), onOff(sessionBus && camera),
-            onOff(clipboard), onOff(wayland), onOff(externalViewer),
+            onOff(clipboard), onOff(wayland), onOff(externalViewer), scale(interfaceSize),
         )
+
+    /** A percent as the output's scale ("1.5" for 150). */
+    fun scale(percent: Int): String = "${percent / 100}.${(percent % 100).toString().padStart(2, '0')}"
 
     /** wayvnc's configuration ([WaylandVnc.config]), next to Xvnc's password file. */
     const val GUEST_WAYVNC_CONFIG = "$GUEST_VNC_DIR/wayvnc.conf"
     /** labwc's configuration directory ([com.garathon.flatdroid.alpine.GuestFiles.labwcRc]). */
     const val GUEST_LABWC_DIR = "$GUEST_VNC_DIR/labwc"
     /** Above this frame rate (uncapped) the output keeps the headless backend's refresh. */
-    private const val MAX_OUTPUT_REFRESH = 240
+    const val MAX_OUTPUT_REFRESH = 240
 
     private fun onOff(value: Boolean) = if (value) "on" else "off"
 
@@ -66,8 +72,8 @@ object SessionScript {
      * Arguments: geometry (WxH), VNC port, frame rate, "on" when the app gets sound (PulseAudio
      * starts only then), PulseAudio's resample method, "on" for the session bus, "on" for PipeWire, "on" when the clipboard is shared ([command]
      * builds them; off adds `-AcceptCutText=0 -SendCutText=0` to Xvnc), "on" for a Wayland session (labwc and wayvnc instead of
-     * Xvnc and Openbox), and "on" for an external viewer (the TCP port and login; else the viewer's Unix
-     * socket); title bars come from Openbox's and labwc's configurations. Exits when the display does; Flatdroid ends the session by stopping this proot.
+     * Xvnc and Openbox), "on" for an external viewer (the TCP port and login; else the viewer's Unix
+     * socket), and the Wayland output's scale ([scale]); title bars come from Openbox's and labwc's configurations. Exits when the display does; Flatdroid ends the session by stopping this proot.
      * `-extension GLX` turns GLX off in Alpine's Xvnc, which has it (apps use EGL). `-nolisten local` drops the abstract socket
      * `@/tmp/.X11-unix/X1`: proot doesn't translate abstract names, so it would be open to other
      * users of the device, with no authentication; clients use the socket file in private storage
@@ -98,6 +104,7 @@ object SessionScript {
         |clipboard=$8
         |wayland=$9
         |external=${'$'}{10}
+        |scale=${'$'}{11}
         |clipboard_args=
         |[ "${'$'}clipboard" = on ] || clipboard_args="-AcceptCutText=0 -SendCutText=0"
         |rm -f /tmp/.X1-lock ${GuestPaths.X11_DIR}/$X_SOCKET ${GuestPaths.PULSE_DIR}/* $GUEST_VNC_DIR/$VNC_SOCKET
@@ -129,7 +136,7 @@ object SessionScript {
         |  fi
         |  LD_PRELOAD=${Fdshm.ALPINE_PATH} XDG_RUNTIME_DIR=${GuestPaths.WAYLAND_DIR} WLR_BACKENDS=headless WLR_RENDERER=pixman \
         |    WLR_LIBINPUT_NO_DEVICES=1 WLR_HEADLESS_OUTPUTS=1 ${'$'}guard /usr/bin/labwc -C $GUEST_LABWC_DIR -S \
-        |    "/bin/sh -c '/usr/bin/wlr-randr --output HEADLESS-1 --custom-mode ${'$'}mode; exec /usr/bin/wayvnc -S $GUEST_VNC_DIR/wayvncctl -f ${'$'}frame_rate ${'$'}listen'" &
+        |    "/bin/sh -c '/usr/bin/wlr-randr --output HEADLESS-1 --custom-mode ${'$'}mode --scale ${'$'}scale; exec /usr/bin/wayvnc -S $GUEST_VNC_DIR/wayvncctl -f ${'$'}frame_rate ${'$'}listen'" &
         |  display=${'$'}!
         |  wait_socket ${GuestPaths.WAYLAND_DIR}/${GuestPaths.WAYLAND_SOCKET} "the Wayland compositor"
         |  # labwc starts wayvnc itself, once its own socket is there.

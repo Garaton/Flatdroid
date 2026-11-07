@@ -182,9 +182,9 @@ static const struct rule EXTRA[] = {
 /* Big enough for every rule build() can emit; the _Static_assert below fails the build if a
  * future rule would overflow the stack array. */
 #define MAX_FILTER 96
-/* base (arch check, nr load) + x32 guard + newer-than-proot guard + ALWAYS + EXTRA + the no_inet
- * block + the check rule. */
-_Static_assert(5 + 2 + 2 + 2 * (sizeof ALWAYS / sizeof *ALWAYS) + 2 * (sizeof EXTRA / sizeof *EXTRA) + 7 + 5 <= MAX_FILTER,
+/* base (arch check, nr load) + x32 guard + newer-than-proot guard + ALWAYS + EXTRA + the
+ * no_connect and no_inet blocks + the check rule. */
+_Static_assert(5 + 2 + 2 + 2 * (sizeof ALWAYS / sizeof *ALWAYS) + 2 * (sizeof EXTRA / sizeof *EXTRA) + 2 + 7 + 5 <= MAX_FILTER,
                "fdsec filter would overflow MAX_FILTER");
 #define LOAD(field) BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, field))
 /* The low 32 bits of argument i (seccomp_data is little-endian on both architectures). */

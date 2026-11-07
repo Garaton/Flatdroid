@@ -78,4 +78,11 @@ class InstalledAppsTest {
         // IDs aren't searched.
         assertEquals(emptyList<String>(), apps.forList("c.C", AppSort.NAME).map { it.name })
     }
+
+    @Test
+    fun terminalAppsAreToldFromTheirDesktopFile() {
+        assertEquals(true, InstalledApps.runsInTerminal(Keyfile.parse("[Desktop Entry]\nName=A\nTerminal=true\n")))
+        assertEquals(false, InstalledApps.runsInTerminal(Keyfile.parse("[Desktop Entry]\nName=A\nTerminal=false\n")))
+        assertEquals(false, InstalledApps.runsInTerminal(Keyfile.parse("[Desktop Entry]\nName=A\n")))
+    }
 }

@@ -27,6 +27,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -117,6 +118,7 @@ fun AppSettingsScreen(
     var environment by rememberSaveable { mutableStateOf(EnvironmentText.format(settings.environment)) }
     var launchArgs by rememberSaveable { mutableStateOf(LaunchArgs.format(settings.launchArgs)) }
     var forceX11 by rememberSaveable { mutableStateOf(settings.forceX11) }
+    var interfaceSize by rememberSaveable { mutableIntStateOf(settings.interfaceSize) }
     var homeMode by rememberSaveable { mutableStateOf(settings.homeMode) }
     var sdcard by rememberSaveable { mutableStateOf(settings.sdcard) }
     val environmentValue = EnvironmentText.parse(environment)
@@ -173,11 +175,6 @@ fun AppSettingsScreen(
             title = stringResource(R.string.app_settings_resolution),
             hint = stringResource(R.string.app_settings_resolution_hint),
         )
-        // Only for apps that ask for Wayland as well as X11.
-        if (app.waylandAndX11) SwitchRow(
-            forceX11, { forceX11 = it },
-            stringResource(R.string.app_settings_force_x11), stringResource(R.string.app_settings_force_x11_hint),
-        )
         if (choice == Resolution.CUSTOM) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 SizeField(width, stringResource(R.string.app_settings_width), size(width) == null, Modifier.width(120.dp)) { width = it }
@@ -192,6 +189,20 @@ fun AppSettingsScreen(
                 )
             }
         }
+        // Only for apps that ask for Wayland as well as X11.
+        if (app.waylandAndX11) SwitchRow(
+            forceX11, { forceX11 = it },
+            stringResource(R.string.app_settings_force_x11), stringResource(R.string.app_settings_force_x11_hint),
+        )
+        // The compositor scales; Xvnc can't.
+        if (app.wayland) DropdownRow(
+            selected = interfaceSize,
+            options = AppSettings.INTERFACE_SIZES,
+            onSelect = { interfaceSize = it },
+            label = { percentLabel.format(it) },
+            title = stringResource(R.string.app_settings_interface_size),
+            hint = stringResource(R.string.app_settings_interface_size_hint),
+        )
 
         SectionTitle(stringResource(R.string.app_settings_permissions))
         SwitchRow(
@@ -394,6 +405,7 @@ fun AppSettingsScreen(
                             environment = if (developerOptions) environmentValue.orEmpty() else settings.environment,
                             launchArgs = if (developerOptions) LaunchArgs.parse(launchArgs) else settings.launchArgs,
                             forceX11 = forceX11,
+                            interfaceSize = interfaceSize,
                             homeModeChoice = homeMode.takeIf { it != settings.defaults.homeMode },
                             sdcard = if (broadAccess) sdcard else settings.sdcard,
                         )

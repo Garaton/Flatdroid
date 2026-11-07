@@ -104,6 +104,63 @@ object GuestFiles {
             |""".trimMargin()
     }
 
+    /** The name of [OPENBOX_THEMERC] among Openbox's themes. */
+    const val OPENBOX_THEME = "Flatdroid"
+
+    /**
+     * Openbox's theme: labwc's built-in one (its default colours), so windows look the same on
+     * X11 as on Wayland. Keys left out keep Openbox's defaults.
+     */
+    val OPENBOX_THEMERC = """
+        |border.width: 1
+        |padding.width: 4
+        |padding.height: 3
+        |window.handle.width: 0
+        |window.client.padding.width: 0
+        |window.client.padding.height: 0
+        |window.active.border.color: #aaaaaa
+        |window.inactive.border.color: #aaaaaa
+        |window.active.title.bg: flat solid
+        |window.active.title.bg.color: #e1dedb
+        |window.inactive.title.bg: flat solid
+        |window.inactive.title.bg.color: #f6f5f4
+        |window.active.label.bg: parentrelative
+        |window.active.label.text.color: #000000
+        |window.inactive.label.bg: parentrelative
+        |window.inactive.label.text.color: #000000
+        |window.label.text.justify: center
+        |window.active.button.unpressed.bg: parentrelative
+        |window.active.button.unpressed.image.color: #000000
+        |window.active.button.hover.bg: flat solid
+        |window.active.button.hover.bg.color: #d2cfcb
+        |window.active.button.pressed.bg: flat solid
+        |window.active.button.pressed.bg.color: #c6c2bd
+        |window.inactive.button.unpressed.bg: parentrelative
+        |window.inactive.button.unpressed.image.color: #000000
+        |window.active.handle.bg: flat solid
+        |window.active.handle.bg.color: #e1dedb
+        |window.inactive.handle.bg: flat solid
+        |window.inactive.handle.bg.color: #f6f5f4
+        |window.active.grip.bg: parentrelative
+        |window.inactive.grip.bg: parentrelative
+        |menu.border.width: 1
+        |menu.border.color: #aaaaaa
+        |menu.items.bg: flat solid
+        |menu.items.bg.color: #fcfbfa
+        |menu.items.text.color: #000000
+        |menu.items.active.bg: flat solid
+        |menu.items.active.bg.color: #e1dedb
+        |menu.items.active.text.color: #000000
+        |menu.title.bg: flat solid
+        |menu.title.bg.color: #e1dedb
+        |menu.title.text.color: #000000
+        |osd.border.width: 1
+        |osd.border.color: #aaaaaa
+        |osd.bg: flat solid
+        |osd.bg.color: #fcfbfa
+        |osd.label.text.color: #000000
+        |""".trimMargin()
+
     /**
      * Openbox's whole configuration (a user rc.xml replaces Openbox's defaults, it isn't merged):
      * normal windows maximised with their title bars kept (GTK3/Qt windows need them to close);
@@ -125,7 +182,7 @@ object GuestFiles {
             |<openbox_config xmlns="http://openbox.org/3.4/rc">
             |<focus><focusNew>yes</focusNew><followMouse>no</followMouse></focus>
             |<placement><policy>Smart</policy><center>yes</center></placement>
-            |<theme><titleLayout>NLMC</titleLayout><keepBorder>yes</keepBorder><animateIconify>no</animateIconify></theme>
+            |<theme><name>$OPENBOX_THEME</name><titleLayout>NLMC</titleLayout><keepBorder>yes</keepBorder><animateIconify>no</animateIconify></theme>
             |<desktops><number>1</number></desktops>
             |<keyboard>
             |<keybind key="A-F4"><action name="Close"/></keybind>

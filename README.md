@@ -1,8 +1,8 @@
+<p align="center"><img src="assets/flatdroid_icon.png" alt="Flatdroid Logo"></p>
+
 # Flatdroid
 
 > Under development and unfinished.
-
-![Flatdroid Logo](./assets/flatdroid_icon.png "Flatdroid Logo")
 
 An Android based Flatpak runner which uses proot to provide the needed environment for Flatpaks to run.
 
@@ -20,39 +20,41 @@ An Android based Flatpak runner which uses proot to provide the needed environme
 
 ## Overview
 
-Flatdroid runs Linux desktop Flatpak apps from Flathub on Android phones, without needing root. It sets up a small Alpine Linux environment inside the app using proot, and uses the `flatpak` CLI to download and update apps. It then launches each app with its own launcher, as Flatpak's normal sandbox can't run on Android (bwrap needs namespaces). Apps draw to a virtual X11 display that you view with a VNC viewer such as AVNC.
+Flatdroid runs Linux desktop Flatpak apps from Flathub on Android phones, with no root. It sets up a small Alpine Linux environment inside the app using proot, and uses the `flatpak` CLI to download and update apps. It then launches each app with its own launcher, as Flatpak's normal sandbox can't run on Android (bwrap needs namespaces). Apps draw to a virtual Wayland/X11 display that you view with a VNC viewer.
 
 The app creates and uses `Documents/Flatdroid` as its home directory.
 
 Some apps (VLC/Firefox) may have issues that can be fixed by adding environment variables to their launch (turn on developer options in the settings to see them). These app fixes are found within `AppEnvironmentFixes.txt`.
 
-This is an almost entirely vibe-coded app in order to train my agentic coding skills. Expect there to be issues, and me (the maintainer) to not have a complete knowledge of the codebase, but if you make a GitHub issue I will respond (given 2 weeks).
+This is an almost entirely vibe-coded app in order to train my agentic coding skills, this README however is written by a human who has verified everything stated herein (written doesn't mean Claude didn't tell me 500 times to include specific sections until I relented). Expect there to be issues, and me (the maintainer) to not have a complete knowledge of the codebase, but if you make a GitHub issue I will respond (given 2 weeks).
 
 ## Installation
 
 Go to the releases tab, and for the most recent version download the release APK for the architecture your Android device runs (most likely Arm64).
 
 Requirements:
-- Version and Architecture: Android 7+ (minSdk 24), arm64-v8a or x86_64.
+
+- Version and Architecture: Android 7+ (minSdk 24), arm64-v8a (aka: aarch64) or x86_64.
 - Internet: For initial setup, and Flatpak downloading.
 - Storage Space: ~450 MB for initial required packages, and 0.4-1 GB per Flatpak runtime.
-- VNC Viewer App: AVNC, bVNC, etc.
 
-## Screenshots
+## App Examples
 
-<img src="assets/flatdroid_screenshot.png" alt="Flatdroid Flatpak List" width="300">
-<img src="assets/audacity_screenshot.png" alt="Audacity Running" width="300">
-<img src="assets/homestuck_screenshot.png" alt="Homestuck Running" width="300">
+<img src="assets/flatdroid_running.gif" alt="Flatdroid Running Mousepad" width="300">
 
-(VNC Viewer used in screenshots is [AVNC](https://f-droid.org/packages/com.gaurav.avnc/))
+<table><tr>
+<td><img src="assets/flatdroid_screenshot.png" alt="Flatdroid Flatpak List" width="300"></td>
+<td><img src="assets/audacity_screenshot.png" alt="Audacity Running" width="300"></td>
+<td><img src="assets/homestuck_screenshot.png" alt="Homestuck Running" width="300"></td>
+</tr></table>
 
 ## Features
 
-Using Flatdroid a user is able to install and launch Flatpaks to use on their Android device.
+Using Flatdroid, a user is able to install and launch Flatpaks apps on their Android device.
 
-In order to install, at the home screen you hit the + icon on the topbar, and enter the Flatpak ID from [Flathub](https://flathub.org/), this will then begin installation and Flatdroid's own Flatpak setup, once it is done it will appear in your Flatpak list.
+In order to install, at the home screen you hit the + icon on the topbar, and enter the Flatpak ID from [Flathub](https://flathub.org/) (Flathub is currently the only supported source), this will then begin installation and Flatdroid's own Flatpak setup, once it is done it will appear in your Flatpak list.
 
-In order to launch and use a Flatpak, you tap the Flatpak within the home screen, and after it has been fully launched, you can hit "Open viewer" to move to your VNC viewer and use the Flatpak from there. Once you are finished with the Flatpak you can either exit it from within the Flatpak, or hit the "Stop" button.
+In order to launch and use a Flatpak, you tap the Flatpak within the home screen, and after it has been fully launched, you can hit "Open app" in order to view and interact with the Flatpak. Once you are finished with the Flatpak you can may exit through the Flatpak itself, or stop the Flatpak using Flatdroid.
 
 In order to update, at the home screen you hit the refresh icon, this will first update all alpine packages, and then update all Flatpaks. Updating may take a while even after the download has been finished so please be patient.
 
@@ -61,6 +63,7 @@ In order to uninstall you go into the per-app settings, scroll to the bottom and
 ### Settings Presets
 
 Currently there are three security settings presets:
+
 - Performant
     - Assumes all Flatpaks are trusted.
     - Sacrifices some security for performance.
@@ -83,6 +86,7 @@ Currently there are three security settings presets:
 ### Flatpak File Access
 
 There are three home modes for apps:
+
 - Shared Home
     - The home is found at `Documents/Flatdroid` in Android's shared storage.
     - On Android 11+ only files made by Flatdroid can be seen within this folder unless all file access is turned on.
@@ -101,9 +105,36 @@ There are three home modes for apps:
 
 You can also optionally per-app mount all of Android's shared storage to `/sdcard` so you can access more than just `Documents/Flatdroid` (needs all files access).
 
+### Embedded VNC Viewer
+
+Instead of needing an external VNC viewer (you may still use one by going into settings), which comes with security issues, Flatdroid has it's own opinionated VNC viewer.
+
+The reason this is safer is because the VNC connection isn't exposed to the rest of Android over localhost. Instead Flatdroid uses a local unix socket to transfer data directly to our embedded viewer. Due to Flatdroid controlling the viewer this also allows to implement more features, and optimizations that wouldn't be possible with an external viewer.
+
+#### Controls
+
+Topbar Buttons:
+
+- The back button takes you back to the Flatpak list.
+- Keyboard on tap brings up the keyboard, keyboard on hold brings up the extra keys by itself (or puts it down with a keyboard up).
+- The X icon closes the currently focused window with an Alt+F4.
+- The power icon turns off the app with a SIGINT (X icon leads to more graceful exits).
+
+User Controls:
+
+- Taps correlate to clicks, with double taps correlating to double clips.
+- Dragging correlates to scrolling, with there being support for fling scrolling.
+- Tapping, holding, and releasing without a drag correlates to a right click.
+- Tapping, holding, and dragging correlates to a left click and drag.
+- Using the Android back gesture or button correlates to Alt+left arrow (back on most browsers).
+- You can zoom in and out with pinch.
+- Two finger dragging allows you to pan a zoomed in screen, with there also being support for fling panning.
+- Three finger tap opens up the keyboard.
+
 ### Export/Import Flatdroid Data
 
 You are able to export/import:
+
 - Flatdroid's global and per-app settings.
 - All private homes.
 - All Flatpak settings.
@@ -115,6 +146,7 @@ You are able to export/import:
 `tools/flatdroid-sync` is a shell utility that can transfer Flatpak settings between your PC and Flatdroid. It works by taking a Flatdroid compliant zip and pushing its Flatpak settings to your PC, or taking your PC's Flatpak settings and forming them into Flatdroid compliant zips.
 
 Example Usage:
+
 ```
 # Imports the individual app settings of the app
 flatdroid-sync -i "UnofficialHomestuckCollection_settings.zip"
@@ -138,6 +170,10 @@ flatdroid-sync -x com.example.flat
 
 Dependencies: `zip`, `unzip`.
 
+### Alpine Terminal
+
+In case you want to
+
 ## Building
 
 - Requirements: Android SDK platform-tools, platforms;android-35, build-tools 35, NDK 30, JDK 21, CMake 3.22.1, make, git, curl, gawk, readelf.
@@ -145,29 +181,33 @@ Dependencies: `zip`, `unzip`.
 - Build: In the base directory: `./gradlew assemble[architecture]["Release" or "Debug"]`.
   - ex: `./gradlew assembleArm64Debug`
   - Built APKs are found in `app/build/outputs/apk`.
-- Architectures: Arm64, X86_64, Universal (only 64-bit systems are supported).
+- Architectures (only 64-bit supported): Arm64, X86_64, Universal.
 
 Notes:
+
 - The first build will need internet access to pull patched repositories.
-- You need to sign release builds with your own key (and do other setup so it uses the key) in order to install them.
+- You need to sign release builds with your own key in order to install them.
 
 ## Methodology
 
 Alpine rootfs and proot are used to install packages and run the Flatpak CLI for install, update, and uninstall. Flatpaks are launched outside of Alpine with a custom launcher under their own proot.
 
 Flatpak Needs:
+
 - When running: a runtime at /usr, app at /app, app data in ~/.var/app/\<APP-ID\>, and a .flatpak-info file.
 - User namespaces (Android doesn't do namespaces).
 - X11 or Wayland server.
 
 Issues:
+
 - bwrap and proot have compatibility issues so base `flatpak run` doesn't work (custom launcher used).
 
 How it Works:
+
 - proot is used to bind needed flatpak runtime data, and Documents/Flatdroid on flatpak launch.
 - proot fakes success on namespaces, but Android doesn't have namespaces, which creates bwrap incompatibility.
 - Flatpaks are launched through a custom launcher to get around bwrap and other issues.
-- Xvnc and Openbox are used for display management.
+- Xvnc + Openbox for X11, and wayvnc + labwc for Wayland, are used for display management.
 - PulseAudio is used for audio/microphone.
 - PipeWire, WirePlumber, xdg-desktop-portal, GStreamer, xdg-dbus-proxy are used for camera.
 - Software only rendering.
@@ -175,17 +215,19 @@ How it Works:
 ## Security
 
 Issues:
+
 - Sandboxes are disabled in order for Flatpak to run.
     - This does not bypass Android's own sandbox.
     - Flatpaks are not isolated from each other.
     - Electron and WebKit run without their own sandboxes as well.
-- Due to use of external VNC viewer, and VNC passwords being weak, treat it as if any app has access to the VNC session.
 - If a Flatpak escapes proot, it will have access to everything Flatdroid has access to.
 
 Hardening:
+
 - Every Flatpak launch runs with a seccomp filter and non-dumpable proot. This makes Flatpaks from the fully extent of Flatdroid's permissions more difficult.
 - Under normal conditions a Flatpak only has access to the files bound to it's proot.
 - Different "Home Modes" to limit accessible files even more.
+- Embedded VNC viewer to avoid putting the VNC instance anywhere on localhost.
 - Per-Flatpak permissions, with the ability to also disable permissions.
 - Optional per launch check to see if a Flatpak's files were modified by another process.
 - Other miscellaneous low cost hardening.

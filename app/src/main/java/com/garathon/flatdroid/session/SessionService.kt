@@ -145,7 +145,7 @@ class SessionService : Service() {
                 if (AppData.settings(applicationContext, appId).load().homeMode == HomeMode.TEMPORARY) {
                     TempHomePrompt.sessionEnded(applicationContext, appId)
                 }
-                // A question (an Electron or Wayland offer, a files-changed report) stays up for the UI to answer.
+                // A question (an Electron offer, a files-changed report) stays up for the UI to answer.
                 val awaitingUi = SessionController.ui.value.state is SessionState.Question
                 if (!awaitingUi) SessionController.ended(message, failed)
                 stopSelf()

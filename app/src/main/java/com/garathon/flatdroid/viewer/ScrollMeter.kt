@@ -110,12 +110,12 @@ class ScrollMeter {
         for (band in 0 until BANDS) {
             val from = band * rows
             val to = from + rows
-            // Both sorted by hash: walk them together, matching hashes found once in each.
+            // Both sorted by hash (as signed numbers, as the sort does): walk them together, matching hashes found once in each.
             var i = from
             var j = from
             while (i < to && j < to) {
-                val a = lastBands[i] ushr 32
-                val b = newBands[j] ushr 32
+                val a = lastBands[i] shr 32
+                val b = newBands[j] shr 32
                 when {
                     a < b -> i = next(lastBands, i, to)
                     b < a -> j = next(newBands, j, to)
@@ -148,9 +148,9 @@ class ScrollMeter {
 
     /** The index after the run of equal hashes starting at [i]. */
     private fun next(bands: LongArray, i: Int, to: Int): Int {
-        val hash = bands[i] ushr 32
+        val hash = bands[i] shr 32
         var k = i + 1
-        while (k < to && bands[k] ushr 32 == hash) k++
+        while (k < to && bands[k] shr 32 == hash) k++
         return k
     }
 }

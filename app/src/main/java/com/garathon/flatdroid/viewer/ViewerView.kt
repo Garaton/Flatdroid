@@ -26,7 +26,6 @@ import android.view.inputmethod.InputConnection
 import com.garathon.flatdroid.settings.Resolution
 import com.garathon.flatdroid.util.DebugLog
 import com.garathon.flatdroid.util.DebugMeter
-import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 
@@ -41,13 +40,15 @@ import kotlin.math.roundToInt
 class ViewerView(context: Context, private val connection: ViewerConnection) : View(context), ViewerSink, PointerOutput {
     var onClosed: ((String?) -> Unit)? = null
     /** Key presses, with the extra keys row's latched Ctrl and Alt. */
-    val keys = ViewerKeys { down, keysym -> connection.key(down, keysym) }
+    val keys = ViewerKeys(connection::key, connection::typed)
     /** Keysyms sent for keys held down, by key code: the release sends the same one. */
     private val heldKeys = HashMap<Int, Int>()
     /** Modifiers pressed for a key whose event only said they were on, by key code: released with it. */
     private val addedModifiers = HashMap<Int, List<Int>>()
     var onClipboard: ((String) -> Unit)? = null
     var onClipboardRequested: (() -> String?)? = null
+    /** A keyboard committed more text than is typed as keys ([MAX_TYPED]). */
+    var onLongText: ((String) -> Unit)? = null
     /** Three fingers tapped (the soft keyboard opens or closes). */
     var onThreeFingerTap: (() -> Unit)? = null
 
@@ -217,6 +218,8 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
         }
     }
     private var mouseButtons = 0
+    private var wheelUp = 0f
+    private var wheelRight = 0f
     private var pinching = false
 
     /** A three-finger tap may be under way: three fingers down, none moved, not too long ago. */
@@ -352,7 +355,7 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
 
     /** The part of the framebuffer on screen now, above the keyboard and the extra keys, into [visible]. */
     private fun visiblePart() {
-        visibleRect.set(0f, 0f, width.toFloat(), (height - covered).coerceAtLeast(0).toFloat())
+        visibleRect.set(0f, 0f, width.toFloat(), (height - covered).coerceAtLeast(1).toFloat())
         inverse.mapRect(visibleRect)
         visible.set(
             visibleRect.left.toInt().coerceIn(0, frameWidth), visibleRect.top.toInt().coerceIn(0, frameHeight),
@@ -445,11 +448,8 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
         offsetX = if (w <= width) (if (moved) offsetX.coerceIn(0f, width - w) else (width - w) / 2) else offsetX.coerceIn(width - w, 0f)
         offsetY = when {
             h > height -> offsetY.coerceIn(room - h, 0f)
-            // Fitted: what the keyboard covers can be moved above it.
-            moved && h >= height - 1 -> offsetY.coerceIn(min(0f, room - h), height - h)
-            // Shorter than the view: it stops at the top; only the keyboard and the extra keys go over it.
-            moved -> offsetY.coerceIn(0f, height - h)
-            zoom < 1f -> max(0f, (room - h) / 2)
+            moved -> offsetY.coerceIn(min(0f, room - h), height - h)
+            zoom < 1f -> (room - h) / 2
             else -> (height - h) / 2
         }
         placement.setScale(s, s)
@@ -467,13 +467,8 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
         if (twoFingers || !panFlinger.isFinished) return
         if (frameWidth == 0) return
         if (zoom <= 1f && covered == 0) return connection.visibleRegion(0, 0, frameWidth, frameHeight, whole = true)
-        val rect = RectF(0f, 0f, width.toFloat(), (height - covered).coerceAtLeast(1).toFloat())
-        inverse.mapRect(rect)
-        val left = max(0, rect.left.toInt())
-        val top = max(0, rect.top.toInt())
-        val right = min(frameWidth, rect.right.toInt() + 1)
-        val bottom = min(frameHeight, rect.bottom.toInt() + 1)
-        connection.visibleRegion(left, top, right - left, bottom - top, whole = left == 0 && top == 0 && right == frameWidth && bottom == frameHeight)
+        visiblePart()
+        connection.visibleRegion(visible.left, visible.top, visible.width(), visible.height(), whole = visible.width() == frameWidth && visible.height() == frameHeight)
     }
 
     // ---- Touch
@@ -632,7 +627,22 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
         reportVisible()
     }
 
+    override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
+        super.onWindowFocusChanged(hasWindowFocus)
+        if (!hasWindowFocus) releaseKeys()
+    }
+
+    /** The key-ups would go elsewhere now: the app would go on seeing the keys held. */
+    private fun releaseKeys() {
+        heldKeys.values.forEach(keys::up)
+        heldKeys.clear()
+        addedModifiers.values.flatten().forEach(keys::up)
+        addedModifiers.clear()
+        keys.releaseAll()
+    }
+
     override fun onDetachedFromWindow() {
+        releaseKeys()
         stopFling()
         stopPanFling()
         stopPlacing()
@@ -711,7 +721,7 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
             InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
         outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_FULLSCREEN or EditorInfo.IME_FLAG_NO_EXTRACT_UI or
             EditorInfo.IME_FLAG_NO_ENTER_ACTION or EditorInfo.IME_ACTION_NONE
-        return KeyInput(this, keys)
+        return KeyInput(this, keys) { onLongText?.invoke(it) }
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
@@ -786,9 +796,14 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
         when (event.actionMasked) {
             MotionEvent.ACTION_HOVER_MOVE, MotionEvent.ACTION_BUTTON_PRESS, MotionEvent.ACTION_BUTTON_RELEASE -> mouse(event)
             MotionEvent.ACTION_SCROLL -> {
-                // One notch per unit; Android's vertical axis is positive upwards, its horizontal one to the right.
-                val v = event.getAxisValue(MotionEvent.AXIS_VSCROLL).roundToInt()
-                val h = event.getAxisValue(MotionEvent.AXIS_HSCROLL).roundToInt()
+                // One notch per unit, what is left of one kept for the next event (fine wheels and
+                // trackpads send fractions); Android's vertical axis is positive upwards, its horizontal one to the right.
+                wheelUp += event.getAxisValue(MotionEvent.AXIS_VSCROLL)
+                wheelRight += event.getAxisValue(MotionEvent.AXIS_HSCROLL)
+                val v = wheelUp.toInt()
+                val h = wheelRight.toInt()
+                wheelUp -= v
+                wheelRight -= h
                 wheel(event.x, event.y, if (v > 0) WHEEL_UP else WHEEL_DOWN, kotlin.math.abs(v))
                 wheel(event.x, event.y, if (h > 0) WHEEL_RIGHT else WHEEL_LEFT, kotlin.math.abs(h))
             }

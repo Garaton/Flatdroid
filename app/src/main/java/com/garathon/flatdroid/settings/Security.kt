@@ -21,7 +21,7 @@ data class SecuritySettings(
     val defaultHomeMode: HomeMode = HomeMode.SHARED,
     /** Only CPU and memory information from /sys, and `devices=all` gives no device group. */
     val limitDevices: Boolean = false,
-    /** The VNC password screen can't be captured, the password shows only on tap, and the viewer must be chosen in Settings. */
+    /** Flatdroid's screens can't be captured. */
     val hideScreen: Boolean = false,
     /** Exports go through Android's "save as" picker instead of straight into Download. */
     val exportWithPicker: Boolean = false,

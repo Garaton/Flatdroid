@@ -28,9 +28,11 @@ sealed interface SessionState {
         val socket: String? = null,
         val wayland: Boolean = false,
         val followPercent: Int? = null,
-        /** The compositor's socket for [com.garathon.flatdroid.viewer.WaylandClipboard]; null without a shared clipboard or Wayland. */
-        val clipboardSocket: String? = null,
+        /** The compositor's socket for [com.garathon.flatdroid.viewer.WaylandClient]; null on X11. */
+        val waylandSocket: String? = null,
         val shareClipboard: Boolean = true,
+        /** What the Wayland output refreshes at, per second; null to leave it. */
+        val outputRefresh: Int? = null,
     ) : SessionState
     data class Stopping(val appId: String) : SessionState
     /**
@@ -38,7 +40,7 @@ sealed interface SessionState {
      * downloads one for this device. [problem] is set when a swap can't work.
      */
     data class ElectronOffer(val appId: String, val version: String?, val fromArch: String, val problem: String?) : SessionState, Question
-    /** The app can only use Wayland, whose packages aren't installed; the user is asked before Flatdroid downloads them. */
+    /** The agreed Electron swap is being downloaded and put in place. */
     data class PreparingElectron(val appId: String, val detail: String, val fraction: Float?) : SessionState
     /**
      * The file check found changed files before launch; [detail] lists the affected packages and
@@ -97,10 +99,7 @@ object SessionController {
     @Volatile var onDisplayResized: ((Int, Int) -> Unit)? = null
     fun skipFileCheck() { onSkipFileCheck?.invoke() }
 
-    fun running(
-        appId: String, password: String, username: String? = null, socket: String? = null, wayland: Boolean = false, followPercent: Int? = null,
-        clipboardSocket: String? = null, shareClipboard: Boolean = true,
-    ) = _ui.update { it.copy(state = SessionState.Running(appId, password, username, socket, wayland, followPercent, clipboardSocket, shareClipboard)) }
+    fun running(state: SessionState.Running) = _ui.update { it.copy(state = state) }
 
     fun stopping(appId: String) {
         ViewerConnection.closeOnMain()

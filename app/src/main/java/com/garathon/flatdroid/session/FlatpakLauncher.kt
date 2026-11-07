@@ -7,7 +7,7 @@ import android.hardware.display.DisplayManager
 import android.media.AudioManager
 import android.os.Build
 import android.os.FileObserver
-import android.os.Process
+import android.os.SystemClock
 import android.system.Os
 import android.view.Display
 import android.view.Surface
@@ -34,6 +34,7 @@ import com.garathon.flatdroid.launcher.LaunchPlan
 import com.garathon.flatdroid.launcher.LaunchPlanner
 import com.garathon.flatdroid.launcher.PlanResult
 import com.garathon.flatdroid.launcher.VncPassword
+import com.garathon.flatdroid.flatpak.InstalledApps
 import com.garathon.flatdroid.proot.AlpineBinds
 import com.garathon.flatdroid.proot.DevNodes
 import com.garathon.flatdroid.proot.Fdsec
@@ -151,6 +152,7 @@ class FlatpakLauncher(private val context: Context) {
         if (StorageTasks.busyWith(appId) || (settings.homeMode == HomeMode.TEMPORARY && StorageTasks.exportingTempHome(StorageTaskService.pendingTasks(context)))) {
             throw LaunchException(context.getString(R.string.launch_storage_busy))
         }
+        if (InstalledApps(context).needsTerminal(appId)) throw LaunchException(context.getString(R.string.launch_needs_terminal))
         var plan = when (val result = plan(appId, settings, userSettings)) {
             is PlanResult.Ready -> result.plan
             is PlanResult.ElectronSwapNeeded -> {
@@ -232,7 +234,7 @@ class FlatpakLauncher(private val context: Context) {
             SessionScript.command(
                 "${screenWidth}x$screenHeight", frameRate, audio, resampler, sessionBus = true,
                 camera = cameraNodes.isNotEmpty(), clipboard = settings.sharesClipboard, wayland = plan.wayland,
-                externalViewer = externalViewer,
+                externalViewer = externalViewer, interfaceSize = settings.interfaceSize,
             ),
             audio,
             Fdsec.Filter(extraSyscalls = security.extraSyscallFilter),
@@ -257,6 +259,7 @@ class FlatpakLauncher(private val context: Context) {
             try {
                 val display = if (plan.wayland) File(waylandDir, GuestPaths.WAYLAND_SOCKET) else File(x11Dir, SessionScript.X_SOCKET)
                 waitForFile(display, helpers, DISPLAY_TIMEOUT_MS, context.getString(R.string.launch_display_failed))
+                if (!helpersRunning(helpersStarted, helpers)) throw LaunchException(context.getString(R.string.launch_display_failed))
             } catch (e: LaunchException) {
                 throw if (filterRefused.get()) LaunchException(context.getString(R.string.launch_filter_refused)) else e
             }
@@ -277,10 +280,8 @@ class FlatpakLauncher(private val context: Context) {
                 )
                 player.start()
             }
-            // The helpers run under proot, which keeps them dumpable: hide what runs now from the
-            // app, once all of them run.
-            if (!helpersStarted.await(DISPLAY_TIMEOUT_MS, TimeUnit.MILLISECONDS)) SessionController.log("[flatdroid] the helpers did not all start in time")
-            val hidden = if (security.hideHelperProcesses) HelperProcesses.procPaths(Process.myPid()) else emptyList()
+            // The helpers run under proot, which keeps them dumpable: hide what runs now from the app.
+            val hidden = if (security.hideHelperProcesses) HelperProcesses.procPaths(ProotRunner.runningPids()) else emptyList()
             fun hideHelpers(plan: LaunchPlan) =
                 if (hidden.isEmpty()) plan else plan.copy(binds = plan.binds.copy(hiddenProc = hidden, emptyDir = emptyDir.path))
             plan = hideHelpers(plan)
@@ -305,12 +306,15 @@ class FlatpakLauncher(private val context: Context) {
                     if (LaunchPlanner.PROOT_KILLED_BY_SIGNAL in line) killedBySignal.set(true)
                     SessionController.log(line)
                 }
-                if (externalViewer) SessionController.running(appId, password, username = WaylandVnc.USERNAME.takeIf { plan.wayland })
-                else SessionController.running(
-                    appId, password, socket = File(vncDir, SessionScript.VNC_SOCKET).path, wayland = plan.wayland,
-                    followPercent = settings.resolution.percent,
-                    clipboardSocket = File(waylandDir, GuestPaths.WAYLAND_SOCKET).path.takeIf { plan.wayland && settings.sharesClipboard },
-                    shareClipboard = settings.sharesClipboard,
+                SessionController.running(
+                    if (externalViewer) SessionState.Running(appId, password, username = WaylandVnc.USERNAME.takeIf { plan.wayland })
+                    else SessionState.Running(
+                        appId, password, socket = File(vncDir, SessionScript.VNC_SOCKET).path, wayland = plan.wayland,
+                        followPercent = settings.resolution.percent,
+                        waylandSocket = File(waylandDir, GuestPaths.WAYLAND_SOCKET).path.takeIf { plan.wayland },
+                        shareClipboard = settings.sharesClipboard,
+                        outputRefresh = frameRate.takeIf { plan.wayland && it <= SessionScript.MAX_OUTPUT_REFRESH },
+                    ),
                 )
                 val code = app.waitFor()
                 SessionController.log("[flatdroid] the app exited ($code)")
@@ -527,6 +531,15 @@ class FlatpakLauncher(private val context: Context) {
         streamers.values.forEach { it.open() }
         if (!ready.await(CAMERA_TIMEOUT_MS, TimeUnit.MILLISECONDS)) SessionController.log("[flatdroid] the camera's helpers did not get ready in time")
         return process
+    }
+
+    /** Waits for the helpers' script to have started them all; false if it ended first, or never gets there. */
+    private fun helpersRunning(started: CountDownLatch, helpers: ProotProcess): Boolean {
+        val end = SystemClock.uptimeMillis() + DISPLAY_TIMEOUT_MS
+        while (!started.await(HELPERS_POLL_MS, TimeUnit.MILLISECONDS)) {
+            if (!helpers.isAlive || SystemClock.uptimeMillis() > end) return false
+        }
+        return true
     }
 
     /** The rate Android's mixer runs at, so PulseAudio's output needs no second resampling. */
@@ -770,7 +783,10 @@ class FlatpakLauncher(private val context: Context) {
      * VNC password file, and the helpers' scripts ([pulseScript] only with sound) and the session
      * bus's configuration and proxy arguments ([busArgs]). Old sockets are removed.
      */
-    private fun writeSessionFiles(password: String, wayvncLogin: Boolean, titleBars: Boolean, pulseScript: String?, busArgs: List<String>, cameraNodes: List<CameraScript.Node>) {
+    private fun writeSessionFiles(
+        password: String, wayvncLogin: Boolean, titleBars: Boolean, pulseScript: String?, busArgs: List<String>,
+        cameraNodes: List<CameraScript.Node>,
+    ) {
         val launcher = AppData.launcherFiles(context)
         launcher.write()
         File(etcDir, "machine-id").writeTextAtomically(launcher.machineId.readText(), durable = false)
@@ -793,6 +809,7 @@ class FlatpakLauncher(private val context: Context) {
         }
         File(sessionDir, "session.sh").writeTextAtomically(SessionScript.TEXT, durable = false)
         File(sessionDir, "openbox-rc.xml").writeTextAtomically(GuestFiles.openboxRc(titleBars), durable = false)
+        File(sessionDir, "openbox-themerc").writeTextAtomically(GuestFiles.OPENBOX_THEMERC, durable = false)
         File(vncDir, "${File(SessionScript.GUEST_LABWC_DIR).name}/rc.xml").apply { parentFile!!.mkdirs() }.writeTextAtomically(GuestFiles.labwcRc(titleBars), durable = false)
         val pulseFile = File(sessionDir, "pulse.pa")
         if (pulseScript != null) pulseFile.writeTextAtomically(pulseScript, durable = false) else pulseFile.delete()
@@ -822,6 +839,7 @@ class FlatpakLauncher(private val context: Context) {
             waylandDir.path to GuestPaths.WAYLAND_DIR,
             File(sessionDir, "session.sh").path to SessionScript.GUEST_SCRIPT,
             File(sessionDir, "openbox-rc.xml").path to SessionScript.GUEST_OPENBOX_RC,
+            File(sessionDir, "openbox-themerc").path to SessionScript.GUEST_OPENBOX_THEMERC,
             busDaemonDir.path to SessionBus.GUEST_DAEMON_DIR,
             busProxyDir.path to SessionBus.GUEST_PROXY_DIR,
             pipewireDir.path to CameraScript.GUEST_PIPEWIRE_DIR,
@@ -885,6 +903,7 @@ class FlatpakLauncher(private val context: Context) {
         /** Android's own fonts, readable by every app. */
         val ANDROID_FONTS = File("/system/fonts")
         const val DISPLAY_TIMEOUT_MS = 30_000L
+        const val HELPERS_POLL_MS = 50L
         const val AUDIO_TIMEOUT_MS = 10_000L
         const val BUS_TIMEOUT_MS = 10_000L
         const val CAMERA_TIMEOUT_MS = 20_000L

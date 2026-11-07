@@ -10,10 +10,20 @@ import android.view.inputmethod.BaseInputConnection
  * for what changed and the new characters. Key events (Backspace on an empty field, Enter,
  * arrows) reach [ViewerView.onKeyDown] as they would from a hardware keyboard.
  */
-class KeyInput(view: View, private val keys: ViewerKeys) : BaseInputConnection(view, false) {
+class KeyInput(
+    view: View,
+    private val keys: ViewerKeys,
+    /** Text longer than [MAX_TYPED] committed at once (a keyboard pasting): not typed. */
+    private val longText: (String) -> Unit = {},
+) : BaseInputConnection(view, false) {
     private var composing = ""
 
     override fun commitText(text: CharSequence, newCursorPosition: Int): Boolean {
+        // Typed, it would take minutes, the screen waiting behind it, and the app may not keep up.
+        if (composing.isEmpty() && text.length > MAX_TYPED) {
+            longText(text.toString())
+            return true
+        }
         replace(text.toString())
         composing = ""
         return true
@@ -54,10 +64,18 @@ class KeyInput(view: View, private val keys: ViewerKeys) : BaseInputConnection(v
 
     /** The composing text becomes [text]: Backspace over what differs, then type the rest. */
     private fun replace(text: String) {
-        var same = 0
-        while (same < composing.length && same < text.length && composing[same] == text[same]) same++
+        val same = sharedStart(composing, text)
         val removed = composing.substring(same)
         repeat(removed.codePointCount(0, removed.length)) { keys.tap(Keysyms.BACKSPACE) }
         keys.type(text.substring(same))
     }
+}
+
+/** The most characters committed at once that are typed as keys (about ten seconds' worth). */
+const val MAX_TYPED = 1000
+
+/** How many chars [a] and [b] start with in common, never ending inside a character made of two. */
+internal fun sharedStart(a: String, b: String): Int {
+    val same = a.commonPrefixWith(b).length
+    return if (same > 0 && a[same - 1].isHighSurrogate()) same - 1 else same
 }

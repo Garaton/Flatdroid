@@ -63,6 +63,7 @@
         <activity
             android:name=".viewer.ViewerActivity"
             android:exported="false"
+            android:launchMode="singleTop"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density"
             android:theme="@style/Theme.Flatdroid"
             android:windowSoftInputMode="adjustResize|stateAlwaysHidden" />
