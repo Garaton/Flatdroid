@@ -12,6 +12,7 @@ import com.garathon.flatdroid.launcher.ElectronSwap
 import com.garathon.flatdroid.launcher.Leftovers
 import com.garathon.flatdroid.proot.LeftoverProcesses
 import com.garathon.flatdroid.setup.AndroidTarFs
+import com.garathon.flatdroid.setup.SetupController
 import com.garathon.flatdroid.storage.SavedSizes
 import com.garathon.flatdroid.util.DebugLog
 import com.garathon.flatdroid.util.appScope
@@ -47,6 +48,7 @@ class FlatdroidApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         DebugLog.init(cacheDir)
+        SetupController.settings(this).loadLive()
         // Before anything of this run starts: every process of Flatdroid's that is running now is left over.
         val killed = LeftoverProcesses.kill()
         if (killed > 0) DebugLog.i("Ended $killed processes left by an earlier run")

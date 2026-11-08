@@ -18,6 +18,7 @@ data class ApkSummary(val line: String?, val errors: List<String>) {
 /** Reads apk's per-package lines, e.g. "( 12/186) Installing glib (2.88.1-r1)". */
 object ApkProgress {
     private val LINE = Regex("""^\(\s*(\d+)/(\d+)\)\s""")
+    private val ACTION = Regex("""^\(\s*\d+/\d+\)\s+(\p{L}+)\s+(\S+)""")
 
     /** (done, total) for a progress line, or null for any other line. */
     fun parse(line: String): Pair<Int, Int>? {
@@ -26,4 +27,7 @@ object ApkProgress {
         val total = m.groupValues[2].toInt()
         return if (total > 0 && done <= total) done to total else null
     }
+
+    /** What a progress line does and to which package ("Upgrading" and "glib"), or null for any other line. */
+    fun action(line: String): Pair<String, String>? = ACTION.find(line)?.let { it.groupValues[1] to it.groupValues[2] }
 }

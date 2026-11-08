@@ -8,8 +8,26 @@ import java.io.File
 import java.io.StringWriter
 import java.util.Properties
 
-/** The display size an app starts with: one of the defaults, or the user's own. */
-enum class DisplaySize { PORTRAIT, LANDSCAPE, CUSTOM }
+/**
+ * The size of an app's screen: a share of the viewer's size ([percent]), which it follows as the
+ * phone turns, or the user's own fixed size ([CUSTOM]). Smaller shares draw everything larger
+ * (the viewer scales the screen up) and cost less to send.
+ */
+enum class Resolution(val percent: Int?) {
+    FULL(100), THREE_QUARTERS(75), HALF(50), QUARTER(25), CUSTOM(null);
+
+    /** The screen's size for a viewer of [viewWidth] x [viewHeight]; even sizes, at least [MIN_FOLLOW]. Not for [CUSTOM]. */
+    fun scaled(viewWidth: Int, viewHeight: Int): Pair<Int, Int> {
+        val p = requireNotNull(percent) { "a custom size follows nothing" }
+        fun side(view: Int) = (view * p / 100 / 2 * 2).coerceIn(MIN_FOLLOW, AppSettings.MAX_SIZE)
+        return side(viewWidth) to side(viewHeight)
+    }
+
+    companion object {
+        /** The smallest side a followed size gets (a quarter of a small phone's width is less). */
+        const val MIN_FOLLOW = 200
+    }
+}
 
 /** What an app gets as its home. None of them isolates the app; they change what it can reach. */
 enum class HomeMode {
@@ -37,11 +55,11 @@ data class AppDefaults(
 
 /** Flatdroid's choices for one Flatpak. */
 data class AppSettings(
-    /** Xvnc's size at launch; the viewer's resize option can change it afterwards. */
-    val displaySize: DisplaySize = DisplaySize.PORTRAIT,
-    /** Used with [DisplaySize.CUSTOM] only. */
-    val customWidth: Int = PORTRAIT_WIDTH,
-    val customHeight: Int = PORTRAIT_HEIGHT,
+    /** The screen's size: a share of the viewer's, or [customWidth] x [customHeight]. */
+    val resolution: Resolution = Resolution.THREE_QUARTERS,
+    /** Used with [Resolution.CUSTOM] only. */
+    val customWidth: Int = CUSTOM_WIDTH,
+    val customHeight: Int = CUSTOM_HEIGHT,
     /** Electron needed the flags for newer versions ("GPU process isn't usable" without them). Managed by the launcher. */
     val newerElectronFlags: Boolean = false,
     /**
@@ -119,6 +137,12 @@ data class AppSettings(
     val cameraFrameRate: Int = AndroidCameras.DEFAULT_FRAME_RATE,
     /** Developer setting: variables added to the app's environment, over Flatdroid's own. */
     val environment: Map<String, String> = emptyMap(),
+    /** Developer setting: arguments added after the app's command (one argument each; no quoting). */
+    val launchArgs: List<String> = emptyList(),
+    /** X11 for an app that takes both (by default such an app gets Wayland). */
+    val forceX11: Boolean = false,
+    /** On Wayland, how large the app draws everything, in percent ([INTERFACE_SIZES]); X11 apps keep their size. */
+    val interfaceSize: Int = 100,
     /** The user's choice of home; null follows [defaults] ([homeMode]). */
     val homeModeChoice: HomeMode? = null,
     /**
@@ -141,23 +165,15 @@ data class AppSettings(
     /** Whether the app gets the Internet: its own setting, else [defaults] and whether its metadata asks for the network. */
     fun networkAllowed(shared: List<String>): Boolean = network ?: (defaults.permissionsFromMetadata && NETWORK in shared)
 
-    val width: Int get() = when (displaySize) {
-        DisplaySize.PORTRAIT -> PORTRAIT_WIDTH
-        DisplaySize.LANDSCAPE -> LANDSCAPE_WIDTH
-        DisplaySize.CUSTOM -> customWidth
-    }
-    val height: Int get() = when (displaySize) {
-        DisplaySize.PORTRAIT -> PORTRAIT_HEIGHT
-        DisplaySize.LANDSCAPE -> LANDSCAPE_HEIGHT
-        DisplaySize.CUSTOM -> customHeight
-    }
-    val geometry: String get() = "${width}x$height"
+    /** The screen's size at launch for a viewer of [viewWidth] x [viewHeight]. */
+    fun size(viewWidth: Int, viewHeight: Int): Pair<Int, Int> =
+        if (resolution == Resolution.CUSTOM) customWidth to customHeight else resolution.scaled(viewWidth, viewHeight)
 
     companion object {
-        const val PORTRAIT_WIDTH = 1000
-        const val PORTRAIT_HEIGHT = 1400
-        const val LANDSCAPE_WIDTH = 1600
-        const val LANDSCAPE_HEIGHT = 1000
+        const val CUSTOM_WIDTH = 1000
+        const val CUSTOM_HEIGHT = 1400
+        /** The interface sizes offered, in percent. */
+        val INTERFACE_SIZES = listOf(50, 75, 100, 125, 150, 175, 200)
         const val MIN_SIZE = 320
         const val MAX_SIZE = 4096
         /** Flatpak's `sockets=` name for sound. */
@@ -205,7 +221,7 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
         fun size(key: String, default: Int) =
             props.getProperty(key)?.toIntOrNull()?.takeIf { it in AppSettings.MIN_SIZE..AppSettings.MAX_SIZE } ?: default
         return AppSettings(
-            displaySize = DisplaySize.entries.firstOrNull { it.name.lowercase() == props.getProperty(KEY_SIZE) } ?: defaults.displaySize,
+            resolution = Resolution.entries.firstOrNull { (it.percent?.toString() ?: "custom") == props.getProperty(KEY_RESOLUTION) } ?: defaults.resolution,
             customWidth = size(KEY_WIDTH, defaults.customWidth),
             customHeight = size(KEY_HEIGHT, defaults.customHeight),
             newerElectronFlags = props.getProperty(KEY_ELECTRON_NEWER) == "true",
@@ -234,6 +250,9 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
                 .filter(LaunchEnvironment::isName)
                 .sorted()
                 .associateWith { props.getProperty(KEY_ENV_PREFIX + it) },
+            launchArgs = LaunchArgs.parse(props.getProperty(KEY_LAUNCH_ARGS).orEmpty()),
+            forceX11 = props.getProperty(KEY_FORCE_X11) == "true",
+            interfaceSize = props.getProperty(KEY_INTERFACE_SIZE)?.toIntOrNull()?.takeIf { it in AppSettings.INTERFACE_SIZES } ?: 100,
             homeModeChoice = HomeMode.entries.firstOrNull { it.name.lowercase() == props.getProperty(KEY_HOME_MODE) },
             sdcard = props.getProperty(KEY_SDCARD) == "true",
             defaults = appDefaults,
@@ -242,7 +261,7 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
 
     fun save(settings: AppSettings) {
         val props = Properties()
-        props.setProperty(KEY_SIZE, settings.displaySize.name.lowercase())
+        props.setProperty(KEY_RESOLUTION, settings.resolution.percent?.toString() ?: "custom")
         // Kept while another size is chosen, so switching back finds them.
         props.setProperty(KEY_WIDTH, settings.customWidth.toString())
         props.setProperty(KEY_HEIGHT, settings.customHeight.toString())
@@ -264,6 +283,9 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
         props.setProperty(KEY_CAMERA_RESOLUTION, settings.cameraResolution.toString())
         props.setProperty(KEY_CAMERA_FRAME_RATE, settings.cameraFrameRate.toString())
         for ((name, value) in settings.environment) props.setProperty(KEY_ENV_PREFIX + name, value)
+        if (settings.launchArgs.isNotEmpty()) props.setProperty(KEY_LAUNCH_ARGS, LaunchArgs.format(settings.launchArgs))
+        if (settings.forceX11) props.setProperty(KEY_FORCE_X11, "true")
+        if (settings.interfaceSize != 100) props.setProperty(KEY_INTERFACE_SIZE, settings.interfaceSize.toString())
         settings.homeModeChoice?.let { props.setProperty(KEY_HOME_MODE, it.name.lowercase()) }
         if (settings.sdcard) props.setProperty(KEY_SDCARD, "true")
         file.writeTextAtomically(StringWriter().also { props.store(it, null) }.toString())
@@ -281,7 +303,7 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
          * app can reach left as they are on this device ([local], its current file, or null for
          * none): whole /dev (with Binder), all of shared storage, the microphone without asking,
          * the camera, the network, Android's fonts, the clipboard, the time zone, the language, the
-         * extra system calls, its home and its environment. A shared
+         * extra system calls, its home, its environment and its launch arguments. A shared
          * settings file can't turn them on.
          */
         fun imported(imported: ByteArray, local: ByteArray?): ByteArray {
@@ -296,7 +318,7 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
             return ByteArrayOutputStream().also { props.store(it, null) }.toByteArray()
         }
 
-        private const val KEY_SIZE = "display.size"
+        private const val KEY_RESOLUTION = "display.resolution"
         private const val KEY_WIDTH = "display.width"
         private const val KEY_HEIGHT = "display.height"
         private const val KEY_ELECTRON_NEWER = "electron.newerFlags"
@@ -310,6 +332,9 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
         private const val KEY_CAMERA_RESOLUTION = "camera.resolution"
         private const val KEY_CAMERA_FRAME_RATE = "camera.frameRate"
         private const val KEY_ENV_PREFIX = "env."
+        private const val KEY_LAUNCH_ARGS = "launch.args"
+        private const val KEY_FORCE_X11 = "display.x11"
+        private const val KEY_INTERFACE_SIZE = "display.interfaceSize"
         private const val KEY_HOME_MODE = "home.mode"
         private const val KEY_SDCARD = "storage.sdcard"
         private const val KEY_NETWORK = "permission.network"
@@ -321,7 +346,14 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
         private const val KEY_SHARE_HIDDEN_FILES = "home.shareHiddenFiles"
         private val WIDENING_KEYS = setOf(
             KEY_WHOLE_DEV, KEY_SDCARD, KEY_MICROPHONE_ALWAYS, KEY_CAMERA, KEY_NETWORK, KEY_EXTRA_SYSCALLS, KEY_HOME_MODE,
-            KEY_SHARE_HIDDEN_FILES, KEY_ANDROID_FONTS, KEY_CLIPBOARD, KEY_TIME_ZONE, KEY_LANGUAGE,
+            KEY_SHARE_HIDDEN_FILES, KEY_ANDROID_FONTS, KEY_CLIPBOARD, KEY_TIME_ZONE, KEY_LANGUAGE, KEY_LAUNCH_ARGS,
         )
     }
+}
+
+/** [AppSettings.launchArgs] as the user edits it: arguments separated by whitespace, each taken as it is (no quoting). */
+object LaunchArgs {
+    fun parse(text: String): List<String> = text.split(Regex("\\s+")).filter { it.isNotEmpty() }
+
+    fun format(args: List<String>): String = args.joinToString(" ")
 }

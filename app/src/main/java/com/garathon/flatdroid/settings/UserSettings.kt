@@ -40,7 +40,13 @@ data class UserSettings(
     val flatpakLanguages: String,
     /** Shows settings Flatdroid normally manages itself (such as an Electron app's flags). */
     val developerOptions: Boolean = false,
-    /** The VNC viewer's package; null to choose every time. */
+    /**
+     * Apps are shown in an external VNC viewer app, which connects to a local port with a
+     * password; off (the default), only Flatdroid's own viewer shows them, through a socket in
+     * private storage.
+     */
+    val externalViewer: Boolean = false,
+    /** The external VNC viewer's package; null when none is chosen yet. */
     val vncViewer: String? = null,
     /** Xvnc sends up to 60 frames a second instead of 30: smoother, more CPU when the picture moves. */
     val frameRate60: Boolean = false,
@@ -50,8 +56,8 @@ data class UserSettings(
     val uncappedFrameRate: Boolean = false,
     /** Developer setting: let Flatpak install vendor GPU runtimes (masked otherwise; see [commands]). */
     val installGpuRuntimes: Boolean = false,
-    /** Developer setting: Openbox draws title bars (close, maximize) on windows. */
-    val titleBars: Boolean = true,
+    /** Developer setting: whether Openbox draws title bars (close, maximize) on windows. */
+    val titleBars: TitleBars = TitleBars.AUTO,
     /** Developer setting: the audio player's buffer in milliseconds; null for [DEFAULT_AUDIO_LATENCY_MS]. */
     val customAudioLatencyMs: Int? = null,
     /** The player uses Android's low latency output instead of the power saving one ([audioOutputMode]). */
@@ -61,6 +67,8 @@ data class UserSettings(
     /** The shared home's absolute path; null for the default, `Documents/Flatdroid`. */
     val sharedHome: String? = null,
     val flatpakTheme: FlatpakTheme = FlatpakTheme.SYSTEM,
+    /** Flatdroid's own dark theme with black backgrounds (AMOLED screens); not applied to apps. */
+    val pureBlack: Boolean = false,
     /** What the security level sets ([SecurityLevel]). */
     val security: SecuritySettings = SecuritySettings(),
     /** Developer setting: the terminal's commands run behind fdsec's filter. */
@@ -92,8 +100,16 @@ data class UserSettings(
             else -> DEFAULT_FRAME_RATE
         }
 
-    /** Whether windows get title bars; the developer setting counts only while developer options are on. */
-    val windowTitleBars: Boolean get() = !developerOptions || titleBars
+    /**
+     * Whether windows get title bars: with an external viewer, which has no other way to close a
+     * window; not in Flatdroid's viewer, whose bar closes the focused one. The developer setting
+     * counts only while developer options are on.
+     */
+    val windowTitleBars: Boolean get() = when (titleBars.takeIf { developerOptions } ?: TitleBars.AUTO) {
+        TitleBars.AUTO -> externalViewer
+        TitleBars.ON -> true
+        TitleBars.OFF -> false
+    }
 
     /** The audio player's buffer; the developer setting counts only while developer options are on. */
     val audioLatencyMs: Int get() = customAudioLatencyMs?.takeIf { developerOptions } ?: DEFAULT_AUDIO_LATENCY_MS
@@ -135,6 +151,13 @@ data class UserSettings(
 }
 
 class UserSettingsStore(private val file: File) {
+    /** Reads [LiveSettings] (at start-up; [save] keeps them current). */
+    fun loadLive() {
+        val settings = runCatching { load() }.getOrNull()
+        LiveSettings.pureBlack.value = settings?.pureBlack == true
+        LiveSettings.hideScreen.value = settings?.security?.hideScreen == true
+    }
+
     /** The saved settings, or null when the user hasn't chosen any yet. */
     fun load(): UserSettings? {
         if (!file.isFile) return null
@@ -143,12 +166,14 @@ class UserSettingsStore(private val file: File) {
         return UserSettings(
             flatpakLanguages = languages,
             developerOptions = props.getProperty(KEY_DEVELOPER) == "true",
+            externalViewer = props.getProperty(KEY_EXTERNAL_VIEWER) == "true",
+            pureBlack = props.getProperty(KEY_PURE_BLACK) == "true",
             vncViewer = props.getProperty(KEY_VNC_VIEWER)?.takeIf { it.isNotBlank() },
             frameRate60 = props.getProperty(KEY_FRAME_RATE_60) == "true",
             customFrameRate = props.getProperty(KEY_CUSTOM_FRAME_RATE)?.toIntOrNull()?.takeIf { it in UserSettings.CUSTOM_FRAME_RATES },
             uncappedFrameRate = props.getProperty(KEY_UNCAPPED_FRAME_RATE) == "true",
             installGpuRuntimes = props.getProperty(KEY_GPU_RUNTIMES) == "true",
-            titleBars = props.getProperty(KEY_TITLE_BARS) != "false",
+            titleBars = TitleBars.entries.firstOrNull { it.key == props.getProperty(KEY_TITLE_BARS) } ?: TitleBars.AUTO,
             customAudioLatencyMs = props.getProperty(KEY_AUDIO_LATENCY)?.toIntOrNull()?.takeIf { it in UserSettings.AUDIO_LATENCIES_MS },
             lowLatencyAudio = props.getProperty(KEY_LOW_LATENCY_AUDIO) == "true",
             highQualityAudio = props.getProperty(KEY_HIGH_QUALITY_AUDIO) == "true",
@@ -176,7 +201,7 @@ class UserSettingsStore(private val file: File) {
             permissionsFromMetadata = flag(KEY_PERMISSIONS_FROM_METADATA, default.permissionsFromMetadata),
             defaultHomeMode = HomeMode.entries.firstOrNull { it.name.lowercase() == props.getProperty(KEY_DEFAULT_HOME) } ?: default.defaultHomeMode,
             limitDevices = flag(KEY_LIMIT_DEVICES, default.limitDevices),
-            protectPassword = flag(KEY_PROTECT_PASSWORD, default.protectPassword),
+            hideScreen = flag(KEY_HIDE_SCREEN, default.hideScreen),
             exportWithPicker = flag(KEY_EXPORT_PICKER, default.exportWithPicker),
             checkFilesBeforeLaunch = flag(KEY_CHECK_FILES, default.checkFilesBeforeLaunch),
             androidFonts = flag(KEY_ANDROID_FONTS, default.androidFonts),
@@ -190,12 +215,14 @@ class UserSettingsStore(private val file: File) {
         val props = Properties()
         props.setProperty(KEY_LANGUAGES, settings.flatpakLanguages)
         if (settings.developerOptions) props.setProperty(KEY_DEVELOPER, "true")
+        if (settings.externalViewer) props.setProperty(KEY_EXTERNAL_VIEWER, "true")
+        if (settings.pureBlack) props.setProperty(KEY_PURE_BLACK, "true")
         settings.vncViewer?.let { props.setProperty(KEY_VNC_VIEWER, it) }
         if (settings.frameRate60) props.setProperty(KEY_FRAME_RATE_60, "true")
         settings.customFrameRate?.let { props.setProperty(KEY_CUSTOM_FRAME_RATE, it.toString()) }
         if (settings.uncappedFrameRate) props.setProperty(KEY_UNCAPPED_FRAME_RATE, "true")
         if (settings.installGpuRuntimes) props.setProperty(KEY_GPU_RUNTIMES, "true")
-        if (!settings.titleBars) props.setProperty(KEY_TITLE_BARS, "false")
+        if (settings.titleBars != TitleBars.AUTO) props.setProperty(KEY_TITLE_BARS, settings.titleBars.key)
         settings.customAudioLatencyMs?.let { props.setProperty(KEY_AUDIO_LATENCY, it.toString()) }
         if (settings.lowLatencyAudio) props.setProperty(KEY_LOW_LATENCY_AUDIO, "true")
         if (settings.highQualityAudio) props.setProperty(KEY_HIGH_QUALITY_AUDIO, "true")
@@ -210,7 +237,7 @@ class UserSettingsStore(private val file: File) {
             props.setProperty(KEY_PERMISSIONS_FROM_METADATA, s.permissionsFromMetadata.toString())
             props.setProperty(KEY_DEFAULT_HOME, s.defaultHomeMode.name.lowercase())
             props.setProperty(KEY_LIMIT_DEVICES, s.limitDevices.toString())
-            props.setProperty(KEY_PROTECT_PASSWORD, s.protectPassword.toString())
+            props.setProperty(KEY_HIDE_SCREEN, s.hideScreen.toString())
             props.setProperty(KEY_EXPORT_PICKER, s.exportWithPicker.toString())
             props.setProperty(KEY_CHECK_FILES, s.checkFilesBeforeLaunch.toString())
             props.setProperty(KEY_ANDROID_FONTS, s.androidFonts.toString())
@@ -221,6 +248,8 @@ class UserSettingsStore(private val file: File) {
         if (!settings.terminalFilter) props.setProperty(KEY_TERMINAL_FILTER, "false")
         if (settings.terminalDuringSession) props.setProperty(KEY_TERMINAL_DURING_SESSION, "true")
         file.writeTextAtomically(StringWriter().also { props.store(it, null) }.toString())
+        LiveSettings.pureBlack.value = settings.pureBlack
+        LiveSettings.hideScreen.value = settings.security.hideScreen
     }
 
     private companion object {
@@ -231,7 +260,7 @@ class UserSettingsStore(private val file: File) {
         private const val KEY_PERMISSIONS_FROM_METADATA = "security.permissionsFromMetadata"
         private const val KEY_DEFAULT_HOME = "security.defaultHome"
         private const val KEY_LIMIT_DEVICES = "security.limitDevices"
-        private const val KEY_PROTECT_PASSWORD = "security.protectPassword"
+        private const val KEY_HIDE_SCREEN = "security.hideScreen"
         private const val KEY_EXPORT_PICKER = "security.exportPicker"
         private const val KEY_CHECK_FILES = "security.checkFiles"
         private const val KEY_ANDROID_FONTS = "security.androidFonts"
@@ -243,6 +272,7 @@ class UserSettingsStore(private val file: File) {
         private const val KEY_LANGUAGES = "flatpak.languages"
         private const val KEY_DEVELOPER = "ui.developerOptions"
         private const val KEY_VNC_VIEWER = "vnc.viewer"
+        private const val KEY_EXTERNAL_VIEWER = "vnc.external"
         private const val KEY_FRAME_RATE_60 = "vnc.frameRate60"
         private const val KEY_CUSTOM_FRAME_RATE = "vnc.frameRate"
         private const val KEY_UNCAPPED_FRAME_RATE = "vnc.frameRateUncapped"
@@ -253,5 +283,15 @@ class UserSettingsStore(private val file: File) {
         private const val KEY_HIGH_QUALITY_AUDIO = "audio.highQuality"
         private const val KEY_SHARED_HOME = "home.shared"
         private const val KEY_THEME = "flatpak.theme"
+        private const val KEY_PURE_BLACK = "ui.pureBlack"
     }
+}
+
+/** The title bar developer setting: Flatdroid decides (by the viewer), or always on or off. */
+enum class TitleBars(val key: String) { AUTO("auto"), ON("on"), OFF("off") }
+
+/** Settings every screen follows as soon as they are saved: the theme's pure black, hiding the screen. */
+object LiveSettings {
+    val pureBlack = kotlinx.coroutines.flow.MutableStateFlow(false)
+    val hideScreen = kotlinx.coroutines.flow.MutableStateFlow(false)
 }

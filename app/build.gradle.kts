@@ -1,3 +1,4 @@
+import com.android.build.api.variant.HostTestBuilder
 import java.util.Properties
 import javax.inject.Inject
 
@@ -23,8 +24,8 @@ android {
         applicationId = "com.garathon.flatdroid"
         minSdk = 24
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.6"
+        versionCode = 2
+        versionName = "0.7"
 
         buildConfigField("String", "ALPINE_BRANCH", "\"${alpine.getProperty("branch")}\"")
         buildConfigField("String", "ALPINE_VERSION", "\"${alpine.getProperty("version")}\"")
@@ -115,8 +116,8 @@ abstract class BuildProotTask @Inject constructor(private val exec: ExecOperatio
     }
 }
 
-/** Runs native/build-fdsec.sh for one ABI; output is a jniLibs root (<dir>/<abi>/libfdsec.so). */
-abstract class BuildFdsecTask @Inject constructor(private val exec: ExecOperations) : DefaultTask() {
+/** Runs a native helper's build script (native/build-fdsec.sh, build-fdshm.sh) for one ABI; output is a jniLibs root (<dir>/<abi>/lib*.so). */
+abstract class BuildHelperTask @Inject constructor(private val exec: ExecOperations) : DefaultTask() {
     @get:Input abstract val abi: Property<String>
     @get:InputFile abstract val script: RegularFileProperty
     @get:InputFile abstract val source: RegularFileProperty
@@ -134,12 +135,32 @@ abstract class BuildFdsecTask @Inject constructor(private val exec: ExecOperatio
 }
 
 val fdsecTasks = architectures.keys.associateWith { abi ->
-    tasks.register<BuildFdsecTask>("buildFdsec_$abi") {
+    tasks.register<BuildHelperTask>("buildFdsec_$abi") {
         this.abi = abi
         script = rootProject.file("native/build-fdsec.sh")
         source = rootProject.file("native/fdsec.c")
         ndkDirectory = androidComponents.sdkComponents.ndkDirectory
         outputDirectory = layout.buildDirectory.dir("generated/fdsec/$abi")
+    }
+}
+
+val fdshmTasks = architectures.keys.associateWith { abi ->
+    tasks.register<BuildHelperTask>("buildFdshm_$abi") {
+        this.abi = abi
+        script = rootProject.file("native/build-fdshm.sh")
+        source = rootProject.file("native/fdshm.c")
+        ndkDirectory = androidComponents.sdkComponents.ndkDirectory
+        outputDirectory = layout.buildDirectory.dir("generated/fdshm/$abi")
+    }
+}
+
+val fdviewTasks = architectures.keys.associateWith { abi ->
+    tasks.register<BuildHelperTask>("buildFdview_$abi") {
+        this.abi = abi
+        script = rootProject.file("native/build-fdview.sh")
+        source = rootProject.file("native/fdview.c")
+        ndkDirectory = androidComponents.sdkComponents.ndkDirectory
+        outputDirectory = layout.buildDirectory.dir("generated/fdview/$abi")
     }
 }
 
@@ -156,6 +177,11 @@ val prootTasks = architectures.keys.associateWith { abi ->
 }
 
 androidComponents {
+    beforeVariants { variant ->
+        // Unit tests for release builds too (the plugin makes them only for debug by default):
+        // release has its own source set, without debug builds' measuring.
+        variant.hostTests[HostTestBuilder.UNIT_TEST_TYPE]?.enable = true
+    }
     onVariants { variant ->
         val abis = when (variant.flavorName) {
             "arm64" -> listOf("arm64-v8a")
@@ -164,7 +190,9 @@ androidComponents {
         }
         for (abi in abis) {
             variant.sources.jniLibs?.addGeneratedSourceDirectory(prootTasks.getValue(abi), BuildProotTask::outputDirectory)
-            variant.sources.jniLibs?.addGeneratedSourceDirectory(fdsecTasks.getValue(abi), BuildFdsecTask::outputDirectory)
+            variant.sources.jniLibs?.addGeneratedSourceDirectory(fdsecTasks.getValue(abi), BuildHelperTask::outputDirectory)
+            variant.sources.jniLibs?.addGeneratedSourceDirectory(fdshmTasks.getValue(abi), BuildHelperTask::outputDirectory)
+            variant.sources.jniLibs?.addGeneratedSourceDirectory(fdviewTasks.getValue(abi), BuildHelperTask::outputDirectory)
         }
     }
 }

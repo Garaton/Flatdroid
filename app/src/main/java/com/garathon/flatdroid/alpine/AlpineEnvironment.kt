@@ -7,6 +7,7 @@ import android.system.Os
 import com.garathon.flatdroid.proot.AlpineBinds
 import com.garathon.flatdroid.proot.DevNodes
 import com.garathon.flatdroid.proot.Fdsec
+import com.garathon.flatdroid.proot.Fdshm
 import com.garathon.flatdroid.proot.GuestPaths
 import com.garathon.flatdroid.proot.ProcessResult
 import com.garathon.flatdroid.proot.ProcessStopper
@@ -113,6 +114,7 @@ class AlpineEnvironment private constructor(private val context: Context) {
         tmpDir = dir(File(cacheDir, "proot-tmp")).path,
         rootfs = installer.rootfs.path,
         fdsec = File(libDir, Fdsec.LIBRARY).path,
+        fdshm = File(libDir, Fdshm.LIBRARY).path,
     )
 
     private fun prepareBinds(extra: List<Pair<String, String>>): AlpineBinds {

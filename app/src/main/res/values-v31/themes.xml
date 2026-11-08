@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The splash screen stays white in dark mode too, behind the icon; the window after it
+         follows the theme. -->
+    <style name="Theme.Flatdroid" parent="Base.Flatdroid">
+        <item name="android:windowSplashScreenBackground">@android:color/white</item>
+    </style>
+</resources>

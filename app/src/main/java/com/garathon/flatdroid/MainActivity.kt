@@ -2,6 +2,7 @@ package com.garathon.flatdroid
 
 import android.Manifest
 import android.content.ActivityNotFoundException
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -39,6 +40,7 @@ import com.garathon.flatdroid.flatpak.FlatpakTaskService
 import com.garathon.flatdroid.flatpak.FlatpakTasks
 import com.garathon.flatdroid.flatpak.InstalledApps
 import com.garathon.flatdroid.session.SessionController
+import com.garathon.flatdroid.viewer.ViewerActivity
 import com.garathon.flatdroid.session.SessionService
 import com.garathon.flatdroid.session.SessionState
 import com.garathon.flatdroid.session.Viewer
@@ -64,6 +66,7 @@ import com.garathon.flatdroid.ui.SettingsScreen
 import com.garathon.flatdroid.ui.SetupSettingsScreen
 import com.garathon.flatdroid.ui.TerminalScreen
 import com.garathon.flatdroid.ui.SetupScreen
+import com.garathon.flatdroid.ui.followHideScreen
 import com.garathon.flatdroid.ui.theme.FlatdroidTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -103,6 +106,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        followHideScreen()
         storage.restore()
         enableEdgeToEdge()
         val languages = GuestFiles.flatpakLanguages(deviceLanguageTags())
@@ -149,7 +153,7 @@ class MainActivity : ComponentActivity() {
         val apps by home.apps.collectAsState()
         val session by SessionController.ui.collectAsState()
         val task by FlatpakTasks.ui.collectAsState()
-        val sessionBusy = SessionController.isBusy || session.state is SessionState.ElectronOffer || session.state is SessionState.FilesChanged
+        val sessionBusy = SessionController.isBusy || session.state is SessionState.Question
         val taskRunning = task.running != null
         // No task while an app runs, and no app while a task or (unless allowed) a terminal command
         // runs: a running app could take over Alpine processes started after it ([AlpineCommands]).
@@ -347,7 +351,6 @@ class MainActivity : ComponentActivity() {
                         onStop = { SessionService.stop(this) },
                         onShowLog = { log = LogKind.SESSION },
                         onDismiss = SessionController::dismissMessage,
-                        protectPassword = remember { savedSettings(languages).security.protectPassword },
                     )
                 }
             }
@@ -400,17 +403,16 @@ class MainActivity : ComponentActivity() {
         permissionRequest.launch(Manifest.permission.CAMERA)
     }
 
-    private fun openViewer(password: String) {
+    private fun openViewer(session: SessionState.Running) {
+        if (session.socket != null) return startActivity(Intent(this, ViewerActivity::class.java))
         val settings = SetupController.settings(this).load()
-        // With the password protected, it goes only to the viewer chosen in Settings, never through a chooser.
-        val protect = settings?.security?.protectPassword == true
         try {
-            val intent = Viewer.intent(this, password, settings?.vncViewer, allowChooser = !protect)
+            val intent = Viewer.intent(this, session.password, settings?.vncViewer, username = session.username)
                 ?: throw ActivityNotFoundException()
             startActivity(intent)
         } catch (_: ActivityNotFoundException) {
-            val noChosen = protect && Viewer.installed(this).isNotEmpty()
-            Toast.makeText(this, if (noChosen) R.string.session_choose_viewer else R.string.session_no_viewer, Toast.LENGTH_LONG).show()
+            val message = if (Viewer.installed(this).isEmpty()) R.string.session_no_viewer else R.string.session_choose_viewer
+            Toast.makeText(this, message, Toast.LENGTH_LONG).show()
         }
     }
 

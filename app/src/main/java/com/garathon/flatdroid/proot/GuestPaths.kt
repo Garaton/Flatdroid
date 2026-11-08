@@ -5,6 +5,13 @@ object GuestPaths {
     /** Xvnc's socket directory. */
     const val X11_DIR = "/tmp/.X11-unix"
 
+    /**
+     * The Wayland compositor's socket directory: its XDG_RUNTIME_DIR among the helpers, bound
+     * into the root of an app that runs on Wayland.
+     */
+    const val WAYLAND_DIR = "/run/flatdroid/wayland"
+    const val WAYLAND_SOCKET = "wayland-0"
+
     /** PulseAudio's socket directory. */
     const val PULSE_DIR = "/run/pulse"
 

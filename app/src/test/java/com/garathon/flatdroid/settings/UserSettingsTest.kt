@@ -28,8 +28,9 @@ class UserSettingsTest {
         assertEquals(UserSettings(GuestFiles.ALL_LANGUAGES), store.load())
         val all = UserSettings(
             "de;en", developerOptions = true, vncViewer = "com.gaurav.avnc", frameRate60 = true, customFrameRate = 45,
-            uncappedFrameRate = true, installGpuRuntimes = true, titleBars = false, customAudioLatencyMs = 30,
-            lowLatencyAudio = true, highQualityAudio = true, sharedHome = "/storage/emulated/0/Download/Home",
+            uncappedFrameRate = true, installGpuRuntimes = true, titleBars = TitleBars.OFF, customAudioLatencyMs = 30,
+            lowLatencyAudio = true, highQualityAudio = true, sharedHome = "/storage/emulated/0/Download/Home", pureBlack = true,
+            externalViewer = true,
         )
         store.save(all)
         assertEquals(all, store.load())
@@ -56,10 +57,15 @@ class UserSettingsTest {
     }
 
     @Test
-    fun titleBarsCanBeTurnedOffOnlyWithDeveloperOptions() {
-        assertTrue(UserSettings("en").windowTitleBars)
-        assertTrue(UserSettings("en", titleBars = false).windowTitleBars)
-        assertFalse(UserSettings("en", developerOptions = true, titleBars = false).windowTitleBars)
+    fun titleBarsFollowTheViewerUnlessTheDeveloperSettingSaysOtherwise() {
+        // Flatdroid decides: off in its own viewer (its bar closes windows), on with an external one.
+        assertFalse(UserSettings("en").windowTitleBars)
+        assertTrue(UserSettings("en", externalViewer = true).windowTitleBars)
+        // The developer setting counts only with developer options on.
+        assertFalse(UserSettings("en", titleBars = TitleBars.ON).windowTitleBars)
+        assertTrue(UserSettings("en", developerOptions = true, titleBars = TitleBars.ON).windowTitleBars)
+        assertFalse(UserSettings("en", developerOptions = true, externalViewer = true, titleBars = TitleBars.OFF).windowTitleBars)
+        assertTrue(UserSettings("en", developerOptions = true, externalViewer = true, titleBars = TitleBars.AUTO).windowTitleBars)
     }
 
     @Test
@@ -121,7 +127,7 @@ class UserSettingsTest {
         assertTrue(default.hideHelperProcesses && hardened.hideHelperProcesses)
         assertEquals(HomeMode.PRIVATE, hardened.appDefaults.homeMode)
         assertFalse(hardened.appDefaults.permissionsFromMetadata)
-        assertTrue(hardened.limitDevices && hardened.protectPassword && hardened.exportWithPicker && hardened.hideHelperProcesses)
+        assertTrue(hardened.limitDevices && hardened.hideScreen && hardened.exportWithPicker && hardened.hideHelperProcesses)
         assertFalse(hardened.appDefaults.androidFonts || hardened.appDefaults.clipboard)
         assertFalse(hardened.appDefaults.timeZone || hardened.appDefaults.language)
         assertEquals(AppDefaults(), default.appDefaults)

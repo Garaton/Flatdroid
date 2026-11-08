@@ -1,10 +1,12 @@
 package com.garathon.flatdroid.flatpak
 
+import com.garathon.flatdroid.setup.ApkProgress
+
 /**
  * Follows `flatpak install/update/uninstall -y` output (not on a terminal): first a table of
  * what it will do (` 1.  <ID>  <branch>  <op>  <remote>  <size>`, tab-separated), then lines
  * such as `Installing 2/4… ███  45%  1.2 MB/s` while each one runs (`Installing… ███  45%` when
- * there is only one).
+ * there is only one). Alpine's packages update as steps too ([ApkProgress]).
  */
 class FlatpakProgress {
     /** The operation running: [verb] as flatpak prints it, which of [total], its ref, and its percent. */
@@ -30,6 +32,10 @@ class FlatpakProgress {
 
     /** Reads one output line; returns true if it was a progress line. */
     fun feed(line: String): Boolean {
+        apkStep(line)?.let {
+            current = it
+            return true
+        }
         if (COMPLETE.containsMatchIn(line)) {
             current = null
             finishing = true
@@ -51,10 +57,32 @@ class FlatpakProgress {
         return true
     }
 
+    /** A package among [Step.total]: the percent counts those before it, so it never reads as [Step.deploying]. */
+    private fun apkStep(line: String): Step? {
+        val (index, total) = ApkProgress.parse(line) ?: return null
+        val (verb, name) = ApkProgress.action(line) ?: return null
+        return Step(verb, index, total, name, (index - 1) * 100 / total)
+    }
+
     companion object {
         private val TABLE_ROW = Regex("""^\s*(\d+)\.\s+([A-Za-z0-9_.-]+)\s+(\S+)\s+[a-z]\b""")
         private val PROGRESS = Regex("""^(\p{L}+)(?: (\d+)/(\d+))?…(?:.*?(\d+)%)?""")
         private val COMPLETE = Regex("""^(Changes|Installation|Uninstall) complete\.""")
+
+        /**
+         * Output lines worth showing as the task's status: what flatpak is doing ("Looking for
+         * updates…"), that there is nothing to do, that it finished, or that an app is already
+         * installed. Everything else (end-of-life notices, warnings, pinned runtimes, tables, apk's
+         * package list) stays in the log only. Progress lines are shown as steps instead.
+         */
+        private val STATUS = listOf(
+            Regex("""\p{L}[\p{L} ]{0,40}…"""),
+            Regex("""Nothing [\p{L} ]{0,40}\.?"""),
+            Regex("""(Changes|Installation|Uninstall) complete\."""),
+            Regex("""Skipping: \S+ is already installed"""),
+        )
+
+        fun isStatus(line: String): Boolean = line.trim().let { text -> STATUS.any { it.matches(text) } }
         /** True if [a] and [b] report the same operation, so [b] can replace [a] in a log. */
         fun sameStep(a: String, b: String): Boolean {
             val x = PROGRESS.find(a) ?: return false

@@ -36,6 +36,7 @@ import com.garathon.flatdroid.settings.FlatpakTheme
 import com.garathon.flatdroid.setup.ResetMode
 import com.garathon.flatdroid.alpine.GuestFiles
 import com.garathon.flatdroid.session.Viewer
+import com.garathon.flatdroid.settings.TitleBars
 import com.garathon.flatdroid.settings.UserSettings
 import com.garathon.flatdroid.ui.theme.FlatdroidTheme
 
@@ -94,6 +95,7 @@ fun SettingsScreen(
     var onlyMyLanguages by rememberSaveable { mutableStateOf(settings.onlyMyLanguages) }
     var developerOptions by rememberSaveable { mutableStateOf(settings.developerOptions) }
     var vncViewer by rememberSaveable { mutableStateOf(settings.vncViewer) }
+    var externalViewer by rememberSaveable { mutableStateOf(settings.externalViewer) }
     var frameRate60 by rememberSaveable { mutableStateOf(settings.frameRate60) }
     var customFrameRate by rememberSaveable { mutableStateOf(settings.customFrameRate?.toString() ?: "") }
     var uncappedFrameRate by rememberSaveable { mutableStateOf(settings.uncappedFrameRate) }
@@ -103,6 +105,7 @@ fun SettingsScreen(
     var lowLatencyAudio by rememberSaveable { mutableStateOf(settings.lowLatencyAudio) }
     var highQualityAudio by rememberSaveable { mutableStateOf(settings.highQualityAudio) }
     var flatpakTheme by rememberSaveable { mutableStateOf(settings.flatpakTheme) }
+    var pureBlack by rememberSaveable { mutableStateOf(settings.pureBlack) }
     var security by rememberSaveable(stateSaver = SecuritySaver) { mutableStateOf(settings.security) }
     var terminalFilter by rememberSaveable { mutableStateOf(settings.terminalFilter) }
     var terminalDuringSession by rememberSaveable { mutableStateOf(settings.terminalDuringSession) }
@@ -194,23 +197,41 @@ fun SettingsScreen(
             hint = stringResource(R.string.settings_theme_hint),
             enabled = !applying,
         )
+        SwitchRow(
+            pureBlack, { pureBlack = it },
+            stringResource(R.string.settings_pure_black), stringResource(R.string.settings_pure_black_hint), enabled = !applying,
+        )
 
         SectionTitle(stringResource(R.string.settings_section_security))
         SecuritySection(security, { security = it }, details = true, enabled = !applying, developerOptions = developerOptions)
 
         SectionTitle(stringResource(R.string.settings_section_viewer))
-        val askViewer = stringResource(R.string.settings_viewer_ask)
+        val noViewer = stringResource(R.string.settings_viewer_none)
+        val ownViewer = stringResource(R.string.settings_viewer_flatdroid)
         // Only the saved choice can be missing: the list holds installed viewers.
         val missingViewer = stringResource(R.string.settings_viewer_missing, vncViewer.orEmpty())
+        // Flatdroid's own viewer ("") or a viewer app (its package, which turns the external viewer on).
         DropdownRow(
-            selected = vncViewer,
-            options = listOf(null) + viewers.map { it.packageName },
-            onSelect = { vncViewer = it },
-            label = { id -> if (id == null) askViewer else viewers.firstOrNull { it.packageName == id }?.label ?: missingViewer },
+            selected = if (externalViewer) vncViewer else OWN_VIEWER,
+            options = listOf(OWN_VIEWER) + viewers.map { it.packageName },
+            onSelect = { choice ->
+                externalViewer = choice != OWN_VIEWER
+                if (choice != OWN_VIEWER) vncViewer = choice
+            },
+            label = { id ->
+                when (id) {
+                    OWN_VIEWER -> ownViewer
+                    null -> noViewer
+                    else -> viewers.firstOrNull { it.packageName == id }?.label ?: missingViewer
+                }
+            },
             title = stringResource(R.string.settings_viewer),
             hint = stringResource(R.string.settings_viewer_hint),
             enabled = !applying,
         )
+        if (externalViewer) {
+            Text(stringResource(R.string.settings_viewer_external_warning), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+        }
         SwitchRow(
             frameRate60, { frameRate60 = it },
             stringResource(R.string.settings_frame_rate_60), stringResource(R.string.settings_frame_rate_60_hint), enabled = !applying,
@@ -334,10 +355,20 @@ fun SettingsScreen(
             stringResource(R.string.settings_developer_options), stringResource(R.string.settings_developer_options_hint), enabled = !applying,
         )
         if (developerOptions) {
-            SwitchRow(
-                titleBars, { titleBars = it },
-                stringResource(R.string.settings_title_bars), stringResource(R.string.settings_title_bars_hint),
-                enabled = !applying, developer = true,
+            val titleBarNames = mapOf(
+                TitleBars.AUTO to stringResource(R.string.settings_title_bars_auto),
+                TitleBars.ON to stringResource(R.string.settings_title_bars_on),
+                TitleBars.OFF to stringResource(R.string.settings_title_bars_off),
+            )
+            DropdownRow(
+                selected = titleBars,
+                options = TitleBars.entries,
+                onSelect = { titleBars = it },
+                label = { titleBarNames.getValue(it) },
+                title = stringResource(R.string.settings_title_bars),
+                hint = stringResource(R.string.settings_title_bars_hint),
+                enabled = !applying,
+                developer = true,
             )
             SwitchRow(
                 installGpuRuntimes, { installGpuRuntimes = it },
@@ -363,6 +394,7 @@ fun SettingsScreen(
             UserSettings(
                 flatpakLanguages = if (onlyMyLanguages) deviceLanguages else GuestFiles.ALL_LANGUAGES,
                 developerOptions = developerOptions,
+                externalViewer = externalViewer,
                 vncViewer = vncViewer,
                 frameRate60 = frameRate60,
                 customFrameRate = customFrameRateValue,
@@ -374,6 +406,7 @@ fun SettingsScreen(
                 highQualityAudio = highQualityAudio,
                 sharedHome = settings.sharedHome,
                 flatpakTheme = flatpakTheme,
+                pureBlack = pureBlack,
                 security = security,
                 terminalFilter = terminalFilter,
                 terminalDuringSession = terminalDuringSession,
@@ -437,3 +470,6 @@ private const val APP_DATA = "appData"
 private const val HOMES = "homes"
 private const val IMPORT = "import"
 private const val RESET = "reset"
+
+/** The viewer list's entry for Flatdroid's own viewer (viewer apps are their package names). */
+private const val OWN_VIEWER = ""

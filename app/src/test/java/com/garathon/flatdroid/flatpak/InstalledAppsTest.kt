@@ -20,8 +20,21 @@ class InstalledAppsTest {
     }
 
     @Test
+    fun severalIdsAreSplitOnWhitespace() {
+        assertEquals(listOf("org.xfce.mousepad"), InstalledApps.parseIds(" org.xfce.mousepad "))
+        assertEquals(listOf("org.xfce.mousepad", "org.kde.kcalc"), InstalledApps.parseIds("org.xfce.mousepad  org.kde.kcalc\torg.xfce.mousepad"))
+        for (bad in listOf("", "   ", "org.xfce.mousepad --help.x", "org.xfce.mousepad mousepad")) {
+            assertEquals(bad, null, InstalledApps.parseIds(bad))
+        }
+    }
+
+    @Test
     fun commandsRefuseBadIds() {
-        assertEquals(listOf(FlatpakCommands.FLATPAK, "--user", "install", "-y", "flathub", "org.kde.kcalc"), FlatpakCommands.install("org.kde.kcalc"))
+        assertEquals(listOf(FlatpakCommands.FLATPAK, "--user", "install", "-y", "flathub", "org.kde.kcalc"), FlatpakCommands.install(listOf("org.kde.kcalc")))
+        assertEquals(
+            listOf(FlatpakCommands.FLATPAK, "--user", "install", "-y", "flathub", "org.kde.kcalc", "org.xfce.mousepad"),
+            FlatpakCommands.install(listOf("org.kde.kcalc", "org.xfce.mousepad")),
+        )
         try {
             FlatpakCommands.uninstall("--all")
             throw AssertionError("expected a refusal")
@@ -64,5 +77,12 @@ class InstalledAppsTest {
         assertEquals(listOf("Delta", "Gamma", "Alpha", "beta"), installed.forList("", AppSort.LAST_OPENED).map { it.name })
         // IDs aren't searched.
         assertEquals(emptyList<String>(), apps.forList("c.C", AppSort.NAME).map { it.name })
+    }
+
+    @Test
+    fun terminalAppsAreToldFromTheirDesktopFile() {
+        assertEquals(true, InstalledApps.runsInTerminal(Keyfile.parse("[Desktop Entry]\nName=A\nTerminal=true\n")))
+        assertEquals(false, InstalledApps.runsInTerminal(Keyfile.parse("[Desktop Entry]\nName=A\nTerminal=false\n")))
+        assertEquals(false, InstalledApps.runsInTerminal(Keyfile.parse("[Desktop Entry]\nName=A\n")))
     }
 }

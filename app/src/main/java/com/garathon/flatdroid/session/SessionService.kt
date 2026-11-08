@@ -16,6 +16,7 @@ import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.garathon.flatdroid.MainActivity
 import com.garathon.flatdroid.R
+import com.garathon.flatdroid.viewer.ViewerActivity
 import com.garathon.flatdroid.alpine.AlpineCommands
 import com.garathon.flatdroid.audio.MicStreamer
 import com.garathon.flatdroid.camera.AndroidCameras
@@ -100,7 +101,7 @@ class SessionService : Service() {
         val notifications = getSystemService(NotificationManager::class.java)
         val updates = scope.launch {
             SessionController.ui.distinctUntilChangedBy { it.state::class to it.state.appIdOrNull }
-                .filter { it.state !is SessionState.Idle && it.state !is SessionState.ElectronOffer && it.state !is SessionState.FilesChanged }
+                .filter { it.state !is SessionState.Idle && it.state !is SessionState.Question }
                 .collect { notifications.notify(NOTIFICATION_ID, notification(it.state)) }
         }
         val micRequests = scope.launch {
@@ -144,10 +145,8 @@ class SessionService : Service() {
                 if (AppData.settings(applicationContext, appId).load().homeMode == HomeMode.TEMPORARY) {
                     TempHomePrompt.sessionEnded(applicationContext, appId)
                 }
-                // An Electron offer or a files-changed report stays up for the UI to answer.
-                val awaitingUi = SessionController.ui.value.state.let {
-                    it is SessionState.ElectronOffer || it is SessionState.FilesChanged
-                }
+                // A question (an Electron offer, a files-changed report) stays up for the UI to answer.
+                val awaitingUi = SessionController.ui.value.state is SessionState.Question
                 if (!awaitingUi) SessionController.ended(message, failed)
                 stopSelf()
             }
@@ -222,7 +221,9 @@ class SessionService : Service() {
         val appId = state.appIdOrNull
         val name = appId?.let(::label) ?: getString(R.string.app_name)
         val text = when (state) {
-            is SessionState.Running -> getString(R.string.session_notification_running, SessionScript.VNC_PORT)
+            is SessionState.Running ->
+                if (state.socket != null) getString(R.string.session_notification_viewer)
+                else getString(R.string.session_notification_running, SessionScript.VNC_PORT)
             is SessionState.Starting -> state.detail
             is SessionState.PreparingElectron -> state.detail
             else -> ""
@@ -235,10 +236,14 @@ class SessionService : Service() {
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setGroup(CHANNEL_ID)
-        val viewerIntent = (state as? SessionState.Running)?.let { Viewer.intent(this, it.password, SetupController.settings(this).load()?.vncViewer) }
+        val viewerIntent = (state as? SessionState.Running)?.let {
+            if (it.socket != null) Intent(this, ViewerActivity::class.java)
+            else Viewer.intent(this, it.password, SetupController.settings(this).load()?.vncViewer, username = it.username)
+        }
         if (viewerIntent != null) {
             val viewer = PendingIntent.getActivity(this, 1, viewerIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-            builder.addAction(0, getString(R.string.session_open_viewer), viewer)
+            val label = if ((state as SessionState.Running).socket != null) R.string.session_open_app else R.string.session_open_viewer
+            builder.addAction(0, getString(label), viewer)
         }
         val stop = PendingIntent.getService(
             this, 2, Intent(this, SessionService::class.java).setAction(ACTION_STOP), PendingIntent.FLAG_IMMUTABLE,

@@ -24,6 +24,10 @@ data class InstalledApp(
     val requestsAudio: Boolean = false,
     /** Its metadata asks for the network (`shared=network`). */
     val requestsNetwork: Boolean = false,
+    /** Its metadata asks for Wayland as well as X11, so X11 can be forced ([FlatpakContext.waylandAndX11]). */
+    val waylandAndX11: Boolean = false,
+    /** Its metadata asks for Wayland, so it runs there unless X11 is forced. */
+    val wayland: Boolean = false,
 )
 
 /** Installed apps with their names and icons, read from what each app exports. */
@@ -42,6 +46,8 @@ class InstalledApps(private val context: Context) {
             requestsAllDevices = DevNodes.ALL in app.metadata.context.devices,
             requestsAudio = AppSettings.PULSEAUDIO_SOCKET in app.metadata.context.sockets,
             requestsNetwork = AppSettings.NETWORK in app.metadata.context.shared,
+            waylandAndX11 = app.metadata.context.waylandAndX11,
+            wayland = app.metadata.context.wayland,
         )
     }
 
@@ -63,14 +69,15 @@ class InstalledApps(private val context: Context) {
     /** The `sockets=` the app's metadata asks for; empty if it isn't installed. */
     fun sockets(id: String): List<String> = installation.app(id)?.metadata?.context?.sockets.orEmpty()
 
-    private fun desktopName(app: Deployment, id: String): String? {
-        val file = File(app.export, "share/applications/$id.desktop")
-        val desktop = try {
-            Keyfile.parse(file.readTextUpTo() ?: return null)
-        } catch (_: Exception) {
-            return null
-        }
-        return localizedName(desktop, Locale.getDefault())
+    /** The app is made for a terminal, which Flatdroid doesn't have. */
+    fun needsTerminal(id: String): Boolean = installation.app(id)?.let { desktop(it, id) }?.let(::runsInTerminal) == true
+
+    private fun desktopName(app: Deployment, id: String): String? = desktop(app, id)?.let { localizedName(it, Locale.getDefault()) }
+
+    private fun desktop(app: Deployment, id: String): Keyfile? = try {
+        File(app.export, "share/applications/$id.desktop").readTextUpTo()?.let(Keyfile::parse)
+    } catch (_: Exception) {
+        null
     }
 
     /** A PNG when the app exports one, else its scalable SVG. */
@@ -87,6 +94,12 @@ class InstalledApps(private val context: Context) {
         /** A Flatpak app ID: at least two dot-separated parts of letters, digits, `_` and `-`. */
         fun isValidId(id: String): Boolean =
             id.length <= 255 && Regex("[A-Za-z_][A-Za-z0-9_-]*(\\.[A-Za-z0-9_-]+)+").matches(id)
+
+        /** The app IDs in [text], separated by whitespace, each once; null if there are none or any isn't valid. */
+        fun parseIds(text: String): List<String>? =
+            text.split(Regex("\\s+")).filter { it.isNotEmpty() }.distinct().takeIf { ids -> ids.isNotEmpty() && ids.all(::isValidId) }
+
+        fun runsInTerminal(desktop: Keyfile): Boolean = desktop.string("Desktop Entry", "Terminal")?.trim() == "true"
 
         /** `Name[ll_CC]`, then `Name[ll]`, then `Name`, from a desktop file's `[Desktop Entry]`. */
         fun localizedName(desktop: Keyfile, locale: Locale): String? {

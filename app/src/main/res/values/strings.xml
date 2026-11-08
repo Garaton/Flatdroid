@@ -2,7 +2,7 @@
     <string name="app_name">Flatdroid</string>
 
     <string name="setup_title">Set up Flatdroid</string>
-    <string name="setup_intro">Flatdroid downloads Alpine Linux, then installs Flatpak, a display server (Xvnc and Openbox) and PulseAudio into it. This downloads about 140 MB and needs about 400 MB of storage.</string>
+    <string name="setup_intro">Flatdroid downloads Alpine Linux, then installs Flatpak, the display servers (Wayland\'s labwc, and Xvnc and Openbox for X11) and PulseAudio into it. This downloads about 140 MB and needs about 400 MB of storage.</string>
     <string name="setup_start">Start setup</string>
     <string name="setup_resume">Resume setup</string>
     <string name="setup_retry">Retry</string>
@@ -94,8 +94,8 @@
     <string name="dismiss">Close</string>
 
     <string name="install_title">Install from Flathub</string>
-    <string name="install_text">Enter the app\'s ID, as shown on its Flathub page.</string>
-    <string name="install_id_label">App ID</string>
+    <string name="install_text">Enter the app\'s ID, as shown on its Flathub page. Separate several IDs with spaces to install them together.</string>
+    <string name="install_id_label">App IDs</string>
     <string name="install_confirm">Install</string>
 
     <string name="task_channel">Installing and updating</string>
@@ -150,19 +150,24 @@
     </plurals>
     <string name="log_top">Top</string>
     <string name="log_bottom">Bottom</string>
-    <string name="settings_section_viewer">VNC viewer</string>
-    <string name="settings_viewer">Default viewer</string>
-    <string name="settings_viewer_hint">Determines what the default VNC Viewer app is. With \"Ask every time\", Android asks which app to use each time.</string>
-    <string name="settings_viewer_ask">Ask every time</string>
+    <string name="settings_section_viewer">Viewer</string>
+    <string name="settings_viewer">Show apps in</string>
+    <string name="settings_viewer_hint">Where apps are shown. Flatdroid\'s viewer is better in every way: quicker to respond, much lighter on the CPU, with touch gestures, the keyboard and the clipboard built in, and no port or password. A viewer app gets the session\'s link, password included, and only the app chosen here gets it.</string>
+    <string name="settings_viewer_flatdroid">Flatdroid\'s viewer (recommended)</string>
+    <string name="settings_viewer_external_warning">Less secure: with a viewer app, the display is reachable on a network port of this phone, so any app on it can try to connect, and the password is shown in Flatdroid. Flatdroid\'s viewer uses a private socket that only Flatdroid can reach.</string>
+    <string name="settings_viewer_none">None chosen</string>
     <string name="settings_viewer_missing">%1$s (not installed)</string>
     <string name="settings_frame_rate_60">60 FPS mode</string>
     <string name="settings_frame_rate_60_hint">Changes away from the default 30 FPS, significantly increases CPU usage and reduces battery life.</string>
     <string name="settings_custom_frame_rate">Frame rate</string>
     <string name="settings_custom_frame_rate_hint">%1$d to %2$d; overrides any other FPS setting. Clear this field to go back to 30/60 FPS.</string>
     <string name="settings_uncapped_frame_rate">Uncapped frame rate</string>
-    <string name="settings_uncapped_frame_rate_hint">As many frames as Xvnc can send.</string>
+    <string name="settings_uncapped_frame_rate_hint">As many frames as the display can send.</string>
     <string name="settings_title_bars">Window title bars</string>
-    <string name="settings_title_bars_hint">Title bars with close and maximize buttons on app windows. Without them apps get more room, but some (GTK3, Qt) can then only be closed from their own menus.</string>
+    <string name="settings_title_bars_hint">Title bars with close and maximize buttons on app windows. Without them apps get more room; Flatdroid\'s viewer closes the focused window from its own bar, an external viewer only through the apps\' menus.</string>
+    <string name="settings_title_bars_auto">Flatdroid decides (on with an external viewer)</string>
+    <string name="settings_title_bars_on">Always on</string>
+    <string name="settings_title_bars_off">Always off</string>
     <string name="settings_gpu_runtimes">Install GPU runtimes</string>
     <string name="settings_gpu_runtimes_hint">Lets Flatpak install vendor GPU and video decoding runtimes (NVIDIA, VAAPI) with apps. Flatdroid renders in software and doesn\'t use them; off saves space, and saving with it off removes ones already installed.</string>
     <string name="developer_setting">Developer setting</string>
@@ -197,14 +202,28 @@
     <string name="session_starting_app">Starting %1$s</string>
     <string name="session_running_app">%1$s is running</string>
     <string name="session_stopping">Stopping %1$s…</string>
+    <string name="session_notification_viewer">Running. Open the app to see it.</string>
+    <string name="viewer_back">Back to the app list</string>
+    <string name="viewer_keyboard">Keyboard</string>
+    <string name="viewer_extra_keys">Show or hide the extra keys</string>
+    <string name="viewer_close_window">Close window</string>
+    <string name="viewer_stop_title">Stop %1$s?</string>
+    <string name="viewer_stop_text">The app is closed at once; anything unsaved in it is lost.</string>
+    <string name="viewer_disconnected">Display disconnected: %1$s</string>
+    <string name="viewer_text_too_long">That\'s too much text to type. Copy it on Android and paste it in the app instead.</string>
+    <string name="viewer_copy_too_large">That\'s too much text for Android\'s clipboard, so it wasn\'t copied</string>
     <string name="session_notification_running">Open it in a VNC viewer at localhost:%1$d</string>
     <string name="session_address">Address: %1$s:%2$d</string>
     <string name="session_password">Password: %1$s</string>
+    <string name="session_username">Username: %1$s</string>
     <string name="session_copy_password">Copy password</string>
     <string name="session_open_viewer">Open viewer</string>
+    <!-- Flatdroid's own viewer: the app itself is what opens. -->
+    <string name="session_open_app">Open app</string>
     <string name="session_stop">Stop</string>
     <string name="session_ended">%1$s has closed.</string>
     <string name="session_failed">Could not run the app: %1$s</string>
+    <string name="session_choose_viewer">Choose the VNC viewer under Settings → Viewer first.</string>
     <string name="session_no_viewer">No VNC viewer is installed. Install one (such as AVNC) then connect to the address shown with the password.</string>
     <string name="session_log_title">App output</string>
     <string name="session_reading_metadata">Reading the app\'s metadata</string>
@@ -216,10 +235,10 @@
     <string name="launch_no_command">%1$s has no command to run</string>
     <string name="launch_wrong_arch">%1$s is built for %2$s, not %3$s; this app can\'t run here</string>
     <string name="launch_bind_replaced">%1$s was replaced by a link or is missing; not launching. Reinstalling the app recreates it.</string>
-    <string name="launch_display_failed">Xvnc did not start</string>
+    <string name="launch_display_failed">The display did not start</string>
+    <string name="launch_needs_terminal">This app runs in a terminal, which Flatdroid doesn\'t have</string>
     <string name="launch_app_changed">The app changed while it was running</string>
     <string name="session_relaunching_without_flatpak_info">Relaunching without /.flatpak-info</string>
-    <string name="launch_needs_wayland">This app needs Wayland, which Flatdroid doesn\'t provide yet (only X11). It exited with code %1$d.</string>
     <string name="launch_newer_flags_failed">The app failed with and without newer Electron\'s flags (exit %1$d)</string>
 
     <string name="electron_title">Download Electron for this device?</string>
@@ -236,10 +255,10 @@
     <string name="electron_step_extract">Extracting %1$s</string>
     <string name="electron_step_resources">Copying the app\'s resources</string>
 
-    <string name="app_settings_display">Display size</string>
-    <string name="app_settings_display_hint">The size the app\'s screen starts at.</string>
-    <string name="app_settings_portrait">Portrait (%1$d × %2$d)</string>
-    <string name="app_settings_landscape">Landscape (%1$d × %2$d)</string>
+    <string name="app_settings_display">Display</string>
+    <string name="app_settings_resolution">Resolution</string>
+    <string name="app_settings_resolution_hint">The app\'s screen as a share of the viewer\'s size, following it as the phone turns. Lower shares show everything larger and use less CPU. Custom is a fixed size.</string>
+    <string name="app_settings_resolution_percent">%1$d%%</string>
     <string name="app_settings_custom">Custom</string>
     <string name="app_settings_width">Width</string>
     <string name="app_settings_custom_invalid">Width and height must be between %1$d and %2$d.</string>
@@ -274,6 +293,12 @@
     <string name="app_settings_launch">Launch</string>
     <string name="app_settings_environment">Environment variables</string>
     <string name="app_settings_environment_hint">One NAME=value per line, added to the app\'s environment over Flatdroid\'s own. Lines starting with # are skipped.</string>
+    <string name="app_settings_launch_args">Launch arguments</string>
+    <string name="app_settings_interface_size">Interface size</string>
+    <string name="app_settings_interface_size_hint">Draws the app\'s text and controls larger, staying sharp, or smaller to fit more on the screen (smaller may be less sharp). With a higher Resolution, a larger size shows more detail at the same size. Apps on X11 keep their size.</string>
+    <string name="app_settings_force_x11">Force X11</string>
+    <string name="app_settings_force_x11_hint">Runs the app on X11 instead of Wayland. Wayland is quicker to respond in Flatdroid\'s tests; try this if the app misbehaves on it.</string>
+    <string name="app_settings_launch_args_hint">Added after the app\'s own command, separated by spaces. Each is passed as it is: no quoting.</string>
     <string name="app_settings_environment_invalid">Each line needs NAME=value; names use letters, digits and _, not starting with a digit.</string>
     <string name="app_settings_storage">Storage</string>
     <string name="app_settings_clear_cache">Clear cache</string>
@@ -335,6 +360,8 @@
     <string name="homes_provider_summary">Private homes</string>
     <string name="home_import_zip">Import a zip into the shared home</string>
     <string name="settings_theme">Theme for apps</string>
+    <string name="settings_pure_black">Pure black</string>
+    <string name="settings_pure_black_hint">Flatdroid\'s dark theme with black backgrounds, which saves power on AMOLED screens. Doesn\'t change apps.</string>
     <string name="settings_theme_hint">Uses a variety of files, Flatpak settings, etc to make certain apps abide by theming, works for most but not all apps.</string>
     <string name="settings_theme_system">System</string>
     <string name="settings_theme_dark">Dark</string>
@@ -490,7 +517,7 @@
     <string name="security_extra_syscalls">App default: block rarely used system calls</string>
     <string name="security_extra_syscalls_hint">Also refuses pidfd_open, process_madvise, kcmp, keyctl, add_key and request_key, which apps rarely need. An app that fails without them can be allowed them in its own settings.</string>
     <string name="security_hide_helpers">Hide the display and audio processes</string>
-    <string name="security_hide_helpers_hint">Apps can\'t open the memory of Xvnc, Openbox, PulseAudio and the other helpers through /proc. Helper processes started after the app aren\'t covered.</string>
+    <string name="security_hide_helpers_hint">Apps can\'t open the memory of the display, PulseAudio and the other helpers through /proc. Helper processes started after the app aren\'t covered.</string>
     <string name="security_permissions_from_metadata">Give apps the permissions they ask for</string>
     <string name="security_applies_to_default">Also applies to settings still on the default.</string>
     <string name="security_permissions_from_metadata_hint">If an app asks for permissions, they are granted by default. Off, they start off until you turn them on in an app\'s settings.</string>
@@ -498,8 +525,8 @@
     <string name="security_default_home_hint">The home an app gets until you choose one in its settings. Also applies to apps whose home you haven\'t chosen.</string>
     <string name="security_limit_devices">Limit devices and system information</string>
     <string name="security_limit_devices_hint">Apps get only CPU and memory information from /sys, and apps asking for all devices get only the basic ones every app has (no GPU, input, KVM or USB devices). Some apps may lose features.</string>
-    <string name="security_protect_password">Protect the VNC password</string>
-    <string name="security_protect_password_hint">The password shows only when you tap it, the screen can\'t be captured while it\'s shown, and it goes only to the viewer chosen under VNC viewer.</string>
+    <string name="security_hide_screen">Hide Flatdroid\'s screen</string>
+    <string name="security_hide_screen_hint">Flatdroid\'s screens can\'t be captured: screenshots and screen recordings get nothing, and recent apps shows them blank.</string>
     <string name="security_export_picker">Choose where exports go</string>
     <string name="security_export_picker_hint">Exports open Android\'s \"save as\" picker instead of going into Download.</string>
     <string name="security_android_fonts">App default: use Android\'s fonts</string>
@@ -541,7 +568,6 @@
     <string name="app_settings_share_hidden">Share hidden files and keys with other apps</string>
     <string name="app_settings_share_hidden_hint">This app\'s .ssh, .gnupg, shell start-up files and .gitconfig come from one set shared with the other apps that have this on, instead of its own.</string>
     <string name="session_show_password">Show password</string>
-    <string name="session_choose_viewer">Choose a VNC viewer under Settings → VNC viewer first: your security settings don\'t let the password go through Android\'s chooser.</string>
     <string name="storage_unwritable">The chosen file can\'t be written.</string>
     <string name="storage_export">Export</string>
     <string name="storage_export_warning_title">What an export holds</string>

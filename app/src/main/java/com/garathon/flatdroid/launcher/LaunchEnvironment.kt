@@ -34,6 +34,8 @@ object LaunchEnvironment {
         runtimeDir: String = "/tmp",
         /** The root looks like Flatpak's (/.flatpak-info), so `container` says so too, as Flatpak sets it. */
         flatpakContainer: Boolean = false,
+        /** The session is Wayland: the toolkits are pointed at it instead of X11. */
+        wayland: Boolean = false,
     ): LinkedHashMap<String, String> {
         val varApp = "${GuestPaths.HOME}/.var/app/$appId"
         val env = linkedMapOf(
@@ -76,6 +78,15 @@ object LaunchEnvironment {
             "FLUTTER_LINUX_RENDERER" to "software",
             "ALSOFT_DRIVERS" to "pulse",
         )
+        if (wayland) {
+            env.remove("DISPLAY")
+            for (key in X11_ONLY) env.remove(key)
+            env["WAYLAND_DISPLAY"] = "${GuestPaths.WAYLAND_DIR}/${GuestPaths.WAYLAND_SOCKET}"
+            env["XDG_SESSION_TYPE"] = "wayland"
+            env["GDK_BACKEND"] = "wayland"
+            env["QT_QPA_PLATFORM"] = "wayland"
+            env["SDL_VIDEODRIVER"] = "wayland"
+        }
         // libadwaita follows only the settings portal, or this (portals are off).
         if (flatpakContainer) env["container"] = "flatpak"
         if (darkTheme) env["ADW_DEBUG_COLOR_SCHEME"] = "prefer-dark"
@@ -96,6 +107,9 @@ object LaunchEnvironment {
         for ((key, value) in overrides) if (isName(key)) env[key] = value
         return env
     }
+
+    /** Variables only X11 sessions use, left out of Wayland ones. */
+    private val X11_ONLY = listOf("QT_X11_NO_MITSHM", "QT_XCB_GL_INTEGRATION", "SDL_VIDEO_X11_FORCE_EGL")
 
     /** The locale apps get when the device's language isn't shared: no language or region. */
     const val GENERIC_LOCALE = "C.UTF-8"

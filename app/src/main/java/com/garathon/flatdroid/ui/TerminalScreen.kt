@@ -1,12 +1,12 @@
 package com.garathon.flatdroid.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -15,7 +15,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.garathon.flatdroid.R
@@ -47,12 +46,8 @@ fun TerminalScreen(
                 Text(stringResource(R.string.settings_back))
             }
         }
-        SelectionContainer(modifier = Modifier.fillMaxWidth().weight(1f).verticalScroll(scroll)) {
-            Text(
-                text = output,
-                fontFamily = FontFamily.Monospace,
-                style = MaterialTheme.typography.bodySmall,
-            )
+        Box(modifier = Modifier.fillMaxWidth().weight(1f).verticalScroll(scroll)) {
+            LogText(output, Modifier.fillMaxWidth())
         }
     }
 }

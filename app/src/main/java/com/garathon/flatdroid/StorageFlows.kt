@@ -464,6 +464,7 @@ class StorageFlows(
                     val device = SetupController.settings(activity).load()
                     settings.copy(
                         vncViewer = device?.vncViewer,
+                        externalViewer = device?.externalViewer ?: false,
                         security = device?.security ?: settings.security,
                         terminalFilter = device?.terminalFilter ?: settings.terminalFilter,
                         terminalDuringSession = device?.terminalDuringSession ?: false,

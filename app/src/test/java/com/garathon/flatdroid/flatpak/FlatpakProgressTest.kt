@@ -69,4 +69,41 @@ class FlatpakProgressTest {
         assertFalse(FlatpakProgress.sameStep("Installing 1/2… 100%", "Installing 2/2…"))
         assertFalse(FlatpakProgress.sameStep("Looking for matches…", "Installing 1/2…"))
     }
+
+    @Test
+    fun alpinePackagesAreSteps() {
+        val progress = FlatpakProgress()
+        assertTrue(progress.feed("(  3/186) Upgrading glib (2.88.1-r1 -> 2.88.2-r0)"))
+        assertEquals(FlatpakProgress.Step("Upgrading", 3, 186, "glib", 1), progress.current)
+        assertTrue(progress.feed("(186/186) Installing wayvnc (0.10.0-r0)"))
+        assertEquals(99, progress.current?.percent)
+        assertFalse(progress.current!!.deploying)
+        assertTrue(progress.feed("(1/1) Purging libfoo (1.0-r0)"))
+        assertEquals(0, progress.current?.percent)
+        assertFalse(progress.feed("Executing busybox-1.37.0-r30.trigger"))
+        assertFalse(progress.feed("OK: 521.1 MiB in 329 packages"))
+    }
+
+    @Test
+    fun onlyStatusLinesReachTheStatus() {
+        for (line in listOf("Looking for updates…", "Looking for matches…", "Nothing to do.", "Nothing unused to uninstall",
+                "Installation complete.", "Changes complete.", "Skipping: org.xfce.mousepad/aarch64/stable is already installed")) {
+            assertTrue(line, FlatpakProgress.isStatus(line))
+        }
+        for (line in listOf(
+            "Info: runtime org.freedesktop.Platform branch 24.08 is end-of-life, with reason:",
+            "   org.freedesktop.Platform 24.08 is no longer receiving fixes and security updates. Please update to a supported runtime version.",
+            "Info: applications using this runtime:",
+            "   dev.bambosh.UnofficialHomestuckCollection",
+            "Warning: Commit metadata for runtime/org.freedesktop.Platform/aarch64/24.08 not matching expected metadata",
+            "These runtimes in installation 'user' are pinned and won't be removed; see flatpak-pin(1):",
+            "  runtime/org.freedesktop.Platform/aarch64/26.08",
+            " 1.           org.xfce.mousepad.Locale    stable    i    flathub    < 2.3 MB (partial)",
+            "(1/1) Upgrading libexpat (2.9.0-r0 -> 2.10.0-r0)",
+            "OK: 521.1 MiB in 329 packages",
+            "",
+        )) {
+            assertFalse(line, FlatpakProgress.isStatus(line))
+        }
+    }
 }

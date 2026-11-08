@@ -140,6 +140,35 @@ class LaunchPlannerTest {
     }
 
     @Test
+    fun onlyAppsWithoutX11GetAWaylandSession() {
+        runtimeWithGl()
+        val wayland = tmp.newFolder("wayland")
+        fun plan(id: String, sockets: String, force: Boolean = false): LaunchPlan {
+            val files = inst.app(id, metadata = appMetadata(id, "app", extra = "[Context]\nsockets=$sockets\n"))
+            File(files, "bin").mkdirs()
+            File(files, "bin/app").writeBytes(ExecutableTest.elf(0xb7))
+            return Ready(planner.plan(id, dirs.copy(waylandSockets = wayland), LaunchOptions(forceX11 = force)))
+        }
+        for (sockets in listOf("wayland;", "wayland;fallback-x11;", "x11;wayland;")) {
+            val app = plan("org.example.App" + sockets.length, sockets)
+            assertTrue(sockets, app.wayland)
+            assertEquals(wayland.path, app.binds.waylandSockets)
+            assertEquals("/run/flatdroid/wayland/wayland-0", app.environment["WAYLAND_DISPLAY"])
+            assertEquals(null, app.environment["DISPLAY"])
+        }
+        // Force X11, for an app that takes both.
+        val forced = plan("org.example.Forced", "x11;wayland;", force = true)
+        assertFalse(forced.wayland)
+        assertEquals(null, forced.binds.waylandSockets)
+        assertEquals(":1", forced.environment["DISPLAY"])
+        // An app that takes only Wayland keeps it: the setting is ignored.
+        assertTrue(plan("org.example.WaylandOnly", "wayland;", force = true).wayland)
+        val x11Only = plan("org.example.X11Only", "x11;")
+        assertFalse(x11Only.wayland)
+        assertEquals(":1", x11Only.environment["DISPLAY"])
+    }
+
+    @Test
     fun theSessionBusIsBoundWithItsAddress() {
         inst.runtime("org.kde.Platform", "6.10", "[Runtime]\nname=org.kde.Platform\n")
         val files = inst.app("org.kde.kmines", metadata = appMetadata("org.kde.kmines", "kmines", "org.kde.Platform/aarch64/6.10"))
@@ -203,7 +232,14 @@ class LaunchPlannerTest {
         assertEquals(listOf("/app/obsidian") + Electron.BASE_FLAGS + "--x", plan.command)
 
         val newer = Ready(planner.plan("md.obsidian.Obsidian", dirs, LaunchOptions(newerElectronFlags = true)))
-        assertEquals(listOf("/app/obsidian") + Electron.BASE_FLAGS + Electron.NEWER_FLAGS, newer.command)
+        assertEquals(listOf("/app/obsidian") + Electron.BASE_FLAGS + Electron.NEWER_FLAGS + Electron.OZONE_X11, newer.command)
+    }
+
+    @Test
+    fun electronFlagsNameTheSession() {
+        assertEquals(Electron.BASE_FLAGS, Electron.flags(newer = false, wayland = false))
+        assertEquals(Electron.BASE_FLAGS + Electron.OZONE_WAYLAND, Electron.flags(newer = false, wayland = true))
+        assertEquals(Electron.BASE_FLAGS + Electron.NEWER_FLAGS + Electron.OZONE_WAYLAND, Electron.flags(newer = true, wayland = true))
     }
 
     @Test

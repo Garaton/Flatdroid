@@ -78,11 +78,12 @@ class FlatpakMetadataTest {
     }
 
     @Test
-    fun waylandOnlyMeansNoX11Socket() {
-        assertTrue(FlatpakContext(sockets = listOf("wayland")).waylandOnly)
-        assertFalse(FlatpakContext(sockets = listOf("wayland", "fallback-x11")).waylandOnly)
-        assertFalse(FlatpakContext(sockets = listOf("wayland", "x11")).waylandOnly)
-        assertFalse(FlatpakContext(sockets = listOf("x11", "pulseaudio")).waylandOnly)
+    fun waylandIsForcedOffOnlyForAppsThatAlsoTakeX11() {
+        assertTrue(FlatpakContext(sockets = listOf("wayland")).wayland)
+        assertFalse(FlatpakContext(sockets = listOf("wayland")).waylandAndX11)
+        assertTrue(FlatpakContext(sockets = listOf("wayland", "fallback-x11")).waylandAndX11)
+        assertTrue(FlatpakContext(sockets = listOf("wayland", "x11")).waylandAndX11)
+        assertFalse(FlatpakContext(sockets = listOf("x11", "pulseaudio")).wayland)
     }
 
     @Test

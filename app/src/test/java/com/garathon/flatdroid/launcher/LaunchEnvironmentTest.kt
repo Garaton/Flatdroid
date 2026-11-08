@@ -25,6 +25,21 @@ class LaunchEnvironmentTest {
     }
 
     @Test
+    fun aWaylandSessionPointsTheToolkitsAtTheCompositor() {
+        val env = LaunchEnvironment.build("page.codeberg.dnkl.foot", "aarch64-linux-gnu", emptyMap(), glDefault = null, wayland = true)
+        assertEquals("/run/flatdroid/wayland/wayland-0", env["WAYLAND_DISPLAY"])
+        assertEquals("wayland", env["XDG_SESSION_TYPE"])
+        assertEquals("wayland", env["GDK_BACKEND"])
+        assertEquals("wayland", env["QT_QPA_PLATFORM"])
+        assertEquals("wayland", env["SDL_VIDEODRIVER"])
+        for (key in listOf("DISPLAY", "QT_X11_NO_MITSHM", "QT_XCB_GL_INTEGRATION", "SDL_VIDEO_X11_FORCE_EGL")) assertFalse(key, key in env)
+        // An app's own setting still wins.
+        val overridden = LaunchEnvironment.build("page.codeberg.dnkl.foot", "aarch64-linux-gnu", emptyMap(), glDefault = null,
+            overrides = mapOf("GDK_BACKEND" to "x11"), wayland = true)
+        assertEquals("x11", overridden["GDK_BACKEND"])
+    }
+
+    @Test
     fun metadataLdPathComesFirstAndGlAddsItsVariables() {
         val env = LaunchEnvironment.build(
             "org.supertuxproject.SuperTux", "aarch64-linux-gnu",

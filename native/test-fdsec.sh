@@ -21,6 +21,7 @@ run "$F" "$T" base
 run "$F" --extra "$T" extra
 run "$F" --no-inet "$T" noinet
 run "$F" --extra --no-inet -- "$T" extra noinet
+run "$F" --no-connect "$T" noconnect
 echo "== refusals"
 timeout 5 "$F" relative 2>&1 | grep -q '^fdsec: usage' || { echo "FAIL: relative command accepted"; fail=1; }
 timeout 5 "$F" --unknown /bin/true 2>&1 | grep -q '^fdsec: unknown option' || { echo "FAIL: unknown option accepted"; fail=1; }

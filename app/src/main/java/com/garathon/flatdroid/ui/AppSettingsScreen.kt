@@ -27,6 +27,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -44,9 +45,10 @@ import com.garathon.flatdroid.audio.MicStreamer
 import com.garathon.flatdroid.camera.AndroidCameras
 import com.garathon.flatdroid.flatpak.InstalledApp
 import com.garathon.flatdroid.settings.AppSettings
-import com.garathon.flatdroid.settings.DisplaySize
 import com.garathon.flatdroid.settings.EnvironmentText
 import com.garathon.flatdroid.settings.HomeMode
+import com.garathon.flatdroid.settings.LaunchArgs
+import com.garathon.flatdroid.settings.Resolution
 import com.garathon.flatdroid.storage.AppStorage
 import com.garathon.flatdroid.ui.theme.FlatdroidTheme
 
@@ -92,7 +94,7 @@ fun AppSettingsScreen(
     /** An Electron app or a Chromium browser ([com.garathon.flatdroid.flatpak.InstalledApps.showsWebContent]). */
     showsWebContent: Boolean = false,
 ) {
-    var choice by rememberSaveable { mutableStateOf(settings.displaySize) }
+    var choice by rememberSaveable { mutableStateOf(settings.resolution) }
     var width by rememberSaveable { mutableStateOf(settings.customWidth.toString()) }
     var height by rememberSaveable { mutableStateOf(settings.customHeight.toString()) }
     var wholeDev by rememberSaveable { mutableStateOf(settings.wholeDev) }
@@ -114,6 +116,9 @@ fun AppSettingsScreen(
     var cameraFrameRate by rememberSaveable { mutableStateOf(settings.cameraFrameRate) }
     var cameraRefused by rememberSaveable { mutableStateOf(false) }
     var environment by rememberSaveable { mutableStateOf(EnvironmentText.format(settings.environment)) }
+    var launchArgs by rememberSaveable { mutableStateOf(LaunchArgs.format(settings.launchArgs)) }
+    var forceX11 by rememberSaveable { mutableStateOf(settings.forceX11) }
+    var interfaceSize by rememberSaveable { mutableIntStateOf(settings.interfaceSize) }
     var homeMode by rememberSaveable { mutableStateOf(settings.homeMode) }
     var sdcard by rememberSaveable { mutableStateOf(settings.sdcard) }
     val environmentValue = EnvironmentText.parse(environment)
@@ -160,13 +165,17 @@ fun AppSettingsScreen(
         }
 
         SectionTitle(stringResource(R.string.app_settings_display))
-        Text(stringResource(R.string.app_settings_display_hint), style = MaterialTheme.typography.bodySmall)
-        Column(Modifier.selectableGroup()) {
-            RadioRow(choice == DisplaySize.PORTRAIT, { choice = DisplaySize.PORTRAIT }, stringResource(R.string.app_settings_portrait, AppSettings.PORTRAIT_WIDTH, AppSettings.PORTRAIT_HEIGHT))
-            RadioRow(choice == DisplaySize.LANDSCAPE, { choice = DisplaySize.LANDSCAPE }, stringResource(R.string.app_settings_landscape, AppSettings.LANDSCAPE_WIDTH, AppSettings.LANDSCAPE_HEIGHT))
-            RadioRow(choice == DisplaySize.CUSTOM, { choice = DisplaySize.CUSTOM }, stringResource(R.string.app_settings_custom))
-        }
-        if (choice == DisplaySize.CUSTOM) {
+        val customLabel = stringResource(R.string.app_settings_custom)
+        val percentLabel = stringResource(R.string.app_settings_resolution_percent)
+        DropdownRow(
+            selected = choice,
+            options = Resolution.entries,
+            onSelect = { choice = it },
+            label = { it.percent?.let { p -> percentLabel.format(p) } ?: customLabel },
+            title = stringResource(R.string.app_settings_resolution),
+            hint = stringResource(R.string.app_settings_resolution_hint),
+        )
+        if (choice == Resolution.CUSTOM) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 SizeField(width, stringResource(R.string.app_settings_width), size(width) == null, Modifier.width(120.dp)) { width = it }
                 Text("×")
@@ -180,6 +189,20 @@ fun AppSettingsScreen(
                 )
             }
         }
+        // Only for apps that ask for Wayland as well as X11.
+        if (app.waylandAndX11) SwitchRow(
+            forceX11, { forceX11 = it },
+            stringResource(R.string.app_settings_force_x11), stringResource(R.string.app_settings_force_x11_hint),
+        )
+        // The compositor scales; Xvnc can't.
+        if (app.wayland) DropdownRow(
+            selected = interfaceSize,
+            options = AppSettings.INTERFACE_SIZES,
+            onSelect = { interfaceSize = it },
+            label = { percentLabel.format(it) },
+            title = stringResource(R.string.app_settings_interface_size),
+            hint = stringResource(R.string.app_settings_interface_size_hint),
+        )
 
         SectionTitle(stringResource(R.string.app_settings_permissions))
         SwitchRow(
@@ -345,6 +368,15 @@ fun AppSettingsScreen(
                 singleLine = false,
                 keyboardType = KeyboardType.Ascii,
             )
+            TextRow(
+                content = launchArgs,
+                onChange = { launchArgs = it },
+                title = stringResource(R.string.app_settings_launch_args),
+                hint = stringResource(R.string.app_settings_launch_args_hint),
+                isError = false,
+                developer = true,
+                keyboardType = KeyboardType.Ascii,
+            )
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -352,7 +384,7 @@ fun AppSettingsScreen(
                 onClick = {
                     onSave(
                         settings.copy(
-                            displaySize = choice,
+                            resolution = choice,
                             // Valid typed values are kept even while another size is chosen.
                             customWidth = size(width) ?: settings.customWidth,
                             customHeight = size(height) ?: settings.customHeight,
@@ -371,12 +403,15 @@ fun AppSettingsScreen(
                             cameraResolution = cameraResolution,
                             cameraFrameRate = cameraFrameRate,
                             environment = if (developerOptions) environmentValue.orEmpty() else settings.environment,
+                            launchArgs = if (developerOptions) LaunchArgs.parse(launchArgs) else settings.launchArgs,
+                            forceX11 = forceX11,
+                            interfaceSize = interfaceSize,
                             homeModeChoice = homeMode.takeIf { it != settings.defaults.homeMode },
                             sdcard = if (broadAccess) sdcard else settings.sdcard,
                         )
                     )
                 },
-                enabled = (choice != DisplaySize.CUSTOM || customValid) && (!developerOptions || environmentValue != null),
+                enabled = (choice != Resolution.CUSTOM || customValid) && (!developerOptions || environmentValue != null),
             ) { Text(stringResource(R.string.settings_save)) }
             TextButton(onClick = onBack) { Text(stringResource(R.string.settings_back)) }
         }

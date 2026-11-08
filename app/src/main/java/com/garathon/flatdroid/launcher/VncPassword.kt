@@ -21,8 +21,8 @@ object VncPassword {
     // No look-alikes (0/O, 1/l/I), since the user may have to type it into a viewer.
     private const val ALPHABET = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
-    fun random(random: SecureRandom = SecureRandom()): String =
-        (1..LENGTH).map { ALPHABET[random.nextInt(ALPHABET.length)] }.joinToString("")
+    fun random(random: SecureRandom = SecureRandom(), length: Int = LENGTH): String =
+        (1..length).map { ALPHABET[random.nextInt(ALPHABET.length)] }.joinToString("")
 
     /**
      * The 8 bytes of Xvnc's `-PasswordFile` for [password]. DES-ECB is VNC's format, not a choice;

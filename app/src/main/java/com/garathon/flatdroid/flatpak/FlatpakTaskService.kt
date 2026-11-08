@@ -73,11 +73,13 @@ class FlatpakTaskService : Service() {
             .apply { acquire(WAKE_LOCK_TIMEOUT_MS) }
         // Installs are left out: an interrupted download is already safe (see cleanUpAfter); so is a
         // baseline, which changes no Flatpak files.
-        val marker = AppData.taskMarker(applicationContext).takeIf { task !is FlatpakTask.Install && task != FlatpakTask.BaselineAll }
+        val marker = AppData.taskMarker(applicationContext).takeIf {
+            task !is FlatpakTask.Install && task != FlatpakTask.BaselineAll
+        }
         // A task that ends with baselines: if it doesn't finish (cancelled, failed, killed), they are
         // recorded at the next start instead. A Repair finishes them too, if they were pending.
         val baselineMarker = AppData.baselineMarker(applicationContext).takeIf {
-            checkFilesOn(this) && (task !is FlatpakTask.Uninstall && (task != FlatpakTask.Repair || it.exists()))
+            checkFilesOn(this) && task !is FlatpakTask.Uninstall && (task != FlatpakTask.Repair || it.exists())
         }
         killed = false
         job = scope.launch {
@@ -140,7 +142,7 @@ class FlatpakTaskService : Service() {
         if (pending.isEmpty()) return
         FlatpakTasks.newCommand(getString(R.string.task_extra_data))
         val guard = IntegrityGuard(applicationContext).takeIf { checkFilesOn(this) }
-        val failedApp = extraData.applyAll(FlatpakTasks::log) { guard?.recordDeployment(it) }.firstOrNull { it.isApp && it.exitCode != 0 }
+        val failedApp = extraData.applyAll(FlatpakTasks::output) { guard?.recordDeployment(it) }.firstOrNull { it.isApp && it.exitCode != 0 }
         if (failedApp != null) {
             throw IOException(getString(R.string.task_extra_data_failed, failedApp.deployment.parentFile!!.parentFile!!.parentFile!!.name, failedApp.exitCode))
         }
@@ -168,8 +170,8 @@ class FlatpakTaskService : Service() {
                 }
                 val command = AlpineSetup.apkCommand(args)
                 FlatpakTasks.newCommand(getString(R.string.task_updating_alpine))
-                FlatpakTasks.log("$ ${command.joinToString(" ")}")
-                val result = env.run(command, ALPINE_TIMEOUT_SECONDS, extraBinds = listOf(cache.path to AlpineSetup.APK_CACHE), onLine = FlatpakTasks::log)
+                FlatpakTasks.log("$ ${command.joinToString(" ")}", status = false)
+                val result = env.run(command, ALPINE_TIMEOUT_SECONDS, extraBinds = listOf(cache.path to AlpineSetup.APK_CACHE), onLine = FlatpakTasks::output)
                 if (result.timedOut || result.exitCode != 0) {
                     FlatpakTasks.log(getString(R.string.task_alpine_failed, result.output.lineSequence().lastOrNull { it.isNotBlank() } ?: "exit ${result.exitCode}"))
                     return
@@ -190,15 +192,15 @@ class FlatpakTaskService : Service() {
         extraData(env).prune()
         when (task) {
             is FlatpakTask.Install -> try {
-                run(env, FlatpakCommands.install(task.appId))
+                run(env, FlatpakCommands.install(task.appIds))
             } catch (e: IOException) {
                 // Data an earlier interrupted removal left half-deleted makes the install fail
                 // instead of downloading it again: remove it, then try once more.
                 if (!MISSING_REPO_DATA.containsMatchIn(e.message ?: "")) throw e
                 // Possibly left by a kill some time before, so the links are checked too.
                 cleanRepository(env, checkLinks = true)
-                run(env, FlatpakCommands.install(task.appId))
-            }.also { applyExtraDataAndBaseline(env, listOf(task.appId)) }
+                run(env, FlatpakCommands.install(task.appIds))
+            }.also { applyExtraDataAndBaseline(env, task.appIds) }
             FlatpakTask.UpdateAll -> {
                 // An update reuses every file it doesn't change, so a changed one would end up in the new
                 // commit's baseline: check what is installed first.
@@ -373,9 +375,9 @@ class FlatpakTaskService : Service() {
 
     private fun run(env: AlpineEnvironment, command: List<String>, phase: String? = null) {
         FlatpakTasks.newCommand(phase)
-        FlatpakTasks.log("$ ${command.joinToString(" ")}")
+        FlatpakTasks.log("$ ${command.joinToString(" ")}", status = false)
         val result = try {
-            env.run(command, timeoutSeconds = TIMEOUT_SECONDS, onLine = FlatpakTasks::log)
+            env.run(command, timeoutSeconds = TIMEOUT_SECONDS, onLine = FlatpakTasks::output)
         } catch (e: RunInterruptedException) {
             if (e.killed) killed = true
             throw e
@@ -448,6 +450,7 @@ class FlatpakTaskService : Service() {
 
         private const val EXTRA_TASK = "task"
         private const val EXTRA_APP_ID = "appId"
+        private const val EXTRA_APP_IDS = "appIds"
         private const val EXTRA_DELETE_DATA = "deleteData"
         private const val EXTRA_KEEP_RUNTIMES = "keepRuntimes"
 
@@ -460,7 +463,7 @@ class FlatpakTaskService : Service() {
             if (FlatpakTasks.ui.value.running != null || SessionController.isBusy) return false
             val intent = Intent(context, FlatpakTaskService::class.java)
             when (task) {
-                is FlatpakTask.Install -> intent.putExtra(EXTRA_TASK, "install").putExtra(EXTRA_APP_ID, task.appId)
+                is FlatpakTask.Install -> intent.putExtra(EXTRA_TASK, "install").putExtra(EXTRA_APP_IDS, task.appIds.toTypedArray())
                 FlatpakTask.UpdateAll -> intent.putExtra(EXTRA_TASK, "update")
                 FlatpakTask.Repair -> intent.putExtra(EXTRA_TASK, "repair")
                 FlatpakTask.BaselineAll -> intent.putExtra(EXTRA_TASK, "baselineAll")
@@ -478,7 +481,8 @@ class FlatpakTaskService : Service() {
         private fun taskOf(intent: Intent): FlatpakTask? {
             val appId = intent.getStringExtra(EXTRA_APP_ID)?.takeIf(InstalledApps::isValidId)
             return when (intent.getStringExtra(EXTRA_TASK)) {
-                "install" -> appId?.let { FlatpakTask.Install(it) }
+                "install" -> intent.getStringArrayExtra(EXTRA_APP_IDS)?.toList()
+                    ?.takeIf { ids -> ids.isNotEmpty() && ids.all(InstalledApps::isValidId) }?.let { FlatpakTask.Install(it) }
                 "update" -> FlatpakTask.UpdateAll
                 "repair" -> FlatpakTask.Repair
                 "baselineAll" -> FlatpakTask.BaselineAll
@@ -497,7 +501,7 @@ class FlatpakTaskService : Service() {
         }
 
         fun describe(context: Context, task: FlatpakTask): String = when (task) {
-            is FlatpakTask.Install -> context.getString(R.string.task_installing, task.appId)
+            is FlatpakTask.Install -> context.getString(R.string.task_installing, task.appIds.joinToString(", "))
             FlatpakTask.UpdateAll -> context.getString(R.string.task_updating)
             FlatpakTask.Repair -> context.getString(R.string.task_repairing)
             FlatpakTask.BaselineAll -> context.getString(R.string.task_baselining_all)

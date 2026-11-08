@@ -1,6 +1,7 @@
 package com.garathon.flatdroid.alpine
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -78,5 +79,42 @@ class GuestFilesTest {
         val a = GuestFiles.machineId()
         assertTrue(Regex("^[0-9a-f]{32}\n$").matches(a))
         assertTrue(a != GuestFiles.machineId())
+    }
+
+    @Test
+    fun labwcHasOnlyItsOwnKeysAndAsksAppsNotToDrawTitleBarsWithoutThem() {
+        val rc = GuestFiles.labwcRc(titleBars = false)
+        assertTrue("key=\"A-F4\"" in rc)
+        assertFalse("<default/></keyboard>" in rc || "<keyboard><default" in rc)
+        assertTrue("serverDecoration=\"no\"" in rc)
+        assertFalse("serverDecoration" in GuestFiles.labwcRc(titleBars = true))
+    }
+
+    @Test
+    fun openboxWearsLabwcsDefaultLook() {
+        assert("<name>${GuestFiles.OPENBOX_THEME}</name>" in GuestFiles.openboxRc())
+        assert("<name>" !in GuestFiles.labwcRc())
+        assert("window.active.title.bg.color: #e1dedb" in GuestFiles.themerc(dark = false))
+    }
+
+    @Test
+    fun darkAppsGetDarkDecorations() {
+        val dark = GuestFiles.themerc(dark = true)
+        assert("window.active.title.bg.color: #303030" in dark)
+        assert("window.active.label.text.color: #ffffff" in dark)
+        // The same keys either way: only the colours change.
+        org.junit.Assert.assertEquals(
+            GuestFiles.themerc(dark = false).lines().map { it.substringBefore(':') },
+            dark.lines().map { it.substringBefore(':') },
+        )
+    }
+
+    @Test
+    fun interfaceSizesAreScales() {
+        org.junit.Assert.assertEquals("1.00", com.garathon.flatdroid.session.SessionScript.scale(100))
+        org.junit.Assert.assertEquals("1.25", com.garathon.flatdroid.session.SessionScript.scale(125))
+        org.junit.Assert.assertEquals("2.00", com.garathon.flatdroid.session.SessionScript.scale(200))
+        org.junit.Assert.assertEquals("0.75", com.garathon.flatdroid.session.SessionScript.scale(75))
+        org.junit.Assert.assertEquals("0.50", com.garathon.flatdroid.session.SessionScript.scale(50))
     }
 }

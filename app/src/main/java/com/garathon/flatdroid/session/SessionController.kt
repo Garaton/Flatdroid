@@ -4,6 +4,7 @@ import com.garathon.flatdroid.flatpak.FlatpakTasks
 import com.garathon.flatdroid.util.DebugLog
 import com.garathon.flatdroid.util.LineBuffer
 import com.garathon.flatdroid.util.appScope
+import com.garathon.flatdroid.viewer.ViewerConnection
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -13,20 +14,42 @@ import kotlinx.coroutines.flow.update
 sealed interface SessionState {
     data object Idle : SessionState
     data class Starting(val appId: String, val detail: String, val skippable: Boolean = false) : SessionState
-    /** The app runs; the viewer connects to localhost:[SessionScript.VNC_PORT] with [password]. */
-    data class Running(val appId: String, val password: String) : SessionState
+    /**
+     * The app runs. Flatdroid's own viewer connects to [socket] (a host path); with the external
+     * viewer setting there is none, and a viewer connects to localhost:[SessionScript.VNC_PORT]
+     * with [password], and [username] when the session is Wayland ([WaylandVnc]). [wayland]: the
+     * display is labwc rather than Xvnc and Openbox. [followPercent]:
+     * the screen is that share of the viewer's size and follows it (null: a fixed size).
+     */
+    data class Running(
+        val appId: String,
+        val password: String,
+        val username: String? = null,
+        val socket: String? = null,
+        val wayland: Boolean = false,
+        val followPercent: Int? = null,
+        /** The compositor's socket for [com.garathon.flatdroid.viewer.WaylandClient]; null on X11. */
+        val waylandSocket: String? = null,
+        val shareClipboard: Boolean = true,
+        /** What the Wayland output refreshes at, per second; null to leave it. */
+        val outputRefresh: Int? = null,
+    ) : SessionState
     data class Stopping(val appId: String) : SessionState
     /**
      * The app ships Electron [version] for [fromArch]; the user is asked before Flatdroid
      * downloads one for this device. [problem] is set when a swap can't work.
      */
-    data class ElectronOffer(val appId: String, val version: String?, val fromArch: String, val problem: String?) : SessionState
+    data class ElectronOffer(val appId: String, val version: String?, val fromArch: String, val problem: String?) : SessionState, Question
+    /** The agreed Electron swap is being downloaded and put in place. */
     data class PreparingElectron(val appId: String, val detail: String, val fraction: Float?) : SessionState
     /**
      * The file check found changed files before launch; [detail] lists the affected packages and
      * the launch was refused. The reinstall path restores them by [appId] (see FlatpakTask.Reinstall).
      */
-    data class FilesChanged(val appId: String, val detail: String) : SessionState
+    data class FilesChanged(val appId: String, val detail: String) : SessionState, Question
+
+    /** No session runs: a launch stopped to ask the user something, which stays up until answered. */
+    sealed interface Question
 
     val appIdOrNull: String?
         get() = when (this) {
@@ -61,7 +84,7 @@ object SessionController {
     /** Where answers to [SessionUi.micRequest] go: the running session's microphone, while one has it. */
     @Volatile var onMicrophoneAnswer: ((Boolean) -> Unit)? = null
 
-    val isBusy: Boolean get() = _ui.value.state !is SessionState.Idle && _ui.value.state !is SessionState.ElectronOffer && _ui.value.state !is SessionState.FilesChanged
+    val isBusy: Boolean get() = _ui.value.state !is SessionState.Idle && _ui.value.state !is SessionState.Question
 
     /** Also clears a finished Flatpak task's banner: one banner at a time. */
     fun starting(appId: String, detail: String, clearLog: Boolean = false, skippable: Boolean = false) {
@@ -72,11 +95,16 @@ object SessionController {
 
     /** Set while the file check runs; the Skip button calls [skipFileCheck]. */
     @Volatile var onSkipFileCheck: (() -> Unit)? = null
+    /** The viewer's display took a new size (width, height), while a session with cameras runs. */
+    @Volatile var onDisplayResized: ((Int, Int) -> Unit)? = null
     fun skipFileCheck() { onSkipFileCheck?.invoke() }
 
-    fun running(appId: String, password: String) = _ui.update { it.copy(state = SessionState.Running(appId, password)) }
+    fun running(state: SessionState.Running) = _ui.update { it.copy(state = state) }
 
-    fun stopping(appId: String) = _ui.update { it.copy(state = SessionState.Stopping(appId)) }
+    fun stopping(appId: String) {
+        ViewerConnection.closeOnMain()
+        _ui.update { it.copy(state = SessionState.Stopping(appId)) }
+    }
 
     fun offerElectron(offer: SessionState.ElectronOffer) = _ui.update { it.copy(state = offer) }
 
@@ -87,6 +115,7 @@ object SessionController {
 
     /** Back to idle, with [message] describing the outcome (null for a plain stop). */
     fun ended(message: String?, failed: Boolean = false) {
+        ViewerConnection.closeOnMain()
         message?.let { DebugLog.i("Session: $it") }
         _ui.update { it.copy(state = SessionState.Idle, message = message, failed = failed && message != null, micRequest = null) }
     }

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark mode: a dark window behind Compose's content (no white flash at start, and a dark
+         stand-in in recent apps while the screen is hidden; Android 13+ gets the exact colour at runtime). -->
+    <style name="Base.Flatdroid" parent="android:Theme.Material.NoActionBar" />
+</resources>

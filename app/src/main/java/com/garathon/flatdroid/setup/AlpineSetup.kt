@@ -173,17 +173,20 @@ class AlpineSetup(
 
     companion object {
         /**
-         * Alpine's tigervnc stays until our own Xvnc build replaces it. Openbox needs a font: without
-         * one its title bars collapse to a few pixels. ostree repairs the Flatpak repository after
+         * Xvnc is Alpine's tigervnc (an own build would save little: the camera stack needs Mesa
+         * too), Openbox its window manager; labwc, wayvnc and wlr-randr are the Wayland session:
+         * the compositor, its VNC server and what sets the output's size. Openbox needs a font:
+         * without one its title bars collapse to a few pixels. ostree repairs the Flatpak repository after
          * an interrupted removal (FlatpakTaskService). dbus and xdg-dbus-proxy give apps their session bus
          * (SessionBus); PipeWire, WirePlumber, the portal and GStreamer's PipeWire elements carry
          * the camera (gst-plugins-good to split its JPEG frames), and pipewire-tools tells when an app uses it.
          */
         val PACKAGES = listOf(
-            "flatpak", "ostree", "tigervnc", "openbox", "font-cantarell", "pulseaudio", "ca-certificates",
+            "flatpak", "ostree", "tigervnc", "openbox", "labwc", "wayvnc", "wlr-randr", "font-cantarell", "pulseaudio", "ca-certificates",
             "dbus", "xdg-dbus-proxy", "pipewire", "wireplumber", "xdg-desktop-portal", "gst-plugin-pipewire", "gstreamer-tools", "gst-plugins-good",
             "pipewire-tools",
         )
+
         /** Where apk's package cache is bound: a directory in Flatdroid's cache, deleted afterwards. */
         const val APK_CACHE = "/var/cache/apk"
 

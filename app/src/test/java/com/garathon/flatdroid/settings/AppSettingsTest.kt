@@ -15,9 +15,9 @@ class AppSettingsTest {
     fun defaultsUntilSavedThenRoundTrips() {
         val store = AppSettingsStore(File(tmp.root, "appsettings/a.App.properties"))
         assertEquals(AppSettings(), store.load())
-        assertEquals("1000x1400", store.load().geometry)
+        assertEquals(540 to 990, store.load().size(720, 1320))
         val saved = AppSettings(
-            DisplaySize.CUSTOM, 960, 640, newerElectronFlags = true, lastOpened = 1234L, wholeDev = true,
+            Resolution.CUSTOM, 960, 640, newerElectronFlags = true, lastOpened = 1234L, wholeDev = true,
             audio = false, microphone = true, alwaysAllowMicrophone = true, withoutFlatpakInfo = true,
             environment = mapOf("VLC_DATA_PATH" to "/app/share/vlc", "VLC_PLUGIN_PATH" to "/app/lib/vlc/plugins"),
             homeModeChoice = HomeMode.TEMPORARY, sdcard = true, camera = true, cameraResolution = 1080, cameraFrameRate = 15,
@@ -25,7 +25,7 @@ class AppSettingsTest {
         )
         store.save(saved)
         assertEquals(saved, store.load())
-        assertEquals("960x640", store.load().geometry)
+        assertEquals(960 to 640, store.load().size(720, 1320))
         store.update { it.copy(lastOpened = 99L) }
         assertEquals(saved.copy(lastOpened = 99L), store.load())
         store.delete()
@@ -33,13 +33,21 @@ class AppSettingsTest {
     }
 
     @Test
-    fun defaultSizesAreNotPinned() {
+    fun aCustomSizeIsKeptWhileAShareIsChosen() {
         val file = File(tmp.root, "b.properties")
-        // A custom size is kept for later, but landscape still follows Flatdroid's default.
-        AppSettingsStore(file).save(AppSettings(DisplaySize.LANDSCAPE, customWidth = 480, customHeight = 720, lastOpened = 5L))
+        AppSettingsStore(file).save(AppSettings(Resolution.HALF, customWidth = 480, customHeight = 720, lastOpened = 5L))
         val loaded = AppSettingsStore(file).load()
-        assertEquals("1600x1000", loaded.geometry)
-        assertEquals("480x720", loaded.copy(displaySize = DisplaySize.CUSTOM).geometry)
+        assertEquals(360 to 660, loaded.size(720, 1320))
+        assertEquals(480 to 720, loaded.copy(resolution = Resolution.CUSTOM).size(720, 1320))
+    }
+
+    @Test
+    fun sharesOfTheViewerAreEvenAndNotTiny() {
+        assertEquals(720 to 1320, Resolution.FULL.scaled(720, 1320))
+        assertEquals(540 to 990, Resolution.THREE_QUARTERS.scaled(720, 1320))
+        // Landscape follows the viewer turned; odd sizes round down to even.
+        assertEquals(1168 to 540, Resolution.HALF.scaled(2337, 1081))
+        assertEquals(Resolution.MIN_FOLLOW to 330, Resolution.QUARTER.scaled(720, 1320))
     }
 
     @Test
@@ -85,7 +93,7 @@ class AppSettingsTest {
         // The store hands the defaults to what it loads, saved or not.
         val file = File(tmp.root, "d.properties")
         assertEquals(HomeMode.PRIVATE, AppSettingsStore(file, hardened).load().homeMode)
-        AppSettingsStore(file, hardened).save(AppSettings(defaults = hardened, displaySize = DisplaySize.LANDSCAPE))
+        AppSettingsStore(file, hardened).save(AppSettings(defaults = hardened, resolution = Resolution.HALF))
         assertEquals(hardened, AppSettingsStore(file, hardened).load().defaults)
         assertEquals(HomeMode.SHARED, AppSettingsStore(file).load().homeMode)
     }
@@ -106,9 +114,9 @@ class AppSettingsTest {
     @Test
     fun brokenValuesFallBackToDefaults() {
         val broken = File(tmp.root, "x.properties").apply {
-            writeText("display.size=custom\ndisplay.width=99999\ndisplay.height=abc\nlastOpened=x\npermission.audio=maybe\npermission.microphone=always\n")
+            writeText("display.resolution=custom\ndisplay.width=99999\ndisplay.height=abc\nlastOpened=x\npermission.audio=maybe\npermission.microphone=always\n")
         }
-        assertEquals(AppSettings(DisplaySize.CUSTOM), AppSettingsStore(broken).load())
+        assertEquals(AppSettings(Resolution.CUSTOM), AppSettingsStore(broken).load())
     }
 
     @Test
@@ -134,5 +142,17 @@ class AppSettingsTest {
         )
         val alone = AppSettingsStore(file(AppSettingsStore.imported(imported, null).decodeToString())).load()
         assertEquals(AppSettings(microphone = true, audio = false), alone)
+    }
+
+    @Test
+    fun launchArgumentsRoundTripAndAreKeptLocalOnImport() {
+        assertEquals(listOf("--hold", "-e", "x"), LaunchArgs.parse("  --hold  -e\tx "))
+        assertEquals(emptyList<String>(), LaunchArgs.parse(" "))
+        val f = File(tmp.root, "appsettings/b.App.properties")
+        val store = AppSettingsStore(f)
+        store.save(AppSettings(launchArgs = listOf("--hold", "--x=1")))
+        assertEquals(listOf("--hold", "--x=1"), store.load().launchArgs)
+        val imported = File(tmp.root, "appsettings/c.App.properties").apply { writeBytes(AppSettingsStore.imported(f.readBytes(), null)) }
+        assertEquals(emptyList<String>(), AppSettingsStore(imported).load().launchArgs)
     }
 }

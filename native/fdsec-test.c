@@ -3,6 +3,7 @@
  *   fdsec-test none          run without fdsec: nothing below may be blocked
  *   fdsec-test base          under `fdsec`
  *   fdsec-test extra noinet  under `fdsec --extra --no-inet` (either word alone also works)
+ *   fdsec-test noconnect     under `fdsec --no-connect`
  * Each system call is made with arguments that are harmless whether or not it is blocked.
  * Exits 1 if any result differs from what fdsec should give.
  */
@@ -33,11 +34,12 @@ static long socket_result(int family)
 
 int main(int argc, char **argv)
 {
-	int base = 0, extra = 0, noinet = 0;
+	int base = 0, extra = 0, noinet = 0, noconnect = 0;
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "base")) base = 1;
 		else if (!strcmp(argv[i], "extra")) base = extra = 1;
 		else if (!strcmp(argv[i], "noinet")) base = noinet = 1;
+		else if (!strcmp(argv[i], "noconnect")) base = noconnect = 1;
 		else if (strcmp(argv[i], "none")) { fprintf(stderr, "unknown mode %s\n", argv[i]); return 2; }
 	}
 	pid_t self = getpid();
@@ -82,6 +84,8 @@ int main(int argc, char **argv)
 	expect("socket AF_INET6", socket_result(AF_INET6), noinet, EACCES);
 	expect("socket AF_UNIX", socket_result(AF_UNIX), 0, EACCES);
 	expect("socket AF_NETLINK", socket_result(AF_NETLINK), 0, EACCES);
+	/* A bad descriptor: EBADF when connect is allowed. */
+	expect("connect", connect(-1, 0, 0), noconnect, EACCES);
 
 	printf("%d failure(s)\n", failures);
 	return failures != 0;

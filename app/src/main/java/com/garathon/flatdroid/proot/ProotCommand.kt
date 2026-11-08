@@ -12,12 +12,14 @@ data class ProotPaths(
     val rootfs: String,
     /** nativeLibraryDir/libfdsec.so ([Fdsec]). */
     val fdsec: String,
+    /** nativeLibraryDir/libfdshm.so ([Fdshm]). */
+    val fdshm: String,
 ) {
     /** link2symlink's backing files; Flatpak's hard links end up here. */
     val l2sDir: String get() = "$rootfs/.l2s"
 
     init {
-        for (path in listOf(proot, loader, tmpDir, rootfs, fdsec)) {
+        for (path in listOf(proot, loader, tmpDir, rootfs, fdsec, fdshm)) {
             require(path.startsWith("/") && ':' !in path) { "Unusable path: $path" }
         }
     }
@@ -84,6 +86,8 @@ data class FlatpakBinds(
     /** Xvnc's socket directory ([GuestPaths.X11_DIR]) and PulseAudio's ([GuestPaths.PULSE_DIR]; null without sound). */
     val x11Sockets: String,
     val pulseSockets: String?,
+    /** The Wayland compositor's socket directory ([GuestPaths.WAYLAND_DIR]); null when the session is X11. */
+    val waylandSockets: String? = null,
     /** [GuestPaths.HOME], then the app's own private directories over parts of it and at /var/…: host to guest path. */
     val home: String,
     val appDirs: List<Pair<String, String>> = emptyList(),
@@ -103,7 +107,7 @@ data class FlatpakBinds(
     val extra: List<Pair<String, String>> = emptyList(),
 ) {
     init {
-        val hosts = listOfNotNull(root, runtimeFiles, appFiles, tmp, shm, x11Sockets, pulseSockets, home, emptyDir) +
+        val hosts = listOfNotNull(root, runtimeFiles, appFiles, tmp, shm, x11Sockets, pulseSockets, waylandSockets, home, emptyDir) +
             etc.values + extensions.map { it.first } + appDirs.map { it.first } + privateFiles.map { it.first } + extra.map { it.first }
         for (path in hosts) require(path.startsWith("/") && ':' !in path) { "Unusable host path: $path" }
         val guests = extensions.map { it.second } + appDirs.map { it.second } + privateFiles.map { it.second } + extra.map { it.second }
@@ -178,6 +182,7 @@ object ProotCommand {
         argv += "--bind=${binds.emptyDir}:/sys/fs/selinux"
         for ((guest, host) in binds.fakeProc) argv += "--bind=$host:$guest"
         for ((host, guest) in binds.extra) argv += "--bind=$host:$guest"
+        argv += "--bind=${paths.fdshm}:${Fdshm.ALPINE_PATH}"
         argv += "--bind=${paths.fdsec}:${Fdsec.ALPINE_PATH}"
         argv += if (filter != null) Fdsec.wrap(Fdsec.ALPINE_PATH, filter, command) else command
 
@@ -275,6 +280,7 @@ object ProotCommand {
         argv += "--bind=${binds.tmp}:/tmp"
         argv += "--bind=${binds.x11Sockets}:${GuestPaths.X11_DIR}"
         binds.pulseSockets?.let { argv += "--bind=$it:${GuestPaths.PULSE_DIR}" }
+        binds.waylandSockets?.let { argv += "--bind=$it:${GuestPaths.WAYLAND_DIR}" }
         argv += "--bind=${binds.home}:${GuestPaths.HOME}"
         for ((host, guest) in binds.appDirs) argv += "--bind=$host:$guest"
         for ((host, guest) in binds.privateFiles) argv += "--bind=$host:$guest"

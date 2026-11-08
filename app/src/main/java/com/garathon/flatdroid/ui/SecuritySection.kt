@@ -97,8 +97,8 @@ fun SecuritySection(
         stringResource(R.string.security_limit_devices), stringResource(R.string.security_limit_devices_hint), enabled = enabled,
     )
     SwitchRow(
-        security.protectPassword, { onChange(security.copy(protectPassword = it)) },
-        stringResource(R.string.security_protect_password), stringResource(R.string.security_protect_password_hint), enabled = enabled,
+        security.hideScreen, { onChange(security.copy(hideScreen = it)) },
+        stringResource(R.string.security_hide_screen), stringResource(R.string.security_hide_screen_hint), enabled = enabled,
     )
     SwitchRow(
         security.exportWithPicker, { onChange(security.copy(exportWithPicker = it)) },
@@ -115,7 +115,7 @@ val SecuritySaver: Saver<SecuritySettings, Any> = listSaver(
     save = {
         listOf(
             it.extraSyscallFilter, it.hideHelperProcesses, it.permissionsFromMetadata, it.defaultHomeMode.name,
-            it.limitDevices, it.protectPassword, it.exportWithPicker, it.checkFilesBeforeLaunch,
+            it.limitDevices, it.hideScreen, it.exportWithPicker, it.checkFilesBeforeLaunch,
             it.androidFonts, it.shareClipboard, it.shareTimeZone, it.shareLanguage,
         )
     },
@@ -126,7 +126,7 @@ val SecuritySaver: Saver<SecuritySettings, Any> = listSaver(
             permissionsFromMetadata = it[2] as Boolean,
             defaultHomeMode = HomeMode.valueOf(it[3] as String),
             limitDevices = it[4] as Boolean,
-            protectPassword = it[5] as Boolean,
+            hideScreen = it[5] as Boolean,
             exportWithPicker = it[6] as Boolean,
             checkFilesBeforeLaunch = it[7] as Boolean,
             androidFonts = it[8] as Boolean,

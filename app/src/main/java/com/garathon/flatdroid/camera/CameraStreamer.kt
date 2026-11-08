@@ -37,12 +37,13 @@ import java.io.IOException
  * who may use cameras, while an app is still linked.
  * Everything runs on the camera's own thread; writing to the pipe
  * blocks it while the source is behind, and the image reader then drops frames. Frames are turned
- * by [rotation] degrees clockwise (upright for the app's display) before they are encoded.
+ * by [rotation] degrees clockwise (upright for the app's display) before they are encoded; when
+ * the display turns ([turn]) so do they, changing shape with it.
  */
-class CameraStreamer(private val context: Context, private val camera: AndroidCameras.Camera, private val pipe: File, private val rotation: Int = 0) {
-    private val outWidth = camera.turnedSize(rotation).first
-    private val outHeight = camera.turnedSize(rotation).second
-    private val turned = if (rotation != 0) ByteArray(Nv21.bytes(camera.width, camera.height)) else null
+class CameraStreamer(private val context: Context, private val camera: AndroidCameras.Camera, private val pipe: File, private var rotation: Int = 0) {
+    private val outWidth get() = camera.turnedSize(rotation).first
+    private val outHeight get() = camera.turnedSize(rotation).second
+    private val turned by lazy { ByteArray(Nv21.bytes(camera.width, camera.height)) }
     private val jpeg = ByteArrayOutputStream()
     private val part = ByteArrayOutputStream()
     private val thread = HandlerThread("camera-${camera.id}").apply { start() }
@@ -91,6 +92,13 @@ class CameraStreamer(private val context: Context, private val camera: AndroidCa
             DebugLog.w("Camera ${camera.id}: ${e.message}")
         }
     }
+
+    /**
+     * Frames are turned by [degrees] from now on. The JPEG in each says its size, so an app decoding
+     * them follows; the node goes on announcing the size it started with (an app that trusts
+     * that instead of the frames: verify).
+     */
+    fun turn(degrees: Int) = handler.post { rotation = degrees }
 
     /** How many links lead from the node: Android's camera runs while there are any. */
     fun setUsers(count: Int) = handler.post {
@@ -209,9 +217,9 @@ class CameraStreamer(private val context: Context, private val camera: AndroidCa
                 u.buffer, v.buffer, u.rowStride, u.pixelStride, order, frame, row,
             )
             meter.step(0)
-            if (turned != null) Nv21.rotate(frame, camera.width, camera.height, rotation, turned)
+            if (rotation != 0) Nv21.rotate(frame, camera.width, camera.height, rotation, turned)
             meter.step(1)
-            writeFrame(stream, turned ?: frame)
+            writeFrame(stream, if (rotation != 0) turned else frame)
             meter.round()
         } catch (e: IOException) {
             if (!closed) DebugLog.w("Camera ${camera.id}: ${e.message}")

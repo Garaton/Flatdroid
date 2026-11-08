@@ -23,6 +23,8 @@ data class HostDirs(
     /** Generated /etc files: name to host file. */
     val etc: Map<String, File>,
     val x11Sockets: File,
+    /** The Wayland compositor's socket directory, bound only for apps in a Wayland session. */
+    val waylandSockets: File? = null,
     /** PulseAudio's socket directory; null when the app gets no sound. */
     val pulseSockets: File?,
     /** Bound at [GuestPaths.FONT_DIRS]. */
@@ -58,6 +60,8 @@ data class LaunchOptions(
     /** A prepared arm64/x64 Electron for an app that ships the other architecture's, if any. */
     val electronSwap: File? = null,
     val extraArgs: List<String> = emptyList(),
+    /** An X11 session for an app that asks for both Wayland and X11 (its Force X11 setting); ignored for others. */
+    val forceX11: Boolean = false,
     val environment: Map<String, String> = emptyMap(),
     /** For an app asking for `devices=all`: the host's whole /dev, Binder included (the app's own setting). */
     val wholeDev: Boolean = false,
@@ -91,6 +95,8 @@ data class LaunchPlan(
     val usrLinks: List<String>,
     /** Electron or a Chromium browser, started without zypak or cobalt ([Electron]). */
     val isElectron: Boolean,
+    /** The app takes Wayland, so its session is Wayland (labwc and wayvnc) instead of Xvnc. */
+    val wayland: Boolean = false,
     /** What fdsec refuses for this app. */
     val filter: Fdsec.Filter,
 )
@@ -145,6 +151,9 @@ class LaunchPlanner(
         val ldPaths = extensions.mapNotNull { (base, ext) -> ext.addLdPath?.let { "$base/${ext.guestPath}/$it" } }
 
         // Electron apps start through zypak, and some Chromium browsers through cobalt: both skipped.
+        // Wayland for every app that takes it, unless one that also takes X11 is set to Force X11.
+        val context = app.metadata.context
+        val wayland = context.wayland && !(options.forceX11 && context.waylandAndX11)
         var command = listOf(commandPath)
         var isElectron = false
         val varApp = "${GuestPaths.HOME}/.var/app/$appId"
@@ -188,14 +197,12 @@ class LaunchPlanner(
                 }
                 extraBinds += swap.path to appDir
             }
-            command = listOf(electronBinary) + Electron.BASE_FLAGS +
-                (if (options.newerElectronFlags) Electron.NEWER_FLAGS else emptyList())
+            command = listOf(electronBinary) + Electron.flags(options.newerElectronFlags, wayland)
         } else if (cobaltBrowser != null) {
             isElectron = true
             val binaryArch = (hostPath(app, cobaltBrowser)?.let(Executable::of) as? Executable.Elf)?.arch
             if (binaryArch != null && binaryArch != arch) return PlanResult.WrongArchitecture(cobaltBrowser, binaryArch)
-            command = listOf(cobaltBrowser) + Electron.BASE_FLAGS +
-                (if (options.newerElectronFlags) Electron.NEWER_FLAGS else emptyList())
+            command = listOf(cobaltBrowser) + Electron.flags(options.newerElectronFlags, wayland)
         } else {
             val binaryArch = (hostPath(app, commandPath)?.let(Executable::of) as? Executable.Elf)?.arch
             if (binaryArch != null && binaryArch != arch) return PlanResult.WrongArchitecture(commandPath, binaryArch)
@@ -217,6 +224,7 @@ class LaunchPlanner(
                 else LaunchEnvironment.locale(options.languageTags, File(runtime.files, "lib/locale").list()?.toList().orEmpty()),
             runtimeDir = runtimeDir ?: "/tmp",
             flatpakContainer = options.flatpakInfo,
+            wayland = wayland,
         )
         val devices = app.metadata.context.devices
         val binds = FlatpakBinds(
@@ -229,6 +237,7 @@ class LaunchPlanner(
             tmp = dirs.tmp.path,
             shm = dirs.shm.path,
             x11Sockets = dirs.x11Sockets.path,
+            waylandSockets = dirs.waylandSockets?.path?.takeIf { wayland },
             pulseSockets = dirs.pulseSockets?.takeIf { options.audio }?.path,
             home = dirs.home.path,
             appDirs = dirs.appDirs.map { it.first.path to it.second },
@@ -249,6 +258,7 @@ class LaunchPlanner(
                 flatpakInfo = if (options.flatpakInfo) flatpakInfo(appId, runtimeRef) else null,
                 usrLinks = USR_LINKS.filter { File(runtime.files, it).exists() },
                 isElectron = isElectron,
+                wayland = wayland,
                 filter = Fdsec.Filter(extraSyscalls = options.extraSyscalls, noInternet = !options.network),
             )
         )
