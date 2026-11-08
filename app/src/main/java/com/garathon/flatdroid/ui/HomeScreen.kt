@@ -130,7 +130,7 @@ fun HomeScreen(
             modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            FlatdroidIcon()
+            FlatdroidIcon(Modifier.padding(end = 12.dp))
             Text(stringResource(R.string.app_name), style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
             IconButton(onClick = onInstall, enabled = canInstall) {
                 Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.home_install))
@@ -316,15 +316,4 @@ private fun HomeScreenPreview() {
             onLaunch = {}, onAppSettings = {}, onInstall = {}, onUpdateAll = {}, onSettings = {}, onImportFiles = {}, onImportZip = {},
         )
     }
-}
-
-/** Flatdroid's launcher icon, as the launcher shapes it (adaptive icons can't be drawn from resources). */
-@Composable
-private fun FlatdroidIcon() {
-    val context = LocalContext.current
-    val px = with(LocalDensity.current) { 32.dp.roundToPx() }
-    val icon = remember(px) {
-        runCatching { context.packageManager.getApplicationIcon(context.packageName).toBitmap(px, px).asImageBitmap() }.getOrNull()
-    } ?: return
-    Image(icon, contentDescription = null, modifier = Modifier.padding(end = 12.dp).size(32.dp))
 }

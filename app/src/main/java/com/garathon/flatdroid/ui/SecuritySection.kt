@@ -12,19 +12,12 @@ import com.garathon.flatdroid.settings.SecurityLevel
 import com.garathon.flatdroid.settings.SecuritySettings
 
 /**
- * The security level, what it means, and that no level is a sandbox; with [details], every
- * setting the levels set, each changeable on its own (a change that matches no level is Custom).
- * The system call filter's settings are developer settings ([developerOptions]); the levels set
- * them either way.
+ * The security level (shown as chosen, or Custom when the settings match no level), what it means,
+ * and that no level is a sandbox. Each setting a level sets is changed on its own, on the
+ * settings pages ([PerAppDefaultRows], [SecurityPrivacyRows]); setup asks only for the level.
  */
 @Composable
-fun SecuritySection(
-    security: SecuritySettings,
-    onChange: (SecuritySettings) -> Unit,
-    details: Boolean,
-    enabled: Boolean = true,
-    developerOptions: Boolean = false,
-) {
+fun SecurityPreset(security: SecuritySettings, onChange: (SecuritySettings) -> Unit, enabled: Boolean = true) {
     val level = SecurityLevel.of(security)
     // Each level carries its own label and hint, so adding a preset needs no change here.
     val names = SecurityLevel.entries.associateWith { stringResource(it.labelRes) }
@@ -40,28 +33,20 @@ fun SecuritySection(
         enabled = enabled,
     )
     Text(stringResource(R.string.security_not_sandboxed), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-    if (!details) {
-        Text(stringResource(R.string.security_change_later), style = MaterialTheme.typography.bodySmall)
-        return
-    }
-    if (developerOptions) {
-        SwitchRow(
-            security.extraSyscallFilter, { onChange(security.copy(extraSyscallFilter = it)) },
-            stringResource(R.string.security_extra_syscalls), stringResource(R.string.security_extra_syscalls_hint),
-            enabled = enabled, developer = true,
-        )
-        SwitchRow(
-            security.hideHelperProcesses, { onChange(security.copy(hideHelperProcesses = it)) },
-            stringResource(R.string.security_hide_helpers), stringResource(R.string.security_hide_helpers_hint),
-            enabled = enabled, developer = true,
-        )
-    }
-    // These match the per-app switches of the same name; the level's value also reaches every app still on it.
+}
+
+/** Setup's version: the level only, with where to change the rest later. */
+@Composable
+fun SecuritySection(security: SecuritySettings, onChange: (SecuritySettings) -> Unit, enabled: Boolean = true) {
+    SecurityPreset(security, onChange, enabled)
+    Text(stringResource(R.string.security_change_later), style = MaterialTheme.typography.bodySmall)
+}
+
+/** What a new app starts with: its home, network and sound from its metadata, the clipboard. */
+@Composable
+fun PerAppDefaultRows(security: SecuritySettings, onChange: (SecuritySettings) -> Unit, enabled: Boolean = true) {
+    // These match the per-app switches of the same name; the value also reaches every app still on it.
     val appliesToDefault = " " + stringResource(R.string.security_applies_to_default)
-    SwitchRow(
-        security.permissionsFromMetadata, { onChange(security.copy(permissionsFromMetadata = it)) },
-        stringResource(R.string.security_permissions_from_metadata), stringResource(R.string.security_permissions_from_metadata_hint) + appliesToDefault, enabled = enabled,
-    )
     val homes = mapOf(
         HomeMode.SHARED to stringResource(R.string.app_settings_home_shared),
         HomeMode.PRIVATE to stringResource(R.string.app_settings_home_private),
@@ -77,12 +62,37 @@ fun SecuritySection(
         enabled = enabled,
     )
     SwitchRow(
-        security.androidFonts, { onChange(security.copy(androidFonts = it)) },
-        stringResource(R.string.security_android_fonts), stringResource(R.string.app_settings_android_fonts_hint) + appliesToDefault, enabled = enabled,
+        security.permissionsFromMetadata, { onChange(security.copy(permissionsFromMetadata = it)) },
+        stringResource(R.string.security_permissions_from_metadata), stringResource(R.string.security_permissions_from_metadata_hint) + appliesToDefault, enabled = enabled,
     )
     SwitchRow(
         security.shareClipboard, { onChange(security.copy(shareClipboard = it)) },
         stringResource(R.string.security_share_clipboard), stringResource(R.string.app_settings_clipboard_hint) + appliesToDefault, enabled = enabled,
+    )
+}
+
+/**
+ * The privacy and hardening settings. The system call filter's and helper hiding are developer
+ * settings ([developerOptions]); the levels set them either way.
+ */
+@Composable
+fun SecurityPrivacyRows(security: SecuritySettings, onChange: (SecuritySettings) -> Unit, enabled: Boolean = true, developerOptions: Boolean = false) {
+    val appliesToDefault = " " + stringResource(R.string.security_applies_to_default)
+    if (developerOptions) {
+        SwitchRow(
+            security.extraSyscallFilter, { onChange(security.copy(extraSyscallFilter = it)) },
+            stringResource(R.string.security_extra_syscalls), stringResource(R.string.security_extra_syscalls_hint),
+            enabled = enabled, developer = true,
+        )
+        SwitchRow(
+            security.hideHelperProcesses, { onChange(security.copy(hideHelperProcesses = it)) },
+            stringResource(R.string.security_hide_helpers), stringResource(R.string.security_hide_helpers_hint),
+            enabled = enabled, developer = true,
+        )
+    }
+    SwitchRow(
+        security.androidFonts, { onChange(security.copy(androidFonts = it)) },
+        stringResource(R.string.security_android_fonts), stringResource(R.string.app_settings_android_fonts_hint) + appliesToDefault, enabled = enabled,
     )
     SwitchRow(
         security.shareTimeZone, { onChange(security.copy(shareTimeZone = it)) },

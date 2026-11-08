@@ -41,6 +41,25 @@
     <string name="setup_settings_intro">Setup applies these to Flatdroid. You can change them later in Settings.</string>
     <string name="setup_settings_continue">Continue</string>
 
+    <string name="settings_page_overview">Overview</string>
+    <string name="settings_page_defaults">Per-app defaults</string>
+    <string name="settings_page_display">Display</string>
+    <string name="settings_page_devices">Audio and camera</string>
+    <string name="settings_page_security">Security and privacy</string>
+    <string name="settings_page_flatpak">Flatpak</string>
+    <string name="settings_page_storage">Storage</string>
+    <string name="settings_page_developer">Developer</string>
+    <string name="app_page_overview">Overview</string>
+    <string name="app_page_home">Home</string>
+    <string name="app_page_display">Display</string>
+    <string name="app_page_permissions">Permissions</string>
+    <string name="app_page_storage">Storage</string>
+    <string name="app_page_overrides">Overrides</string>
+    <string name="settings_top_title">Global Settings</string>
+    <string name="settings_discard">Discard changes</string>
+    <string name="settings_discard_title">Discard changes?</string>
+    <string name="settings_discard_text">The changes you made to these settings are lost.</string>
+    <string name="settings_discard_confirm">Discard</string>
     <string name="settings_title">Settings</string>
     <string name="settings_section_flatpak">Flatpak</string>
     <string name="settings_languages">Only download translations for my languages (%1$s)</string>
@@ -153,7 +172,7 @@
     <string name="settings_section_viewer">Viewer</string>
     <string name="settings_viewer">Show apps in</string>
     <string name="settings_viewer_hint">Where apps are shown. Flatdroid\'s viewer is better in every way: quicker to respond, much lighter on the CPU, with touch gestures, the keyboard and the clipboard built in, and no port or password. A viewer app gets the session\'s link, password included, and only the app chosen here gets it.</string>
-    <string name="settings_viewer_flatdroid">Flatdroid\'s viewer (recommended)</string>
+    <string name="settings_viewer_flatdroid">Flatdroid\'s viewer</string>
     <string name="settings_viewer_external_warning">Less secure: with a viewer app, the display is reachable on a network port of this phone, so any app on it can try to connect, and the password is shown in Flatdroid. Flatdroid\'s viewer uses a private socket that only Flatdroid can reach.</string>
     <string name="settings_viewer_none">None chosen</string>
     <string name="settings_viewer_missing">%1$s (not installed)</string>

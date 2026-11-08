@@ -21,6 +21,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
@@ -71,43 +73,68 @@ fun RadioRow(selected: Boolean, onSelect: () -> Unit, label: String, modifier: M
 }
 
 /**
- * A switch with a title and an optional hint below it. A [developer] setting (shown only with
- * developer options) has a wrench in front of it.
+ * A switch with a title and an optional hint. With a hint, the title has the row's full width and
+ * the switch sits beside the hint below it, so a long title doesn't wrap early; without one, the
+ * switch is beside the title. The hint is muted, and a disabled row is dimmed. A [developer]
+ * setting (shown only with developer options) has a wrench just before its title.
  */
 @Composable
 fun SwitchRow(checked: Boolean, onChange: (Boolean) -> Unit, title: String, hint: String? = null, enabled: Boolean = true, developer: Boolean = false) {
+    val titleColor = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = DISABLED_ALPHA)
+    val hintColor = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface.copy(alpha = DISABLED_ALPHA)
     Row(
         modifier = Modifier.fillMaxWidth().toggleable(checked, enabled = enabled, role = Role.Switch, onValueChange = onChange),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        if (developer) DeveloperMark()
-        Column(modifier = Modifier.weight(1f)) {
-            Text(title)
-            hint?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+        if (hint == null) {
+            SettingTitle(title, developer, Modifier.weight(1f), titleColor)
+            Switch(checked = checked, onCheckedChange = null, enabled = enabled)
+        } else {
+            Column(modifier = Modifier.weight(1f)) {
+                SettingTitle(title, developer, Modifier.fillMaxWidth(), titleColor)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(hint, style = MaterialTheme.typography.bodySmall, color = hintColor, modifier = Modifier.weight(1f))
+                    Switch(checked = checked, onCheckedChange = null, enabled = enabled)
+                }
+            }
         }
-        Switch(checked = checked, onCheckedChange = null, enabled = enabled)
     }
 }
+
+private const val DISABLED_ALPHA = 0.38f
+
+
+/** A setting's title; a [developer] setting has the wrench just before it, so its hint and field stay aligned with the others. */
+@Composable
+fun SettingTitle(title: String, developer: Boolean, modifier: Modifier = Modifier, color: Color = Color.Unspecified) {
+    Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (developer) DeveloperMark(TITLE_MARK_SIZE)
+        Text(title, color = color, modifier = Modifier.weight(1f, fill = false))
+    }
+}
+
+private val TITLE_MARK_SIZE = 16.dp
 
 @Composable
 fun TextRow(
     content: String, onChange: (String) -> Unit, title: String, hint: String? = null, isError: Boolean, enabled: Boolean = true, developer: Boolean = false,
     singleLine: Boolean = true, keyboardType: KeyboardType = KeyboardType.Number,
+    /** Lines the field starts with when it isn't [singleLine]; it grows as the text wraps. */
+    minLines: Int = 3,
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        if (developer) DeveloperMark()
         OutlinedTextField(
             value = content,
             onValueChange = onChange,
-            label = { Text(title) },
+            label = { SettingTitle(title, developer) },
             supportingText = { if (hint != null) Text(hint) else null },
             isError = isError,
             singleLine = singleLine,
-            minLines = if (singleLine) 1 else 3,
+            minLines = if (singleLine) 1 else minLines,
             enabled = enabled,
             keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
             modifier = Modifier.weight(1f),
@@ -140,7 +167,6 @@ fun <T> DropdownRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        if (developer) DeveloperMark()
         Column(modifier = Modifier.weight(1f)) {
             ExposedDropdownMenuBox(
                 expanded = expanded && enabled,
@@ -168,7 +194,7 @@ fun <T> DropdownRow(
                         singleLine = true,
                         visualTransformation = VisualTransformation.None,
                         interactionSource = interactionSource,
-                        label = { Text(title) },
+                        label = { SettingTitle(title, developer) },
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded && enabled) },
                         colors = colors,
                     )
@@ -194,7 +220,7 @@ fun <T> DropdownRow(
 /**
  * A section header on the settings screens. Its look is set here for all of them:
  * [SECTION_TITLE_TOP_PADDING] separates it from the section above, and [sectionTitleStyle]
- * is its text size (setting titles are 16 sp, the page title `headlineSmall` 24 sp).
+ * is its text size (setting titles are 16 sp, the page title `titleLarge` 22 sp).
  */
 @Composable
 fun SectionTitle(text: String, danger: Boolean = false) {
@@ -209,17 +235,17 @@ fun SectionTitle(text: String, danger: Boolean = false) {
 /** Extra space above each section header. */
 val SECTION_TITLE_TOP_PADDING = 12.dp
 
-/** The section headers' text style: `titleLarge` (22 sp). */
+/** The headers' text style inside a page: `titleMedium` (16 sp), below the page title's `titleLarge` (22 sp). */
 @Composable
-fun sectionTitleStyle() = MaterialTheme.typography.titleLarge
+fun sectionTitleStyle() = MaterialTheme.typography.titleMedium
 
 /** The wrench in front of a developer setting, so it is told apart from the others. */
 @Composable
-fun DeveloperMark() {
+fun DeveloperMark(size: Dp = 20.dp) {
     Icon(
         Icons.Filled.Build,
         contentDescription = stringResource(R.string.developer_setting),
         tint = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.size(20.dp),
+        modifier = Modifier.size(size),
     )
 }

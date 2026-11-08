@@ -49,7 +49,7 @@ fun SetupSettingsScreen(
         	onlyMyLanguages, { onlyMyLanguages = it },
         	stringResource(R.string.settings_languages, deviceLanguages.replace(";", ", ")), stringResource(R.string.settings_languages_hint),
         )
-        SecuritySection(security, { security = it }, details = false)
+        SecuritySection(security, { security = it })
         Button(onClick = { onContinue(settings.copy(flatpakLanguages = if (onlyMyLanguages) deviceLanguages else GuestFiles.ALL_LANGUAGES, security = security)) }) {
             Text(stringResource(R.string.setup_settings_continue))
         }

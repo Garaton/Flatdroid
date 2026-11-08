@@ -14,6 +14,13 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
@@ -52,7 +59,6 @@ import com.garathon.flatdroid.setup.ResetMode
 import com.garathon.flatdroid.setup.SetupController
 import com.garathon.flatdroid.setup.SetupService
 import com.garathon.flatdroid.setup.SetupStep
-import com.garathon.flatdroid.ui.AppSettingsScreen
 import com.garathon.flatdroid.ui.CommandState
 import com.garathon.flatdroid.ui.ElectronDialog
 import com.garathon.flatdroid.ui.FilesChangedDialog
@@ -62,11 +68,18 @@ import com.garathon.flatdroid.ui.LogDialog
 import com.garathon.flatdroid.ui.MicrophoneLaunchDialog
 import com.garathon.flatdroid.ui.SessionPanel
 import com.garathon.flatdroid.ui.TaskPanel
-import com.garathon.flatdroid.ui.SettingsScreen
 import com.garathon.flatdroid.ui.SetupSettingsScreen
 import com.garathon.flatdroid.ui.TerminalScreen
 import com.garathon.flatdroid.ui.SetupScreen
 import com.garathon.flatdroid.ui.followHideScreen
+import com.garathon.flatdroid.ui.settings.AppPage
+import com.garathon.flatdroid.ui.settings.AppSettingsEnv
+import com.garathon.flatdroid.ui.settings.AppSettingsScreen
+import com.garathon.flatdroid.ui.settings.GlobalPage
+import com.garathon.flatdroid.ui.settings.GlobalSettingsEnv
+import com.garathon.flatdroid.ui.settings.GlobalSettingsScreen
+import com.garathon.flatdroid.ui.settings.GlobalStorageActions
+import com.garathon.flatdroid.ui.settings.SettingsDraftModel
 import com.garathon.flatdroid.ui.theme.FlatdroidTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -75,6 +88,7 @@ import kotlinx.coroutines.withContext
 class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
     private val home: HomeViewModel by viewModels()
+    private val drafts: SettingsDraftModel by viewModels()
 
     /** An app to launch once the notification permission has been answered. */
     private var pendingLaunch: String? = null
@@ -160,8 +174,21 @@ class MainActivity : ComponentActivity() {
         val terminalWithApps = remember(screen) { AlpineCommands.terminalWithApps(this) }
         val terminalRunning = running
         val nameOf = { id: String -> apps?.firstOrNull { it.id == id }?.name ?: id }
+        // Settings open with fresh drafts. They are not dropped when the screen is left: it is still
+        // drawn while it slides out, and needs its draft until then.
+        val go = { target: Screen ->
+            if (screen == Screen.Home && target != Screen.Home) {
+                drafts.clear()
+                when (target) {
+                    is Screen.Settings -> drafts.openGlobal(savedSettings(languages))
+                    is Screen.AppSettings -> drafts.openApp(target.appId, AppData.settings(this, target.appId).load())
+                    else -> Unit
+                }
+            }
+            navigate(target)
+        }
         BackHandler(enabled = screen != Screen.Home) {
-            navigate(screen.parent ?: Screen.Home)
+            go(screen.parent ?: Screen.Home)
         }
 
         storage.Dialogs(nameOf)
@@ -172,67 +199,97 @@ class MainActivity : ComponentActivity() {
         // Measured again after storage tasks, which change it.
         val savedSizes by SavedSizes.updates.collectAsState()
         // Read again after storage tasks and once sizes measured in the background are saved.
-        if (screen == Screen.Settings) LaunchedEffect(storageTasks.generation, savedSizes) { home.measureFlatdroid() }
-        when (screen) {
-            Screen.Settings -> SettingsScreen(
-                settings = remember { savedSettings(languages) },
-                deviceLanguages = languages,
-                viewers = remember { Viewer.installed(this) },
-                applying = applying,
-                error = settingsError,
+        if (screen is Screen.Settings) LaunchedEffect(storageTasks.generation, savedSizes) { home.measureFlatdroid() }
+        // Between levels (home, settings, terminal) the screen slides sideways; pages of one
+        // level change inside their own screen.
+        AnimatedContent(
+            targetState = screen,
+            contentKey = { it.level },
+            transitionSpec = {
+                val forward = targetState.level > initialState.level
+                // The settings screen is on the home screen's side: an app's from the left, the rest from the right.
+                val from = if (forward) targetState.side else -initialState.side
+                (fadeIn(tween(250)) + slideInHorizontally(tween(300)) { from * it / 6 }) togetherWith
+                    (fadeOut(tween(200)) + slideOutHorizontally(tween(300)) { -from * it / 6 })
+            },
+            label = "screen",
+        ) { target ->
+        when (target) {
+            is Screen.Settings -> {
+                val draft = drafts.global
+                if (draft == null) {
+                    LaunchedEffect(Unit) { drafts.openGlobal(savedSettings(languages)) }
+                    return@AnimatedContent
+                }
                 // The shared home is saved when it is changed, so keep the saved one.
-                onSave = { new -> viewModel.applySettings(new.copy(sharedHome = SetupController.settings(this).load()?.sharedHome)) { navigate(Screen.Home) } },
-                // Settings are persisted before onApplied runs, so the reinstall's baseline sees the check on.
-                onSaveAndReinstallAll = { new ->
-                    viewModel.applySettings(new.copy(sharedHome = SetupController.settings(this).load()?.sharedHome)) {
-                        navigate(Screen.Home); FlatpakTaskService.start(this, FlatpakTask.ReinstallAll)
-                    }
-                },
-                onSaveAndBaselineAll = { new ->
-                    viewModel.applySettings(new.copy(sharedHome = SetupController.settings(this).load()?.sharedHome)) {
-                        if (FlatpakTaskService.start(this, FlatpakTask.BaselineAll)) navigate(Screen.Home)
-                        else Toast.makeText(this, R.string.task_busy, Toast.LENGTH_LONG).show()
-                    }
-                },
-                onBack = { navigate(Screen.Home); viewModel.clearSettingsError() },
-                onReset = { mode -> navigate(Screen.Home); resetAlpine(mode) },
-                onTerminal = { navigate(Screen.Terminal) },
-                sharedHome = storage.sharedHomeDisplay,
-                allFilesAccess = storage.broadAccess.takeIf { Build.VERSION.SDK_INT >= Build.VERSION_CODES.R },
-                onChangeSharedHome = storage::changeSharedHome,
-                onAllFilesAccess = storage::openAllFilesAccess,
-                storage = home.flatdroidStorage.collectAsState().value,
-                onClearAllCaches = home::clearAllCaches,
-                onClearUnusedAppData = home::clearUnusedAppData,
-                onClearUnusedHomes = home::clearUnusedHomes,
-                onExportAllHomes = storage::exportAllHomes,
-                onImportAllHomes = storage::importAllHomes,
-                onExportAllAppFiles = storage::exportAllAppFiles,
-                onImportAllAppFiles = storage::importAllAppFiles,
-                onExportSharedDotfiles = storage::exportSharedDotfiles,
-                onImportSharedDotfiles = storage::importSharedDotfiles,
-                onResetSharedDotfiles = home::resetSharedDotfiles,
-                onExportSettings = storage::exportFlatdroidSettings,
-                // Back to the home screen once applied, as Save does: this screen shows the old values.
-                onImportSettings = { storage.importFlatdroidSettings { navigate(Screen.Home) } },
-                onResetSettings = { viewModel.applySettings(UserSettings.defaults(languages)) { navigate(Screen.Home) } },
-                canReset = !sessionBusy && !taskRunning,
-                canOpenTerminal = !SessionController.isBusy || terminalWithApps,
-                storageBusy = storageTasks.running != null || storageTasks.queued.isNotEmpty(),
-                modifier = modifier,
-            )
-            Screen.Terminal -> TerminalScreen(output, running, viewModel::run, viewModel::cancel, onBack = { navigate(Screen.Settings) }, modifier = modifier)
+                fun withSavedHome(new: UserSettings) = new.copy(sharedHome = SetupController.settings(this@MainActivity).load()?.sharedHome)
+                GlobalSettingsScreen(
+                    page = target.page,
+                    onPage = { go(Screen.Settings(it)) },
+                    draft = draft,
+                    env = GlobalSettingsEnv(
+                        deviceLanguages = languages,
+                        viewers = remember { Viewer.installed(this@MainActivity) },
+                        applying = applying,
+                        error = settingsError,
+                        sharedHome = storage.sharedHomeDisplay,
+                        allFilesAccess = storage.broadAccess.takeIf { Build.VERSION.SDK_INT >= Build.VERSION_CODES.R },
+                        storage = home.flatdroidStorage.collectAsState().value,
+                        storageBusy = storageTasks.running != null || storageTasks.queued.isNotEmpty(),
+                        canReset = !sessionBusy && !taskRunning,
+                        canOpenTerminal = !SessionController.isBusy || terminalWithApps,
+                        actions = GlobalStorageActions(
+                            onChangeSharedHome = storage::changeSharedHome,
+                            onAllFilesAccess = storage::openAllFilesAccess,
+                            onClearAllCaches = home::clearAllCaches,
+                            onClearUnusedAppData = home::clearUnusedAppData,
+                            onClearUnusedHomes = home::clearUnusedHomes,
+                            onExportAllHomes = storage::exportAllHomes,
+                            onImportAllHomes = storage::importAllHomes,
+                            onExportAllAppFiles = storage::exportAllAppFiles,
+                            onImportAllAppFiles = storage::importAllAppFiles,
+                            onExportSharedDotfiles = storage::exportSharedDotfiles,
+                            onImportSharedDotfiles = storage::importSharedDotfiles,
+                            onResetSharedDotfiles = home::resetSharedDotfiles,
+                            onExportSettings = storage::exportFlatdroidSettings,
+                            // Back to the home screen once applied, as Save does: this@MainActivity screen shows the old values.
+                            onImportSettings = { storage.importFlatdroidSettings { go(Screen.Home) } },
+                        ),
+                        onReset = { mode -> go(Screen.Home); resetAlpine(mode) },
+                        onResetSettings = { viewModel.applySettings(UserSettings.defaults(languages)) { go(Screen.Home) } },
+                        onTerminal = { go(Screen.Terminal) },
+                    ),
+                    onSave = { new -> viewModel.applySettings(withSavedHome(new)) { go(Screen.Home) } },
+                    // Settings are persisted before onApplied runs, so the reinstall's baseline sees the check on.
+                    onSaveAndReinstallAll = { new ->
+                        viewModel.applySettings(withSavedHome(new)) { go(Screen.Home); FlatpakTaskService.start(this@MainActivity, FlatpakTask.ReinstallAll) }
+                    },
+                    onSaveAndBaselineAll = { new ->
+                        viewModel.applySettings(withSavedHome(new)) {
+                            if (FlatpakTaskService.start(this@MainActivity, FlatpakTask.BaselineAll)) go(Screen.Home)
+                            else Toast.makeText(this@MainActivity, R.string.task_busy, Toast.LENGTH_LONG).show()
+                        }
+                    },
+                    onDiscard = { go(Screen.Home); viewModel.clearSettingsError() },
+                    modifier = modifier,
+                )
+            }
+            Screen.Terminal -> TerminalScreen(output, running, viewModel::run, viewModel::cancel, onBack = { go(Screen.Settings(GlobalPage.DEVELOPER)) }, modifier = modifier)
             is Screen.AppSettings -> {
-                val list = apps ?: return
-                val app = list.firstOrNull { it.id == screen.appId }
+                val list = apps ?: return@AnimatedContent
+                val app = list.firstOrNull { it.id == target.appId }
                 if (app == null || session.state.appIdOrNull == app.id) {
                     // Uninstalled meanwhile, or running (the home screen doesn't open a running app's settings).
-                    LaunchedEffect(Unit) { navigate(Screen.Home) }
-                    return
+                    LaunchedEffect(Unit) { go(Screen.Home) }
+                    return@AnimatedContent
                 }
-                val store = remember(app.id) { AppData.settings(this, app.id) }
-                val userSettings = remember { savedSettings(languages) }
-                val developerOptions = userSettings.developerOptions
+                val store = remember(app.id) { AppData.settings(this@MainActivity, app.id) }
+                val developerOptions = remember { savedSettings(languages).developerOptions }
+                val draft = drafts.app?.takeIf { it.appId == app.id }?.draft
+                if (draft == null) {
+                    LaunchedEffect(app.id) { drafts.openApp(app.id, store.load()) }
+                    return@AnimatedContent
+                }
                 val appStorage by home.storage.collectAsState()
                 // Again after every copy, export, import or reset.
                 LaunchedEffect(app.id, storageTasks.generation, savedSizes) { home.measureStorage(app.id) }
@@ -241,20 +298,31 @@ class MainActivity : ComponentActivity() {
                     value = withContext(Dispatchers.IO) { InstalledApps(this@MainActivity).showsWebContent(app.id) }
                 }
                 AppSettingsScreen(
-                    app = app,
-                    showsWebContent = showsWebContent,
-                    storage = appStorage[app.id],
-                    settings = remember(app.id) { store.load() },
-                    canChangeFiles = session.state.appIdOrNull != app.id && !appBusy,
-                    canUninstall = !sessionBusy && !taskRunning,
-                    developerOptions = developerOptions,
-                    onRequestMicrophone = ::requestMicrophone,
-                    hasCamera = remember { AndroidCameras.present(this) },
-                    // Asks the camera service, so off the main thread; none until it answers.
-                    cameraResolutions = produceState(emptyMap<Int, List<AndroidCameras.Resolution>>()) {
-                        value = withContext(Dispatchers.IO) { AndroidCameras.resolutions(this@MainActivity) }
-                    }.value,
-                    onRequestCamera = ::requestCamera,
+                    page = target.page,
+                    onPage = { go(Screen.AppSettings(app.id, it)) },
+                    draft = draft,
+                    env = AppSettingsEnv(
+                        app = app,
+                        storage = appStorage[app.id],
+                        canChangeFiles = session.state.appIdOrNull != app.id && !appBusy,
+                        canUninstall = !sessionBusy && !taskRunning,
+                        developerOptions = developerOptions,
+                        showsWebContent = showsWebContent,
+                        hasCamera = remember { AndroidCameras.present(this@MainActivity) },
+                        // Asks the camera service, so off the main thread; none until it answers.
+                        cameraResolutions = produceState(emptyMap<Int, List<AndroidCameras.Resolution>>()) {
+                            value = withContext(Dispatchers.IO) { AndroidCameras.resolutions(this@MainActivity) }
+                        }.value,
+                        onRequestMicrophone = ::requestMicrophone,
+                        onRequestCamera = ::requestCamera,
+                        onUninstall = { deleteData, keepRuntimes ->
+                            FlatpakTaskService.start(this@MainActivity, FlatpakTask.Uninstall(app.id, deleteData, keepRuntimes))
+                            go(Screen.Home)
+                        },
+                        sharedHome = storage.sharedHomeDisplay,
+                        broadAccess = storage.broadAccess,
+                        onStorage = { action -> storage.storageAction(app.id, action) },
+                    ),
                     onSave = { new ->
                         // Keep what the launcher manages: last opened, the Electron flags and /.flatpak-info.
                         store.update { old ->
@@ -265,16 +333,9 @@ class MainActivity : ComponentActivity() {
                                 wholeDev = if (developerOptions) new.wholeDev else old.wholeDev,
                             )
                         }
-                        navigate(Screen.Home)
+                        go(Screen.Home)
                     },
-                    onBack = { navigate(Screen.Home) },
-                    onUninstall = { deleteData, keepRuntimes ->
-                        FlatpakTaskService.start(this, FlatpakTask.Uninstall(app.id, deleteData, keepRuntimes))
-                        navigate(Screen.Home)
-                    },
-                    sharedHome = storage.sharedHomeDisplay,
-                    broadAccess = storage.broadAccess,
-                    onStorage = { action -> storage.storageAction(app.id, action) },
+                    onDiscard = { go(Screen.Home) },
                     modifier = modifier,
                 )
             }
@@ -284,8 +345,8 @@ class MainActivity : ComponentActivity() {
                 if (installDialog) {
                     InstallDialog(
                         onInstall = {
-                            if (!FlatpakTaskService.start(this, FlatpakTask.Install(it)) && SessionController.isBusy) {
-                                Toast.makeText(this, R.string.task_install_waits, Toast.LENGTH_LONG).show()
+                            if (!FlatpakTaskService.start(this@MainActivity, FlatpakTask.Install(it)) && SessionController.isBusy) {
+                                Toast.makeText(this@MainActivity, R.string.task_install_waits, Toast.LENGTH_LONG).show()
                             }
                             installDialog = false
                         },
@@ -294,7 +355,7 @@ class MainActivity : ComponentActivity() {
                 }
                 (session.state as? SessionState.ElectronOffer)?.let { offer ->
                     ElectronDialog(
-                        offer, nameOf(offer.appId), remember { AlpineEnvironment.get(this).arch },
+                        offer, nameOf(offer.appId), remember { AlpineEnvironment.get(this@MainActivity).arch },
                         onAccept = { SessionController.ended(null); continueLaunch(PendingLaunch(offer.appId, prepareElectron = true)) },
                         onDismiss = { SessionController.ended(null) },
                     )
@@ -302,7 +363,7 @@ class MainActivity : ComponentActivity() {
                 (session.state as? SessionState.FilesChanged)?.let { changed ->
                     FilesChangedDialog(
                         changed, nameOf(changed.appId),
-                        onReinstall = { SessionController.ended(null); FlatpakTaskService.start(this, FlatpakTask.Reinstall(changed.appId)) },
+                        onReinstall = { SessionController.ended(null); FlatpakTaskService.start(this@MainActivity, FlatpakTask.Reinstall(changed.appId)) },
                         onDismiss = { SessionController.ended(null) },
                     )
                 }
@@ -331,29 +392,30 @@ class MainActivity : ComponentActivity() {
                     canInstall = !sessionBusy && !taskRunning,
                     canUpdate = !sessionBusy && !taskRunning,
                     onLaunch = { launch(it.id) },
-                    onAppSettings = { navigate(Screen.AppSettings(it.id)) },
+                    onAppSettings = { go(Screen.AppSettings(it.id)) },
                     onInstall = { installDialog = true },
-                    onUpdateAll = { FlatpakTaskService.start(this, FlatpakTask.UpdateAll) },
-                    onSettings = { navigate(Screen.Settings) },
+                    onUpdateAll = { FlatpakTaskService.start(this@MainActivity, FlatpakTask.UpdateAll) },
+                    onSettings = { go(Screen.Settings()) },
                     onImportFiles = { storage.importFiles(ImportTarget.Shared) },
                     onImportZip = storage::importZipIntoSharedHome,
                     modifier = modifier,
                 ) {
                     TaskPanel(
-                        task, describe = { FlatpakTaskService.describe(this, it) },
-                        onCancel = { FlatpakTaskService.cancel(this) },
+                        task, describe = { FlatpakTaskService.describe(this@MainActivity, it) },
+                        onCancel = { FlatpakTaskService.cancel(this@MainActivity) },
                         onShowLog = { log = LogKind.TASK },
                         onDismiss = FlatpakTasks::dismiss,
                     )
                     SessionPanel(
                         session, nameOf,
                         onOpenViewer = ::openViewer,
-                        onStop = { SessionService.stop(this) },
+                        onStop = { SessionService.stop(this@MainActivity) },
                         onShowLog = { log = LogKind.SESSION },
                         onDismiss = SessionController::dismissMessage,
                     )
                 }
             }
+        }
         }
     }
 
@@ -481,39 +543,56 @@ class MainActivity : ComponentActivity() {
 private sealed interface Screen {
     val key: String
 
+    /** Home is the first level, settings (with an app's) the second, the terminal the third: screens slide between levels. */
+    val level: Int
+
+    /** Which side of the home screen it slides in from: 1 right, -1 left. */
+    val side: Int
+
     data object Home : Screen {
         override val key = "home"
+        override val level = 0
+        override val side = 0
     }
 
-    data object Settings : Screen {
-        override val key = "settings"
+    data class Settings(val page: GlobalPage = GlobalPage.OVERVIEW) : Screen {
+        override val key get() = "$SETTINGS_PREFIX${page.key}"
+        override val level = 1
+        override val side = 1
     }
 
     data object Terminal : Screen {
         override val key = "terminal"
+        override val level = 2
+        override val side = 1
     }
 
-    data class AppSettings(val appId: String) : Screen {
-        override val key get() = "$APP_PREFIX$appId"
+    data class AppSettings(val appId: String, val page: AppPage = AppPage.OVERVIEW) : Screen {
+        override val key get() = "$APP_PREFIX${page.key}:$appId"
+        override val level = 1
+        override val side = -1
     }
 
     /** Where Back goes; null on the home screen. */
     val parent: Screen?
         get() = when (this) {
             Home -> null
-            Terminal -> Settings
-            Settings, is AppSettings -> Home
+            Terminal -> Settings(GlobalPage.DEVELOPER)
+            is Settings, is AppSettings -> Home
         }
 
     companion object {
+        private const val SETTINGS_PREFIX = "settings:"
         private const val APP_PREFIX = "app:"
 
         val Saver = Saver<Screen, String>(
             save = { it.key },
             restore = { key ->
                 when {
-                    key.startsWith(APP_PREFIX) -> AppSettings(key.removePrefix(APP_PREFIX))
-                    else -> listOf(Home, Settings, Terminal).firstOrNull { it.key == key } ?: Home
+                    key.startsWith(SETTINGS_PREFIX) -> Settings(GlobalPage.of(key.removePrefix(SETTINGS_PREFIX)))
+                    key.startsWith(APP_PREFIX) -> key.removePrefix(APP_PREFIX).split(":", limit = 2).let { AppSettings(it.getOrElse(1) { "" }, AppPage.of(it[0])) }
+                    key == Terminal.key -> Terminal
+                    else -> Home
                 }
             },
         )
