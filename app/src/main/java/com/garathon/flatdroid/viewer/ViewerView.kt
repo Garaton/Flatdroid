@@ -17,6 +17,7 @@ import android.view.KeyCharacterMap
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
+import android.view.SurfaceView
 import android.view.View
 import android.view.VelocityTracker
 import android.view.ViewConfiguration
@@ -57,6 +58,11 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
     private var frameHeight = 0
     /** How frames reach the screen, from the connection; null before the first frame. */
     private var frames: FrameDrawer? = null
+    /** A surface behind this view that frames can go to straight (see [FrameDrawer.useSurface]); null while there is none. */
+    private var surface: SurfaceView? = null
+    /** [frames] go to [surface]: this view draws nothing. */
+    private var onSurface = false
+    private val destination = RectF()
     /** The part of the framebuffer on screen, in its pixels (from [visiblePart]). */
     private val visible = Rect()
     private val visibleRect = RectF()
@@ -266,7 +272,11 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
 
     override fun frame(client: RfbClient, frames: FrameDrawer) {
         this.client = client
-        this.frames = frames
+        if (frames !== this.frames) {
+            this.frames?.useSurface(null)
+            this.frames = frames
+            useSurface()
+        }
         copyMeter.start()
         var copied: Boolean
         synchronized(client.frameLock) {
@@ -286,10 +296,38 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
             }
             visiblePart()
             copied = frames.frame(fb, visible)
+            if (copied && onSurface) showFrame()
         }
         copyMeter.step(1)
         copyMeter.round()
-        if (copied) invalidate()
+        if (copied && !onSurface) invalidate()
+    }
+
+    /** A surface behind this view is ready for frames, or gone (null). Main thread. */
+    fun surfaceChanged(surface: SurfaceView?) {
+        if (surface === this.surface) return
+        frames?.useSurface(null)
+        this.surface = surface
+        useSurface()
+    }
+
+    private fun useSurface() {
+        val frames = frames ?: return
+        val client = client ?: return
+        synchronized(client.frameLock) {
+            onSurface = frames.useSurface(surface)
+            if (onSurface) showFrame()
+        }
+        setBackgroundColor(if (onSurface) Color.TRANSPARENT else Color.BLACK)
+        if (!onSurface) invalidate()
+    }
+
+    /** Places the frame on the surface as [matrix] says. Under [RfbClient.frameLock]. */
+    private fun showFrame() {
+        if (frameWidth == 0) return
+        destination.set(0f, 0f, frameWidth.toFloat(), frameHeight.toFloat())
+        matrix.mapRect(destination)
+        frames?.show(destination)
     }
 
     /** Starts measuring how far a notch scrolls the content, from the frame as it is now. */
@@ -302,7 +340,7 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
             if (fb.width != frameWidth || fb.height != frameHeight) return
             val size = fb.height * ScrollMeter.BANDS
             if (rowHashes.size != size) rowHashes = IntArray(size)
-            frames?.hashRows(fb, rowHashes) ?: return
+            if (frames?.hashRows(fb, rowHashes) != true) return
             scrollMeter.start(rowHashes, fb.height)
         }
         measuring = true
@@ -315,7 +353,7 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
             scrollMeter.finish()
             return
         }
-        frames.hashRows(fb, rowHashes)
+        if (!frames.hashRows(fb, rowHashes)) return // the next update is being read: measured from the next frame
         val moved = scrollMeter.shift(rowHashes)
         scrollMeter.movedBy(moved)
         if (probing && moved != 0) {
@@ -393,6 +431,7 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
     }
 
     override fun onDraw(canvas: Canvas) {
+        if (onSurface) return
         val frames = frames ?: return
         // Compose doesn't clip an embedded view: a zoomed or panned frame would cover the bar above.
         canvas.clipRect(0, 0, width, height)
@@ -459,7 +498,7 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
         matrix.set(placement)
         matrix.invert(inverse)
         copyHidden()
-        invalidate()
+        if (onSurface) client?.let { synchronized(it.frameLock) { showFrame() } } else invalidate()
     }
 
     /** Tells the connection which part of the framebuffer is on screen (all of it while two fingers move it, and it flies on). */
@@ -642,6 +681,7 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
     }
 
     override fun onDetachedFromWindow() {
+        surfaceChanged(null)
         releaseKeys()
         stopFling()
         stopPanFling()

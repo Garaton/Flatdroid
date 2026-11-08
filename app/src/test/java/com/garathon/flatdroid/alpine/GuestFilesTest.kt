@@ -94,7 +94,19 @@ class GuestFilesTest {
     fun openboxWearsLabwcsDefaultLook() {
         assert("<name>${GuestFiles.OPENBOX_THEME}</name>" in GuestFiles.openboxRc())
         assert("<name>" !in GuestFiles.labwcRc())
-        assert("window.active.title.bg.color: #e1dedb" in GuestFiles.OPENBOX_THEMERC)
+        assert("window.active.title.bg.color: #e1dedb" in GuestFiles.themerc(dark = false))
+    }
+
+    @Test
+    fun darkAppsGetDarkDecorations() {
+        val dark = GuestFiles.themerc(dark = true)
+        assert("window.active.title.bg.color: #303030" in dark)
+        assert("window.active.label.text.color: #ffffff" in dark)
+        // The same keys either way: only the colours change.
+        org.junit.Assert.assertEquals(
+            GuestFiles.themerc(dark = false).lines().map { it.substringBefore(':') },
+            dark.lines().map { it.substringBefore(':') },
+        )
     }
 
     @Test

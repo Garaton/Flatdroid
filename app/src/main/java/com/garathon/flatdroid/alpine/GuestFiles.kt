@@ -104,62 +104,87 @@ object GuestFiles {
             |""".trimMargin()
     }
 
-    /** The name of [OPENBOX_THEMERC] among Openbox's themes. */
+    /** The name of [themerc] among Openbox's themes. */
     const val OPENBOX_THEME = "Flatdroid"
 
+    /** labwc's own file over its built-in theme, in its configuration directory. */
+    const val LABWC_THEME_OVERRIDE = "themerc-override"
+
     /**
-     * Openbox's theme: labwc's built-in one (its default colours), so windows look the same on
-     * X11 as on Wayland. Keys left out keep Openbox's defaults.
+     * The window decorations' theme, for Openbox and labwc alike so windows look the same on X11
+     * as on Wayland: labwc's built-in look (its default colours), or with [dark] the same in the
+     * dark colours GTK's Adwaita uses, following the apps' theme. Keys left out keep the window
+     * manager's defaults.
      */
-    val OPENBOX_THEMERC = """
-        |border.width: 1
-        |padding.width: 4
-        |padding.height: 3
-        |window.handle.width: 0
-        |window.client.padding.width: 0
-        |window.client.padding.height: 0
-        |window.active.border.color: #aaaaaa
-        |window.inactive.border.color: #aaaaaa
-        |window.active.title.bg: flat solid
-        |window.active.title.bg.color: #e1dedb
-        |window.inactive.title.bg: flat solid
-        |window.inactive.title.bg.color: #f6f5f4
-        |window.active.label.bg: parentrelative
-        |window.active.label.text.color: #000000
-        |window.inactive.label.bg: parentrelative
-        |window.inactive.label.text.color: #000000
-        |window.label.text.justify: center
-        |window.active.button.unpressed.bg: parentrelative
-        |window.active.button.unpressed.image.color: #000000
-        |window.active.button.hover.bg: flat solid
-        |window.active.button.hover.bg.color: #d2cfcb
-        |window.active.button.pressed.bg: flat solid
-        |window.active.button.pressed.bg.color: #c6c2bd
-        |window.inactive.button.unpressed.bg: parentrelative
-        |window.inactive.button.unpressed.image.color: #000000
-        |window.active.handle.bg: flat solid
-        |window.active.handle.bg.color: #e1dedb
-        |window.inactive.handle.bg: flat solid
-        |window.inactive.handle.bg.color: #f6f5f4
-        |window.active.grip.bg: parentrelative
-        |window.inactive.grip.bg: parentrelative
-        |menu.border.width: 1
-        |menu.border.color: #aaaaaa
-        |menu.items.bg: flat solid
-        |menu.items.bg.color: #fcfbfa
-        |menu.items.text.color: #000000
-        |menu.items.active.bg: flat solid
-        |menu.items.active.bg.color: #e1dedb
-        |menu.items.active.text.color: #000000
-        |menu.title.bg: flat solid
-        |menu.title.bg.color: #e1dedb
-        |menu.title.text.color: #000000
-        |osd.border.width: 1
-        |osd.border.color: #aaaaaa
-        |osd.bg: flat solid
-        |osd.bg.color: #fcfbfa
-        |osd.label.text.color: #000000
-        |""".trimMargin()
+    fun themerc(dark: Boolean): String {
+        val c = if (dark) DARK_DECORATIONS else LIGHT_DECORATIONS
+        return """
+            |border.width: 1
+            |padding.width: 4
+            |padding.height: 3
+            |window.handle.width: 0
+            |window.client.padding.width: 0
+            |window.client.padding.height: 0
+            |window.active.border.color: ${c.border}
+            |window.inactive.border.color: ${c.border}
+            |window.active.title.bg: flat solid
+            |window.active.title.bg.color: ${c.title}
+            |window.inactive.title.bg: flat solid
+            |window.inactive.title.bg.color: ${c.inactiveTitle}
+            |window.active.label.bg: parentrelative
+            |window.active.label.text.color: ${c.text}
+            |window.inactive.label.bg: parentrelative
+            |window.inactive.label.text.color: ${c.inactiveText}
+            |window.label.text.justify: center
+            |window.active.button.unpressed.bg: parentrelative
+            |window.active.button.unpressed.image.color: ${c.text}
+            |window.active.button.hover.bg: flat solid
+            |window.active.button.hover.bg.color: ${c.hover}
+            |window.active.button.pressed.bg: flat solid
+            |window.active.button.pressed.bg.color: ${c.pressed}
+            |window.inactive.button.unpressed.bg: parentrelative
+            |window.inactive.button.unpressed.image.color: ${c.inactiveText}
+            |window.active.handle.bg: flat solid
+            |window.active.handle.bg.color: ${c.title}
+            |window.inactive.handle.bg: flat solid
+            |window.inactive.handle.bg.color: ${c.inactiveTitle}
+            |window.active.grip.bg: parentrelative
+            |window.inactive.grip.bg: parentrelative
+            |menu.border.width: 1
+            |menu.border.color: ${c.border}
+            |menu.items.bg: flat solid
+            |menu.items.bg.color: ${c.menu}
+            |menu.items.text.color: ${c.text}
+            |menu.items.active.bg: flat solid
+            |menu.items.active.bg.color: ${c.title}
+            |menu.items.active.text.color: ${c.text}
+            |menu.title.bg: flat solid
+            |menu.title.bg.color: ${c.title}
+            |menu.title.text.color: ${c.text}
+            |osd.border.width: 1
+            |osd.border.color: ${c.border}
+            |osd.bg: flat solid
+            |osd.bg.color: ${c.menu}
+            |osd.label.text.color: ${c.text}
+            |""".trimMargin()
+    }
+
+    private class Decorations(
+        val title: String, val inactiveTitle: String, val text: String, val inactiveText: String,
+        val border: String, val hover: String, val pressed: String, val menu: String,
+    )
+
+    /** labwc's built-in colours. */
+    private val LIGHT_DECORATIONS = Decorations(
+        title = "#e1dedb", inactiveTitle = "#f6f5f4", text = "#000000", inactiveText = "#000000",
+        border = "#aaaaaa", hover = "#d2cfcb", pressed = "#c6c2bd", menu = "#fcfbfa",
+    )
+
+    /** Adwaita's dark header bar and popover colours. */
+    private val DARK_DECORATIONS = Decorations(
+        title = "#303030", inactiveTitle = "#242424", text = "#ffffff", inactiveText = "#9a9996",
+        border = "#1b1b1b", hover = "#3d3d3d", pressed = "#4a4a4a", menu = "#383838",
+    )
 
     /**
      * Openbox's whole configuration (a user rc.xml replaces Openbox's defaults, it isn't merged):

@@ -39,6 +39,18 @@ object ViewerDebug {
     /** `tiles=192`: [TileFrames] of that size, whatever the device could do. */
     fun tileSize(cacheDir: File): Int? = read(cacheDir).getProperty("tiles")?.trim()?.toIntOrNull()?.takeIf { it > 0 }
 
+    // Reading thread: time spent showing updates (posting them to the surface's queue).
+    private var posts = 0
+    private var postNanos = 0L
+    private var postMax = 0L
+
+    fun postMeter(): (Long) -> Unit = { nanos ->
+        posts++
+        postNanos += nanos
+        postMax = maxOf(postMax, nanos)
+    }
+
+
     /** Starts the benchmark, if the file asks for one; [zoom] zooms the view in for it. */
     fun connected(client: RfbClient, cacheDir: File, zoom: (Float) -> Unit) {
         since = 0L
@@ -70,6 +82,14 @@ object ViewerDebug {
                 ),
             )
         }
+        if (posts > 0) {
+            DebugLog.i(
+                "Viewer: posting took %.1f ms per update, at most %.1f ms".format(
+                    Locale.ROOT, postNanos / 1e6 / posts, postMax / 1e6,
+                ),
+            )
+        }
+        posts = 0; postNanos = 0; postMax = 0
         since = now; updates = 0; bytes = 0; nanos = 0
         copyRects = 0; copyRectPixels = 0; copyRectNanos = 0
     }

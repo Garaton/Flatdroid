@@ -24,7 +24,7 @@ object SessionScript {
     const val GUEST_PULSE_SCRIPT = "/run/flatdroid/pulse.pa"
     const val GUEST_VNC_DIR = "/run/flatdroid/vnc"
     const val GUEST_OPENBOX_RC = "/root/.config/openbox/rc.xml"
-    /** Openbox's theme ([com.garathon.flatdroid.alpine.GuestFiles.OPENBOX_THEMERC]), where Openbox looks for the user's themes. */
+    /** Openbox's theme ([com.garathon.flatdroid.alpine.GuestFiles.themerc]), where Openbox looks for the user's themes. */
     const val GUEST_OPENBOX_THEMERC = "/root/.themes/${com.garathon.flatdroid.alpine.GuestFiles.OPENBOX_THEME}/openbox-3/themerc"
 
     /** In front of a helper's command: fdsec again, adding no Internet sockets to the filter it already has. */

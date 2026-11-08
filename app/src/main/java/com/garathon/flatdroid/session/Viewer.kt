@@ -2,6 +2,7 @@ package com.garathon.flatdroid.session
 
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.content.pm.PackageManager
 import android.net.Uri
 import androidx.core.net.toUri
@@ -29,8 +30,13 @@ object Viewer {
     /** Installed viewers (apps that open `vnc:` links), by label. */
     fun installed(context: Context): List<App> {
         val pm = context.packageManager
-        @Suppress("DEPRECATION")
-        val activities = pm.queryIntentActivities(Intent(Intent.ACTION_VIEW, "vnc://$HOST".toUri()), PackageManager.MATCH_DEFAULT_ONLY)
+        val intent = Intent(Intent.ACTION_VIEW, "vnc://$HOST".toUri())
+        val activities = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            pm.queryIntentActivities(intent, PackageManager.ResolveInfoFlags.of(PackageManager.MATCH_DEFAULT_ONLY.toLong()))
+        } else {
+            @Suppress("DEPRECATION") // the only way before Android 13
+            pm.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
+        }
         return activities.map { App(it.activityInfo.packageName, it.loadLabel(pm).toString()) }
             .distinctBy { it.packageName }
             .sortedBy { it.label.lowercase() }

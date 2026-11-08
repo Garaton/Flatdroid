@@ -5,8 +5,12 @@ import android.content.ClipboardManager
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.view.SurfaceHolder
+import android.view.SurfaceView
+import android.view.View
 import android.view.ViewConfiguration
 import android.view.WindowManager
+import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
@@ -103,6 +107,28 @@ import kotlinx.coroutines.withContext
 class ViewerActivity : ComponentActivity() {
     private lateinit var view: ViewerView
 
+    /**
+     * The viewer over the surface its frames are shown on, without being drawn by the app (Android
+     * 10 and later, see [NativeFrames]); the surface lies under the window, which leaves a hole for it.
+     */
+    private fun frameHolder(): View {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return view
+        val surface = SurfaceView(this)
+        surface.holder.addCallback(object : SurfaceHolder.Callback {
+            override fun surfaceCreated(holder: SurfaceHolder) = Unit
+
+            // Nothing drawn into the surface itself: where no frame covers it, Android's own black
+            // background for it shows, a plain colour the compositor fills without another buffer.
+            override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) = view.surfaceChanged(surface)
+
+            override fun surfaceDestroyed(holder: SurfaceHolder) = view.surfaceChanged(null)
+        })
+        return FrameLayout(this).apply {
+            addView(surface)
+            addView(view)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val session = SessionController.ui.value.state as? SessionState.Running
@@ -158,7 +184,7 @@ class ViewerActivity : ComponentActivity() {
                             onToggleKeys = { if (keyboardShown) keysWithKeyboard = !keysWithKeyboard else keysAlone = !keysAlone },
                         )
                         // The keyboard and the extra keys lie over the screen, which stays as it was.
-                        AndroidView(factory = { view }, modifier = Modifier.fillMaxWidth().weight(1f).clipToBounds())
+                        AndroidView(factory = { frameHolder() }, modifier = Modifier.fillMaxWidth().weight(1f).clipToBounds())
                     }
                     // Always there: above the keyboard while it is shown, sliding below the screen as it closes.
                     ExtraKeys(

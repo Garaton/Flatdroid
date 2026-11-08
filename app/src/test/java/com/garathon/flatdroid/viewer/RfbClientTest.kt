@@ -127,13 +127,38 @@ class RfbClientTest {
     }
 
     @Test
-    fun rectanglesOutsideTheScreenEndTheConnection() {
+    fun rectanglesOutsideTheScreenAreSkipped() {
+        // A server can send one update of the old size after a resize: its rectangles are passed
+        // over, and those that fit still land.
         val (client, _) = client {
             handshake()
-            update({ rect(3, 0, 2, 1, Rfb.RAW); write(ByteArray(8)) })
+            update(
+                { rect(3, 0, 2, 1, Rfb.RAW); write(ByteArray(8) { 7 }) },
+                { rect(0, 0, 2, 2, Rfb.COPY_RECT); writeShort(3); writeShort(0) },
+                { rect(0, 0, 1, 1, Rfb.RAW); write(byteArrayOf(1, 2, 3, 0)) },
+            )
+        }
+        client.connect()
+        client.readMessage(Recorder())
+        val pixels = client.framebuffer.pixels
+        assertArrayEquals(byteArrayOf(1, 2, 3, 0), pixels.copyOfRange(0, 4))
+        assertEquals(1, pixels.count { it == 1.toByte() }) // nothing of the skipped rectangles
+    }
+
+    @Test
+    fun rectanglesPastAnyScreenEndTheConnection() {
+        val (client, _) = client {
+            handshake()
+            update({ rect(0, 0, RfbClient.MAX_SCREEN + 1, 1, Rfb.RAW) })
         }
         client.connect()
         assertRefused("rectangle outside the screen") { client.readMessage(Recorder()) }
+    }
+
+    @Test
+    fun screensPastTheLimitAreRefused() {
+        val (client, _) = client { handshake(width = RfbClient.MAX_SCREEN + 1, height = 2) }
+        assertRefused("screen too large (8193x2)") { client.connect() }
     }
 
     @Test

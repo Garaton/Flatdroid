@@ -1,17 +1,18 @@
 package com.garathon.flatdroid.viewer
 
-import android.graphics.Bitmap
 import android.graphics.Canvas
-import android.graphics.ColorSpace
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Rect
-import android.graphics.Region
-import android.graphics.RegionIterator
-import android.hardware.HardwareBuffer
+import android.graphics.RectF
 import android.net.LocalSocket
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.ParcelFileDescriptor
+import android.view.Surface
+import android.view.SurfaceControl
+import android.view.SurfaceView
 import androidx.annotation.RequiresApi
 import com.garathon.flatdroid.util.DebugLog
 import java.io.EOFException
@@ -19,13 +20,14 @@ import java.io.IOException
 import java.io.InputStream
 
 /**
- * Pixels read from the socket straight into hardware buffers the GPU draws from (native/fdview.c):
- * no copy into a bitmap and no upload (13 to 27% less CPU than bitmaps when most of the screen
- * changes, measured). Updates carry only what changed, so each buffer also needs what changed
- * since it was last written: that much is copied from the newest buffer, less what the new update
- * replaces anyway. Three buffers, as one is shown and the GPU may still be reading the one before
- * (updates are paced, one per frame shown, so the third has had a frame to finish; verify on a
- * slow GPU). Android 10 and later.
+ * Pixels read from the socket straight into one frame in native memory (native/fdview.c), and
+ * each update's changed area copied from there into the next buffer of a surface's queue, which
+ * Android's compositor shows as it is, placed and scaled by the compositor: no copy into a bitmap,
+ * no upload and no drawing in the app (on a 720x1440 phone 5 to 10% of a core less than drawing
+ * hardware buffers, measured). The queue paces the copies, copies forward what an update left
+ * alone, and is ordinary rendering to Android, so the system's frame-based CPU boosts still see
+ * the app working (frames handed to the compositor without a queue lost them: measured, the
+ * session's processes moved to slow cores). Nothing is shown until [useSurface]. Android 10 and later.
  */
 @RequiresApi(Build.VERSION_CODES.Q)
 class NativeFrames private constructor(private val descriptor: ParcelFileDescriptor) : PixelSink, FrameDrawer {
@@ -36,130 +38,158 @@ class NativeFrames private constructor(private val descriptor: ParcelFileDescrip
         override fun read(b: ByteArray, off: Int, len: Int) = readBytes(fd, b, off, len)
     }
 
-    /** The connection ended. */
-    fun close() = runCatching { descriptor.close() }
-
-    private class Frame(val buffer: HardwareBuffer, val bitmap: Bitmap, val stride: Int) {
-        /** Changed since this buffer was last written. */
-        val stale = Region()
-    }
-
-    private var frames: List<Frame> = emptyList()
+    /** The frame (native); 0 once the connection ended. Released on the main thread. */
+    @Volatile private var frame = create().also { if (it == 0L) throw IOException("no memory for the frame") }
     private var width = 0
     private var height = 0
-    private var newest = 0
-    private var target = 0
-    private var pixels = 0L
-    private val written = Region()
-    private val rect = Rect()
-    /** What [draw] shows; kept whole across a resize, as Android may still be drawing it. */
-    private var current: Frame? = null
+    /** Between [begin] and [end]: the frame is being written (under [RfbClient.frameLock]). */
+    private var updating = false
+    /** What the update being read changed: left, top, right, bottom; empty when right is 0. */
+    private val changed = Rect()
+    private val posting = Rect()
+    private val postMeter = ViewerDebug.postMeter()
+
+    // Main thread: the surface frames are shown on, and where it was put.
+    private var control: SurfaceControl? = null
+    private var surface: Surface? = null
+    private val placed = RectF()
+    private var placedWidth = 0
+    private var placedHeight = 0
+    private val placing = SurfaceControl.Transaction()
+    private val source = Rect()
+    private val rounded = Rect()
+
+    /** The connection ended (reading thread). */
+    fun close() {
+        runCatching { descriptor.close() }
+        Handler(Looper.getMainLooper()).post {
+            useSurface(null)
+            val handle = frame
+            frame = 0L
+            if (handle != 0L) destroy(handle)
+        }
+    }
 
     override fun begin(width: Int, height: Int) {
-        if (width != this.width || height != this.height) allocate(width, height)
-        target = (newest + 1) % frames.size
-        pixels = locked(frames[target].buffer)
-        written.setEmpty()
-    }
-
-    private fun allocate(width: Int, height: Int) {
-        frames.forEach { it.buffer.close() } // the bitmaps keep what they need
-        this.width = width
-        this.height = height
-        frames = List(3) {
-            val buffer = HardwareBuffer.create(width, height, HardwareBuffer.RGBX_8888, 1, USAGE)
-            val bitmap = Bitmap.wrapHardwareBuffer(buffer, ColorSpace.get(ColorSpace.Named.SRGB))
-                ?: throw IOException("the GPU refused a ${width}x$height screen")
-            Frame(buffer, bitmap, stride(buffer))
+        if (width != this.width || height != this.height) {
+            if (!resize(frame, width, height)) throw IOException("no memory for a ${width}x$height screen")
+            this.width = width
+            this.height = height
         }
-        newest = 0
+        updating = true
+        changed.setEmpty()
     }
-
-    /** The [buffer]'s pixels: a null pointer must not reach the native code. */
-    private fun locked(buffer: HardwareBuffer): Long =
-        lock(buffer).also { if (it == 0L) throw IOException("the frame buffer couldn't be locked") }
 
     override fun raw(x: Int, y: Int, width: Int, height: Int) {
-        if (readRect(fd, pixels, frames[target].stride, x, y, width, height) != 0) throw EOFException()
-        written.op(x, y, x + width, y + height, Region.Op.UNION)
+        if (readRect(fd, frame, x, y, width, height) != 0) throw EOFException()
+        changed.union(x, y, x + width, y + height)
     }
 
     override fun copy(sx: Int, sy: Int, x: Int, y: Int, width: Int, height: Int) {
-        catchUp() // the source must be current first
-        moveRect(pixels, frames[target].stride, sx, sy, x, y, width, height)
-        written.op(x, y, x + width, y + height, Region.Op.UNION)
-    }
-
-    /** Brings the target up to date, except for what this update has written. */
-    private fun catchUp() {
-        val frame = frames[target]
-        frame.stale.op(written, Region.Op.DIFFERENCE)
-        if (frame.stale.isEmpty) return
-        val source = frames[newest]
-        val from = locked(source.buffer)
-        val rects = RegionIterator(frame.stale)
-        while (rects.next(rect)) copyRect(pixels, from, frame.stride, rect.left, rect.top, rect.width(), rect.height())
-        unlock(source.buffer)
-        frame.stale.setEmpty()
+        moveRect(frame, sx, sy, x, y, width, height)
+        changed.union(x, y, x + width, y + height)
     }
 
     override fun end() {
-        catchUp()
-        val frame = frames[target]
-        unlock(frame.buffer)
-        for (other in frames) if (other !== frame) other.stale.op(written, Region.Op.UNION)
-        newest = target
+        updating = false
+        posting.set(changed)
+    }
+
+    override fun post() {
+        if (posting.isEmpty) return
+        val start = if (postMeter != null) System.nanoTime() else 0L
+        post(frame, posting.left, posting.top, posting.right, posting.bottom)
+        postMeter?.invoke(System.nanoTime() - start)
     }
 
     override val hasHidden get() = false
 
-    override fun frame(fb: Framebuffer, visible: Rect): Boolean {
-        val latest = frames.getOrNull(newest) ?: return false
-        if (latest === current) return false
-        current = latest
-        return true
-    }
+    override fun frame(fb: Framebuffer, visible: Rect) = true
 
     override fun reveal(fb: Framebuffer, visible: Rect) = false
 
-    override fun draw(canvas: Canvas, matrix: Matrix, paint: Paint) {
-        current?.let { canvas.drawBitmap(it.bitmap, matrix, paint) }
+    /** Nothing: frames are only shown on the surface. */
+    override fun draw(canvas: Canvas, matrix: Matrix, paint: Paint) = Unit
+
+    override fun useSurface(surface: SurfaceView?): Boolean {
+        control?.let { old ->
+            // Off screen first: the compositor lets go of the queue's buffers, so a post waiting
+            // for one returns and the window can be let go (verify under heavy updates).
+            SurfaceControl.Transaction().reparent(old, null).apply()
+            attach(frame, null)
+            old.release()
+            this.surface?.release()
+        }
+        control = null
+        this.surface = null
+        placedWidth = 0
+        if (surface == null || frame == 0L) return false
+        // A layer of our own under the view's surface: placed and scaled to follow zoom and pan.
+        val control = SurfaceControl.Builder().setName("Flatdroid frames").setParent(surface.surfaceControl)
+            .setBufferSize(maxOf(width, 1), maxOf(height, 1)).setOpaque(true).build()
+        val queue = Surface(control)
+        if (!attach(frame, queue)) {
+            queue.release()
+            control.release()
+            return false
+        }
+        SurfaceControl.Transaction().setVisibility(control, true).setLayer(control, 1).apply()
+        this.control = control
+        this.surface = queue
+        // What there is so far, unless an update is being read (its post then shows all of it).
+        if (!updating && width > 0) post(frame, 0, 0, width, height)
+        return true
     }
 
-    override fun hashRows(fb: Framebuffer, out: IntArray) {
-        val frame = frames.getOrNull(newest) ?: return
-        val pixels = lock(frame.buffer)
-        if (pixels == 0L) return
-        hashRows(pixels, frame.stride, width, height, ScrollMeter.BANDS, out)
-        unlock(frame.buffer)
+    override fun show(destination: RectF) {
+        val control = control ?: return
+        if (width == 0 || destination.isEmpty) return
+        if (destination == placed && width == placedWidth && height == placedHeight) return
+        // The layer's bounds follow the frame's size, or a resized frame is cut to the old one.
+        if (width != placedWidth || height != placedHeight) placing.setBufferSize(control, width, height)
+        placed.set(destination)
+        placedWidth = width
+        placedHeight = height
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            // Placed to the fraction of a pixel, as the view's zoom and pan put it.
+            placing.setPosition(control, destination.left, destination.top)
+                .setScale(control, destination.width() / width, destination.height() / height)
+        } else {
+            source.set(0, 0, width, height)
+            destination.round(rounded)
+            @Suppress("DEPRECATION") // the only way before Android 12
+            placing.setGeometry(control, source, rounded, Surface.ROTATION_0)
+        }
+        placing.apply()
+    }
+
+    override fun hashRows(fb: Framebuffer, out: IntArray): Boolean {
+        if (updating || frame == 0L || width != fb.width || height != fb.height) return false
+        hashRows(frame, ScrollMeter.BANDS, out)
+        return true
     }
 
     companion object {
-        /** A [NativeFrames] reading [socket], or null where it can't run (Android before 10, or no such buffers). */
+        /** A [NativeFrames] reading [socket], or null where it can't run (Android before 10). */
         fun open(socket: LocalSocket): NativeFrames? {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
             return runCatching {
                 System.loadLibrary("fdview")
                 reset()
-                // Some devices may refuse the format: better known now than in the middle of an update.
-                HardwareBuffer.create(16, 16, HardwareBuffer.RGBX_8888, 1, USAGE).use { buffer ->
-                    checkNotNull(Bitmap.wrapHardwareBuffer(buffer, ColorSpace.get(ColorSpace.Named.SRGB)))
-                }
                 NativeFrames(ParcelFileDescriptor.dup(socket.fileDescriptor))
             }.onFailure { DebugLog.w("Viewer: no native frames: $it") }.getOrNull()
         }
 
-        private const val USAGE = HardwareBuffer.USAGE_CPU_READ_OFTEN or HardwareBuffer.USAGE_CPU_WRITE_OFTEN or HardwareBuffer.USAGE_GPU_SAMPLED_IMAGE
-
         @JvmStatic private external fun reset()
         @JvmStatic private external fun readByte(fd: Int): Int
         @JvmStatic private external fun readBytes(fd: Int, to: ByteArray, offset: Int, length: Int): Int
-        @JvmStatic private external fun lock(buffer: HardwareBuffer): Long
-        @JvmStatic private external fun unlock(buffer: HardwareBuffer)
-        @JvmStatic private external fun stride(buffer: HardwareBuffer): Int
-        @JvmStatic private external fun readRect(fd: Int, pixels: Long, stride: Int, x: Int, y: Int, width: Int, height: Int): Int
-        @JvmStatic private external fun copyRect(to: Long, from: Long, stride: Int, x: Int, y: Int, width: Int, height: Int)
-        @JvmStatic private external fun moveRect(pixels: Long, stride: Int, sx: Int, sy: Int, x: Int, y: Int, width: Int, height: Int)
-        @JvmStatic private external fun hashRows(pixels: Long, stride: Int, width: Int, height: Int, bands: Int, out: IntArray)
+        @JvmStatic private external fun create(): Long
+        @JvmStatic private external fun destroy(frame: Long)
+        @JvmStatic private external fun resize(frame: Long, width: Int, height: Int): Boolean
+        @JvmStatic private external fun readRect(fd: Int, frame: Long, x: Int, y: Int, width: Int, height: Int): Int
+        @JvmStatic private external fun moveRect(frame: Long, sx: Int, sy: Int, x: Int, y: Int, width: Int, height: Int)
+        @JvmStatic private external fun hashRows(frame: Long, bands: Int, out: IntArray)
+        @JvmStatic private external fun attach(frame: Long, surface: Surface?): Boolean
+        @JvmStatic private external fun post(frame: Long, left: Int, top: Int, right: Int, bottom: Int)
     }
 }

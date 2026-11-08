@@ -6,8 +6,10 @@
  *
  * A name stays known from shm_open with O_CREAT until shm_unlink, as with /dev/shm: opening it
  * again in that time reopens the same memory through /proc/self/fd (with the new access mode),
- * which is how a read-only copy of a writable buffer is made. Names are per process, which is
- * all these programs need: they unlink each name right after creating it.
+ * which is how a read-only copy of a writable buffer is made. Where Android refuses that reopen
+ * (Android 10 does for memfd, Android 13 doesn't), the copy is the same descriptor duplicated,
+ * so it stays writable: the same exposure as the fchmod case below. Names are per process, which
+ * is all these programs need: they unlink each name right after creating it.
  *
  * fchmod(2) is wrapped too: wlroots takes write permission off a writable buffer after making
  * its read-only copy (so a client can't reopen the copy writable), and Android refuses fchmod on
@@ -138,9 +140,11 @@ int shm_open(const char *name, int flags, unsigned mode)
     if (slot >= 0) {
         if ((flags & O_CREAT) && (flags & O_EXCL)) { give(); return (int)fail(-EEXIST); }
         char path[32];
-        fd_path(names[slot].fd, path);
+        int known = names[slot].fd;
+        fd_path(known, path);
         give();
         long fd = syscall3(__NR_openat, AT_FDCWD, (long)path, (flags & ~(O_CREAT | O_EXCL | O_TRUNC)) | O_CLOEXEC);
+        if (fd == -EACCES) fd = syscall3(__NR_fcntl, known, F_DUPFD_CLOEXEC, 0);
         if (fd < 0) return (int)fail(fd);
         if (flags & O_TRUNC) syscall3(__NR_ftruncate, fd, 0, 0);
         return (int)fd;

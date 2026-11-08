@@ -212,6 +212,7 @@ class FlatpakLauncher(private val context: Context) {
         val micRate = MicStreamer.rate()
         writeSessionFiles(
             password, wayvncLogin = plan.wayland && externalViewer, titleBars = userSettings?.windowTitleBars ?: true,
+            darkDecorations = isDarkTheme(userSettings),
             pulseScript = if (audio) PulseScript.text(outputRate, microphone, micRate) else null,
             busArgs = SessionBus.proxyArgs(appId, plan.app.metadata.sessionBusPolicy, camera = cameraNodes.isNotEmpty()),
             cameraNodes = cameraNodes,
@@ -784,8 +785,8 @@ class FlatpakLauncher(private val context: Context) {
      * bus's configuration and proxy arguments ([busArgs]). Old sockets are removed.
      */
     private fun writeSessionFiles(
-        password: String, wayvncLogin: Boolean, titleBars: Boolean, pulseScript: String?, busArgs: List<String>,
-        cameraNodes: List<CameraScript.Node>,
+        password: String, wayvncLogin: Boolean, titleBars: Boolean, darkDecorations: Boolean, pulseScript: String?,
+        busArgs: List<String>, cameraNodes: List<CameraScript.Node>,
     ) {
         val launcher = AppData.launcherFiles(context)
         launcher.write()
@@ -809,8 +810,11 @@ class FlatpakLauncher(private val context: Context) {
         }
         File(sessionDir, "session.sh").writeTextAtomically(SessionScript.TEXT, durable = false)
         File(sessionDir, "openbox-rc.xml").writeTextAtomically(GuestFiles.openboxRc(titleBars), durable = false)
-        File(sessionDir, "openbox-themerc").writeTextAtomically(GuestFiles.OPENBOX_THEMERC, durable = false)
-        File(vncDir, "${File(SessionScript.GUEST_LABWC_DIR).name}/rc.xml").apply { parentFile!!.mkdirs() }.writeTextAtomically(GuestFiles.labwcRc(titleBars), durable = false)
+        val themerc = GuestFiles.themerc(darkDecorations)
+        File(sessionDir, "openbox-themerc").writeTextAtomically(themerc, durable = false)
+        val labwcDir = File(vncDir, File(SessionScript.GUEST_LABWC_DIR).name).apply { mkdirs() }
+        File(labwcDir, "rc.xml").writeTextAtomically(GuestFiles.labwcRc(titleBars), durable = false)
+        File(labwcDir, GuestFiles.LABWC_THEME_OVERRIDE).writeTextAtomically(themerc, durable = false)
         val pulseFile = File(sessionDir, "pulse.pa")
         if (pulseScript != null) pulseFile.writeTextAtomically(pulseScript, durable = false) else pulseFile.delete()
         File(sessionDir, "dbus.conf").writeTextAtomically(SessionBus.CONFIG, durable = false)

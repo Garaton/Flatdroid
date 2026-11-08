@@ -1,8 +1,6 @@
-<p align="center"><img src="assets/flatdroid_icon.png" alt="Flatdroid Logo"></p>
-
 # Flatdroid
 
-> Under development and unfinished.
+<img src="assets/flatdroid_icon.png" alt="Flatdroid Logo" width="300">
 
 An Android based Flatpak runner which uses proot to provide the needed environment for Flatpaks to run.
 
@@ -38,14 +36,12 @@ Requirements:
 - Internet: For initial setup, and Flatpak downloading.
 - Storage Space: ~450 MB for initial required packages, and 0.4-1 GB per Flatpak runtime.
 
-## App Examples
-
-<img src="assets/flatdroid_running.gif" alt="Flatdroid Running Mousepad" width="300">
+## Screenshots
 
 <table><tr>
-<td><img src="assets/flatdroid_screenshot.png" alt="Flatdroid Flatpak List" width="300"></td>
-<td><img src="assets/audacity_screenshot.png" alt="Audacity Running" width="300"></td>
-<td><img src="assets/homestuck_screenshot.png" alt="Homestuck Running" width="300"></td>
+<td><img src="assets/flatdroid_running.gif" alt="Flatdroid Running Mousepad" width="250"></td>
+<td><img src="assets/audacity_screenshot.png" alt="Audacity Running" width="250"></td>
+<td><img src="assets/homestuck_screenshot.png" alt="Homestuck Running" width="250"></td>
 </tr></table>
 
 ## Features
@@ -172,7 +168,7 @@ Dependencies: `zip`, `unzip`.
 
 ### Alpine Terminal
 
-In case you want to
+In case you want to modify the Alpine environment yourself, if this is to check issues, or otherwise you have been given shell access to the Alpine proot. This is not a terminal emulator like Termux, you have no consistent environment variables, or working directory, you fire one shell command at a time and your state resets each time.
 
 ## Building
 

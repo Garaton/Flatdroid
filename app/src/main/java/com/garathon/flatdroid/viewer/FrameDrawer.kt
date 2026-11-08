@@ -4,6 +4,8 @@ import android.graphics.Canvas
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Rect
+import android.graphics.RectF
+import android.view.SurfaceView
 
 /**
  * How the framebuffer gets to the screen: [NativeFrames], or [TileFrames] where that can't run.
@@ -21,6 +23,15 @@ interface FrameDrawer {
 
     fun draw(canvas: Canvas, matrix: Matrix, paint: Paint)
 
-    /** [ScrollMeter.hashRows] of the latest frame. */
-    fun hashRows(fb: Framebuffer, out: IntArray)
+    /**
+     * Frames go to [surface]'s surface from now on, straight to Android's compositor, instead of
+     * [draw] (null: drawn again). True when they will; then [show] places them. Main thread.
+     */
+    fun useSurface(surface: SurfaceView?): Boolean = false
+
+    /** On the surface: shows the latest frame at [destination] (the surface's pixels). */
+    fun show(destination: RectF) {}
+
+    /** [ScrollMeter.hashRows] of the latest frame; false when there is no whole frame to hash now. */
+    fun hashRows(fb: Framebuffer, out: IntArray): Boolean
 }

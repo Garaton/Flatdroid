@@ -33,6 +33,8 @@ interface PixelSink {
     fun raw(x: Int, y: Int, width: Int, height: Int)
     fun copy(sx: Int, sy: Int, x: Int, y: Int, width: Int, height: Int)
     fun end()
+    /** After [end], outside [RfbClient.frameLock]: shows the update (may wait for the screen). */
+    fun post() {}
 }
 
 /**
@@ -105,7 +107,7 @@ class RfbClient(
         val height = input.readUnsignedShort()
         input.skipFully(16) // the server's pixel format: replaced by ours below
         name = String(ByteArray(input.readInt().also(::checkLength)).also(input::readFully), Charsets.UTF_8)
-        framebuffer = Framebuffer(width, height, keepPixels = pixelSink == null)
+        framebuffer = screen(width, height)
         send(Rfb.setPixelFormat())
         send(Rfb.setEncodings())
         requestUpdate(incremental = false)
@@ -166,6 +168,9 @@ class RfbClient(
             val w = input.readUnsignedShort()
             val h = input.readUnsignedShort()
             when (val encoding = input.readInt()) {
+                // Stale (wayvnc can send one update of the old size after a resize): skipped, the
+                // next update draws the new size whole.
+                Rfb.RAW if !fits(x, y, w, h) && stale(x, y, w, h) -> input.skipFully(w * h * Rfb.BYTES_PER_PIXEL)
                 Rfb.RAW -> {
                     val meter = rawMeter
                     if (meter == null) {
@@ -181,6 +186,7 @@ class RfbClient(
                 Rfb.COPY_RECT -> {
                     val sx = input.readUnsignedShort()
                     val sy = input.readUnsignedShort()
+                    if ((!fits(x, y, w, h) || !fits(sx, sy, w, h)) && stale(x, y, w, h) && stale(sx, sy, w, h)) continue // as for Raw
                     val meter = copyRectMeter
                     if (pixelSink != null) {
                         checkRect(x, y, w, h)
@@ -217,13 +223,16 @@ class RfbClient(
                 else -> throw RfbException("unrequested encoding $encoding")
             }
         }
-        pixelSink?.let { synchronized(frameLock) { it.end() } }
+        pixelSink?.let {
+            synchronized(frameLock) { it.end() }
+            it.post()
+        }
         listener.updateDone()
     }
 
     private fun resize(width: Int, height: Int, listener: RfbListener) {
         synchronized(frameLock) {
-            framebuffer = Framebuffer(width, height, keepPixels = pixelSink == null)
+            framebuffer = screen(width, height)
             pixelSink?.let {
                 it.end()
                 it.begin(width, height)
@@ -238,8 +247,19 @@ class RfbClient(
         pixelSink.raw(x, y, w, h)
     }
 
+    /** A framebuffer of the server's size, refused past [MAX_SCREEN] (more memory than any screen asked for needs). */
+    private fun screen(width: Int, height: Int): Framebuffer {
+        if (width > MAX_SCREEN || height > MAX_SCREEN) throw RfbException("screen too large (${width}x$height)")
+        return Framebuffer(width, height, keepPixels = pixelSink == null)
+    }
+
+    private fun fits(x: Int, y: Int, w: Int, h: Int) = x + w <= framebuffer.width && y + h <= framebuffer.height
+
+    /** Could be from a screen of another size Flatdroid asked for; beyond that it is an error (checked later). */
+    private fun stale(x: Int, y: Int, w: Int, h: Int) = x + w <= MAX_SCREEN && y + h <= MAX_SCREEN
+
     private fun checkRect(x: Int, y: Int, w: Int, h: Int) {
-        if (x + w > framebuffer.width || y + h > framebuffer.height) throw RfbException("rectangle outside the screen")
+        if (!fits(x, y, w, h)) throw RfbException("rectangle outside the screen")
     }
 
     private fun readRaw(x: Int, y: Int, w: Int, h: Int) {
@@ -317,5 +337,8 @@ class RfbClient(
     companion object {
         /** Longest name, reason or clipboard text accepted. */
         const val MAX_TEXT = 16 * 1024 * 1024
+
+        /** Widest or tallest screen accepted: twice the largest Flatdroid asks a server for. */
+        const val MAX_SCREEN = 8192
     }
 }

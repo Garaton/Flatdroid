@@ -127,7 +127,10 @@ class TileFrames(private val size: Int = SIZE) : FrameDrawer {
         }
     }
 
-    override fun hashRows(fb: Framebuffer, out: IntArray) = ScrollMeter.hashRows(fb.pixels, fb.stride, fb.width, fb.height, out)
+    override fun hashRows(fb: Framebuffer, out: IntArray): Boolean {
+        ScrollMeter.hashRows(fb.pixels, fb.stride, fb.width, fb.height, out)
+        return true
+    }
 
     companion object {
         /** Measured best at 50, 75 and 100% Resolution; smaller tiles cost more to draw than they save. */
