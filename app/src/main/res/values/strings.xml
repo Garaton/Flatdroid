@@ -2,7 +2,12 @@
     <string name="app_name">Flatdroid</string>
 
     <string name="setup_title">Set up Flatdroid</string>
-    <string name="setup_intro">Flatdroid downloads Alpine Linux, then installs Flatpak, the display servers (Wayland\'s labwc, and Xvnc and Openbox for X11) and PulseAudio into it. This downloads about 140 MB and needs about 400 MB of storage.</string>
+    <string name="setup_intro">Flatdroid downloads Alpine Linux, then installs Flatpak, the display servers (Wayland\'s labwc, and Xvnc and Openbox for X11) and PulseAudio into it. Press Start when you are ready.</string>
+    <string name="setup_title_running">Setting up Flatdroid</string>
+    <string name="setup_screen_count">Part %1$d of %2$d</string>
+    <string name="setup_steps_done">%1$d of %2$d steps done</string>
+    <string name="setup_running_note">Setup keeps going if you leave Flatdroid. A notification shows how far it is.</string>
+    <string name="setup_estimate">Setup downloads Alpine Linux and its packages, so use Wi-Fi if your mobile data is limited. It needs about 600 MB of free storage.</string>
     <string name="setup_start">Start setup</string>
     <string name="setup_resume">Resume setup</string>
     <string name="setup_retry">Retry</string>
@@ -28,6 +33,11 @@
     <string name="setup_error_space">Not enough free storage: %1$d MiB free, about %2$d MiB needed</string>
     <string name="setup_error_scripts">Package scripts failed:\n%1$s</string>
     <string name="setup_error_packages">Packages not installed: %1$s</string>
+    <string name="setup_error_network">The package servers can\'t be reached: %1$s\nCheck your connection and retry.</string>
+    <string name="setup_error_apk_line">apk stopped with an error: %1$s</string>
+    <string name="setup_error_apk">apk failed (exit %1$d)</string>
+    <string name="setup_error_missing">A step finished but its files are missing: %1$s</string>
+    <string name="setup_error_flatpak_check">Flatpak does not run: %1$s</string>
     <string name="setup_error_flathub">Could not add Flathub with its signing key: %1$s</string>
     <string name="setup_error_no_settings">Your settings are missing; reset to choose them again</string>
     <string name="setup_error_timeout">Timed out: %1$s</string>
@@ -38,7 +48,8 @@
     <string name="setup_notification_failed">Flatdroid setup failed</string>
 
     <string name="setup_settings_title">Choose your settings</string>
-    <string name="setup_settings_intro">Setup applies these to Flatdroid. You can change them later in Settings.</string>
+    <string name="setup_settings_intro">Setup applies these choices to Flatdroid.</string>
+    <string name="setup_settings_later">You can change these later in Settings.</string>
     <string name="setup_settings_continue">Continue</string>
 
     <string name="security_android_fonts_hint">Apps can use Android\'s fonts, for more font compatibility (emojis, other languages). Off, apps have only their runtime\'s fonts, so neither they nor the websites they show can tell the device\'s Android version and maker from them.</string>
@@ -142,8 +153,7 @@
     <string name="list_sort">Sort by</string>
     <string name="list_ascending">Ascending</string>
     <string name="list_descending">Descending</string>
-    <string name="storage_legend_percent">%1$s %2$s (%3$d%%)</string>
-    <string name="storage_legend">%1$s %2$s</string>
+    <string name="storage_legend_percent">%1$s (%2$d%%)</string>
     <string name="settings_page_overview">Overview</string>
     <string name="settings_page_defaults">Per-app Defaults</string>
     <string name="settings_page_display">Display</string>
@@ -187,19 +197,21 @@
     <string name="ready_running">Running…</string>
     <string name="command_cancel">Cancel</string>
 
-    <string name="reset_button">Reset Alpine environment…</string>
-    <string name="reset_title">Reset Alpine environment?</string>
-    <string name="reset_text">Alpine is deleted and set up again from scratch: downloaded again, and its packages reinstalled.</string>
+    <string name="reset_button">Reset Flatdroid…</string>
+    <string name="reset_title">Reset Flatdroid?</string>
+    <string name="reset_text">Flatdroid\'s Alpine Linux, the system Flatpak runs in, is deleted and set up again from scratch: downloaded again, and its packages reinstalled. What happens to your Flatpaks is your choice.</string>
     <string name="reset_keep">Keep installed Flatpaks</string>
     <string name="reset_remove">Remove Flatpaks, keep app data</string>
     <string name="reset_wipe">Wipe everything</string>
-    <string name="reset_keep_hint">Flatpaks and their data (settings, homes, etc) stay downloaded within Flatdroid to be used again after the environment is reset. Caches are cleared.</string>
+    <string name="reset_keep_hint">Flatpaks and their data (settings, homes, etc) stay downloaded within Flatdroid to be used again after the reset. Caches are cleared.</string>
     <string name="reset_remove_hint">Flatpaks and all runtimes are removed, however their data stays (settings, home, etc). Caches are cleared.</string>
     <string name="reset_wipe_hint">Everything in Flatdroid is wiped (Alpine, Flatpak apps and data), and you start from a clean slate. The only thing that remains the same is Flatdroid\'s own global settings.</string>
     <string name="reset_confirm">Reset</string>
     <string name="reset_cancel">Cancel</string>
-    <string name="reset_running">Resetting the Alpine environment…</string>
-    <string name="reset_done">Alpine environment reset; start setup to install it again.</string>
+    <string name="reset_running">Deleting the files…</string>
+    <string name="reset_screen_title">Resetting Flatdroid</string>
+    <string name="reset_screen_note">This takes a moment. You choose your settings again after it.</string>
+    <string name="reset_done">Flatdroid reset; start setup to install it again.</string>
     <string name="settings_section_tools">Tools</string>
 
     <string name="home_install">Install an app</string>
@@ -277,7 +289,7 @@
     <string name="log_bottom">Bottom</string>
     <string name="settings_section_viewer">Viewer</string>
     <string name="settings_viewer">Show apps in</string>
-    <string name="settings_viewer_hint">Where apps are shown. Flatdroid\'s viewer is better in every way: quicker to respond, much lighter on the CPU, with touch gestures, the keyboard and the clipboard built in, and no port or password. A viewer app gets the session\'s link, password included, and only the app chosen here gets it.</string>
+    <string name="settings_viewer_hint">Flatdroid\'s viewer is better in every way: quicker to respond, much lighter on the CPU, with touch gestures, the keyboard and the clipboard built in, and no port or password. A viewer app gets the session\'s link, password included, and only the app chosen here gets it.</string>
     <string name="settings_viewer_flatdroid">Flatdroid\'s viewer</string>
     <string name="settings_viewer_external_warning">Less secure: with a viewer app, the display is reachable on a network port of this phone, so any app on it can try to connect, and the password is shown in Flatdroid. Flatdroid\'s viewer uses a private socket that only Flatdroid can reach.</string>
     <string name="settings_viewer_none">None chosen</string>
@@ -300,7 +312,7 @@
     <string name="settings_audio_latency_hint">%1$d to %2$d; clear the field for the default %3$d ms. Lower is more responsive but can crackle.</string>
     <string name="settings_section_developer">Developer</string>
     <string name="settings_developer_options">Developer options</string>
-    <string name="settings_developer_options_hint">Shows extra settings that Flatdroid either manages itself, or are dangerous/unfriendly for the average user.</string>
+    <string name="settings_developer_options_hint">Shows extra settings that Flatdroid manages itself or that are risky for most users.</string>
 
     <string name="session_channel">Running app</string>
     <string name="session_checking_files">Checking files: %1$s (%2$d/%3$d)</string>
@@ -404,8 +416,8 @@
     <string name="app_settings_camera_resolution">Camera resolution</string>
     <string name="app_settings_camera_resolution_value">%1$dp</string>
     <string name="app_settings_camera_resolution_full">Full camera resolution (%1$s)</string>
-    <string name="app_settings_camera_resolution_hint">Larger sizes use more CPU. The listed resolutions depends on the phone\'s listed resolutions for the chosen frame rate. Cameras that can\'t run at the chosen resolution use the nearest one it can.</string>
-    <string name="app_settings_camera_frame_rate_hint">Higher rates use more CPU. Only rates this device\'s cameras support are listed. Cameras that can\'t run at the chosen rate use the nearest one it can.</string>
+    <string name="app_settings_camera_resolution_hint">Larger sizes use more CPU. The sizes listed are the ones the phone\'s cameras give at the chosen frame rate. A camera that can\'t run at the chosen size uses the nearest one it can.</string>
+    <string name="app_settings_camera_frame_rate_hint">Higher rates use more CPU. Only rates this phone\'s cameras support are listed. A camera that can\'t run at the chosen rate uses the nearest one it can.</string>
     <string name="camera_back">Back camera</string>
     <string name="camera_front">Front camera</string>
     <string name="camera_external">External camera</string>
@@ -420,7 +432,7 @@
     <string name="app_settings_interface_size">Interface size</string>
     <string name="app_settings_interface_size_hint">Draws the app\'s text and controls larger, staying sharp, or smaller to fit more on the screen (smaller may be less sharp). With a higher Resolution, a larger size shows more detail at the same size.</string>
     <string name="app_settings_force_x11">Force X11</string>
-    <string name="app_settings_force_x11_hint">Runs the app on X11 instead of Wayland. Wayland is usually quicker to respond and more CPU efficent, try this if the app misbehaves.</string>
+    <string name="app_settings_force_x11_hint">Runs the app on X11 instead of Wayland. Wayland usually responds quicker and uses less CPU; try X11 if the app misbehaves.</string>
     <string name="app_settings_launch_args_hint">Added after the app\'s own command, separated by spaces. Each is passed as it is: no quoting.</string>
     <string name="app_settings_environment_invalid">Each line needs NAME=value; names use letters, digits and _, not starting with a digit.</string>
     <string name="app_settings_storage">Storage</string>
@@ -448,9 +460,9 @@
     <string name="app_settings_home_shared">Shared home</string>
     <string name="app_settings_home_shared_hint">%1$s, shared with every app set to it.</string>
     <string name="app_settings_home_private">App home</string>
-    <string name="app_settings_home_private_hint">A folder only this app gets, in Flatdroid\'s private storage. Bring files in with "Copy files into private home" under Storage. You can access app private homes through the files app under Flatdroid.</string>
+    <string name="app_settings_home_private_hint">A folder only this app gets, in Flatdroid\'s private storage. Bring files in with Copy files into app home on the Storage page; Android\'s Files app shows it under Flatdroid.</string>
     <string name="app_settings_home_temporary">Temporary home</string>
-    <string name="app_settings_home_temporary_hint">New at every launch, the app\'s settings included, nothing is kept. When the app closes, you can export what it saved.</string>
+    <string name="app_settings_home_temporary_hint">A new, empty home at every launch, the app\'s settings included. Nothing is kept, but you can export what the app saved when it closes.</string>
     <string name="app_settings_sdcard">Android storage at /sdcard</string>
     <string name="app_settings_sdcard_hint">This app could read, change or delete all your shared files. Flatpaks are not sandboxed.</string>
     <string name="shared_home_hidden_title">Files in %1$s may be hidden</string>
@@ -483,7 +495,7 @@
     <string name="homes_provider_summary">Private homes</string>
     <string name="home_import_zip">Add a zip to the shared home (extracted)</string>
     <string name="settings_theme">Theme for apps</string>
-    <string name="settings_theme_hint">Uses a variety of files, Flatpak settings, etc to make certain apps abide by theming, works for most but not all apps.</string>
+    <string name="settings_theme_hint">Makes apps follow a light or dark theme, through Flatpak settings and theme files. Works for most apps, not all.</string>
     <string name="settings_theme_system">System</string>
     <string name="settings_app_time">App time</string>
     <string name="settings_app_time_hint">What the list on the home screen shows next to each app.</string>
@@ -553,7 +565,7 @@
     <string name="storage_reset_home">Reset app home…</string>
     <string name="storage_import_settings">Import Flatdroid settings</string>
     <string name="storage_export_settings">Export Flatdroid settings</string>
-    <string name="storage_reset_settings">Reset settings</string>
+    <string name="storage_reset_settings">Reset settings…</string>
     <string name="app_settings_import_home_title">Replace %1$s\'s app home?</string>
     <string name="app_settings_import_home_text">Its app home is replaced with the contents of a zip you choose next (from Export app home).</string>
     <string name="app_settings_reset_home_title">Reset %1$s\'s app home?</string>
@@ -647,15 +659,15 @@
     <string name="security_applies_to_default">Also applies to settings still on the default.</string>
     <string name="security_permissions_from_metadata_hint">If an app asks for permissions, they are granted by default. Off, they start off until you turn them on in an app\'s settings.</string>
     <string name="security_default_home">Default app home</string>
-    <string name="security_default_home_hint">The home an app gets until you choose one in its settings. Also applies to apps whose home you haven\'t chosen.</string>
+    <string name="security_default_home_hint">The home an app gets until you choose one in its settings.</string>
     <string name="security_limit_devices">Limit devices and system information</string>
     <string name="security_limit_devices_hint">Apps get only CPU and memory information from /sys, and apps asking for all devices get only the basic ones every app has (no GPU, input, KVM or USB devices). Some apps may lose features.</string>
     <string name="security_hide_screen">Hide Flatdroid\'s screen</string>
-    <string name="security_hide_screen_hint">Flatdroid\'s screens can\'t be captured: screenshots and screen recordings get nothing, and recent apps shows them blank.</string>
+    <string name="security_hide_screen_hint">Flatdroid\'s screens can\'t be captured: screenshots and screen recordings get nothing, and the recent apps list shows them blank.</string>
     <string name="security_android_fonts">Share Android\'s fonts</string>
     <string name="security_share_clipboard">App default: share the clipboard with Android</string>
     <string name="security_check_files">Safe launch</string>
-    <string name="security_check_files_hint">Before an app starts, Flatdroid checks its files against what was recorded when they were installed/updated, to catch possible tampering. It refuses to start an app whose files changed. At most it takes a minute to finish the check. Turning it off drops the recorded baselines, turning it on asks how to record them again.</string>
+    <string name="security_check_files_hint">Before an app starts, Flatdroid checks its files against what was recorded when they were installed or updated, to catch tampering, and refuses to start an app whose files changed. The check takes up to a minute. Turning it off drops the recorded baselines; turning it on asks how to record them again.</string>
     <string name="baseline_choice_title">Record a baseline?</string>
     <string name="baseline_choice_message">The installed apps have no baseline yet. Reinstall every app and runtime then record the baselines from the reinstalled files, record them now from the files as they are, or record each app\'s baseline when it first launches.</string>
     <string name="baseline_choice_busy">Reinstalling or recording now can\'t start while an app or a Flatpak task runs.</string>
@@ -664,7 +676,7 @@
     <string name="baseline_choice_first_launch">At first launch</string>
     <string name="settings_terminal_filter">Filter the terminal\'s commands</string>
     <string name="settings_terminal_during_session">Terminal while an app runs</string>
-    <string name="settings_terminal_during_session_hint">Lets the terminal run commands while an app runs, and apps start while a command runs. Running apps can take over those commands and run its own code in Alpine\'s proot, with everything Alpine reaches.</string>
+    <string name="settings_terminal_during_session_hint">Lets the terminal run commands while an app runs, and apps start while a command runs. A running app can take over those commands and run its own code in Alpine\'s proot, with everything Alpine reaches.</string>
     <string name="settings_app_running">These settings change Alpine, which can\'t happen while an app runs. Stop the app, then save again.</string>
     <string name="terminal_app_running">An app is running. Stop it first: a command run now could be taken over by the app (see the developer setting \"Terminal while an app runs\").</string>
     <string name="settings_terminal_filter_hint">Commands run behind Flatdroid\'s system call filter, as everything else in Alpine does. Off, tools such as strace and gdb work, and so does anything you run there that tries to leave proot.</string>

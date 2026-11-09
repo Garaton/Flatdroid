@@ -1,6 +1,9 @@
-package com.garathon.flatdroid.ui
+package com.garathon.flatdroid.ui.setup
 
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,7 +22,9 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -31,18 +36,22 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.garathon.flatdroid.R
 import com.garathon.flatdroid.setup.ResetMode
 import com.garathon.flatdroid.setup.SetupStep
 import com.garathon.flatdroid.setup.SetupUi
+import com.garathon.flatdroid.ui.CommandInput
+import com.garathon.flatdroid.ui.LogText
+import com.garathon.flatdroid.ui.ResetDialog
 import com.garathon.flatdroid.ui.theme.FlatdroidTheme
 
 /**
- * First-run setup, the same for everyone: the steps with their state and the current one's
- * progress, recent output, and Start/Resume/Retry. The user's choices come before, on the setup
- * settings screen.
+ * The second screen of setup, the same for everyone: the steps with their state, how far the whole
+ * setup is, the current step's detail, the recent output, and Start/Resume/Retry. The user's
+ * choices come before, on [SetupSettingsScreen].
  */
 @Composable
 fun SetupScreen(
@@ -59,43 +68,42 @@ fun SetupScreen(
     }
     var showLog by rememberSaveable { mutableStateOf(false) }
     val scroll = rememberScrollState()
+    val commandRunning = command?.running == true
 
-    // The whole screen scrolls, so the log keeps a usable height on small screens; the log and
-    // command output scroll inside their own fixed-height boxes.
-    Column(
-        modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+    SetupFrame(
+        title = stringResource(if (ui.running) R.string.setup_title_running else R.string.setup_title),
+        screen = 2,
+        modifier = modifier,
+        actions = {
+            if (ui.running) {
+                Text(
+                    stringResource(R.string.setup_running_note),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+            } else {
+                val label = when {
+                    ui.failed != null -> R.string.setup_retry
+                    ui.completed.isNotEmpty() -> R.string.setup_resume
+                    else -> R.string.setup_start
+                }
+                Button(onClick = onStart, enabled = !commandRunning, modifier = Modifier.fillMaxWidth()) { Text(stringResource(label)) }
+                if (ui.completed.isNotEmpty() || ui.failed != null) {
+                    TextButton(onClick = { confirmReset = true }, enabled = !commandRunning) { Text(stringResource(R.string.reset_button)) }
+                }
+            }
+        },
     ) {
-        Text(stringResource(R.string.setup_title), style = MaterialTheme.typography.headlineSmall)
-        Text(stringResource(R.string.setup_intro), style = MaterialTheme.typography.bodyMedium)
-
-        for (step in SetupStep.entries) StepRow(step, ui)
-
-        // Work outside the steps: finishing a reset.
-        if (ui.running && ui.current == null && ui.detail.isNotEmpty()) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                StepMark { CircularProgressIndicator(Modifier.size(PROGRESS_SIZE), strokeWidth = PROGRESS_STROKE) }
-                Text(ui.detail)
-            }
+        if (!ui.running && ui.completed.isEmpty() && ui.failed == null) {
+            Text(stringResource(R.string.setup_intro), style = MaterialTheme.typography.bodyMedium)
         }
-        ui.error?.let {
-            SelectionContainer {
-                Text(stringResource(R.string.setup_failed, it), color = MaterialTheme.colorScheme.error)
-            }
+        OverallProgress(ui)
+        Column(verticalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.padding(top = 4.dp)) {
+            for (step in SetupStep.entries) StepRow(step, ui)
         }
 
-        if (!ui.running) {
-            val label = when {
-                ui.failed != null -> R.string.setup_retry
-                ui.completed.isNotEmpty() -> R.string.setup_resume
-                else -> R.string.setup_start
-            }
-            val commandRunning = command?.running == true
-            Button(onClick = onStart, enabled = !commandRunning) { Text(stringResource(label)) }
-            if (ui.completed.isNotEmpty() || ui.failed != null) {
-                TextButton(onClick = { confirmReset = true }, enabled = !commandRunning) { Text(stringResource(R.string.reset_button)) }
-            }
-        }
+        ui.error?.let { SetupError(stringResource(R.string.setup_failed, it)) }
 
         if (command != null && !ui.running) {
             CommandInput(command.running, command.onRun, command.onCancel, Modifier.fillMaxWidth())
@@ -112,10 +120,34 @@ fun SetupScreen(
             }
             LaunchedEffect(ui.log.size, showLog) { scroll.scrollTo(scroll.maxValue) }
             val logModifier = if (showLog) Modifier.height(OUTPUT_HEIGHT).verticalScroll(scroll) else Modifier
-            Box(modifier = Modifier.fillMaxWidth().then(logModifier)) {
-                LogText((if (showLog) ui.log else ui.log.takeLast(5)).joinToString("\n"), Modifier.fillMaxWidth())
+            Surface(Modifier.fillMaxWidth().animateContentSize(), shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.surfaceContainer) {
+                Box(modifier = Modifier.padding(8.dp).then(logModifier)) {
+                    LogText((if (showLog) ui.log else ui.log.takeLast(4)).joinToString("\n"), Modifier.fillMaxWidth())
+                }
             }
         }
+    }
+}
+
+/**
+ * How far the whole setup is, as a bar with "n of m steps": the finished steps only. A step's own
+ * progress is its dial's (some restart, as apk's upgrade and install do), so it isn't in the bar.
+ */
+@Composable
+private fun OverallProgress(ui: SetupUi) {
+    val steps = SetupStep.entries.size
+    val done = ui.completed.size
+    val target = (done.toFloat() / steps).coerceIn(0f, 1f)
+    val progress by animateFloatAsState(target, tween(400), label = "setup progress")
+    // Nothing yet to say before setup starts.
+    if (!ui.running && done == 0 && ui.failed == null) return
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
+        Text(
+            stringResource(R.string.setup_steps_done, done, steps),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -157,9 +189,15 @@ private fun StepRow(step: SetupStep, ui: SetupUi) {
                 }
             }
         }
-        Column {
-            Text(stringResource(step.title))
-            if (current && ui.detail.isNotEmpty()) Text(ui.detail, style = MaterialTheme.typography.bodySmall)
+        Column(Modifier.animateContentSize()) {
+            Text(
+                stringResource(step.title),
+                style = MaterialTheme.typography.bodyLarge,
+                color = if (state == StepState.WAITING) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+            )
+            if (current && ui.detail.isNotEmpty()) {
+                Text(ui.detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
     }
 }

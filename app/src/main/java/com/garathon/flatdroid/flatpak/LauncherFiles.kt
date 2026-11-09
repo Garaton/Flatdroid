@@ -32,4 +32,7 @@ class LauncherFiles(val dir: File, private val uid: Int, private val gid: Int) {
         group.writeTextAtomically(GuestFiles.group(gid), durable = false)
         fontDirs.writeTextAtomically(GuestFiles.fontDirs(), durable = false)
     }
+
+    /** The names of the files [write] makes that are not there (none when all are). */
+    fun missing(): List<String> = listOf(hosts, machineId, passwd, group, fontDirs).filter { !it.isFile }.map { it.name }
 }

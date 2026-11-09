@@ -23,11 +23,6 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.exclude
-import androidx.compose.foundation.layout.ime
-import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -43,6 +38,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -56,6 +52,9 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.input.pointer.pointerInput
 import com.garathon.flatdroid.R
+import com.garathon.flatdroid.ui.LocalDeveloperOptions
+import com.garathon.flatdroid.ui.aboveKeyboard
+import com.garathon.flatdroid.ui.theme.Spacing
 
 /** A page of a settings screen: its icon in the rail, and its title (the rail has no text, the page shows it). */
 interface SettingsPage {
@@ -79,6 +78,8 @@ fun <P : SettingsPage> SettingsShell(
     error: String? = null,
     /** The changes are being applied: the page is dimmed as a whole and takes no touches. */
     dimmed: Boolean = false,
+    /** Developer options are on: the developer settings of the pages show. */
+    developerOptions: Boolean = false,
     content: @Composable (P) -> Unit,
 ) {
     val focus = LocalFocusManager.current
@@ -86,7 +87,7 @@ fun <P : SettingsPage> SettingsShell(
     val dim by animateFloatAsState(if (dimmed) 0.5f else 1f, label = "dim")
     // The keyboard takes the room under the page, so the page scrolls to what it covers. The navigation bar's
     // share of it is already padded by the screen.
-    Column(modifier.fillMaxSize().windowInsetsPadding(WindowInsets.ime.exclude(WindowInsets.navigationBars))) {
+    Column(modifier.fillMaxSize().aboveKeyboard()) {
         topBar()
         error?.let {
             SelectionContainer {
@@ -101,14 +102,14 @@ fun <P : SettingsPage> SettingsShell(
             SettingsRail(pages, selected, onSelect)
             val shift = with(LocalDensity.current) { PAGE_SHIFT.roundToPx() }
             Box(Modifier.weight(1f).fillMaxHeight()) {
-            AnimatedContent(
-                targetState = selected,
-                modifier = Modifier.fillMaxSize().alpha(dim),
-                transitionSpec = { pageTransition(pages.indexOf(targetState) > pages.indexOf(initialState), shift) },
-                label = "settings page",
-            ) { page -> content(page) }
-            // Everything on the page, whatever it is made of, looks and acts the same while applying.
-            if (dimmed) Box(Modifier.fillMaxSize().pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent().changes.forEach { it.consume() } } })
+                AnimatedContent(
+                    targetState = selected,
+                    modifier = Modifier.fillMaxSize().alpha(dim),
+                    transitionSpec = { pageTransition(pages.indexOf(targetState) > pages.indexOf(initialState), shift) },
+                    label = "settings page",
+                ) { page -> CompositionLocalProvider(LocalDeveloperOptions provides developerOptions) { content(page) } }
+                // Everything on the page, whatever it is made of, looks and acts the same while applying.
+                if (dimmed) Box(Modifier.fillMaxSize().pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent().changes.forEach { it.consume() } } })
             }
         }
     }
@@ -188,8 +189,8 @@ private val TOP_BAR_HEIGHT = 56.dp
 @Composable
 fun SettingsPageColumn(@StringRes title: Int?, content: @Composable ColumnScope.() -> Unit) {
     Column(
-        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(Spacing.screen),
+        verticalArrangement = Arrangement.spacedBy(Spacing.row),
     ) {
         // As the section headers were before pages: `titleLarge` in the primary color.
         title?.let { Text(stringResource(it), style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary) }

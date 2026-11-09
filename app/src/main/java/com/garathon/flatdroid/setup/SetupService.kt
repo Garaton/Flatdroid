@@ -70,6 +70,7 @@ class SetupService : Service() {
                 val env = AlpineEnvironment.get(applicationContext)
                 val reset = SetupController.reset(applicationContext, env)
                 if (reset.isPending()) {
+                    SetupController.beginReset()
                     SetupController.reporter.progress(null, getString(R.string.reset_running))
                     runInterruptible { reset.finish() }
                     SetupController.cleared()
@@ -184,6 +185,7 @@ class SetupService : Service() {
         /** Requests a reset of the Alpine environment and carries it out; setup isn't started. */
         fun reset(context: Context, mode: ResetMode) {
             SetupController.reset(context).request(mode)
+            SetupController.beginReset()
             SetupController.refresh(context)
             ContextCompat.startForegroundService(
                 context, Intent(context, SetupService::class.java).setAction(ACTION_RESET),

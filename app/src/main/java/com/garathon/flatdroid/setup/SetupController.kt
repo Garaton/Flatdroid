@@ -25,6 +25,8 @@ data class SetupUi(
     val log: List<String> = emptyList(),
     /** The user chose their settings for this setup; until then the settings screen shows. */
     val settingsChosen: Boolean = false,
+    /** The Alpine environment is being reset (requested, or finishing after a restart): its own screen shows. */
+    val resetting: Boolean = false,
 ) {
     val isComplete: Boolean get() = completed.containsAll(SetupStep.entries)
 }
@@ -73,8 +75,11 @@ object SetupController {
 
     /** After a reset: nothing finished, but keep the log and the running flag. */
     fun cleared() = _state.update {
-        it.copy(completed = emptySet(), settingsChosen = false, failed = null, error = null, current = null, fraction = null, detail = "")
+        it.copy(completed = emptySet(), settingsChosen = false, failed = null, error = null, current = null, fraction = null, detail = "", resetting = false)
     }
+
+    /** A reset is under way, from the moment it is requested. */
+    fun beginReset() = _state.update { it.copy(resetting = true, error = null) }
 
     /** Marks setup as running; false when it already was. */
     fun begin(): Boolean {
@@ -88,7 +93,7 @@ object SetupController {
         return started
     }
 
-    fun end() = _state.update { it.copy(running = false, current = null, fraction = null) }
+    fun end() = _state.update { it.copy(running = false, current = null, fraction = null, resetting = false) }
 
     /** An error outside any setup step, e.g. while resetting. */
     fun error(message: String) {

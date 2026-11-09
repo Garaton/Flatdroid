@@ -71,6 +71,7 @@ fun FlatdroidTheme(
     MaterialTheme(
         colorScheme = colorScheme,
         typography = Typography,
+        shapes = FlatdroidShapes,
         content = content
     )
 }

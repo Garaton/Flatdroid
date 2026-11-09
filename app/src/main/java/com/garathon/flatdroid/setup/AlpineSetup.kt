@@ -11,6 +11,8 @@ import com.garathon.flatdroid.proot.ProcessResult
 import com.garathon.flatdroid.settings.UserSettings
 import java.io.File
 import java.io.IOException
+import java.nio.file.Files
+import java.util.concurrent.atomic.AtomicReference
 
 /** What each [SetupStep] does in Alpine. */
 class AlpineSetup(
@@ -56,6 +58,8 @@ class AlpineSetup(
         reporter.progress(null, context.getString(R.string.setup_progress_proot))
         val result = run(listOf("/bin/true"), reporter)
         if (result.exitCode != 0) throw IOException(context.getString(R.string.setup_error_proot, lastLine(result)))
+        // What the next steps need from the rootfs.
+        requireFiles(listOf("sbin/apk", "bin/busybox"))
     }
 
     /** Setup's downloads and installs all go to this app's internal storage (files and cache). */
@@ -73,15 +77,19 @@ class AlpineSetup(
         // Upgrade the minirootfs's own packages first: `apk add` alone only upgrades what the new
         // packages require, so base packages would miss fixes released after the minirootfs.
         reporter.progress(null, context.getString(R.string.setup_progress_upgrade))
-        apk(listOf("upgrade"), cache, reporter)
+        requireApkWorked(apk(listOf("upgrade"), cache, reporter))
         reporter.progress(null, context.getString(R.string.setup_progress_packages))
-        var summary = apk(listOf("add") + PACKAGES, cache, reporter)
+        var run = apk(listOf("add") + PACKAGES, cache, reporter)
+        requireApkWorked(run)
+        var summary = run.summary
         // apk ends with "OK: …" or "N errors; …". The count is kept in apk's database, so a later
         // run still reports packages whose install scripts failed; `apk fix` runs those again
         // (verify that it re-runs triggers too).
         if (!summary.ok) {
             reporter.progress(null, context.getString(R.string.setup_progress_fix))
-            summary = apk(listOf("fix"), cache, reporter)
+            run = apk(listOf("fix"), cache, reporter)
+            requireApkWorked(run)
+            summary = run.summary
         }
         if (!summary.ok) {
             val failed = summary.errors.ifEmpty { listOf(summary.line ?: "no summary line") }
@@ -92,24 +100,77 @@ class AlpineSetup(
             val installed = check.output.lines().filter { it.isNotBlank() }.toSet()
             throw IOException(context.getString(R.string.setup_error_packages, PACKAGES.filter { it !in installed }.joinToString(" ")))
         }
+        // The packages are listed as installed: check that they are there and that Flatpak runs.
+        requireFiles(PACKAGE_FILES)
+        val flatpak = run(listOf(FlatpakCommands.FLATPAK, "--version"), reporter)
+        if (flatpak.exitCode != 0) throw IOException(context.getString(R.string.setup_error_flatpak_check, lastLine(flatpak).ifEmpty { "exit ${flatpak.exitCode}" }))
         AndroidTarFs.deleteTree(cache)
     }
 
-    /** Runs one apk command with the package cache and progress; returns its summary. */
-    private fun apk(args: List<String>, cache: File, reporter: SetupReporter): ApkSummary {
-        val output = mutableListOf<String>()
-        run(
-            apkCommand(args),
-            reporter,
-            timeoutSeconds = 60 * 60,
-            extraBinds = listOf(cache.path to APK_CACHE),
-        ) { line ->
-            output += line
-            ApkProgress.parse(line)?.let { (done, total) ->
-                reporter.progress(done.toFloat() / total, line.substringAfter(") ").trim())
-            }
+    /** An apk command's end: its exit code and what it printed last. */
+    private class ApkRun(val exitCode: Int?, val summary: ApkSummary)
+
+    /**
+     * Fails a run that couldn't reach the package servers (apk goes on with what it has, and says
+     * OK when the packages are installed already), or that failed for another reason than a
+     * package's own scripts, which `apk fix` runs again.
+     */
+    private fun requireApkWorked(run: ApkRun) {
+        if (run.summary.networkErrors.isNotEmpty()) {
+            throw IOException(context.getString(R.string.setup_error_network, run.summary.networkErrors.first()))
         }
-        return ApkSummary.parse(output)
+        if (run.exitCode != 0 && run.summary.errors.isEmpty() && !run.summary.ok) {
+            throw IOException(context.getString(R.string.setup_error_apk, run.exitCode ?: -1))
+        }
+    }
+
+    /** Fails when one of [paths] (relative to the rootfs) is missing: a step that said it finished has to have left them. */
+    private fun requireFiles(paths: List<String>) {
+        val root = env.installer.rootfs
+        val missing = paths.filter { val f = File(root, it); !f.exists() && !Files.isSymbolicLink(f.toPath()) }
+        if (missing.isNotEmpty()) throw IOException(context.getString(R.string.setup_error_missing, missing.joinToString(" ")))
+    }
+
+    /**
+     * Runs one apk command with the package cache and progress; returns how it ended. The first
+     * line that is an error (apk's own, but not a package's script error, which `apk fix` runs
+     * again) or says the package servers can't be reached stops it (it would go on for as long as
+     * every repository takes to time out) and fails the step at once. The message says the servers
+     * can't be reached when a line said so, and otherwise gives the error line.
+     */
+    private fun apk(args: List<String>, cache: File, reporter: SetupReporter): ApkRun {
+        val output = mutableListOf<String>()
+        val setupThread = Thread.currentThread()
+        val unreachable = AtomicReference<String?>(null)
+        val failure = AtomicReference<String?>(null)
+        fun failed(line: String) = IOException(
+            unreachable.get()?.let { context.getString(R.string.setup_error_network, it) } ?: context.getString(R.string.setup_error_apk_line, line),
+        )
+        val result = try {
+            run(
+                apkCommand(args),
+                reporter,
+                timeoutSeconds = 60 * 60,
+                extraBinds = listOf(cache.path to APK_CACHE),
+            ) { line ->
+                output += line
+                if (ApkSummary.isNetworkError(line)) unreachable.compareAndSet(null, line.trim())
+                // Interrupting the setup thread, which waits for the command, stops it (as cancelling does).
+                if ((ApkSummary.isNetworkError(line) || ApkSummary.isFatalError(line)) && failure.compareAndSet(null, line.trim())) setupThread.interrupt()
+                ApkProgress.parse(line)?.let { (done, total) ->
+                    reporter.progress(done.toFloat() / total, line.substringAfter(") ").trim())
+                }
+            }
+        } catch (e: InterruptedException) {
+            // Ours, from the output; anything else is a cancellation and goes on.
+            throw failed(failure.get() ?: throw e)
+        }
+        // It ended before the interrupt was seen: take the interrupt back, so it isn't taken for a cancellation later.
+        failure.get()?.let { line ->
+            Thread.interrupted()
+            throw failed(line)
+        }
+        return ApkRun(result.exitCode, ApkSummary.parse(output))
     }
 
     private fun flathub(reporter: SetupReporter) {
@@ -127,8 +188,13 @@ class AlpineSetup(
                 else context.getString(R.string.setup_progress_flathub_retry, attempt, REMOTE_ADD_ATTEMPTS),
             )
             val result = run(FlatpakCommands.addFlathub, reporter, 5 * 60)
-            if (result.exitCode == 0 && key.isFile) break
-            reporter.log("Flathub was not added with its signing key (exit ${result.exitCode})")
+            if (result.exitCode == 0 && key.isFile) {
+                // The remote is listed, not only written: the repository can be read.
+                val remotes = run(FlatpakCommands.listRemotes, reporter)
+                if (remotes.exitCode == 0 && remotes.output.lines().any { it.trim() == "flathub" }) break
+                reporter.log("Flathub was added but is not listed")
+            }
+            if (result.exitCode != 0 || !key.isFile) reporter.log("Flathub was not added with its signing key (exit ${result.exitCode})")
             run(FlatpakCommands.deleteFlathub, reporter)
             if (attempt == REMOTE_ADD_ATTEMPTS) {
                 throw IOException(context.getString(R.string.setup_error_flathub, lastLine(result)))
@@ -140,6 +206,8 @@ class AlpineSetup(
     /** Files Flatdroid generates outside the rootfs: the /etc files for Flatpak roots. */
     private fun configFiles() {
         launcherFiles.write()
+        val missing = launcherFiles.missing()
+        if (missing.isNotEmpty()) throw IOException(context.getString(R.string.setup_error_missing, missing.joinToString(" ")))
     }
 
     /** The settings the user chose before setup (Settings applies later changes itself). */
@@ -185,6 +253,13 @@ class AlpineSetup(
             "flatpak", "ostree", "tigervnc", "openbox", "labwc", "wayvnc", "wlr-randr", "font-cantarell", "pulseaudio", "ca-certificates",
             "dbus", "xdg-dbus-proxy", "pipewire", "wireplumber", "xdg-desktop-portal", "gst-plugin-pipewire", "gstreamer-tools", "gst-plugins-good",
             "pipewire-tools",
+        )
+
+        /** What the packages must have left in the rootfs (relative to it): the programs setup's later steps and every launch run. */
+        val PACKAGE_FILES = listOf(
+            "usr/bin/flatpak", "usr/bin/ostree", "usr/bin/Xvnc", "usr/bin/openbox", "usr/bin/labwc", "usr/bin/wayvnc", "usr/bin/wlr-randr",
+            "usr/bin/pulseaudio", "usr/bin/dbus-daemon", "usr/bin/xdg-dbus-proxy", "usr/bin/pipewire", "usr/bin/wireplumber",
+            "usr/bin/gst-launch-1.0", "usr/bin/pw-cli",
         )
 
         /** Where apk's package cache is bound: a directory in Flatdroid's cache, deleted afterwards. */

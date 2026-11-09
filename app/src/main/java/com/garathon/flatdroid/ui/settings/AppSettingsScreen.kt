@@ -114,6 +114,7 @@ fun AppSettingsScreen(
         selected = page,
         onSelect = onPage,
         modifier = modifier,
+        developerOptions = env.developerOptions,
         topBar = {
             SettingsTopBar(
                 canSave = draft.changed && toSave != null,

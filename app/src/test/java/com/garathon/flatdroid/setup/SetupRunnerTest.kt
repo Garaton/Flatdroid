@@ -91,6 +91,35 @@ class SetupRunnerTest {
     }
 
     @Test
+    fun anOfflineRunIsNotMistakenForASuccessfulOne() {
+        // Offline with every package installed already, apk can still end with OK; these lines tell.
+        val offline = ApkSummary.parse(listOf(
+            "WARNING: updating and opening https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/APKINDEX.tar.gz: DNS: transient error (try again later)",
+            "ERROR: Not continuing due to stale/unavailable repositories. Use --force-missing-repositories to continue.",
+            "OK: 375.8 MiB in 202 packages",
+        ))
+        assertTrue(offline.ok)
+        assertEquals(1, offline.networkErrors.size)
+        assertTrue(offline.errors.isEmpty())
+
+        // A line alone tells, so a run can stop at the first one.
+        assertTrue(ApkSummary.isNetworkError("WARNING: updating and opening https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/APKINDEX.tar.gz: DNS: transient error (try again later)"))
+        assertFalse(ApkSummary.isNetworkError("( 12/186) Installing glib (2.88.1-r1)"))
+        // Any other apk error stops a run too, but not a package's script error, which `apk fix` runs again.
+        assertTrue(ApkSummary.isFatalError("ERROR: No space left on device"))
+        assertTrue(ApkSummary.isFatalError("ERROR: flatpak-1.16.6-r2: BAD signature"))
+        assertFalse(ApkSummary.isFatalError("ERROR: flatpak-1.16.6-r2.post-install: fork: Function not implemented"))
+        assertFalse(ApkSummary.isFatalError("ERROR: glib-2.88.1-r1.trigger: exit 1"))
+        assertFalse(ApkSummary.isFatalError("WARNING: x: temporary error"))
+        assertFalse(ApkSummary.isFatalError("( 12/186) Installing glib (2.88.1-r1)"))
+        assertEquals(1, ApkSummary.parse(listOf("ERROR: unable to select packages:")).networkErrors.size)
+        assertEquals(1, ApkSummary.parse(listOf("fetch https://example.org/APKINDEX.tar.gz", "WARNING: x: temporary error (try again later)")).networkErrors.size)
+        // A package's own script error is not a network error (apk fix handles it).
+        assertTrue(ApkSummary.parse(listOf("ERROR: glib-2.88.1-r1.trigger: fork: Function not implemented", "1 error; 380.3 MiB in 202 packages")).networkErrors.isEmpty())
+        assertTrue(ApkSummary.parse(listOf("fetch https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/APKINDEX.tar.gz", "OK: 1 MiB in 2 packages")).networkErrors.isEmpty())
+    }
+
+    @Test
     fun apkProgressLines() {
         assertEquals(12 to 186, ApkProgress.parse("( 12/186) Installing glib (2.88.1-r1)"))
         assertEquals(186 to 186, ApkProgress.parse("(186/186) Installing tigervnc (1.16.2-r0)"))

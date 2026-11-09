@@ -9,6 +9,8 @@ object FlatpakCommands {
     const val FLATHUB_KEY = "root/.local/share/flatpak/repo/flathub.trustedkeys.gpg"
 
     val addFlathub = listOf(FLATPAK, "--user", "remote-add", "--if-not-exists", "flathub", FLATHUB_REPO)
+    /** The names of the remotes, one per line. */
+    val listRemotes = listOf(FLATPAK, "--user", "remotes", "--columns=name")
     val deleteFlathub = listOf(FLATPAK, "--user", "remote-delete", "--force", "flathub")
 
     fun setLanguages(languages: String) = listOf(FLATPAK, "--user", "config", "--set", "languages", languages)

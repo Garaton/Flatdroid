@@ -51,7 +51,7 @@ fun CommandInput(
                 textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go, autoCorrectEnabled = false),
                 keyboardActions = KeyboardActions(onGo = { if (!running) onRun(command) }),
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).keepInViewWhileFocused(),
             )
             val cancel = stringResource(R.string.command_cancel)
             IconButton(onClick = onCancel, enabled = running, modifier = Modifier.semantics { contentDescription = cancel }) {

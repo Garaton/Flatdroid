@@ -5,11 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.border
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
@@ -27,14 +23,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import com.garathon.flatdroid.FlatdroidStorage
 import com.garathon.flatdroid.R
 import com.garathon.flatdroid.ui.IconAction
-import com.garathon.flatdroid.ui.SectionTitle
+import com.garathon.flatdroid.ui.SettingsCard
 import com.garathon.flatdroid.ui.StorageAction
 import com.garathon.flatdroid.ui.SwitchRow
 import com.garathon.flatdroid.ui.list.ListFilter
@@ -140,64 +136,68 @@ fun GlobalStoragePage(s: GlobalPageState) = SettingsPageColumn(R.string.settings
     }
 
     // The total by part.
-    val colors = storageColors()
-    Text(
-        stringResource(R.string.settings_storage_total, sizeOf(storage?.total)),
-        style = MaterialTheme.typography.titleMedium,
-    )
-    StorageBar(
-        listOf(
-            StorageSegment(R.string.storage_part_runtimes, storage?.runtimes, colors[0]),
-            StorageSegment(R.string.storage_part_apps, storage?.apps, colors[1]),
-            StorageSegment(R.string.storage_part_app_data, storage?.appData, colors[2]),
-            StorageSegment(R.string.storage_part_homes, storage?.privateHomes, colors[3]),
-            StorageSegment(R.string.storage_part_cache, storage?.cache, colors[4]),
-            StorageSegment(R.string.storage_part_other, storage?.other, colors[5]),
-        ),
-    )
-
-    // The shared home: where it is, what is visible in it, and how to add files.
-    SectionTitle(stringResource(R.string.storage_section_shared_home))
-    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(env.sharedHome)
-            Text(
-                stringResource(if (env.allFilesAccess == true) R.string.storage_shared_all else R.string.storage_shared_only_own),
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        IconAction(Icons.Filled.Edit, R.string.settings_change_shared_home, actions.onChangeSharedHome)
-    }
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedButton(onClick = actions.onAddFiles) { Text(stringResource(R.string.storage_add_files)) }
-        OutlinedButton(onClick = actions.onAddZip) { Text(stringResource(R.string.storage_add_zip)) }
-    }
-    if (env.allFilesAccess != null) {
-        SwitchRow(
-            env.allFilesAccess, { actions.onAllFilesAccess() },
-            stringResource(R.string.settings_all_files_access), stringResource(R.string.settings_all_files_access_hint),
+    SettingsCard {
+        val colors = storageColors()
+        Text(
+            stringResource(R.string.settings_storage_total, sizeOf(storage?.total)),
+            style = MaterialTheme.typography.titleMedium,
+        )
+        StorageBar(
+            listOf(
+                StorageSegment(R.string.storage_part_runtimes, storage?.runtimes, colors[0]),
+                StorageSegment(R.string.storage_part_apps, storage?.apps, colors[1]),
+                StorageSegment(R.string.storage_part_app_data, storage?.appData, colors[2]),
+                StorageSegment(R.string.storage_part_homes, storage?.privateHomes, colors[3]),
+                StorageSegment(R.string.storage_part_cache, storage?.cache, colors[4]),
+                StorageSegment(R.string.storage_part_other, storage?.other, colors[5]),
+            ),
         )
     }
 
-    // What each app and runtime takes.
-    SectionTitle(stringResource(R.string.storage_section_flatpaks))
-    val entries = remember(env.apps, storage) {
-        env.apps.map { FlatpakEntry.App(it.id, it.name, storage?.perApp?.get(it.id)?.app ?: 0) } +
-            storage?.runtimeSizes.orEmpty().map { (id, bytes) -> FlatpakEntry.Runtime(id, bytes, id in storage!!.unusedRuntimes) }
-    }
-    if (storage?.runtimeSizes == null) {
-        Text(stringResource(R.string.storage_measuring_runtimes), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-    StorageList(flatpakSpec, entries, key = { it.id }, emptyText = R.string.storage_list_empty) { entry ->
-        when (entry) {
-            is FlatpakEntry.App -> StorageRow(entry.name, size(entry.bytes), subtitle = entry.id) {
-                IconAction(Icons.Filled.Delete, R.string.uninstall_button, { uninstall = entry.id }, enabled = env.canReset, danger = true)
+    // The shared home: where it is, what is visible in it, and how to add files.
+    SettingsCard(title = stringResource(R.string.storage_section_shared_home)) {
+        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(env.sharedHome)
+                Text(
+                    stringResource(if (env.allFilesAccess == true) R.string.storage_shared_all else R.string.storage_shared_only_own),
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
-            is FlatpakEntry.Runtime -> StorageRow(
-                entry.name, size(entry.bytes),
-                subtitle = stringResource(if (entry.unused) R.string.storage_runtime_unused else R.string.storage_runtime),
-                dimmed = entry.unused,
+            IconAction(Icons.Filled.Edit, R.string.settings_change_shared_home, actions.onChangeSharedHome)
+        }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = actions.onAddFiles) { Text(stringResource(R.string.storage_add_files)) }
+            OutlinedButton(onClick = actions.onAddZip) { Text(stringResource(R.string.storage_add_zip)) }
+        }
+        if (env.allFilesAccess != null) {
+            SwitchRow(
+                env.allFilesAccess, { actions.onAllFilesAccess() },
+                stringResource(R.string.settings_all_files_access), stringResource(R.string.settings_all_files_access_hint),
             )
+        }
+    }
+
+    // What each app and runtime takes.
+    SettingsCard(title = stringResource(R.string.storage_section_flatpaks)) {
+        val entries = remember(env.apps, storage) {
+            env.apps.map { FlatpakEntry.App(it.id, it.name, storage?.perApp?.get(it.id)?.app ?: 0) } +
+                storage?.runtimeSizes.orEmpty().map { (id, bytes) -> FlatpakEntry.Runtime(id, bytes, id in storage!!.unusedRuntimes) }
+        }
+        if (storage?.runtimeSizes == null) {
+            Text(stringResource(R.string.storage_measuring_runtimes), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        StorageList(flatpakSpec, entries, key = { it.id }, emptyText = R.string.storage_list_empty) { entry ->
+            when (entry) {
+                is FlatpakEntry.App -> StorageRow(entry.name, size(entry.bytes), subtitle = entry.id) {
+                    IconAction(Icons.Filled.Delete, R.string.uninstall_button, { uninstall = entry.id }, enabled = env.canReset, danger = true)
+                }
+                is FlatpakEntry.Runtime -> StorageRow(
+                    entry.name, size(entry.bytes),
+                    subtitle = stringResource(if (entry.unused) R.string.storage_runtime_unused else R.string.storage_runtime),
+                    dimmed = entry.unused,
+                )
+            }
         }
     }
 
@@ -207,78 +207,76 @@ fun GlobalStoragePage(s: GlobalPageState) = SettingsPageColumn(R.string.settings
         val installed = env.apps.map { it.id }.toSet()
         (installed + perApp.keys).map { id -> id to perApp[id] }
     }
-    SectionTitle(stringResource(R.string.storage_section_homes))
-    val homes = remember(files, names) { files.map { (id, sizes) -> AppFilesEntry(id, names[id] ?: id, id in names, sizes?.privateHome ?: 0) } }
-    StorageList(appFilesSpec, homes, key = { it.id }, emptyText = R.string.storage_list_empty) { entry ->
-        StorageRow(entry.name, size(entry.bytes), subtitle = if (entry.installed) entry.id else stringResource(R.string.storage_not_installed), dimmed = !entry.installed, actionsBelow = true) {
-            IconAction(Icons.Filled.FolderOpen, R.string.storage_open_in_files, { actions.onOpenHome(entry.id) }, enabled = entry.bytes > 0)
-            IconAction(Icons.Filled.UploadFile, R.string.storage_import, { confirm = StorageConfirm.app(entry.id, StorageAction.IMPORT_HOME) }, enabled = canChange)
-            IconAction(Icons.Filled.SaveAlt, R.string.storage_export, { actions.onAppStorage(entry.id, StorageAction.EXPORT_HOME) }, enabled = entry.bytes > 0)
-            IconAction(Icons.Filled.Delete, R.string.storage_delete, { confirm = StorageConfirm.app(entry.id, StorageAction.RESET_HOME) }, enabled = canChange && entry.bytes > 0, danger = true)
+    SettingsCard(title = stringResource(R.string.storage_section_homes)) {
+        val homes = remember(files, names) { files.map { (id, sizes) -> AppFilesEntry(id, names[id] ?: id, id in names, sizes?.privateHome ?: 0) } }
+        StorageList(appFilesSpec, homes, key = { it.id }, emptyText = R.string.storage_list_empty) { entry ->
+            StorageRow(entry.name, size(entry.bytes), subtitle = if (entry.installed) entry.id else stringResource(R.string.storage_not_installed), dimmed = !entry.installed, actionsBelow = true) {
+                IconAction(Icons.Filled.FolderOpen, R.string.storage_open_in_files, { actions.onOpenHome(entry.id) }, enabled = entry.bytes > 0)
+                IconAction(Icons.Filled.UploadFile, R.string.storage_import, { confirm = StorageConfirm.app(entry.id, StorageAction.IMPORT_HOME) }, enabled = canChange)
+                IconAction(Icons.Filled.SaveAlt, R.string.storage_export, { actions.onAppStorage(entry.id, StorageAction.EXPORT_HOME) }, enabled = entry.bytes > 0)
+                IconAction(Icons.Filled.Delete, R.string.storage_delete, { confirm = StorageConfirm.app(entry.id, StorageAction.RESET_HOME) }, enabled = canChange && entry.bytes > 0, danger = true)
+            }
         }
     }
-    SectionTitle(stringResource(R.string.storage_section_app_data))
-    val data = remember(files, names) { files.map { (id, sizes) -> AppFilesEntry(id, names[id] ?: id, id in names, sizes?.settings ?: 0) } }
-    StorageList(appFilesSpec, data, key = { it.id }, emptyText = R.string.storage_list_empty) { entry ->
-        StorageRow(entry.name, size(entry.bytes), subtitle = if (entry.installed) entry.id else stringResource(R.string.storage_not_installed), dimmed = !entry.installed, actionsBelow = true) {
-            IconAction(Icons.Filled.UploadFile, R.string.storage_import, { confirm = StorageConfirm.app(entry.id, StorageAction.IMPORT_SETTINGS) }, enabled = canChange)
-            IconAction(Icons.Filled.SaveAlt, R.string.storage_export, { actions.onAppStorage(entry.id, StorageAction.EXPORT_SETTINGS) }, enabled = entry.bytes > 0)
-            IconAction(Icons.Filled.Delete, R.string.storage_delete, { confirm = StorageConfirm.app(entry.id, StorageAction.RESET_SETTINGS) }, enabled = canChange && entry.bytes > 0, danger = true)
+
+    SettingsCard(title = stringResource(R.string.storage_section_app_data)) {
+        val data = remember(files, names) { files.map { (id, sizes) -> AppFilesEntry(id, names[id] ?: id, id in names, sizes?.settings ?: 0) } }
+        StorageList(appFilesSpec, data, key = { it.id }, emptyText = R.string.storage_list_empty) { entry ->
+            StorageRow(entry.name, size(entry.bytes), subtitle = if (entry.installed) entry.id else stringResource(R.string.storage_not_installed), dimmed = !entry.installed, actionsBelow = true) {
+                IconAction(Icons.Filled.UploadFile, R.string.storage_import, { confirm = StorageConfirm.app(entry.id, StorageAction.IMPORT_SETTINGS) }, enabled = canChange)
+                IconAction(Icons.Filled.SaveAlt, R.string.storage_export, { actions.onAppStorage(entry.id, StorageAction.EXPORT_SETTINGS) }, enabled = entry.bytes > 0)
+                IconAction(Icons.Filled.Delete, R.string.storage_delete, { confirm = StorageConfirm.app(entry.id, StorageAction.RESET_SETTINGS) }, enabled = canChange && entry.bytes > 0, danger = true)
+            }
         }
     }
 
     // Clean up.
-    SectionTitle(stringResource(R.string.storage_section_clean_up))
-    var cachesCleared by rememberSaveable { mutableStateOf(false) }
-    val cache = storage?.cache ?: 0
-    BorderedRows {
-        StorageRow(stringResource(R.string.settings_clear_all_caches), sizeOf(storage?.cache)) {
-            IconAction(Icons.Filled.DeleteSweep, R.string.settings_clear_all_caches, { actions.onClearAllCaches(); cachesCleared = true }, enabled = env.canReset && !cachesCleared && cache > 0)
-        }
-        StorageRow(stringResource(R.string.settings_clear_unused_app_data), sizeOf(storage?.unusedAppData?.bytes)) {
-            IconAction(Icons.Filled.DeleteSweep, R.string.settings_clear_unused_app_data, { confirm = StorageConfirm.CLEAR_APP_DATA }, enabled = canChange && (storage?.unusedAppData?.apps ?: 0) > 0)
-        }
-        StorageRow(stringResource(R.string.settings_clear_unused_homes), sizeOf(storage?.unusedHomes?.bytes)) {
-            IconAction(Icons.Filled.DeleteSweep, R.string.settings_clear_unused_homes, { confirm = StorageConfirm.CLEAR_HOMES }, enabled = canChange && (storage?.unusedHomes?.apps ?: 0) > 0)
+    SettingsCard(title = stringResource(R.string.storage_section_clean_up)) {
+        var cachesCleared by rememberSaveable { mutableStateOf(false) }
+        val cache = storage?.cache ?: 0
+        Column {
+            StorageRow(stringResource(R.string.settings_clear_all_caches), sizeOf(storage?.cache)) {
+                IconAction(Icons.Filled.DeleteSweep, R.string.settings_clear_all_caches, { actions.onClearAllCaches(); cachesCleared = true }, enabled = env.canReset && !cachesCleared && cache > 0)
+            }
+            StorageRow(stringResource(R.string.settings_clear_unused_app_data), sizeOf(storage?.unusedAppData?.bytes)) {
+                IconAction(Icons.Filled.DeleteSweep, R.string.settings_clear_unused_app_data, { confirm = StorageConfirm.CLEAR_APP_DATA }, enabled = canChange && (storage?.unusedAppData?.apps ?: 0) > 0)
+            }
+            StorageRow(stringResource(R.string.settings_clear_unused_homes), sizeOf(storage?.unusedHomes?.bytes)) {
+                IconAction(Icons.Filled.DeleteSweep, R.string.settings_clear_unused_homes, { confirm = StorageConfirm.CLEAR_HOMES }, enabled = canChange && (storage?.unusedHomes?.apps ?: 0) > 0)
+            }
         }
     }
 
     // Backup of everything.
-    SectionTitle(stringResource(R.string.storage_section_backup))
-    val dotfiles = storage?.sharedDotfiles ?: 0L
-    BorderedRows {
-        StorageRow(stringResource(R.string.storage_part_homes), sizeOf(storage?.privateHomes)) {
-            IconAction(Icons.Filled.UploadFile, R.string.storage_import, { confirm = StorageConfirm.IMPORT_ALL_HOMES }, enabled = canChange)
-            IconAction(Icons.Filled.SaveAlt, R.string.storage_export, actions.onExportAllHomes, enabled = canChange)
-        }
-        StorageRow(stringResource(R.string.storage_part_app_data), sizeOf(storage?.appData)) {
-            IconAction(Icons.Filled.UploadFile, R.string.storage_import, { confirm = StorageConfirm.IMPORT_ALL_APP_DATA }, enabled = canChange)
-            IconAction(Icons.Filled.SaveAlt, R.string.storage_export, actions.onExportAllAppFiles, enabled = canChange)
-        }
-        // Used only by apps that opt in (a developer setting), so shown with developer options or once it holds something.
-        if (s.settings.developerOptions || dotfiles > 0) {
-            StorageRow(stringResource(R.string.settings_shared_dotfiles), size(dotfiles), actionsBelow = true) {
-                IconAction(Icons.Filled.UploadFile, R.string.storage_import, { confirm = StorageConfirm.IMPORT_DOTFILES }, enabled = canChange)
-                IconAction(Icons.Filled.SaveAlt, R.string.storage_export, actions.onExportSharedDotfiles, enabled = canChange && dotfiles > 0)
-                IconAction(Icons.Filled.Delete, R.string.storage_delete, { confirm = StorageConfirm.RESET_DOTFILES }, enabled = canChange && dotfiles > 0, danger = true)
+    SettingsCard(title = stringResource(R.string.storage_section_backup)) {
+        val dotfiles = storage?.sharedDotfiles ?: 0L
+        Column {
+            StorageRow(stringResource(R.string.storage_part_homes), sizeOf(storage?.privateHomes)) {
+                IconAction(Icons.Filled.UploadFile, R.string.storage_import, { confirm = StorageConfirm.IMPORT_ALL_HOMES }, enabled = canChange)
+                IconAction(Icons.Filled.SaveAlt, R.string.storage_export, actions.onExportAllHomes, enabled = canChange)
+            }
+            StorageRow(stringResource(R.string.storage_part_app_data), sizeOf(storage?.appData)) {
+                IconAction(Icons.Filled.UploadFile, R.string.storage_import, { confirm = StorageConfirm.IMPORT_ALL_APP_DATA }, enabled = canChange)
+                IconAction(Icons.Filled.SaveAlt, R.string.storage_export, actions.onExportAllAppFiles, enabled = canChange)
+            }
+            // Used only by apps that opt in (a developer setting), so shown with developer options or once it holds something.
+            if (s.settings.developerOptions || dotfiles > 0) {
+                StorageRow(stringResource(R.string.settings_shared_dotfiles), size(dotfiles), actionsBelow = true) {
+                    IconAction(Icons.Filled.UploadFile, R.string.storage_import, { confirm = StorageConfirm.IMPORT_DOTFILES }, enabled = canChange)
+                    IconAction(Icons.Filled.SaveAlt, R.string.storage_export, actions.onExportSharedDotfiles, enabled = canChange && dotfiles > 0)
+                    IconAction(Icons.Filled.Delete, R.string.storage_delete, { confirm = StorageConfirm.RESET_DOTFILES }, enabled = canChange && dotfiles > 0, danger = true)
+                }
             }
         }
     }
 
     // Resetting everything.
-    SectionTitle(stringResource(R.string.settings_section_danger), danger = true)
-    OutlinedButton(onClick = { confirm = StorageConfirm.RESET_ALL_HOMES }, enabled = canChange) {
-        Text(stringResource(R.string.storage_reset_all_homes), color = MaterialTheme.colorScheme.error)
+    SettingsCard(title = stringResource(R.string.settings_section_danger), danger = true) {
+        OutlinedButton(onClick = { confirm = StorageConfirm.RESET_ALL_HOMES }, enabled = canChange) {
+            Text(stringResource(R.string.storage_reset_all_homes), color = MaterialTheme.colorScheme.error)
+        }
+        OutlinedButton(onClick = { confirm = StorageConfirm.RESET_ALL_APP_DATA }, enabled = canChange) {
+            Text(stringResource(R.string.storage_reset_all_app_data), color = MaterialTheme.colorScheme.error)
+        }
     }
-    OutlinedButton(onClick = { confirm = StorageConfirm.RESET_ALL_APP_DATA }, enabled = canChange) {
-        Text(stringResource(R.string.storage_reset_all_app_data), color = MaterialTheme.colorScheme.error)
-    }
-}
-
-/** Rows in one outlined box, as the lists are. */
-@Composable
-fun BorderedRows(content: @Composable () -> Unit) {
-    Column(
-        Modifier.fillMaxWidth().border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(6.dp)).padding(vertical = 4.dp),
-    ) { content() }
 }

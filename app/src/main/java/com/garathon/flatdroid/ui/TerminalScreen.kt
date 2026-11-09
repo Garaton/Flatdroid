@@ -37,7 +37,7 @@ fun TerminalScreen(
     LaunchedEffect(output) { scroll.scrollTo(scroll.maxValue) }
 
     Column(
-        modifier = modifier.fillMaxSize().padding(16.dp),
+        modifier = modifier.fillMaxSize().aboveKeyboard().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text(stringResource(R.string.terminal_title), style = MaterialTheme.typography.headlineSmall)

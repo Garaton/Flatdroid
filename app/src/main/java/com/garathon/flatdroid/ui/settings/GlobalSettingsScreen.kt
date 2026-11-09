@@ -164,6 +164,7 @@ fun GlobalSettingsScreen(
         onSelect = onPage,
         error = env.error,
         dimmed = env.applying,
+        developerOptions = current.settings.developerOptions,
         modifier = modifier,
         topBar = {
             SettingsTopBar(

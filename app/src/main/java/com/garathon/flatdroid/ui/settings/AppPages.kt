@@ -32,33 +32,31 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import java.text.DateFormat
-import java.util.Date
 import com.garathon.flatdroid.R
-import com.garathon.flatdroid.ui.IconAction
 import com.garathon.flatdroid.audio.MicStreamer
 import com.garathon.flatdroid.camera.AndroidCameras
 import com.garathon.flatdroid.flatpak.AppDetails
 import com.garathon.flatdroid.settings.AppSettings
 import com.garathon.flatdroid.settings.HomeMode
 import com.garathon.flatdroid.settings.Resolution
-import com.garathon.flatdroid.ui.home.AppIcon
 import com.garathon.flatdroid.ui.CheckboxRow
 import com.garathon.flatdroid.ui.ConfirmDialog
 import com.garathon.flatdroid.ui.DropdownRow
-import com.garathon.flatdroid.ui.SectionTitle
+import com.garathon.flatdroid.ui.IconAction
+import com.garathon.flatdroid.ui.SettingsCard
 import com.garathon.flatdroid.ui.StorageAction
 import com.garathon.flatdroid.ui.SwitchRow
 import com.garathon.flatdroid.ui.TextRow
+import com.garathon.flatdroid.ui.home.AppIcon
+import java.text.DateFormat
+import java.util.Date
 
 @Composable
 fun AppOverviewPage(s: AppPageState) = SettingsPageColumn(null) {
@@ -92,37 +90,40 @@ fun AppOverviewPage(s: AppPageState) = SettingsPageColumn(null) {
     PermissionChips(s)
     UsageAndDetails(s)
     if (s.env.developerOptions) {
-        TextRow(
-            content = s.draft.environment,
-            onChange = { v -> s.edit { copy(environment = v) } },
-            title = stringResource(R.string.app_settings_environment),
-            hint = stringResource(if (!s.draft.environmentValid) R.string.app_settings_environment_invalid else R.string.app_settings_environment_hint),
-            isError = !s.draft.environmentValid,
-            developer = true,
-            singleLine = false,
-            keyboardType = KeyboardType.Ascii,
-        )
-        TextRow(
-            content = s.draft.launchArgs,
-            onChange = { v -> s.edit { copy(launchArgs = v) } },
-            title = stringResource(R.string.app_settings_launch_args),
-            hint = stringResource(R.string.app_settings_launch_args_hint),
-            isError = false,
-            developer = true,
-            singleLine = false,
-            minLines = 1,
-            keyboardType = KeyboardType.Ascii,
-        )
+        SettingsCard {
+            TextRow(
+                content = s.draft.environment,
+                onChange = { v -> s.edit { copy(environment = v) } },
+                title = stringResource(R.string.app_settings_environment),
+                hint = stringResource(if (!s.draft.environmentValid) R.string.app_settings_environment_invalid else R.string.app_settings_environment_hint),
+                isError = !s.draft.environmentValid,
+                developer = true,
+                singleLine = false,
+                keyboardType = KeyboardType.Ascii,
+            )
+            TextRow(
+                content = s.draft.launchArgs,
+                onChange = { v -> s.edit { copy(launchArgs = v) } },
+                title = stringResource(R.string.app_settings_launch_args),
+                hint = stringResource(R.string.app_settings_launch_args_hint),
+                isError = false,
+                developer = true,
+                singleLine = false,
+                minLines = 1,
+                keyboardType = KeyboardType.Ascii,
+            )
+        }
     }
-    SectionTitle(stringResource(R.string.settings_section_danger), danger = true)
-    OutlinedButton(onClick = { confirm = OverviewConfirm.APP_DATA }, enabled = s.env.canChangeFiles) {
-        Text(stringResource(R.string.storage_reset_app_data), color = MaterialTheme.colorScheme.error)
-    }
-    OutlinedButton(onClick = { confirm = OverviewConfirm.FLATDROID_SETTINGS }, enabled = s.env.canChangeFiles) {
-        Text(stringResource(R.string.app_reset_flatdroid_settings), color = MaterialTheme.colorScheme.error)
-    }
-    OutlinedButton(onClick = { confirmUninstall = true }, enabled = s.env.canUninstall) {
-        Text(stringResource(R.string.uninstall_button), color = MaterialTheme.colorScheme.error)
+    SettingsCard(title = stringResource(R.string.settings_section_danger), danger = true) {
+        OutlinedButton(onClick = { confirm = OverviewConfirm.APP_DATA }, enabled = s.env.canChangeFiles) {
+            Text(stringResource(R.string.storage_reset_app_data), color = MaterialTheme.colorScheme.error)
+        }
+        OutlinedButton(onClick = { confirm = OverviewConfirm.FLATDROID_SETTINGS }, enabled = s.env.canChangeFiles) {
+            Text(stringResource(R.string.app_reset_flatdroid_settings), color = MaterialTheme.colorScheme.error)
+        }
+        OutlinedButton(onClick = { confirmUninstall = true }, enabled = s.env.canUninstall) {
+            Text(stringResource(R.string.uninstall_button), color = MaterialTheme.colorScheme.error)
+        }
     }
 }
 
@@ -131,36 +132,38 @@ fun AppOverviewPage(s: AppPageState) = SettingsPageColumn(null) {
 private fun UsageAndDetails(s: AppPageState) {
     val context = LocalContext.current
     val app = s.app
-    Text(stringResource(R.string.app_overview_used), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
-    Text(
-        if (app.launches == 0) stringResource(R.string.app_overview_not_used)
-        else stringResource(R.string.app_overview_used_value, durationText(app.usedMillis), app.launches),
-        style = MaterialTheme.typography.bodyMedium,
-    )
+    SettingsCard(title = stringResource(R.string.app_overview_used)) {
+        Text(
+            if (app.launches == 0) stringResource(R.string.app_overview_not_used)
+            else stringResource(R.string.app_overview_used_value, durationText(app.usedMillis), app.launches),
+            style = MaterialTheme.typography.bodyMedium,
+        )
+    }
     val details = s.env.details ?: return
-    Text(stringResource(R.string.app_overview_details), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
-    val display = stringResource(
-        when (details.display) {
-            AppDetails.Display.WAYLAND_AND_X11 -> R.string.app_detail_display_both
-            AppDetails.Display.WAYLAND -> R.string.app_detail_display_wayland
-            AppDetails.Display.X11 -> R.string.app_detail_display_x11
-            AppDetails.Display.NONE -> R.string.app_detail_display_none
-        }
-    )
-    val rows = listOfNotNull(
-        details.runtime?.let { R.string.app_detail_runtime to it },
-        R.string.app_detail_display to display,
-        details.installed?.let { R.string.app_detail_installed to DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(it)) },
-        details.sockets.takeIf { it.isNotEmpty() }?.let { R.string.app_detail_sockets to it.joinToString(", ") },
-        details.devices.takeIf { it.isNotEmpty() }?.let { R.string.app_detail_devices to it.joinToString(", ") },
-        details.filesystems.takeIf { it.isNotEmpty() }?.let { R.string.app_detail_files to it.joinToString(", ") },
-        details.shared.takeIf { it.isNotEmpty() }?.let { R.string.app_detail_shared to it.joinToString(", ") },
-    )
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        for ((label, value) in rows) {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(context.getString(label), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(84.dp))
-                Text(value, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+    SettingsCard(title = stringResource(R.string.app_overview_details)) {
+        val display = stringResource(
+            when (details.display) {
+                AppDetails.Display.WAYLAND_AND_X11 -> R.string.app_detail_display_both
+                AppDetails.Display.WAYLAND -> R.string.app_detail_display_wayland
+                AppDetails.Display.X11 -> R.string.app_detail_display_x11
+                AppDetails.Display.NONE -> R.string.app_detail_display_none
+            }
+        )
+        val rows = listOfNotNull(
+            details.runtime?.let { R.string.app_detail_runtime to it },
+            R.string.app_detail_display to display,
+            details.installed?.let { R.string.app_detail_installed to DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(it)) },
+            details.sockets.takeIf { it.isNotEmpty() }?.let { R.string.app_detail_sockets to it.joinToString(", ") },
+            details.devices.takeIf { it.isNotEmpty() }?.let { R.string.app_detail_devices to it.joinToString(", ") },
+            details.filesystems.takeIf { it.isNotEmpty() }?.let { R.string.app_detail_files to it.joinToString(", ") },
+            details.shared.takeIf { it.isNotEmpty() }?.let { R.string.app_detail_shared to it.joinToString(", ") },
+        )
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            for ((label, value) in rows) {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(context.getString(label), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(84.dp))
+                    Text(value, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                }
             }
         }
     }
@@ -190,23 +193,24 @@ private fun PermissionChips(s: AppPageState) {
         if (audio && (settings.microphone ?: (defaults.permissionsFromMetadata && app.requestsAudio)) && MicStreamer.hasPermission(context)) add(stringResource(R.string.app_settings_microphone) to true)
         if ((settings.camera ?: (defaults.permissionsFromMetadata && app.mayUseCamera)) && AndroidCameras.hasPermission(context)) add(stringResource(R.string.app_settings_camera) to true)
     }
-    Text(stringResource(R.string.app_overview_asks), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
-    if (chips.isEmpty()) {
-        Text(stringResource(R.string.app_overview_asks_nothing), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    } else {
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            for ((label, granted) in chips) {
-                Text(
-                    label,
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = if (granted) FontWeight.Bold else FontWeight.Normal,
-                    color = if (granted) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(if (granted) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
-                        .then(if (granted) Modifier else Modifier.border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp)))
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
-                )
+    SettingsCard(title = stringResource(R.string.app_overview_asks)) {
+        if (chips.isEmpty()) {
+            Text(stringResource(R.string.app_overview_asks_nothing), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        } else {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                for ((label, granted) in chips) {
+                    Text(
+                        label,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = if (granted) FontWeight.Bold else FontWeight.Normal,
+                        color = if (granted) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .clip(MaterialTheme.shapes.medium)
+                            .background(if (granted) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
+                            .then(if (granted) Modifier else Modifier.border(1.dp, MaterialTheme.colorScheme.outline, MaterialTheme.shapes.medium))
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                    )
+                }
             }
         }
     }
@@ -215,41 +219,36 @@ private fun PermissionChips(s: AppPageState) {
 @Composable
 fun AppHomePage(s: AppPageState) = SettingsPageColumn(R.string.app_page_home) {
     val defaults = s.settings.defaults
-    val names = mapOf(
-        HomeMode.SHARED to stringResource(R.string.app_settings_home_shared),
-        HomeMode.PRIVATE to stringResource(R.string.app_settings_home_private),
-        HomeMode.TEMPORARY to stringResource(R.string.app_settings_home_temporary),
-        HomeMode.ANDROID to stringResource(R.string.app_settings_home_android),
-    )
+    val names = homeModeNames()
     val mode = s.settings.homeMode
-    DropdownRow(
-        selected = mode,
-        // Android's storage as the home needs All files access; it stays listed while chosen, so the choice shows.
-        options = HomeMode.entries.filter { it != HomeMode.ANDROID || s.env.broadAccess || mode == HomeMode.ANDROID },
-        onSelect = { v -> s.editSettings { copy(homeModeChoice = v.takeIf { it != defaults.homeMode }) } },
-        label = names::getValue,
-        title = stringResource(R.string.app_page_home),
-        hint = when (mode) {
-            HomeMode.SHARED -> stringResource(R.string.app_settings_home_shared_hint, s.env.sharedHome)
-            HomeMode.PRIVATE -> stringResource(R.string.app_settings_home_private_hint)
-            HomeMode.TEMPORARY -> stringResource(R.string.app_settings_home_temporary_hint)
-            HomeMode.ANDROID -> stringResource(R.string.app_settings_home_android_hint)
-        },
-        onReset = if (s.settings.homeModeChoice != null) ({ s.editSettings { copy(homeModeChoice = null) } }) else null,
-        resettable = true,
-    )
-    SwitchRow(
-        s.settings.sdcard && s.env.broadAccess, { v -> s.editSettings { copy(sdcard = v) } },
-        stringResource(R.string.app_settings_sdcard),
-        stringResource(
-            when {
-                !s.env.broadAccess -> R.string.app_settings_sdcard_needs_access
-                else -> R.string.app_settings_sdcard_hint
-            }
-        ),
-        enabled = s.env.broadAccess && mode != HomeMode.ANDROID,
-    )
-    if (s.env.developerOptions) {
+    SettingsCard {
+        DropdownRow(
+            selected = mode,
+            // Android's storage as the home needs All files access; it stays listed while chosen, so the choice shows.
+            options = HomeMode.entries.filter { it != HomeMode.ANDROID || s.env.broadAccess || mode == HomeMode.ANDROID },
+            onSelect = { v -> s.editSettings { copy(homeModeChoice = v.takeIf { it != defaults.homeMode }) } },
+            label = names::getValue,
+            title = stringResource(R.string.app_page_home),
+            hint = when (mode) {
+                HomeMode.SHARED -> stringResource(R.string.app_settings_home_shared_hint, s.env.sharedHome)
+                HomeMode.PRIVATE -> stringResource(R.string.app_settings_home_private_hint)
+                HomeMode.TEMPORARY -> stringResource(R.string.app_settings_home_temporary_hint)
+                HomeMode.ANDROID -> stringResource(R.string.app_settings_home_android_hint)
+            },
+            onReset = if (s.settings.homeModeChoice != null) ({ s.editSettings { copy(homeModeChoice = null) } }) else null,
+            resettable = true,
+        )
+        SwitchRow(
+            s.settings.sdcard && s.env.broadAccess, { v -> s.editSettings { copy(sdcard = v) } },
+            stringResource(R.string.app_settings_sdcard),
+            stringResource(
+                when {
+                    !s.env.broadAccess -> R.string.app_settings_sdcard_needs_access
+                    else -> R.string.app_settings_sdcard_hint
+                }
+            ),
+            enabled = s.env.broadAccess && mode != HomeMode.ANDROID,
+        )
         SwitchRow(
             s.settings.shareHiddenFiles, { v -> s.editSettings { copy(shareHiddenFiles = v) } },
             stringResource(R.string.app_settings_share_hidden), stringResource(R.string.app_settings_share_hidden_hint),
@@ -263,47 +262,49 @@ fun AppDisplayPage(s: AppPageState) = SettingsPageColumn(R.string.app_page_displ
     val app = s.app
     val customLabel = stringResource(R.string.app_settings_custom)
     val percentLabel = stringResource(R.string.app_settings_resolution_percent)
-    DropdownRow(
-        selected = s.settings.resolution,
-        options = Resolution.entries,
-        onSelect = { v -> s.editSettings { copy(resolution = v) } },
-        label = { it.percent?.let { p -> percentLabel.format(p) } ?: customLabel },
-        title = stringResource(R.string.app_settings_resolution),
-        hint = stringResource(R.string.app_settings_resolution_hint),
-    )
-    if (s.settings.resolution == Resolution.CUSTOM) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            SizeField(s.draft.width, stringResource(R.string.app_settings_width), !s.draft.widthValid, Modifier.width(120.dp)) { v -> s.edit { copy(width = v) } }
-            Text("×")
-            SizeField(s.draft.height, stringResource(R.string.app_settings_height), !s.draft.heightValid, Modifier.width(120.dp)) { v -> s.edit { copy(height = v) } }
+    SettingsCard {
+        DropdownRow(
+            selected = s.settings.resolution,
+            options = Resolution.entries,
+            onSelect = { v -> s.editSettings { copy(resolution = v) } },
+            label = { it.percent?.let { p -> percentLabel.format(p) } ?: customLabel },
+            title = stringResource(R.string.app_settings_resolution),
+            hint = stringResource(R.string.app_settings_resolution_hint),
+        )
+        if (s.settings.resolution == Resolution.CUSTOM) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                SizeField(s.draft.width, stringResource(R.string.app_settings_width), !s.draft.widthValid, Modifier.width(120.dp)) { v -> s.edit { copy(width = v) } }
+                Text("×")
+                SizeField(s.draft.height, stringResource(R.string.app_settings_height), !s.draft.heightValid, Modifier.width(120.dp)) { v -> s.edit { copy(height = v) } }
+            }
+            if (!s.draft.widthValid || !s.draft.heightValid) {
+                Text(
+                    stringResource(R.string.app_settings_custom_invalid, AppSettings.MIN_SIZE, AppSettings.MAX_SIZE),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
         }
-        if (!s.draft.widthValid || !s.draft.heightValid) {
-            Text(
-                stringResource(R.string.app_settings_custom_invalid, AppSettings.MIN_SIZE, AppSettings.MAX_SIZE),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error,
+        // The compositor scales; Xvnc can't.
+        if (app.wayland) {
+            DropdownRow(
+                selected = s.settings.interfaceSize,
+                options = AppSettings.INTERFACE_SIZES,
+                onSelect = { v -> s.editSettings { copy(interfaceSize = v) } },
+                label = { percentLabel.format(it) },
+                title = stringResource(R.string.app_settings_interface_size),
+                hint = stringResource(R.string.app_settings_interface_size_hint),
+                enabled = !s.settings.forceX11
             )
         }
-    }
-    // The compositor scales; Xvnc can't.
-    if (app.wayland) {
-        DropdownRow(
-            selected = s.settings.interfaceSize,
-            options = AppSettings.INTERFACE_SIZES,
-            onSelect = { v -> s.editSettings { copy(interfaceSize = v) } },
-            label = { percentLabel.format(it) },
-            title = stringResource(R.string.app_settings_interface_size),
-            hint = stringResource(R.string.app_settings_interface_size_hint),
-            enabled = !s.settings.forceX11
-        )
-    }
-    // Only for apps that ask for Wayland as well as X11.
-    if (app.waylandAndX11) {
-        SwitchRow(
-            s.settings.forceX11 && app.waylandAndX11, { v -> s.editSettings { copy(forceX11 = v) } },
-            stringResource(R.string.app_settings_force_x11),
-            stringResource(if (app.waylandAndX11) R.string.app_settings_force_x11_hint else R.string.app_settings_force_x11_unavailable),
-        )
+        // Only for apps that ask for Wayland as well as X11.
+        if (app.waylandAndX11) {
+            SwitchRow(
+                s.settings.forceX11 && app.waylandAndX11, { v -> s.editSettings { copy(forceX11 = v) } },
+                stringResource(R.string.app_settings_force_x11),
+                stringResource(if (app.waylandAndX11) R.string.app_settings_force_x11_hint else R.string.app_settings_force_x11_unavailable),
+            )
+        }
     }
 }
 
@@ -320,87 +321,88 @@ fun AppPermissionsPage(s: AppPageState) = SettingsPageColumn(R.string.app_page_p
     val audio = s.settings.audio ?: audioDefault
     val network = s.settings.network ?: networkDefault
 
-    SwitchRow(
-        network, { v -> s.editSettings { copy(network = v.takeIf { it != networkDefault }) } },
-        stringResource(R.string.app_settings_network),
-        stringResource(
-            when {
-                !app.requestsNetwork -> R.string.app_settings_network_not_requested
-                fromMetadata -> R.string.app_settings_network_requested
-                else -> R.string.app_settings_network_requested_off
-            }
-        ),
-        onReset = if (s.settings.network != null) ({ s.editSettings { copy(network = null) } }) else null,
-    )
-    SwitchRow(
-        audio, { v -> s.editSettings { copy(audio = v.takeIf { it != audioDefault }) } },
-        stringResource(R.string.app_settings_audio),
-        stringResource(
-            when {
-                !app.requestsAudio -> R.string.app_settings_audio_not_requested
-                fromMetadata -> R.string.app_settings_audio_requested
-                else -> R.string.app_settings_audio_requested_off
-            }
-        ),
-        onReset = if (s.settings.audio != null) ({ s.editSettings { copy(audio = null) } }) else null,
-    )
-    // On by default for an app that asks for sound, and for a hint that it uses a camera; both need Android's permission too.
-    val micDefault = fromMetadata && app.requestsAudio
-    val micSet = s.settings.microphone
-    val micOn = (micSet ?: micDefault) && MicStreamer.hasPermission(context)
-    fun setMicrophone(on: Boolean) = s.editSettings { copy(microphone = on.takeIf { it != micDefault }) }
-    SwitchRow(
-        micOn,
-        { on ->
-            micRefused = false
-            if (!on || MicStreamer.hasPermission(context)) {
-                setMicrophone(on)
-            } else {
-                s.env.onRequestMicrophone { granted -> if (granted) setMicrophone(true) else micRefused = true }
-            }
-        },
-        stringResource(R.string.app_settings_microphone),
-        stringResource(if (micRefused) R.string.app_settings_microphone_android_denied else R.string.app_settings_microphone_hint),
-        enabled = audio,
-        onReset = if (micSet != null && micSet != micDefault) ({ s.editSettings { copy(microphone = null) } }) else null,
-    )
-    SwitchRow(
-        s.settings.alwaysAllowMicrophone, { v -> s.editSettings { copy(alwaysAllowMicrophone = v) } },
-        stringResource(R.string.app_settings_always_allow_microphone), stringResource(R.string.app_settings_always_allow_microphone_hint),
-        enabled = audio && micOn,
-    )
-    val cameraDefault = fromMetadata && app.mayUseCamera
-    val cameraSet = s.settings.camera
-    val cameraOn = (cameraSet ?: cameraDefault) && AndroidCameras.hasPermission(context)
-    fun setCamera(on: Boolean) = s.editSettings { copy(camera = on.takeIf { it != cameraDefault }) }
-    SwitchRow(
-        cameraOn,
-        { on ->
-            cameraRefused = false
-            if (!on || AndroidCameras.hasPermission(context)) {
-                setCamera(on)
-            } else {
-                s.env.onRequestCamera { granted -> if (granted) setCamera(true) else cameraRefused = true }
-            }
-        },
-        stringResource(R.string.app_settings_camera),
-        stringResource(
-            when {
-                !s.env.hasCamera -> R.string.app_settings_camera_none
-                cameraRefused -> R.string.app_settings_camera_android_denied
-                else -> R.string.app_settings_camera_hint
-            }
-        ),
-        enabled = s.env.hasCamera,
-        onReset = if (cameraSet != null && cameraSet != cameraDefault) ({ s.editSettings { copy(camera = null) } }) else null,
-    )
-    SwitchRow(
-        s.settings.sharesClipboard, { v -> s.editSettings { copy(clipboard = v.takeIf { it != defaults.clipboard }) } },
-        stringResource(R.string.app_settings_clipboard),
-        stringResource(R.string.app_settings_clipboard_hint),
-        onReset = if (s.settings.clipboard != null) ({ s.editSettings { copy(clipboard = null) } }) else null,
-    )
-    if (s.env.developerOptions) {
+    SettingsCard {
+        SwitchRow(
+            network, { v -> s.editSettings { copy(network = v.takeIf { it != networkDefault }) } },
+            stringResource(R.string.app_settings_network),
+            stringResource(
+                when {
+                    !app.requestsNetwork -> R.string.app_settings_network_not_requested
+                    fromMetadata -> R.string.app_settings_network_requested
+                    else -> R.string.app_settings_network_requested_off
+                }
+            ),
+            onReset = if (s.settings.network != null) ({ s.editSettings { copy(network = null) } }) else null,
+        )
+        SwitchRow(
+            audio, { v -> s.editSettings { copy(audio = v.takeIf { it != audioDefault }) } },
+            stringResource(R.string.app_settings_audio),
+            stringResource(
+                when {
+                    !app.requestsAudio -> R.string.app_settings_audio_not_requested
+                    fromMetadata -> R.string.app_settings_audio_requested
+                    else -> R.string.app_settings_audio_requested_off
+                }
+            ),
+            onReset = if (s.settings.audio != null) ({ s.editSettings { copy(audio = null) } }) else null,
+        )
+        // On by default for an app that asks for sound, and for a hint that it uses a camera; both need Android's permission too.
+        val micDefault = fromMetadata && app.requestsAudio
+        val micSet = s.settings.microphone
+        val micOn = (micSet ?: micDefault) && MicStreamer.hasPermission(context)
+        fun setMicrophone(on: Boolean) = s.editSettings { copy(microphone = on.takeIf { it != micDefault }) }
+        SwitchRow(
+            micOn,
+            { on ->
+                micRefused = false
+                if (!on || MicStreamer.hasPermission(context)) {
+                    setMicrophone(on)
+                } else {
+                    s.env.onRequestMicrophone { granted -> if (granted) setMicrophone(true) else micRefused = true }
+                }
+            },
+            stringResource(R.string.app_settings_microphone),
+            stringResource(if (micRefused) R.string.app_settings_microphone_android_denied else R.string.app_settings_microphone_hint),
+            enabled = audio,
+            onReset = if (micSet != null && micSet != micDefault) ({ s.editSettings { copy(microphone = null) } }) else null,
+        )
+        SwitchRow(
+            s.settings.alwaysAllowMicrophone, { v -> s.editSettings { copy(alwaysAllowMicrophone = v) } },
+            stringResource(R.string.app_settings_always_allow_microphone), stringResource(R.string.app_settings_always_allow_microphone_hint),
+            enabled = audio && micOn,
+        )
+        
+        val cameraDefault = fromMetadata && app.mayUseCamera
+        val cameraSet = s.settings.camera
+        val cameraOn = (cameraSet ?: cameraDefault) && AndroidCameras.hasPermission(context)
+        fun setCamera(on: Boolean) = s.editSettings { copy(camera = on.takeIf { it != cameraDefault }) }
+        SwitchRow(
+            cameraOn,
+            { on ->
+                cameraRefused = false
+                if (!on || AndroidCameras.hasPermission(context)) {
+                    setCamera(on)
+                } else {
+                    s.env.onRequestCamera { granted -> if (granted) setCamera(true) else cameraRefused = true }
+                }
+            },
+            stringResource(R.string.app_settings_camera),
+            stringResource(
+                when {
+                    !s.env.hasCamera -> R.string.app_settings_camera_none
+                    cameraRefused -> R.string.app_settings_camera_android_denied
+                    else -> R.string.app_settings_camera_hint
+                }
+            ),
+            enabled = s.env.hasCamera,
+            onReset = if (cameraSet != null && cameraSet != cameraDefault) ({ s.editSettings { copy(camera = null) } }) else null,
+        )
+        SwitchRow(
+            s.settings.sharesClipboard, { v -> s.editSettings { copy(clipboard = v.takeIf { it != defaults.clipboard }) } },
+            stringResource(R.string.app_settings_clipboard),
+            stringResource(R.string.app_settings_clipboard_hint),
+            onReset = if (s.settings.clipboard != null) ({ s.editSettings { copy(clipboard = null) } }) else null,
+        )
         SwitchRow(
             s.settings.wholeDev && app.requestsAllDevices, { v -> s.editSettings { copy(wholeDev = v) } },
             stringResource(R.string.app_settings_whole_dev), stringResource(R.string.app_settings_whole_dev_hint),
@@ -417,67 +419,40 @@ fun AppPermissionsPage(s: AppPageState) = SettingsPageColumn(R.string.app_page_p
 @Composable
 fun AppOverridesPage(s: AppPageState) = SettingsPageColumn(R.string.app_page_overrides) {
     val defaults = s.settings.defaults
-    val resources = LocalResources.current
     Text(stringResource(R.string.app_overrides_intro), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    SwitchRow(
-        s.settings.blocksExtraSyscalls, { v -> s.editSettings { copy(blockExtraSyscalls = v.takeIf { it != defaults.blockExtraSyscalls }) } },
-        stringResource(R.string.app_settings_extra_syscalls),
-        stringResource(R.string.app_settings_extra_syscalls_hint),
-        developer = true,
-        onReset = if (s.settings.blockExtraSyscalls != null) ({ s.editSettings { copy(blockExtraSyscalls = null) } }) else null,
-    )
-    // The camera's settings need the app's camera and one on the phone.
-    val cameraOn = s.settings.camera ?: (defaults.permissionsFromMetadata && s.app.mayUseCamera)
-    val cameraEnabled = cameraOn && s.env.hasCamera
-    val rate = s.settings.cameraFrameRate
-    val resolution = s.settings.cameraResolution
-    val cameraResolutions = s.env.cameraResolutions
-    DropdownRow(
-        selected = rate,
-        options = cameraResolutions.keys.sortedDescending().ifEmpty { listOf(rate) },
-        onSelect = { chosen ->
-            s.editSettings {
-                // A size the cameras don't give at the new rate: the largest they do below it
-                // (the largest they do for full resolution).
-                val sides = cameraResolutions[chosen].orEmpty().map { it.shortSide }
-                val size = if (sides.isNotEmpty() && resolution !in sides) {
-                    if (resolution == AndroidCameras.FULL_RESOLUTION) sides.first()
-                    else sides.firstOrNull { it != AndroidCameras.FULL_RESOLUTION && it < resolution } ?: sides.last()
-                } else resolution
-                copy(
-                    cameraFrameRateOverride = chosen.takeIf { it != defaults.cameraFrameRate },
-                    cameraResolutionOverride = size.takeIf { it != defaults.cameraResolution },
-                )
-            }
-        },
-        label = { resources.getString(R.string.app_settings_camera_frame_rate_value, it) },
-        title = stringResource(R.string.app_settings_camera_frame_rate),
-        hint = stringResource(if (cameraOn) R.string.app_settings_camera_frame_rate_hint else R.string.app_overrides_camera_off),
-        enabled = cameraEnabled,
-        developer = true,
-        onReset = if (s.settings.cameraFrameRateOverride != null) ({ s.editSettings { copy(cameraFrameRateOverride = null) } }) else null,
-        resettable = true,
-    )
-    val resolutions = cameraResolutions[rate].orEmpty()
-    fun resolutionLabel(side: Int) =
-        if (side == AndroidCameras.FULL_RESOLUTION) {
-            val sizes = resolutions.firstOrNull { it.shortSide == side }?.fullSizes.orEmpty()
-            resources.getString(R.string.app_settings_camera_resolution_full, sizes.joinToString(", ") { "${it.width}×${it.height}" })
-        } else {
-            resources.getString(R.string.app_settings_camera_resolution_value, side)
-        }
-    DropdownRow(
-        selected = resolution,
-        options = resolutions.map { it.shortSide }.ifEmpty { listOf(resolution) },
-        onSelect = { v -> s.editSettings { copy(cameraResolutionOverride = v.takeIf { it != defaults.cameraResolution }) } },
-        label = ::resolutionLabel,
-        title = stringResource(R.string.app_settings_camera_resolution),
-        hint = stringResource(if (cameraOn) R.string.app_settings_camera_resolution_hint else R.string.app_overrides_camera_off),
-        enabled = cameraEnabled,
-        developer = true,
-        onReset = if (s.settings.cameraResolutionOverride != null) ({ s.editSettings { copy(cameraResolutionOverride = null) } }) else null,
-        resettable = true,
-    )
+    SettingsCard {
+        SwitchRow(
+            s.settings.blocksExtraSyscalls, { v -> s.editSettings { copy(blockExtraSyscalls = v.takeIf { it != defaults.blockExtraSyscalls }) } },
+            stringResource(R.string.app_settings_extra_syscalls),
+            stringResource(R.string.app_settings_extra_syscalls_hint),
+            developer = true,
+            onReset = if (s.settings.blockExtraSyscalls != null) ({ s.editSettings { copy(blockExtraSyscalls = null) } }) else null,
+        )
+        // The camera's settings need the app's camera and one on the phone.
+        val cameraOn = s.settings.camera ?: (defaults.permissionsFromMetadata && s.app.mayUseCamera)
+        val cameraEnabled = cameraOn && s.env.hasCamera
+        CameraRows(
+            rate = s.settings.cameraFrameRate,
+            resolution = s.settings.cameraResolution,
+            resolutions = s.env.cameraResolutions,
+            enabled = cameraEnabled,
+            rateHint = stringResource(if (cameraOn) R.string.app_settings_camera_frame_rate_hint else R.string.app_overrides_camera_off),
+            resolutionHint = stringResource(if (cameraOn) R.string.app_settings_camera_resolution_hint else R.string.app_overrides_camera_off),
+            onRate = { rate, size ->
+                s.editSettings {
+                    copy(
+                        cameraFrameRateOverride = rate.takeIf { it != defaults.cameraFrameRate },
+                        cameraResolutionOverride = size.takeIf { it != defaults.cameraResolution },
+                    )
+                }
+            },
+            onResolution = { v -> s.editSettings { copy(cameraResolutionOverride = v.takeIf { it != defaults.cameraResolution }) } },
+            developer = true,
+            onResetRate = if (s.settings.cameraFrameRateOverride != null) ({ s.editSettings { copy(cameraFrameRateOverride = null) } }) else null,
+            onResetResolution = if (s.settings.cameraResolutionOverride != null) ({ s.editSettings { copy(cameraResolutionOverride = null) } }) else null,
+            resettable = true,
+        )
+    }
 }
 
 /**
@@ -508,40 +483,43 @@ fun AppStoragePage(s: AppPageState) = SettingsPageColumn(R.string.app_page_stora
     val hasData = (storage?.settings ?: 0L) > 0L
     val canChange = env.canChangeFiles
 
-    Text(stringResource(R.string.app_settings_app_storage, size(storage?.total)), style = MaterialTheme.typography.titleMedium)
-    StorageBar(
-        listOf(
-            StorageSegment(R.string.storage_part_apps, storage?.app, colors[1]),
-            StorageSegment(R.string.storage_part_app_data, storage?.settings, colors[2]),
-            StorageSegment(R.string.storage_part_home, storage?.privateHome, colors[3]),
-            StorageSegment(R.string.storage_part_cache, storage?.cache, colors[4]),
-        ),
-    )
-    BorderedRows {
-        StorageRow(stringResource(R.string.storage_part_home), size(storage?.privateHome)) {
-            IconAction(Icons.Filled.FolderOpen, R.string.storage_open_in_files, { env.onOpenHome() }, enabled = hasHome)
-            IconAction(Icons.Filled.UploadFile, R.string.storage_import, { confirm = StorageConfirm.app(s.app.id, StorageAction.IMPORT_HOME) }, enabled = canChange)
-            IconAction(Icons.Filled.SaveAlt, R.string.storage_export, { env.onStorage(StorageAction.EXPORT_HOME) }, enabled = hasHome)
+    SettingsCard {
+        Text(stringResource(R.string.app_settings_app_storage, size(storage?.total)), style = MaterialTheme.typography.titleMedium)
+        StorageBar(
+            listOf(
+                StorageSegment(R.string.storage_part_apps, storage?.app, colors[1]),
+                StorageSegment(R.string.storage_part_app_data, storage?.settings, colors[2]),
+                StorageSegment(R.string.storage_part_home, storage?.privateHome, colors[3]),
+                StorageSegment(R.string.storage_part_cache, storage?.cache, colors[4]),
+            ),
+        )
+        Column {
+            StorageRow(stringResource(R.string.storage_part_home), size(storage?.privateHome)) {
+                IconAction(Icons.Filled.FolderOpen, R.string.storage_open_in_files, { env.onOpenHome() }, enabled = hasHome)
+                IconAction(Icons.Filled.UploadFile, R.string.storage_import, { confirm = StorageConfirm.app(s.app.id, StorageAction.IMPORT_HOME) }, enabled = canChange)
+                IconAction(Icons.Filled.SaveAlt, R.string.storage_export, { env.onStorage(StorageAction.EXPORT_HOME) }, enabled = hasHome)
+            }
+            StorageRow(stringResource(R.string.storage_part_app_data), size(storage?.settings)) {
+                IconAction(Icons.Filled.UploadFile, R.string.storage_import, { confirm = StorageConfirm.app(s.app.id, StorageAction.IMPORT_SETTINGS) }, enabled = canChange)
+                IconAction(Icons.Filled.SaveAlt, R.string.storage_export, { env.onStorage(StorageAction.EXPORT_SETTINGS) }, enabled = hasData)
+            }
+            StorageRow(stringResource(R.string.storage_part_cache), size(storage?.cache)) {
+                IconAction(Icons.Filled.DeleteSweep, R.string.app_settings_clear_cache, { env.onStorage(StorageAction.CLEAR_CACHE) }, enabled = canChange && (storage?.cache ?: 0L) > 0L)
+            }
         }
-        StorageRow(stringResource(R.string.storage_part_app_data), size(storage?.settings)) {
-            IconAction(Icons.Filled.UploadFile, R.string.storage_import, { confirm = StorageConfirm.app(s.app.id, StorageAction.IMPORT_SETTINGS) }, enabled = canChange)
-            IconAction(Icons.Filled.SaveAlt, R.string.storage_export, { env.onStorage(StorageAction.EXPORT_SETTINGS) }, enabled = hasData)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = { env.onStorage(StorageAction.COPY_INTO_HOME) }, enabled = canChange) { Text(stringResource(R.string.storage_copy_into_home)) }
+            OutlinedButton(onClick = { env.onStorage(StorageAction.DOWNLOAD_FROM_HOME) }, enabled = hasHome) { Text(stringResource(R.string.storage_download_from_home)) }
         }
-        StorageRow(stringResource(R.string.storage_part_cache), size(storage?.cache)) {
-            IconAction(Icons.Filled.DeleteSweep, R.string.app_settings_clear_cache, { env.onStorage(StorageAction.CLEAR_CACHE) }, enabled = canChange && (storage?.cache ?: 0L) > 0L)
-        }
-    }
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedButton(onClick = { env.onStorage(StorageAction.COPY_INTO_HOME) }, enabled = canChange) { Text(stringResource(R.string.storage_copy_into_home)) }
-        OutlinedButton(onClick = { env.onStorage(StorageAction.DOWNLOAD_FROM_HOME) }, enabled = hasHome) { Text(stringResource(R.string.storage_download_from_home)) }
     }
 
-    SectionTitle(stringResource(R.string.settings_section_danger), danger = true)
-    OutlinedButton(onClick = { confirm = StorageConfirm.app(s.app.id, StorageAction.RESET_HOME) }, enabled = canChange && hasHome) {
-        Text(stringResource(R.string.storage_reset_home), color = MaterialTheme.colorScheme.error)
-    }
-    OutlinedButton(onClick = { confirm = StorageConfirm.app(s.app.id, StorageAction.RESET_SETTINGS) }, enabled = canChange && hasData) {
-        Text(stringResource(R.string.storage_reset_app_data), color = MaterialTheme.colorScheme.error)
+    SettingsCard(title = stringResource(R.string.settings_section_danger), danger = true) {
+        OutlinedButton(onClick = { confirm = StorageConfirm.app(s.app.id, StorageAction.RESET_HOME) }, enabled = canChange && hasHome) {
+            Text(stringResource(R.string.storage_reset_home), color = MaterialTheme.colorScheme.error)
+        }
+        OutlinedButton(onClick = { confirm = StorageConfirm.app(s.app.id, StorageAction.RESET_SETTINGS) }, enabled = canChange && hasData) {
+            Text(stringResource(R.string.storage_reset_app_data), color = MaterialTheme.colorScheme.error)
+        }
     }
 }
 

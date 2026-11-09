@@ -63,7 +63,7 @@ import com.garathon.flatdroid.setup.ResetMode
 import com.garathon.flatdroid.setup.SetupController
 import com.garathon.flatdroid.setup.SetupService
 import com.garathon.flatdroid.setup.SetupStep
-import com.garathon.flatdroid.ui.CommandState
+import com.garathon.flatdroid.ui.setup.CommandState
 import com.garathon.flatdroid.ui.ElectronDialog
 import com.garathon.flatdroid.ui.FilesChangedDialog
 import com.garathon.flatdroid.ui.home.HomeScreen
@@ -72,9 +72,10 @@ import com.garathon.flatdroid.ui.InstallDialog
 import com.garathon.flatdroid.ui.LogDialog
 import com.garathon.flatdroid.ui.MicrophoneLaunchDialog
 import com.garathon.flatdroid.ui.MobileDataDialog
-import com.garathon.flatdroid.ui.SetupSettingsScreen
+import com.garathon.flatdroid.ui.setup.ResetScreen
+import com.garathon.flatdroid.ui.setup.SetupSettingsScreen
 import com.garathon.flatdroid.ui.TerminalScreen
-import com.garathon.flatdroid.ui.SetupScreen
+import com.garathon.flatdroid.ui.setup.SetupScreen
 import com.garathon.flatdroid.ui.followHideScreen
 import com.garathon.flatdroid.ui.settings.AppPage
 import com.garathon.flatdroid.ui.settings.AppSettingsEnv
@@ -139,30 +140,55 @@ class MainActivity : ComponentActivity() {
                     val output by viewModel.output.collectAsState()
                     val running by viewModel.running.collectAsState()
                     var screen by rememberSaveable(stateSaver = Screen.Saver) { mutableStateOf<Screen>(Screen.Home) }
-                    when {
-                        // Screen 1: the user's settings, asked before setup (again after a reset,
-                        // pre-filled); setup's last step applies them.
-                        !setup.settingsChosen && !setup.isComplete && !setup.running -> SetupSettingsScreen(
-                            settings = remember { savedSettings(languages) },
-                            deviceLanguages = languages,
-                            onContinue = { SetupController.settings(this).save(it); startSetup() },
-                            modifier = modifier,
-                        )
-                        // Screen 2: setup, the same for everyone.
-                        !setup.isComplete || setup.running -> SetupScreen(
-                            ui = setup,
-                            onStart = ::startSetup,
-                            onReset = ::resetAlpine,
-                            modifier = modifier,
-                            // Once Alpine is extracted, commands can look into a failed setup.
-                            command = if (SetupStep.ROOTFS in setup.completed) CommandState(output, running, viewModel::run, viewModel::cancel) else null,
-                        )
-                        else -> Main(screen, { screen = it }, languages, modifier)
+                    // Screen 1: the user's settings, asked before setup (again after a reset, pre-filled);
+                    // setup's last step applies them. Screen 2: setup, the same for everyone. Then the app.
+                    val stage = when {
+                        setup.resetting -> AppStage.RESETTING
+                        !setup.settingsChosen && !setup.isComplete && !setup.running -> AppStage.CHOICES
+                        !setup.isComplete || setup.running -> AppStage.SETUP
+                        else -> AppStage.MAIN
+                    }
+                    AnimatedContent(
+                        targetState = stage,
+                        transitionSpec = {
+                            val shift = { width: Int -> width / 12 }
+                            // Forward goes in from the right, back (a reset) from the left.
+                            val forward = targetState.ordinal > initialState.ordinal
+                            if (targetState == AppStage.RESETTING || initialState == AppStage.RESETTING) {
+                                return@AnimatedContent fadeIn(tween(300, delayMillis = 100)) togetherWith fadeOut(tween(150))
+                            }
+                            (fadeIn(tween(300, delayMillis = 100)) + slideInHorizontally(tween(350)) { if (forward) shift(it) else -shift(it) }) togetherWith
+                                (fadeOut(tween(150)) + slideOutHorizontally(tween(350)) { if (forward) -shift(it) else shift(it) })
+                        },
+                        label = "setup stage",
+                    ) { shown ->
+                        when (shown) {
+                            AppStage.CHOICES -> SetupSettingsScreen(
+                                settings = remember { savedSettings(languages) },
+                                deviceLanguages = languages,
+                                error = setup.error,
+                                onContinue = { SetupController.settings(this@MainActivity).save(it); startSetup() },
+                                modifier = modifier,
+                            )
+                            AppStage.SETUP -> SetupScreen(
+                                ui = setup,
+                                onStart = ::startSetup,
+                                onReset = ::resetAlpine,
+                                modifier = modifier,
+                                // Once Alpine is extracted, commands can look into a failed setup.
+                                command = if (SetupStep.ROOTFS in setup.completed) CommandState(output, running, viewModel::run, viewModel::cancel) else null,
+                            )
+                            AppStage.MAIN -> Main(screen, { screen = it }, languages, modifier)
+                            AppStage.RESETTING -> ResetScreen(setup.detail, modifier)
+                        }
                     }
                 }
             }
         }
     }
+
+    /** Where the first run is: the user's choices, the installation, then the app itself; and the reset between. */
+    private enum class AppStage { CHOICES, SETUP, MAIN, RESETTING }
 
     /** Everything after setup: home, Settings (with the terminal) and each app's settings. */
     @Composable

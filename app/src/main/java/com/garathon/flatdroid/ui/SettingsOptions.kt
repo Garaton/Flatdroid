@@ -20,6 +20,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -46,15 +47,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.ime
-import androidx.compose.foundation.relocation.BringIntoViewRequester
-import androidx.compose.foundation.relocation.bringIntoViewRequester
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.snapshotFlow
-import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.platform.LocalDensity
 import com.garathon.flatdroid.R
+
+/**
+ * Whether developer options are on, for the rows below: a row marked `developer` shows nothing
+ * without them, so a page lists its developer settings with no check of its own. The settings
+ * screens provide it; elsewhere it is off.
+ */
+val LocalDeveloperOptions = compositionLocalOf { false }
 
 // Rows for choices: the whole row, label included, is one touch target, so tapping the text
 // works like tapping the control (the control itself takes no clicks of its own).
@@ -62,6 +62,7 @@ import com.garathon.flatdroid.R
 // Used only for pop up dialogs, toggles (SwitchRows) are for settings
 @Composable
 fun CheckboxRow(checked: Boolean, onChange: (Boolean) -> Unit, label: String, modifier: Modifier = Modifier, enabled: Boolean = true, developer: Boolean = false) {
+    if (developer && !LocalDeveloperOptions.current) return
     Row(
         modifier = modifier.fillMaxWidth().toggleable(checked, enabled = enabled, role = Role.Checkbox, onValueChange = onChange),
         verticalAlignment = Alignment.CenterVertically,
@@ -74,6 +75,7 @@ fun CheckboxRow(checked: Boolean, onChange: (Boolean) -> Unit, label: String, mo
 
 @Composable
 fun RadioRow(selected: Boolean, onSelect: () -> Unit, label: String, modifier: Modifier = Modifier, enabled: Boolean = true, developer: Boolean = false) {
+    if (developer && !LocalDeveloperOptions.current) return
     Row(
         modifier = modifier.fillMaxWidth().selectable(selected, enabled = enabled, role = Role.RadioButton, onClick = onSelect),
         verticalAlignment = Alignment.CenterVertically,
@@ -88,7 +90,7 @@ fun RadioRow(selected: Boolean, onSelect: () -> Unit, label: String, modifier: M
  * A switch with a title and an optional hint. With a hint, the title has the row's full width and
  * the switch sits beside the hint below it, so a long title doesn't wrap early; without one, the
  * switch is beside the title. The hint is muted, and a disabled row is dimmed. A [developer]
- * setting (shown only with developer options) has a wrench just before its title.
+ * setting (shown only with developer options, see [LocalDeveloperOptions]) has a wrench just before its title.
  */
 @Composable
 fun SwitchRow(
@@ -96,6 +98,7 @@ fun SwitchRow(
     /** Set while the value is an override of a default: removes the override. */
     onReset: (() -> Unit)? = null,
 ) {
+    if (developer && !LocalDeveloperOptions.current) return
     val titleColor = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = DISABLED_ALPHA)
     val hintColor = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface.copy(alpha = DISABLED_ALPHA)
     Row(
@@ -167,20 +170,11 @@ fun TextRow(
     /** Lines the field starts with when it isn't [singleLine]; it grows as the text wraps. */
     minLines: Int = 3,
 ) {
+    if (developer && !LocalDeveloperOptions.current) return
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // The field stays in view while the keyboard comes up (it covers the bottom of a scrolling page).
-        val requester = remember { BringIntoViewRequester() }
-        var focused by remember { mutableStateOf(false) }
-        val density = LocalDensity.current
-        val ime = WindowInsets.ime
-        LaunchedEffect(focused) {
-            if (!focused) return@LaunchedEffect
-            requester.bringIntoView()
-            snapshotFlow { ime.getBottom(density) }.collect { requester.bringIntoView() }
-        }
         OutlinedTextField(
             value = content,
             onValueChange = onChange,
@@ -191,7 +185,7 @@ fun TextRow(
             minLines = if (singleLine) 1 else minLines,
             enabled = enabled,
             keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
-            modifier = Modifier.weight(1f).bringIntoViewRequester(requester).onFocusChanged { focused = it.isFocused },
+            modifier = Modifier.weight(1f).keepInViewWhileFocused(),
         )
     }
 }
@@ -217,6 +211,7 @@ fun <T> DropdownRow(
     /** The setting can be an override: room is kept beside it for [onReset], so the field doesn't change width. */
     resettable: Boolean = onReset != null,
 ) {
+    if (developer && !LocalDeveloperOptions.current) return
     var expanded by remember { mutableStateOf(false) }
     val interactionSource = remember { MutableInteractionSource() }
     val colors = OutlinedTextFieldDefaults.colors()
@@ -278,25 +273,7 @@ fun <T> DropdownRow(
     }
 }
 
-/**
- * A section header on the settings screens. Its look is set here for all of them:
- * [SECTION_TITLE_TOP_PADDING] separates it from the section above, and [sectionTitleStyle]
- * is its text size (setting titles are 16 sp, the page title `titleLarge` 22 sp).
- */
-@Composable
-fun SectionTitle(text: String, danger: Boolean = false) {
-    Text(
-        text,
-        style = sectionTitleStyle(),
-        color = if (danger) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(top = SECTION_TITLE_TOP_PADDING),
-    )
-}
-
-/** Extra space above each section header. */
-val SECTION_TITLE_TOP_PADDING = 12.dp
-
-/** The headers' text style inside a page: `titleMedium` (16 sp), below the page title's `titleLarge` (22 sp). */
+/** The text style of a card's title: `titleMedium` (16 sp), below the page title's `titleLarge` (22 sp). */
 @Composable
 fun sectionTitleStyle() = MaterialTheme.typography.titleMedium
 

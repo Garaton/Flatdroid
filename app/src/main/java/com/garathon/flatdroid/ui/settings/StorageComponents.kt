@@ -3,11 +3,9 @@ package com.garathon.flatdroid.ui.settings
 import android.text.format.Formatter
 import androidx.annotation.StringRes
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -18,7 +16,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -53,21 +50,20 @@ fun StorageBar(segments: List<StorageSegment>, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val measured = segments.filter { (it.bytes ?: 0) > 0 }
     val total = measured.sumOf { it.bytes!! }
-    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(Modifier.fillMaxWidth().height(12.dp).clip(RoundedCornerShape(6.dp)).background(MaterialTheme.colorScheme.surfaceVariant)) {
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(Modifier.fillMaxWidth().height(12.dp).clip(MaterialTheme.shapes.small).background(MaterialTheme.colorScheme.surfaceVariant)) {
             for (segment in measured) Box(Modifier.weight(segment.bytes!!.toFloat()).height(12.dp).background(segment.color))
         }
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            for (segment in segments) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Box(Modifier.size(10.dp).clip(CircleShape).background(segment.color))
-                    Text(
-                        segment.bytes?.takeIf { total > 0 }?.let {
-                            stringResource(R.string.storage_legend_percent, stringResource(segment.label), Formatter.formatShortFileSize(context, it), (it * 100 / total).toInt())
-                        } ?: stringResource(R.string.storage_legend, stringResource(segment.label), segment.bytes?.let { Formatter.formatShortFileSize(context, it) } ?: "…"),
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
+        // One part to a line: its name, and its size and share at the right edge, so the lines line up.
+        for (segment in segments) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(Modifier.size(10.dp).clip(CircleShape).background(segment.color))
+                Text(stringResource(segment.label), style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                val size = segment.bytes?.let { Formatter.formatShortFileSize(context, it) } ?: "…"
+                Text(
+                    if (segment.bytes != null && total > 0) stringResource(R.string.storage_legend_percent, size, (segment.bytes * 100 / total).toInt()) else size,
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
         }
     }
@@ -108,7 +104,7 @@ fun StorageRow(
 }
 
 /**
- * A searchable list in a box of fixed height, which the page scrolls around: the shared search
+ * A searchable list of fixed height, which the page scrolls around: the shared search
  * bar on top, the rows of [items] that [spec] and the query let through below it.
  */
 @Composable
@@ -124,11 +120,9 @@ fun <T> StorageList(
     val shown = remember(items, query) { spec.apply(items, query) }
     val listState = rememberLazyListState()
     ScrollToTopOnNewOrder(query, listState)
-    Column(
-        modifier.fillMaxWidth().height(LIST_HEIGHT)
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(LIST_CORNER)),
-    ) {
-        ListSearchBar(spec, query, { query = it }, Modifier.padding(8.dp))
+    // No outline of its own: it sits in a card.
+    Column(modifier.fillMaxWidth().height(LIST_HEIGHT)) {
+        ListSearchBar(spec, query, { query = it }, Modifier.padding(bottom = 8.dp))
         if (shown.isEmpty()) {
             Text(
                 stringResource(emptyText), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -146,4 +140,3 @@ fun <T> StorageList(
 }
 
 private val LIST_HEIGHT = 360.dp
-private val LIST_CORNER = 6.dp
