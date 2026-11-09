@@ -86,7 +86,8 @@ class SessionService : Service() {
         }
         if (job?.isActive != true && appId != null && InstalledApps.isValidId(appId)) {
             microphoneType = mayRecord(appId)
-            cameraType = AppData.settings(this, appId).load().camera && AndroidCameras.hasPermission(this)
+            cameraType = AndroidCameras.hasPermission(this) &&
+                InstalledApps(this).context(appId)?.let { AppData.settings(this, appId).load().cameraAllowed(it) } == true
         }
         startInForeground(notification(SessionController.ui.value.state))
         if (job?.isActive == true) return START_NOT_STICKY
@@ -176,8 +177,7 @@ class SessionService : Service() {
      */
     private fun mayRecord(appId: String): Boolean {
         val settings = AppData.settings(this, appId).load()
-        return settings.microphone && MicStreamer.hasPermission(this) &&
-            settings.audioAllowed(InstalledApps(applicationContext).sockets(appId))
+        return MicStreamer.hasPermission(this) && settings.microphoneAllowed(InstalledApps(applicationContext).sockets(appId))
     }
 
     private fun startInForeground(notification: Notification) {

@@ -51,6 +51,7 @@ fun PerAppDefaultRows(security: SecuritySettings, onChange: (SecuritySettings) -
         HomeMode.SHARED to stringResource(R.string.app_settings_home_shared),
         HomeMode.PRIVATE to stringResource(R.string.app_settings_home_private),
         HomeMode.TEMPORARY to stringResource(R.string.app_settings_home_temporary),
+        HomeMode.ANDROID to stringResource(R.string.app_settings_home_android),
     )
     DropdownRow(
         selected = security.defaultHomeMode,
@@ -72,18 +73,13 @@ fun PerAppDefaultRows(security: SecuritySettings, onChange: (SecuritySettings) -
 }
 
 /**
- * The privacy and hardening settings. The system call filter's and helper hiding are developer
- * settings ([developerOptions]); the levels set them either way.
+ * The privacy and hardening settings. Hiding the helpers is a developer setting
+ * ([developerOptions]); the levels set it either way. The system call filter has no setting of its
+ * own: the level sets it, and an app can override it in its developer settings.
  */
 @Composable
 fun SecurityPrivacyRows(security: SecuritySettings, onChange: (SecuritySettings) -> Unit, enabled: Boolean = true, developerOptions: Boolean = false) {
-    val appliesToDefault = " " + stringResource(R.string.security_applies_to_default)
     if (developerOptions) {
-        SwitchRow(
-            security.extraSyscallFilter, { onChange(security.copy(extraSyscallFilter = it)) },
-            stringResource(R.string.security_extra_syscalls), stringResource(R.string.security_extra_syscalls_hint),
-            enabled = enabled, developer = true,
-        )
         SwitchRow(
             security.hideHelperProcesses, { onChange(security.copy(hideHelperProcesses = it)) },
             stringResource(R.string.security_hide_helpers), stringResource(R.string.security_hide_helpers_hint),
@@ -92,15 +88,11 @@ fun SecurityPrivacyRows(security: SecuritySettings, onChange: (SecuritySettings)
     }
     SwitchRow(
         security.androidFonts, { onChange(security.copy(androidFonts = it)) },
-        stringResource(R.string.security_android_fonts), stringResource(R.string.app_settings_android_fonts_hint) + appliesToDefault, enabled = enabled,
+        stringResource(R.string.security_android_fonts), stringResource(R.string.security_android_fonts_hint), enabled = enabled,
     )
     SwitchRow(
-        security.shareTimeZone, { onChange(security.copy(shareTimeZone = it)) },
-        stringResource(R.string.security_share_time_zone), stringResource(R.string.app_settings_time_zone_hint) + appliesToDefault, enabled = enabled,
-    )
-    SwitchRow(
-        security.shareLanguage, { onChange(security.copy(shareLanguage = it)) },
-        stringResource(R.string.security_share_language), stringResource(R.string.app_settings_language_hint) + appliesToDefault, enabled = enabled,
+        security.shareLocale, { onChange(security.copy(shareLocale = it)) },
+        stringResource(R.string.security_share_locale), stringResource(R.string.security_share_locale_hint), enabled = enabled,
     )
     SwitchRow(
         security.limitDevices, { onChange(security.copy(limitDevices = it)) },
@@ -109,10 +101,6 @@ fun SecurityPrivacyRows(security: SecuritySettings, onChange: (SecuritySettings)
     SwitchRow(
         security.hideScreen, { onChange(security.copy(hideScreen = it)) },
         stringResource(R.string.security_hide_screen), stringResource(R.string.security_hide_screen_hint), enabled = enabled,
-    )
-    SwitchRow(
-        security.exportWithPicker, { onChange(security.copy(exportWithPicker = it)) },
-        stringResource(R.string.security_export_picker), stringResource(R.string.security_export_picker_hint), enabled = enabled,
     )
     SwitchRow(
         security.checkFilesBeforeLaunch, { onChange(security.copy(checkFilesBeforeLaunch = it)) },
@@ -125,8 +113,8 @@ val SecuritySaver: Saver<SecuritySettings, Any> = listSaver(
     save = {
         listOf(
             it.extraSyscallFilter, it.hideHelperProcesses, it.permissionsFromMetadata, it.defaultHomeMode.name,
-            it.limitDevices, it.hideScreen, it.exportWithPicker, it.checkFilesBeforeLaunch,
-            it.androidFonts, it.shareClipboard, it.shareTimeZone, it.shareLanguage,
+            it.limitDevices, it.hideScreen, it.checkFilesBeforeLaunch,
+            it.androidFonts, it.shareClipboard, it.shareLocale,
         )
     },
     restore = {
@@ -137,12 +125,10 @@ val SecuritySaver: Saver<SecuritySettings, Any> = listSaver(
             defaultHomeMode = HomeMode.valueOf(it[3] as String),
             limitDevices = it[4] as Boolean,
             hideScreen = it[5] as Boolean,
-            exportWithPicker = it[6] as Boolean,
-            checkFilesBeforeLaunch = it[7] as Boolean,
-            androidFonts = it[8] as Boolean,
-            shareClipboard = it[9] as Boolean,
-            shareTimeZone = it[10] as Boolean,
-            shareLanguage = it[11] as Boolean,
+            checkFilesBeforeLaunch = it[6] as Boolean,
+            androidFonts = it[7] as Boolean,
+            shareClipboard = it[8] as Boolean,
+            shareLocale = it[9] as Boolean,
         )
     },
 )

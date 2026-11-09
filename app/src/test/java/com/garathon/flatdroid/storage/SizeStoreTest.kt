@@ -75,14 +75,15 @@ class SizeStoreTest {
     }
 
     @Test
-    fun forgetAllCanKeepOne() {
+    fun forgetAllCanKeepSome() {
         val dir = tmp.newFolder()
         val store = SizeStore(dir)
         store.get("shared", setOf("runtimes")) { mapOf("runtimes" to 5L) }
+        store.get("runtimes", setOf("org.gnome.Platform")) { mapOf("org.gnome.Platform" to 5L) }
         store.get("a.App", keys) { mapOf("app" to 1L, "home" to 1L) }
-        store.forgetAll(keep = "shared")
+        store.forgetAll(keep = setOf("shared", "runtimes"))
         // The forgotten one is set aside as its last sizes, for showing until measured again.
-        assertEquals(setOf("shared.sizes", "a.App.sizes.last"), dir.list()!!.toSet())
+        assertEquals(setOf("shared.sizes", "runtimes.sizes", "a.App.sizes.last"), dir.list()!!.toSet())
         var measured = false
         store.get("shared", setOf("runtimes")) { measured = true; mapOf("runtimes" to 5L) }
         assertFalse(measured)

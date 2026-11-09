@@ -23,6 +23,11 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.exclude
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -44,6 +49,12 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.input.pointer.pointerInput
 import com.garathon.flatdroid.R
 
 /** A page of a settings screen: its icon in the rail, and its title (the rail has no text, the page shows it). */
@@ -66,9 +77,16 @@ fun <P : SettingsPage> SettingsShell(
     topBar: @Composable () -> Unit,
     modifier: Modifier = Modifier,
     error: String? = null,
+    /** The changes are being applied: the page is dimmed as a whole and takes no touches. */
+    dimmed: Boolean = false,
     content: @Composable (P) -> Unit,
 ) {
-    Column(modifier.fillMaxSize()) {
+    val focus = LocalFocusManager.current
+    LaunchedEffect(dimmed) { if (dimmed) focus.clearFocus() }
+    val dim by animateFloatAsState(if (dimmed) 0.5f else 1f, label = "dim")
+    // The keyboard takes the room under the page, so the page scrolls to what it covers. The navigation bar's
+    // share of it is already padded by the screen.
+    Column(modifier.fillMaxSize().windowInsetsPadding(WindowInsets.ime.exclude(WindowInsets.navigationBars))) {
         topBar()
         error?.let {
             SelectionContainer {
@@ -82,12 +100,16 @@ fun <P : SettingsPage> SettingsShell(
         Row(Modifier.weight(1f).fillMaxWidth()) {
             SettingsRail(pages, selected, onSelect)
             val shift = with(LocalDensity.current) { PAGE_SHIFT.roundToPx() }
+            Box(Modifier.weight(1f).fillMaxHeight()) {
             AnimatedContent(
                 targetState = selected,
-                modifier = Modifier.weight(1f).fillMaxHeight(),
+                modifier = Modifier.fillMaxSize().alpha(dim),
                 transitionSpec = { pageTransition(pages.indexOf(targetState) > pages.indexOf(initialState), shift) },
                 label = "settings page",
             ) { page -> content(page) }
+            // Everything on the page, whatever it is made of, looks and acts the same while applying.
+            if (dimmed) Box(Modifier.fillMaxSize().pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent().changes.forEach { it.consume() } } })
+            }
         }
     }
 }
@@ -162,15 +184,15 @@ fun SettingsTopBar(
 
 private val TOP_BAR_HEIGHT = 56.dp
 
-/** A page: its title, then [content], scrolling as a whole. */
+/** A page: its title (none on the Overview pages, which open with their own heading), then [content], scrolling as a whole. */
 @Composable
-fun SettingsPageColumn(@StringRes title: Int, content: @Composable ColumnScope.() -> Unit) {
+fun SettingsPageColumn(@StringRes title: Int?, content: @Composable ColumnScope.() -> Unit) {
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         // As the section headers were before pages: `titleLarge` in the primary color.
-        Text(stringResource(title), style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
+        title?.let { Text(stringResource(it), style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary) }
         content()
     }
 }

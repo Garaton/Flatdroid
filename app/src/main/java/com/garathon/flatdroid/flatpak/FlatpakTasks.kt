@@ -40,6 +40,8 @@ data class FlatpakTaskUi(
     val finishing: Boolean = false,
     /** The last status line: Flatdroid's own, or a command's that [FlatpakProgress.isStatus] lets through. */
     val status: String? = null,
+    /** How far the running task is when it isn't a Flatpak operation with a percent (recording or checking file baselines); null when it can't say. */
+    val progress: Float? = null,
     /** What the running task is doing when that differs from the task itself (removing unused runtimes). */
     val phase: String? = null,
     /** Cancel was pressed; the task is stopping. */
@@ -67,7 +69,7 @@ object FlatpakTasks {
         _ui.update {
             if (it.running != null) it else {
                 started = true
-                it.copy(running = task, step = null, finishing = false, status = null, finished = null, error = null, cancelling = false)
+                it.copy(running = task, step = null, finishing = false, status = null, progress = null, finished = null, error = null, cancelling = false)
             }
         }
         if (started) logBuffer.clear()
@@ -86,16 +88,19 @@ object FlatpakTasks {
     /** A line of a command's output: logged, and the status line only if it is one ([FlatpakProgress.isStatus]). */
     internal fun output(line: String) = log(line, status = FlatpakProgress.isStatus(line))
 
+    /** The running task's progress, 0 to 1; null when it can't say. */
+    internal fun progress(fraction: Float?) = _ui.update { it.copy(progress = fraction?.coerceIn(0f, 1f)) }
+
     internal fun cancelling(phase: String) = _ui.update { it.copy(phase = phase, cancelling = true) }
 
     /** Starts following a new flatpak command's output; [phase] describes it, if not the task itself. */
     internal fun newCommand(phase: String?) {
         progress = FlatpakProgress()
-        _ui.update { it.copy(step = null, finishing = false, phase = phase) }
+        _ui.update { it.copy(step = null, finishing = false, phase = phase, status = null, progress = null) }
     }
 
     internal fun end(task: FlatpakTask, error: String?) =
-        _ui.update { it.copy(running = null, step = null, phase = null, cancelling = false, finished = task, error = error, generation = it.generation + 1) }
+        _ui.update { it.copy(running = null, step = null, phase = null, progress = null, cancelling = false, finished = task, error = error, generation = it.generation + 1) }
 
     fun dismiss() {
         _ui.update { it.copy(finished = null, error = null) }

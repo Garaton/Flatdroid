@@ -1,5 +1,7 @@
 package com.garathon.flatdroid.flatpak
 
+import com.garathon.flatdroid.proot.DevNodes
+
 /** A Flatpak ref without its kind: `name/arch/branch`, e.g. `org.gnome.Platform/aarch64/50`. */
 data class FlatpakRef(val name: String, val arch: String, val branch: String) {
     override fun toString() = "$name/$arch/$branch"
@@ -41,10 +43,21 @@ data class FlatpakContext(
     val wayland: Boolean
         get() = "wayland" in sockets
 
+    /**
+     * The app may use a camera. Metadata can't say it: the camera portal needs no declaration, so
+     * this is a hint, from what an app that opens a camera itself asks for: all devices, or the
+     * PipeWire socket.
+     */
+    val mayUseCamera: Boolean
+        get() = DevNodes.ALL in devices || filesystems.any { it.substringBefore(':') == PIPEWIRE_SOCKET }
+
     /** Asks for both Wayland and X11 (`x11` or `fallback-x11`), so X11 can be forced. */
     val waylandAndX11: Boolean
         get() = wayland && ("x11" in sockets || "fallback-x11" in sockets)
 }
+
+/** The PipeWire socket's `filesystems=` name. */
+private const val PIPEWIRE_SOCKET = "xdg-run/pipewire-0"
 
 /** The metadata file of an installed app or runtime. */
 class FlatpakMetadata(private val keyfile: Keyfile) {

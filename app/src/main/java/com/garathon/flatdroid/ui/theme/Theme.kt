@@ -15,6 +15,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.graphics.Color
+import com.garathon.flatdroid.settings.InterfaceTheme
 import com.garathon.flatdroid.settings.LiveSettings
 import androidx.compose.ui.platform.LocalContext
 
@@ -32,13 +33,13 @@ private val LightColorScheme = lightColorScheme(
 
 @Composable
 fun FlatdroidTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    theme: InterfaceTheme = LiveSettings.theme.collectAsState().value,
     // Dynamic color is available on Android 12+
     dynamicColor: Boolean = true,
-    /** Black backgrounds and bars in the dark theme (the user's setting); dialogs and menus keep their shade. */
-    pureBlack: Boolean = LiveSettings.pureBlack.collectAsState().value,
     content: @Composable () -> Unit
 ) {
+    val darkTheme = theme.isDark(isSystemInDarkTheme())
+    val pureBlack = theme == InterfaceTheme.AMOLED
     val scheme = when {
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             val context = LocalContext.current

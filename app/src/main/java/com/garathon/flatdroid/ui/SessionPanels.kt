@@ -50,155 +50,16 @@ import com.garathon.flatdroid.session.SessionUi
 import com.garathon.flatdroid.session.Viewer
 import kotlinx.coroutines.launch
 
-/**
- * The running session, or how the last one ended. Nothing when idle with no message. An external
- * viewer's password shows only on tap.
- */
+/** A download is about to start on a metered connection (mobile data, mostly): the user decides. */
 @Composable
-fun SessionPanel(
-    session: SessionUi,
-    nameOf: (String) -> String,
-    onOpenViewer: (SessionState.Running) -> Unit,
-    onStop: () -> Unit,
-    onShowLog: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    val state = session.state
-    if (state is SessionState.Idle && session.message == null) return
-    if (state is SessionState.Question) return
-    val colors = MaterialTheme.colorScheme
-    val failed = state is SessionState.Idle && session.failed
-    Surface(
-        color = if (failed) colors.errorContainer else colors.secondaryContainer,
-        contentColor = if (failed) colors.onErrorContainer else colors.onSecondaryContainer,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            when (state) {
-                is SessionState.Starting -> {
-                    Text(stringResource(R.string.session_starting_app, nameOf(state.appId)), style = MaterialTheme.typography.titleSmall)
-                    Text(state.detail, style = MaterialTheme.typography.bodySmall)
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                }
-                is SessionState.PreparingElectron -> {
-                    Text(stringResource(R.string.electron_preparing_app, nameOf(state.appId)), style = MaterialTheme.typography.titleSmall)
-                    Text(state.detail, style = MaterialTheme.typography.bodySmall)
-                    val fraction = state.fraction
-                    if (fraction != null) LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth())
-                    else LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                }
-                is SessionState.Running -> {
-                    Text(stringResource(R.string.session_running_app, nameOf(state.appId)), style = MaterialTheme.typography.titleSmall)
-                    // Flatdroid's own viewer needs no address or login: only an external one does.
-                    if (state.socket == null) {
-                        state.username?.let { Text(stringResource(R.string.session_username, it), style = MaterialTheme.typography.bodyMedium) }
-                        PasswordLine(state.password)
-                    }
-                }
-                is SessionState.Stopping -> Text(stringResource(R.string.session_stopping, nameOf(state.appId)), style = MaterialTheme.typography.titleSmall)
-                else -> session.message?.let { SelectionContainer { Text(it, style = MaterialTheme.typography.bodyMedium) } }
-            }
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (state is SessionState.Running) Button(onClick = { onOpenViewer(state) }) { Text(stringResource(if (state.socket != null) R.string.session_open_app else R.string.session_open_viewer)) }
-                if (state is SessionState.Starting && state.skippable) OutlinedButton(onClick = { SessionController.skipFileCheck() }) { Text(stringResource(R.string.session_skip_check)) }
-                when (state) {
-                    is SessionState.Starting, is SessionState.Running, is SessionState.PreparingElectron ->
-                        OutlinedButton(onClick = onStop) { Text(stringResource(R.string.session_stop)) }
-                    else -> Unit
-                }
-                TextButton(onClick = onShowLog) { Text(stringResource(R.string.show_log)) }
-                if (state is SessionState.Idle) TextButton(onClick = onDismiss) { Text(stringResource(R.string.dismiss)) }
-            }
-        }
-    }
-}
-
-/** The display's address and password; the password only once Show is tapped. */
-@Composable
-private fun PasswordLine(password: String) {
-    val clipboard = LocalClipboard.current
-    val scope = rememberCoroutineScope()
-    var shown by rememberSaveable { mutableStateOf(false) }
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(
-            stringResource(R.string.session_address, Viewer.HOST, SessionScript.VNC_PORT),
-            style = MaterialTheme.typography.bodyMedium,
-        )
-        if (!shown) {
-            TextButton(onClick = { shown = true }) { Text(stringResource(R.string.session_show_password)) }
-        } else {
-            Text(
-                stringResource(R.string.session_password, password),
-                style = MaterialTheme.typography.bodyMedium,
-                fontFamily = FontFamily.Monospace,
-            )
-        }
-        TextButton(onClick = { scope.launch { clipboard.setClipEntry(ClipEntry(sensitiveText("VNC password", password))) } }) {
-            Text(stringResource(R.string.session_copy_password))
-        }
-    }
-}
-
-/**
- * Clipboard text marked sensitive, so keyboards and Android's clipboard preview don't show or keep
- * it (Android 13+; older versions ignore the mark).
- */
-private fun sensitiveText(label: String, text: String): ClipData = ClipData.newPlainText(label, text).apply {
-    description.extras = PersistableBundle().apply { putBoolean(EXTRA_IS_SENSITIVE, true) }
-}
-
-/** `ClipDescription.EXTRA_IS_SENSITIVE`, which only exists in the API from Android 13. */
-private const val EXTRA_IS_SENSITIVE = "android.content.extra.IS_SENSITIVE"
-
-/** The running or finished Flatpak task. Nothing when there is none. */
-@Composable
-fun TaskPanel(task: FlatpakTaskUi, describe: (FlatpakTask) -> String, onCancel: () -> Unit, onShowLog: () -> Unit, onDismiss: () -> Unit) {
-    val running = task.running
-    val finished = task.finished
-    if (running == null && finished == null) return
-    val failed = running == null && task.error != null
-    val colors = MaterialTheme.colorScheme
-    Surface(
-        color = if (failed) colors.errorContainer else colors.secondaryContainer,
-        contentColor = if (failed) colors.onErrorContainer else colors.onSecondaryContainer,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (running != null) {
-                Text(task.phase ?: describe(running), style = MaterialTheme.typography.titleSmall)
-                val step = task.step
-                if (step != null) {
-                    Text(
-                        stringResource(if (step.deploying) R.string.task_step_deploying else R.string.task_step, step.verb, step.index, step.total, step.ref ?: ""),
-                        style = MaterialTheme.typography.bodySmall,
-                        maxLines = 2,
-                    )
-                } else if (task.finishing) {
-                    Text(stringResource(R.string.task_finishing), style = MaterialTheme.typography.bodySmall, maxLines = 2)
-                } else {
-                    task.status?.let { Text(it, style = MaterialTheme.typography.bodySmall, maxLines = 2) }
-                }
-                // Deploying reports nothing, so a full bar would look stuck.
-                val percent = step?.percent?.takeIf { !step.deploying }
-                if (percent != null) {
-                    LinearProgressIndicator(progress = { percent / 100f }, modifier = Modifier.fillMaxWidth())
-                } else {
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                }
-            } else if (finished != null) {
-                Text(
-                    task.error?.let { stringResource(R.string.task_failed, describe(finished), it) }
-                        ?: stringResource(R.string.task_done, describe(finished)),
-                    style = MaterialTheme.typography.titleSmall,
-                )
-            }
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (running != null) OutlinedButton(onClick = onCancel, enabled = !task.cancelling) { Text(stringResource(R.string.command_cancel)) }
-                TextButton(onClick = onShowLog) { Text(stringResource(R.string.show_log)) }
-                if (running == null) TextButton(onClick = onDismiss) { Text(stringResource(R.string.dismiss)) }
-            }
-        }
-    }
+fun MobileDataDialog(onDownload: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.mobile_data_title)) },
+        text = { Text(stringResource(R.string.mobile_data_text)) },
+        confirmButton = { Button(onClick = onDownload) { Text(stringResource(R.string.mobile_data_download)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.reset_cancel)) } },
+    )
 }
 
 /** Asks for one or more app IDs (separated by spaces) to install from Flathub. */

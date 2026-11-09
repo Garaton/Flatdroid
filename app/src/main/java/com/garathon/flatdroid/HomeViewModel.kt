@@ -22,6 +22,9 @@ import com.garathon.flatdroid.storage.StorageSizes
 import com.garathon.flatdroid.storage.StorageTasks
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChangedBy
@@ -34,8 +37,23 @@ import java.io.File
 /** Installed apps for the home list; reloaded after Flatpak tasks, sessions and setup. */
 class HomeViewModel(app: Application) : AndroidViewModel(app) {
     private val _apps = MutableStateFlow<List<InstalledApp>?>(null)
+    /** Apps whose uninstall has started: gone from the list at once, back if the task ends with them still installed. */
+    private val uninstalling = MutableStateFlow<Set<String>>(emptySet())
     /** Null until first loaded. */
-    val apps: StateFlow<List<InstalledApp>?> = _apps.asStateFlow()
+    val apps: StateFlow<List<InstalledApp>?> = combine(_apps, uninstalling) { list, gone -> list?.filter { it.id !in gone } }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    /** The user started an app from Flatdroid's window and hasn't left it: its viewer opens when it is up (not kept through rotation or in the background). */
+    @Volatile var autoOpen = false
+
+    /** An uninstall of [appId] has started: it leaves the list now, not when the task ends. */
+    fun uninstallStarted(appId: String) {
+        hiddenSince = FlatpakTasks.ui.value.generation
+        uninstalling.update { it + appId }
+    }
+
+    /** The task generation the apps were hidden in: they are listed again once a task has ended since. */
+    @Volatile private var hiddenSince = 0
 
     init {
         viewModelScope.launch {
@@ -56,6 +74,9 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             } catch (_: Exception) {
                 emptyList()
             }
+            // The task is over: what is still installed (an uninstall that was cancelled) is listed again.
+            val tasks = FlatpakTasks.ui.value
+            if (tasks.running == null && tasks.generation > hiddenSince) uninstalling.value = emptySet()
         }
     }
 
@@ -102,7 +123,9 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             done(Part.APPS) { it.withApps(apps, installed) }
             done(Part.CACHE) { it.copy(cache = StorageSizes.of(context.cacheDir)) }
             val shared = SavedSizes.shared(context) ?: return@launch
-            done(Part.SHARED) { it.copy(runtimes = shared.runtimes, other = shared.other) }
+            val runtimeSizes = SavedSizes.runtimes(context) ?: return@launch
+            val unusedRuntimes = unusedRuntimes(runtimeSizes.keys)
+            done(Part.SHARED) { it.copy(runtimes = shared.runtimes, other = shared.other, runtimeSizes = runtimeSizes, unusedRuntimes = unusedRuntimes) }
         }
     }
 
@@ -112,6 +135,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         val apps = ids.associateWith { SavedSizes.lastApp(context, it) }
         if (apps.values.none { it == null }) storage = storage.withApps(apps.mapValues { it.value!! }, installed)
         SavedSizes.lastShared(context)?.let { storage = storage.copy(runtimes = it.runtimes, other = it.other) }
+        SavedSizes.lastRuntimes(context)?.let { storage = storage.copy(runtimeSizes = it, unusedRuntimes = unusedRuntimes(it.keys)) }
         return storage
     }
 
@@ -175,14 +199,14 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * Runs [change] on each app that isn't installed but has files here, unless an app, a Flatpak
-     * task or a storage task runs, then measures again.
+     * Runs [change] on each app that isn't installed but has files here (with [onlyUninstalled] off,
+     * on every app with files), unless an app, a Flatpak task or a storage task runs, then measures again.
      */
-    private fun whileAllIdle(change: (Application, String) -> Unit) {
+    private fun whileAllIdle(onlyUninstalled: Boolean = true, change: (Application, String) -> Unit) {
         if (SessionController.isBusy || FlatpakTasks.ui.value.running != null || StorageTasks.busy) return
         viewModelScope.launch(Dispatchers.IO) {
             val context = getApplication<Application>()
-            for (appId in SavedSizes.appIds(context) - installedIds()) {
+            for (appId in if (onlyUninstalled) SavedSizes.appIds(context) - installedIds() else SavedSizes.appIds(context)) {
                 SavedSizes.forget(context, appId)
                 try {
                     change(context, appId)
@@ -195,6 +219,25 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             }
             measureFlatdroid()
         }
+    }
+
+    /**
+     * The runtimes among [runtimes] that no installed app uses: not its runtime, and not an
+     * extension mounted under it or under the app (the same rules a launch uses).
+     */
+    private fun unusedRuntimes(runtimes: Set<String>): Set<String> {
+        val env = AlpineEnvironment.get(getApplication())
+        val installation = FlatpakInstallation(env.flatpakDir, env.arch)
+        val used = installation.appIds().flatMap { installation.deploymentsFor(it) }.filter { it.kind == "runtime" }.map { it.ref.name }.toSet()
+        return runtimes - used
+    }
+
+    /** Deletes every app's private home, installed or not; not while anything runs. */
+    fun resetAllHomes() = whileAllIdle(onlyUninstalled = false) { context, appId -> AndroidTarFs.deleteTree(AppData.privateHome(context, appId)) }
+
+    /** Deletes every app's settings and other files of its own ([AppFiles]), installed or not; not while anything runs. */
+    fun resetAllAppData() = whileAllIdle(onlyUninstalled = false) { context, appId ->
+        AppFiles.dirs(File(AppData.root(context), appId), appId).forEach { AndroidTarFs.deleteTree(it) }
     }
 
     private fun installedIds(): Set<String> = AlpineEnvironment.get(getApplication()).let { FlatpakInstallation(it.flatpakDir, it.arch).appIds().toSet() }
@@ -217,6 +260,11 @@ data class FlatdroidStorage(
     val unusedHomes: Unused? = null,
     /** The hidden files apps share when they opt in (developer setting); counted in [total]. */
     val sharedDotfiles: Long? = null,
+    /** Each app's sizes (installed or with files left), for the Storage lists. */
+    val perApp: Map<String, SavedSizes.App> = emptyMap(),
+    /** Each runtime's size by ID, and the ones no installed app needs; null until measured. */
+    val runtimeSizes: Map<String, Long>? = null,
+    val unusedRuntimes: Set<String> = emptySet(),
     /** Parts shown from an earlier measurement while they are measured again. A null size isn't known yet. */
     val stale: Set<Part> = emptySet(),
 ) {
@@ -231,6 +279,7 @@ data class FlatdroidStorage(
     fun withApps(apps: Map<String, SavedSizes.App>, installed: Set<String>): FlatdroidStorage {
         val unused = apps.filterKeys { it !in installed }.values
         return copy(
+            perApp = apps,
             apps = apps.values.sumOf { it.app },
             appData = apps.values.sumOf { it.settings },
             privateHomes = apps.values.sumOf { it.privateHome },

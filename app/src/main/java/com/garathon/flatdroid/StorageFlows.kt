@@ -40,6 +40,7 @@ import com.garathon.flatdroid.storage.TempHomePrompt
 import com.garathon.flatdroid.storage.TempHomes
 import com.garathon.flatdroid.ui.ClashDialog
 import com.garathon.flatdroid.ui.ConfirmDialog
+import com.garathon.flatdroid.ui.HiddenFilesDialog
 import com.garathon.flatdroid.ui.MessageDialog
 import com.garathon.flatdroid.ui.StorageAction
 import com.garathon.flatdroid.ui.TempHomeDialog
@@ -70,6 +71,9 @@ class StorageFlows(
         private set
     var sharedHomeDisplay by mutableStateOf("")
         private set
+
+    /** The shared home may hold files Flatdroid can't see: asked once per folder, with ways to deal with it. */
+    private var sharedWarning by mutableStateOf<SharedWarning?>(null)
 
     /** A message about storage, and what follows once it is closed. */
     private var message by mutableStateOf<Message?>(null)
@@ -176,6 +180,19 @@ class StorageFlows(
                 shown.then?.invoke()
             }
         }
+        sharedWarning?.let { warning ->
+            val name = SharedHome.display(warning.dir)
+            fun close() {
+                SharedHome.markWarned(activity, warning.dir)
+                sharedWarning = null
+            }
+            HiddenFilesDialog(
+                activity.getString(R.string.shared_home_hidden_title, name), activity.getString(R.string.shared_home_hidden, name),
+                onShowAll = { close(); openAllFilesAccess() },
+                onAddFiles = { close(); importFiles(ImportTarget.Shared) },
+                onContinue = { close(); warning.then?.invoke() },
+            )
+        }
         tempHomeQuestion?.let { appId ->
             TempHomeDialog(
                 nameOf(appId),
@@ -197,7 +214,7 @@ class StorageFlows(
         exportQuestion?.let { task ->
             ConfirmDialog(
                 activity.getString(R.string.storage_export_warning_title),
-                activity.getString(if (exportWithPicker()) R.string.storage_export_warning_picker else R.string.storage_export_warning_download),
+                activity.getString(R.string.storage_export_warning_picker),
                 activity.getString(R.string.storage_export),
                 onConfirm = { exportQuestion = null; exportConfirmed(task) },
                 onDismiss = { exportQuestion = null },
@@ -305,13 +322,13 @@ class StorageFlows(
             return
         }
         val shared = settings.homeMode == HomeMode.SHARED
-        if ((shared || settings.sdcard) && !storageAsked && SharedHome.needsLegacyPermission(activity)) {
+        if ((shared || settings.homeMode == HomeMode.ANDROID || settings.sdcard) && !storageAsked && SharedHome.needsLegacyPermission(activity)) {
             afterStoragePermission = { beforeLaunch(appId, onReady, storageAsked = true) }
             storagePermission.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
             return
         }
         if (shared && SharedHome.needsWarning(activity)) {
-            message = hiddenFilesWarning(SharedHome.dir(activity)) { beforeLaunch(appId, onReady, storageAsked) }
+            sharedWarning = SharedWarning(SharedHome.dir(activity)) { beforeLaunch(appId, onReady, storageAsked) }
             return
         }
         onReady()
@@ -323,6 +340,17 @@ class StorageFlows(
     }
 
     fun importZipIntoSharedHome() = pickZip(ZipTarget.SharedHome)
+
+    /** Opens [appId]'s app home in Android's Files app, through Flatdroid's documents provider. */
+    fun openHomeInFiles(appId: String) {
+        val intent = Intent(Intent.ACTION_VIEW)
+            .setDataAndType(DocumentsContract.buildDocumentUri(HomesProvider.AUTHORITY, appId), DocumentsContract.Document.MIME_TYPE_DIR)
+        try {
+            activity.startActivity(intent)
+        } catch (_: ActivityNotFoundException) {
+            Toast.makeText(activity, R.string.storage_no_files_app, Toast.LENGTH_LONG).show()
+        }
+    }
 
     /** An action from an app's Storage section; the ones that replace or delete files were confirmed. */
     fun storageAction(appId: String, action: StorageAction) {
@@ -385,17 +413,11 @@ class StorageFlows(
         if (task == StorageTask.ExportFlatdroidSettings) exportConfirmed(task) else exportQuestion = task
     }
 
-    /** Download by path needs the storage permission before Android 10; a picked file doesn't. */
+    /** Exports go through Android's "save as" picker. */
     private fun exportConfirmed(task: StorageTask) {
-        if (exportWithPicker()) {
-            exportTarget = task
-            exportPicker.launch(StorageTaskService.exportName(activity, task))
-        } else {
-            withStorage(LEGACY_DOWNLOAD) { StorageTaskService.start(activity, task) }
-        }
+        exportTarget = task
+        exportPicker.launch(StorageTaskService.exportName(activity, task))
     }
-
-    private fun exportWithPicker() = SetupController.settings(activity).load()?.security?.exportWithPicker == true
 
     /** Runs [then], first asking for the storage permission on Android 10 and older when [needed]. */
     private fun withStorage(needed: Boolean, then: () -> Unit) {
@@ -489,7 +511,7 @@ class StorageFlows(
                 val store = SetupController.settings(activity)
                 store.load()?.let { store.save(it.copy(sharedHome = result.path.takeIf { path -> path != SharedHome.defaultDir().path })) }
                 refresh()
-                if (SharedHome.needsWarning(activity, dir)) message = hiddenFilesWarning(dir)
+                if (SharedHome.needsWarning(activity, dir)) sharedWarning = SharedWarning(dir)
             }
             SharedFolderPath.Result.NotAllowed ->
                 message = Message(activity.getString(R.string.shared_home_not_allowed_title), activity.getString(R.string.shared_home_not_allowed))
@@ -498,17 +520,8 @@ class StorageFlows(
         }
     }
 
-    /**
-     * The shared home may hold files Flatdroid can't see. Says where to change that, without
-     * doing it here; shown once per folder.
-     */
-    private fun hiddenFilesWarning(dir: File, then: (() -> Unit)? = null): Message {
-        val name = SharedHome.display(dir)
-        return Message(activity.getString(R.string.shared_home_hidden_title, name), activity.getString(R.string.shared_home_hidden, name)) {
-            SharedHome.markWarned(activity, dir)
-            then?.invoke()
-        }
-    }
+    /** The folder, and what follows the user's choice to continue ([then]; null when nothing waits). */
+    private class SharedWarning(val dir: File, val then: (() -> Unit)? = null)
 
     /** A message whose OK runs [then]. */
     private class Message(val title: String, val text: String, val then: (() -> Unit)? = null)

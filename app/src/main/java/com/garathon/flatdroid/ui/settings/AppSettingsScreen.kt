@@ -27,28 +27,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.padding
 import com.garathon.flatdroid.R
 import com.garathon.flatdroid.camera.AndroidCameras
+import com.garathon.flatdroid.flatpak.AppDetails
 import com.garathon.flatdroid.flatpak.InstalledApp
 import com.garathon.flatdroid.settings.AppSettings
 import com.garathon.flatdroid.settings.AppSettingsDraft
 import com.garathon.flatdroid.storage.AppStorage
-import com.garathon.flatdroid.ui.AppIcon
+import com.garathon.flatdroid.ui.home.AppIcon
 import com.garathon.flatdroid.ui.ConfirmDialog
 import com.garathon.flatdroid.ui.StorageAction
 import com.garathon.flatdroid.ui.theme.FlatdroidTheme
-
-/** The pages of one app's settings, in the rail's order; [OVERRIDES] only with developer options. */
-enum class AppPage(val key: String, override val icon: ImageVector, override val titleRes: Int) : SettingsPage {
-    OVERVIEW("overview", Icons.Filled.Info, R.string.app_page_overview),
-    HOME("home", Icons.Filled.Folder, R.string.app_page_home),
-    DISPLAY("display", Icons.Filled.DisplaySettings, R.string.app_page_display),
-    PERMISSIONS("permissions", Icons.Filled.VerifiedUser, R.string.app_page_permissions),
-    STORAGE("storage", Icons.Filled.Storage, R.string.app_page_storage),
-    OVERRIDES("overrides", Icons.Filled.Tune, R.string.app_page_overrides);
-
-    companion object {
-        fun of(key: String?): AppPage = entries.firstOrNull { it.key == key } ?: OVERVIEW
-    }
-}
 
 /**
  * Everything the pages read besides the draft. [onRequestMicrophone] asks Android for its
@@ -63,6 +50,8 @@ enum class AppPage(val key: String, override val icon: ImageVector, override val
  */
 class AppSettingsEnv(
     val app: InstalledApp,
+    /** What its metadata says; null while read. */
+    val details: AppDetails?,
     val storage: AppStorage?,
     val canChangeFiles: Boolean,
     val canUninstall: Boolean,
@@ -76,6 +65,12 @@ class AppSettingsEnv(
     val sharedHome: String,
     val broadAccess: Boolean,
     val onStorage: (StorageAction) -> Unit,
+    /** Opens this app's app home in Android's Files app. */
+    val onOpenHome: () -> Unit,
+    /** The security level limits devices (an app asking for all devices gets the basic ones). */
+    val limitDevices: Boolean,
+    /** Removes this app's Flatdroid settings file; the screen then closes. */
+    val onResetFlatdroidSettings: () -> Unit,
 )
 
 /** The draft and its environment, as the pages see them. */
@@ -158,12 +153,13 @@ private fun AppSettingsScreenPreview() {
             page = AppPage.PERMISSIONS, onPage = {},
             draft = SettingsDraftModel.Draft(AppSettingsDraft.of(AppSettings())),
             env = AppSettingsEnv(
-                app = InstalledApp("org.xfce.mousepad", "Mousepad", null, null),
+                app = InstalledApp("org.xfce.mousepad", "Mousepad", null, null), details = null,
                 storage = AppStorage(9_000_000, 12_345_678, 4_096, 65_536), canChangeFiles = true, canUninstall = true,
                 developerOptions = true, showsWebContent = false, hasCamera = true,
                 cameraResolutions = mapOf(15 to listOf(AndroidCameras.Resolution(720)), 30 to listOf(AndroidCameras.Resolution(720))),
                 onRequestMicrophone = {}, onRequestCamera = {}, onUninstall = { _, _ -> },
-                sharedHome = "Documents/Flatdroid", broadAccess = true, onStorage = {},
+                sharedHome = "Documents/Flatdroid", broadAccess = true, onStorage = {}, onOpenHome = {},
+                limitDevices = false, onResetFlatdroidSettings = {},
             ),
             onSave = {}, onDiscard = {},
         )

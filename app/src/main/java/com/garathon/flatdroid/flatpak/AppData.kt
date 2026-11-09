@@ -54,7 +54,7 @@ object AppData {
     /** The app's settings, with what those the user hasn't changed follow (the security level's defaults). */
     fun settings(context: Context, appId: String) = AppSettingsStore(
         settingsFile(context, appId),
-        SetupController.settings(context).load()?.security?.appDefaults ?: AppDefaults(),
+        SetupController.settings(context).load()?.appDefaults ?: AppDefaults(),
     )
 
     /** Electron builds prepared for apps that ship another architecture's (`files/electron/<ID>`). */

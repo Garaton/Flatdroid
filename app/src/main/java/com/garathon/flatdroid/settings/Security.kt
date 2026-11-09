@@ -23,21 +23,21 @@ data class SecuritySettings(
     val limitDevices: Boolean = false,
     /** Flatdroid's screens can't be captured. */
     val hideScreen: Boolean = false,
-    /** Exports go through Android's "save as" picker instead of straight into Download. */
-    val exportWithPicker: Boolean = false,
     /** Each app's and its runtime's deployed files are checked against a baseline before launch. */
     val checkFilesBeforeLaunch: Boolean = false,
-    /** Apps get Android's fonts (their list tells apps and websites the device's Android version and maker) until changed per app. */
+    /** Apps get Android's fonts (their list tells apps and websites the device's Android version and maker). */
     val androidFonts: Boolean = true,
     /** Apps share the clipboard with Android (through the VNC viewer) until changed per app. */
     val shareClipboard: Boolean = true,
-    /** Apps get Android's time zone (otherwise UTC, which hints at no location) until changed per app. */
-    val shareTimeZone: Boolean = true,
-    /** Apps get Android's language and region as their locale (otherwise the generic C.UTF-8) until changed per app. */
-    val shareLanguage: Boolean = true,
+    /**
+     * Apps get Android's time zone and its language and region as their locale. Off, they get UTC
+     * and the generic C.UTF-8, which hint at no location and no language.
+     */
+    val shareLocale: Boolean = true,
 ) {
+    /** What an app's own settings start as; [UserSettings.appDefaults] adds the camera's. */
     val appDefaults: AppDefaults get() =
-        AppDefaults(defaultHomeMode, permissionsFromMetadata, androidFonts, shareClipboard, shareTimeZone, shareLanguage)
+        AppDefaults(homeMode = defaultHomeMode, permissionsFromMetadata = permissionsFromMetadata, clipboard = shareClipboard, blockExtraSyscalls = extraSyscallFilter)
 }
 
 /**
@@ -61,12 +61,10 @@ enum class SecurityLevel(
             defaultHomeMode = HomeMode.PRIVATE,
             limitDevices = true,
             hideScreen = true,
-            exportWithPicker = true,
             checkFilesBeforeLaunch = true,
             androidFonts = false,
             shareClipboard = false,
-            shareTimeZone = false,
-            shareLanguage = false,
+            shareLocale = false,
         ),
         R.string.security_level_hardened, R.string.security_level_hardened_hint,
     ),

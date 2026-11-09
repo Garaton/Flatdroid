@@ -28,7 +28,30 @@ data class InstalledApp(
     val waylandAndX11: Boolean = false,
     /** Its metadata asks for Wayland, so it runs there unless X11 is forced. */
     val wayland: Boolean = false,
+    /** How many times it was launched, and for how long it ran in all (milliseconds). */
+    val launches: Int = 0,
+    val usedMillis: Long = 0,
+    /** A hint that it uses a camera ([FlatpakContext.mayUseCamera]). */
+    val mayUseCamera: Boolean = false,
+    /** Its metadata asks for the home or the whole host file system (`filesystems=home`, `host` or `host-os`). */
+    val requestsFiles: Boolean = false,
 )
+
+/** What an app's metadata says (see [InstalledApps.details]). */
+data class AppDetails(
+    /** The runtime's name and branch, e.g. `org.gnome.Platform 47`. */
+    val runtime: String?,
+    val display: Display,
+    val sockets: List<String>,
+    val devices: List<String>,
+    val filesystems: List<String>,
+    val shared: List<String>,
+    /** When it was installed; null if unknown. */
+    val installed: Long?,
+) {
+    /** Which display protocols the app asks for. */
+    enum class Display { WAYLAND_AND_X11, WAYLAND, X11, NONE }
+}
 
 /** Installed apps with their names and icons, read from what each app exports. */
 class InstalledApps(private val context: Context) {
@@ -37,17 +60,22 @@ class InstalledApps(private val context: Context) {
 
     fun list(): List<InstalledApp> = installation.appIds().mapNotNull { id ->
         val app = installation.app(id) ?: return@mapNotNull null
+        val settings = AppData.settings(context, id).load()
         InstalledApp(
             id = id,
             name = desktopName(app, id) ?: id,
             icon = icon(app, id),
-            lastOpened = AppData.settings(context, id).load().lastOpened,
+            lastOpened = settings.lastOpened,
+            launches = settings.launches,
+            usedMillis = settings.usedMillis,
             installed = installation.installed(id),
             requestsAllDevices = DevNodes.ALL in app.metadata.context.devices,
             requestsAudio = AppSettings.PULSEAUDIO_SOCKET in app.metadata.context.sockets,
             requestsNetwork = AppSettings.NETWORK in app.metadata.context.shared,
             waylandAndX11 = app.metadata.context.waylandAndX11,
             wayland = app.metadata.context.wayland,
+            mayUseCamera = app.metadata.context.mayUseCamera,
+            requestsFiles = app.metadata.context.filesystems.any { it.substringBefore(':') in FILE_ACCESS },
         )
     }
 
@@ -64,7 +92,31 @@ class InstalledApps(private val context: Context) {
         return Electron.zypakTarget(script) != null || Electron.cobaltTarget(script, id) { true } != null
     }
 
+    /** What the app's metadata says, for its Overview; null if it isn't installed. */
+    fun details(id: String): AppDetails? {
+        val app = installation.app(id) ?: return null
+        val context = app.metadata.context
+        val display = when {
+            context.waylandAndX11 -> AppDetails.Display.WAYLAND_AND_X11
+            context.wayland -> AppDetails.Display.WAYLAND
+            "x11" in context.sockets || "fallback-x11" in context.sockets -> AppDetails.Display.X11
+            else -> AppDetails.Display.NONE
+        }
+        return AppDetails(
+            runtime = app.metadata.runtime?.let { "${it.name} ${it.branch}" },
+            display = display,
+            sockets = context.sockets,
+            devices = context.devices,
+            filesystems = context.filesystems,
+            shared = context.shared,
+            installed = installation.installed(id),
+        )
+    }
+
     fun name(id: String): String? = installation.app(id)?.let { desktopName(it, id) }
+
+    /** The app's metadata permissions; null if it isn't installed. */
+    fun context(id: String): FlatpakContext? = installation.app(id)?.metadata?.context
 
     /** The `sockets=` the app's metadata asks for; empty if it isn't installed. */
     fun sockets(id: String): List<String> = installation.app(id)?.metadata?.context?.sockets.orEmpty()
@@ -88,6 +140,9 @@ class InstalledApps(private val context: Context) {
     }
 
     companion object {
+        /** The `filesystems=` entries that give an app the home or everything. */
+        private val FILE_ACCESS = setOf("home", "host", "host-os")
+
         /** PNG sizes to try, best first. */
         private val ICON_SIZES = listOf("128x128", "256x256", "96x96", "64x64", "512x512", "48x48")
 

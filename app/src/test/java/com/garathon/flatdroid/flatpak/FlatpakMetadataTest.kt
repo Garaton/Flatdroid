@@ -95,6 +95,15 @@ class FlatpakMetadataTest {
     }
 
     @Test
+    fun aCameraHintIsAllDevicesOrThePipewireSocket() {
+        assertTrue(FlatpakContext(devices = listOf("all")).mayUseCamera)
+        assertTrue(FlatpakContext(filesystems = listOf("xdg-run/pipewire-0:ro")).mayUseCamera)
+        assertTrue(FlatpakContext(filesystems = listOf("xdg-run/pipewire-0")).mayUseCamera)
+        assertFalse(FlatpakContext(devices = listOf("dri"), filesystems = listOf("home", "xdg-run/pipewire-0-manager")).mayUseCamera)
+        assertFalse(FlatpakContext(sockets = listOf("pulseaudio")).mayUseCamera)
+    }
+
+    @Test
     fun readsTheSessionBusPolicy() {
         val m = FlatpakMetadata.parse(
             """

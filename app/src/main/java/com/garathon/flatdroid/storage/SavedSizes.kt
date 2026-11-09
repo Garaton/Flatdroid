@@ -51,12 +51,12 @@ class SizeStore(private val dir: File, private val onMeasured: (name: String, mi
         setAside(file(name))
     }
 
-    /** Every saved size, or with [keep], all but that one. */
-    fun forgetAll(keep: String? = null) = synchronized(this) {
+    /** Every saved size, or with [keep], all but those. */
+    fun forgetAll(keep: Set<String> = emptySet()) = synchronized(this) {
         allGeneration++
-        dir.listFiles()?.filter { it.name.endsWith(SUFFIX) && it.name != keep?.let { name -> name + SUFFIX } }?.forEach(::setAside)
-        // The kept one's measurement in progress may still be saved.
-        if (keep != null) generations[keep] = (generations[keep] ?: 0) - 1
+        dir.listFiles()?.filter { it.name.endsWith(SUFFIX) && it.name.removeSuffix(SUFFIX) !in keep }?.forEach(::setAside)
+        // The kept ones' measurements in progress may still be saved.
+        for (name in keep) generations[name] = (generations[name] ?: 0) - 1
     }
 
     private fun generation(name: String) = synchronized(this) { allGeneration + (generations[name] ?: 0) }
@@ -128,6 +128,7 @@ class SizeStore(private val dir: File, private val onMeasured: (name: String, mi
  */
 object SavedSizes {
     private const val SHARED = "shared"
+    private const val RUNTIMES = "runtimes"
     private val APP_KEYS = setOf("app", "flatpak", "home", "settings")
     private val SHARED_KEYS = setOf("runtimes", "other")
 
@@ -204,11 +205,8 @@ object SavedSizes {
     fun shared(context: Context): Shared? {
         val sizes = measuring { store(context).get(SHARED, SHARED_KEYS) {
             val env = AlpineEnvironment.get(context)
-            val l2s = File(env.paths().l2sDir)
             val apps = FlatpakInstallation(env.flatpakDir, env.arch).appIds()
-            val runtimes = StorageSizes.following(
-                File(env.flatpakDir, "runtime").listFiles().orEmpty().filter { dir -> apps.none { dir.name.startsWith("$it.") } }, l2s, stop,
-            )
+            val runtimes = (runtimes(context) ?: throw MeasureStopped()).values.sum()
             // As each app's own size counts them, so that the rest is what neither counts. Saved with
             // the app's sizes (apps are measured before this), so read rather than walked again.
             val appFiles = apps.sumOf { id -> (app(context, id) ?: throw MeasureStopped()).flatpak }
@@ -219,6 +217,28 @@ object SavedSizes {
             mapOf("runtimes" to runtimes, "other" to (files - runtimes - appFiles).coerceAtLeast(0))
         } } ?: return null
         return Shared(sizes.getValue("runtimes"), sizes.getValue("other"))
+    }
+
+    /**
+     * Each runtime's size (ID to bytes; its branches and their extensions' own deployments with it),
+     * without apps' own extensions (counted with the app). Null while everything is changing.
+     */
+    fun runtimes(context: Context): Map<String, Long>? = measuring {
+        val env = AlpineEnvironment.get(context)
+        val l2s = File(env.paths().l2sDir)
+        val dirs = runtimeDirs(env)
+        store(context).get(RUNTIMES, dirs.map { it.name }.toSet()) {
+            dirs.associate { dir -> dir.name to StorageSizes.following(listOf(dir), l2s, stop) }
+        }
+    }
+
+    /** The runtimes' sizes as last saved, perhaps from before a change; null when never measured. Never measures. */
+    fun lastRuntimes(context: Context): Map<String, Long>? =
+        store(context).last(RUNTIMES, runtimeDirs(AlpineEnvironment.get(context)).map { it.name }.toSet())
+
+    private fun runtimeDirs(env: AlpineEnvironment): List<File> {
+        val apps = FlatpakInstallation(env.flatpakDir, env.arch).appIds()
+        return File(env.flatpakDir, "runtime").listFiles().orEmpty().filter { dir -> apps.none { dir.name.startsWith("$it.") } }.sortedBy { it.name }
     }
 
     /** [measure], or null while everything is changing or when that began during it. */
@@ -237,7 +257,7 @@ object SavedSizes {
     }
 
     /** Before anything that changes apps' files, but not Alpine, Flatpak or runtimes. */
-    fun forgetApps(context: Context) = store(context).forgetAll(keep = SHARED)
+    fun forgetApps(context: Context) = store(context).forgetAll(keep = setOf(SHARED, RUNTIMES))
 
     /** Before anything that may change any of it: Flatpak tasks, setup, the terminal. Nothing is measured until [changedAll]. */
     fun forgetAll(context: Context) {
@@ -288,7 +308,11 @@ object SavedSizes {
                 // Not before setup has finished: a partial Alpine would be saved as its size.
                 if (AlpineEnvironment.get(appContext).isInstalled()) {
                     try {
-                        if (name == SHARED) shared(appContext) else app(appContext, name)
+                        when (name) {
+                            SHARED -> shared(appContext)
+                            RUNTIMES -> runtimes(appContext)
+                            else -> app(appContext, name)
+                        }
                     } catch (e: Exception) {
                         DebugLog.w("Measuring $name failed: $e")
                     }

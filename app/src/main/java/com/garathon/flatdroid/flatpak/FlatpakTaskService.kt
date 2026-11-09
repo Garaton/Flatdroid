@@ -269,14 +269,18 @@ class FlatpakTaskService : Service() {
         val guard = IntegrityGuard(applicationContext)
         // Shared across apps so a runtime or extension several apps use is hashed once, not per app.
         val baselinedCommits = mutableSetOf<String>()
-        for (id in appIds) {
+        for ((index, id) in appIds.withIndex()) {
             guard.recordBaseline(
                 id,
                 baselinedCommits = baselinedCommits,
                 skip = skip,
                 onStart = { FlatpakTasks.newCommand(getString(R.string.task_recording_baseline)) },
             ) { ref, done, total ->
-                if (done == total || done % 1000 == 0) FlatpakTasks.log(getString(R.string.task_baseline_progress, ref.name, done, total))
+                if (done == total || done % 1000 == 0) {
+                    FlatpakTasks.log(getString(R.string.task_baseline_progress, ref.name, done, total))
+                    // Across the apps: this one's files are a share of all of them.
+                    if (total > 0) FlatpakTasks.progress((index + done.toFloat() / total) / appIds.size)
+                }
             }
         }
         guard.cleanOrphans()
@@ -340,7 +344,10 @@ class FlatpakTaskService : Service() {
 
     /** The check's progress in the task's log (its last line shows under the task), every so often. */
     private fun logCheckProgress(ref: FlatpakRef, done: Int, total: Int) {
-        if (total > 0 && (done == total || done % 2000 == 0)) FlatpakTasks.log(getString(R.string.task_check_progress, ref.name, done, total))
+        if (total > 0 && (done == total || done % 2000 == 0)) {
+            FlatpakTasks.log(getString(R.string.task_check_progress, ref.name, done, total))
+            FlatpakTasks.progress(done.toFloat() / total)
+        }
     }
 
     private fun extraData(env: AlpineEnvironment) = ExtraData(env, AppData.extraDataState(applicationContext), File(cacheDir, "extra-data"))
@@ -351,11 +358,12 @@ class FlatpakTaskService : Service() {
      * leave a commit whose files are partly gone, and a hard kill can leave files whose content is
      * gone (see BrokenLinks); a later install then fails rather than downloading them again. Not
      * after installs: an interrupted download is already safe, and cleaning would throw away
-     * what it fetched. Links are checked only after a kill: a command that ended on SIGINT
+     * what it fetched, nor after a baseline, which changes no Flatpak files. Links are checked only after a kill: a command that ended on SIGINT
      * stopped between system calls, which leaves them whole.
      */
     private fun cleanUpAfter(task: FlatpakTask) {
-        if (task is FlatpakTask.Install) return
+        // A baseline changes no Flatpak files, so there is nothing half-done to clean up after it either.
+        if (task is FlatpakTask.Install || task == FlatpakTask.BaselineAll) return
         try {
             cleanRepository(AlpineEnvironment.get(applicationContext), checkLinks = killed)
         } catch (e: Exception) {

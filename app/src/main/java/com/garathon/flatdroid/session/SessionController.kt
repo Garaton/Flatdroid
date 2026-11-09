@@ -13,7 +13,8 @@ import kotlinx.coroutines.flow.update
 /** What the one Flatpak session is doing. */
 sealed interface SessionState {
     data object Idle : SessionState
-    data class Starting(val appId: String, val detail: String, val skippable: Boolean = false) : SessionState
+    /** [fraction]: how far the file check is in the deployment it is on, when it can tell. */
+    data class Starting(val appId: String, val detail: String, val skippable: Boolean = false, val fraction: Float? = null) : SessionState
     /**
      * The app runs. Flatdroid's own viewer connects to [socket] (a host path); with the external
      * viewer setting there is none, and a viewer connects to localhost:[SessionScript.VNC_PORT]
@@ -87,10 +88,10 @@ object SessionController {
     val isBusy: Boolean get() = _ui.value.state !is SessionState.Idle && _ui.value.state !is SessionState.Question
 
     /** Also clears a finished Flatpak task's banner: one banner at a time. */
-    fun starting(appId: String, detail: String, clearLog: Boolean = false, skippable: Boolean = false) {
+    fun starting(appId: String, detail: String, clearLog: Boolean = false, skippable: Boolean = false, fraction: Float? = null) {
         FlatpakTasks.dismiss()
         if (clearLog) logBuffer.clear()
-        _ui.update { it.copy(state = SessionState.Starting(appId, detail, skippable), message = null, failed = false) }
+        _ui.update { it.copy(state = SessionState.Starting(appId, detail, skippable, fraction), message = null, failed = false) }
     }
 
     /** Set while the file check runs; the Skip button calls [skipFileCheck]. */

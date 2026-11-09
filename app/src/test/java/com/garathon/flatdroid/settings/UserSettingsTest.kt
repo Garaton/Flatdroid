@@ -28,9 +28,9 @@ class UserSettingsTest {
         assertEquals(UserSettings(GuestFiles.ALL_LANGUAGES), store.load())
         val all = UserSettings(
             "de;en", developerOptions = true, vncViewer = "com.gaurav.avnc", frameRate60 = true, customFrameRate = 45,
-            uncappedFrameRate = true, installGpuRuntimes = true, titleBars = TitleBars.OFF, customAudioLatencyMs = 30,
-            lowLatencyAudio = true, highQualityAudio = true, sharedHome = "/storage/emulated/0/Download/Home", pureBlack = true,
-            externalViewer = true,
+            uncappedFrameRate = true, installGpuRuntimes = true, customAudioLatencyMs = 30,
+            lowLatencyAudio = true, highQualityAudio = true, sharedHome = "/storage/emulated/0/Download/Home", theme = InterfaceTheme.AMOLED,
+            externalViewer = true, mobileData = MobileData.NEVER, appTime = AppTime.LAST_OPENED, cameraResolution = 480, cameraFrameRate = 15,
         )
         store.save(all)
         assertEquals(all, store.load())
@@ -57,15 +57,27 @@ class UserSettingsTest {
     }
 
     @Test
-    fun titleBarsFollowTheViewerUnlessTheDeveloperSettingSaysOtherwise() {
+    fun titleBarsFollowTheViewer() {
         // Flatdroid decides: off in its own viewer (its bar closes windows), on with an external one.
         assertFalse(UserSettings("en").windowTitleBars)
         assertTrue(UserSettings("en", externalViewer = true).windowTitleBars)
-        // The developer setting counts only with developer options on.
-        assertFalse(UserSettings("en", titleBars = TitleBars.ON).windowTitleBars)
-        assertTrue(UserSettings("en", developerOptions = true, titleBars = TitleBars.ON).windowTitleBars)
-        assertFalse(UserSettings("en", developerOptions = true, externalViewer = true, titleBars = TitleBars.OFF).windowTitleBars)
-        assertTrue(UserSettings("en", developerOptions = true, externalViewer = true, titleBars = TitleBars.AUTO).windowTitleBars)
+    }
+
+    @Test
+    fun theThemeFollowsAndroidOnlyWhenItIsTheSystemOne() {
+        assertTrue(InterfaceTheme.SYSTEM.isDark(true))
+        assertFalse(InterfaceTheme.SYSTEM.isDark(false))
+        assertFalse(InterfaceTheme.LIGHT.isDark(true))
+        assertTrue(InterfaceTheme.DARK.isDark(false) && InterfaceTheme.AMOLED.isDark(false))
+    }
+
+    @Test
+    fun appsStartFromFlatdroidsCameraAndTheLevelsChoices() {
+        val defaults = UserSettings("en", cameraResolution = 480, cameraFrameRate = 15, security = SecurityLevel.PERFORMANT.settings).appDefaults
+        assertEquals(480 to 15, defaults.cameraResolution to defaults.cameraFrameRate)
+        // Performant doesn't filter the rarely used system calls, so an app starts without blocking them.
+        assertFalse(defaults.blockExtraSyscalls)
+        assertTrue(UserSettings("en").appDefaults.blockExtraSyscalls)
     }
 
     @Test
@@ -110,7 +122,7 @@ class UserSettingsTest {
             assertTrue("security.level=${level.name.lowercase()}" in file.readText())
             assertFalse("security.limitDevices" in file.readText())
         }
-        val custom = SecurityLevel.HARDENED.settings.copy(defaultHomeMode = HomeMode.SHARED, exportWithPicker = false, shareClipboard = true)
+        val custom = SecurityLevel.HARDENED.settings.copy(defaultHomeMode = HomeMode.SHARED, shareLocale = true, shareClipboard = true)
         store.save(UserSettings("en", security = custom))
         assertNull(store.load()!!.securityLevel)
         assertEquals(custom, store.load()!!.security)
@@ -127,11 +139,10 @@ class UserSettingsTest {
         assertTrue(default.hideHelperProcesses && hardened.hideHelperProcesses)
         assertEquals(HomeMode.PRIVATE, hardened.appDefaults.homeMode)
         assertFalse(hardened.appDefaults.permissionsFromMetadata)
-        assertTrue(hardened.limitDevices && hardened.hideScreen && hardened.exportWithPicker && hardened.hideHelperProcesses)
-        assertFalse(hardened.appDefaults.androidFonts || hardened.appDefaults.clipboard)
-        assertFalse(hardened.appDefaults.timeZone || hardened.appDefaults.language)
+        assertTrue(hardened.limitDevices && hardened.hideScreen && hardened.hideHelperProcesses)
+        assertFalse(hardened.androidFonts || hardened.shareLocale || hardened.appDefaults.clipboard)
         assertEquals(AppDefaults(), default.appDefaults)
-        assertEquals(AppDefaults(), performant.appDefaults)
+        assertEquals(AppDefaults(blockExtraSyscalls = false), performant.appDefaults)
     }
 
     @Test

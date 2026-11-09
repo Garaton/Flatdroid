@@ -28,6 +28,8 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.garathon.flatdroid.FlatdroidStorage
 import com.garathon.flatdroid.R
+import com.garathon.flatdroid.camera.AndroidCameras
+import com.garathon.flatdroid.flatpak.InstalledApp
 import com.garathon.flatdroid.Unused
 import com.garathon.flatdroid.flatpak.IntegrityGuard
 import com.garathon.flatdroid.session.Viewer
@@ -36,24 +38,9 @@ import com.garathon.flatdroid.settings.UserSettingsDraft
 import com.garathon.flatdroid.setup.ResetMode
 import com.garathon.flatdroid.ui.BaselineChoiceDialog
 import com.garathon.flatdroid.ui.ConfirmDialog
+import com.garathon.flatdroid.ui.StorageAction
 import com.garathon.flatdroid.ui.FlatdroidIcon
 import com.garathon.flatdroid.ui.theme.FlatdroidTheme
-
-/** The pages of Flatdroid's settings, in the rail's order. */
-enum class GlobalPage(val key: String, override val icon: ImageVector, override val titleRes: Int) : SettingsPage {
-    OVERVIEW("overview", Icons.Filled.Dashboard, R.string.settings_page_overview),
-    PER_APP_DEFAULTS("defaults", Icons.Filled.Apps, R.string.settings_page_defaults),
-    DISPLAY("display", Icons.Filled.DisplaySettings, R.string.settings_page_display),
-    DEVICES("devices", Icons.Filled.PermCameraMic, R.string.settings_page_devices),
-    SECURITY("security", Icons.Filled.Shield, R.string.settings_page_security),
-    FLATPAK("flatpak", Icons.Filled.Inventory2, R.string.settings_page_flatpak),
-    STORAGE("storage", Icons.Filled.Storage, R.string.settings_page_storage),
-    DEVELOPER("developer", Icons.Filled.Code, R.string.settings_page_developer);
-
-    companion object {
-        fun of(key: String?): GlobalPage = entries.firstOrNull { it.key == key } ?: OVERVIEW
-    }
-}
 
 /** What the Storage page can ask for; each is an action of the activity. */
 class GlobalStorageActions(
@@ -71,6 +58,14 @@ class GlobalStorageActions(
     val onResetSharedDotfiles: () -> Unit,
     val onExportSettings: () -> Unit,
     val onImportSettings: () -> Unit,
+    val onAddFiles: () -> Unit,
+    val onAddZip: () -> Unit,
+    val onResetAllHomes: () -> Unit,
+    val onResetAllAppData: () -> Unit,
+    /** One app's storage action from the lists (its home or app data: import, export, reset). */
+    val onAppStorage: (appId: String, StorageAction) -> Unit,
+    val onOpenHome: (appId: String) -> Unit,
+    val onUninstall: (appId: String, deleteData: Boolean, keepRuntimes: Boolean) -> Unit,
 )
 
 /**
@@ -94,12 +89,24 @@ class GlobalSettingsEnv(
     val onReset: (ResetMode) -> Unit,
     val onResetSettings: () -> Unit,
     val onTerminal: () -> Unit,
+    /** The installed apps, for the Overview's usage numbers. */
+    val apps: List<InstalledApp>,
+    /** What the running Flatpak task is doing (an uninstall started from the Storage lists, say); null when none runs. */
+    val taskText: String?,
+    /** The device has a camera, and the sizes its cameras give at each rate ([AndroidCameras.resolutions]; empty while asked). */
+    val hasCamera: Boolean,
+    val cameraResolutions: Map<Int, List<AndroidCameras.Resolution>>,
 )
 
 /** The draft and its environment, as the pages see them. */
-class GlobalPageState(val env: GlobalSettingsEnv, val draft: UserSettingsDraft, private val onDraft: (UserSettingsDraft) -> Unit) {
+class GlobalPageState(
+    val env: GlobalSettingsEnv,
+    val draft: UserSettingsDraft,
+    /** Goes to another page (the Overview's chips). */
+    val onPage: (GlobalPage) -> Unit,
+    private val onDraft: (UserSettingsDraft) -> Unit,
+) {
     val settings: UserSettings get() = draft.settings
-    val enabled: Boolean get() = !env.applying
 
     fun edit(change: UserSettingsDraft.() -> UserSettingsDraft) = onDraft(draft.change())
 
@@ -150,12 +157,13 @@ fun GlobalSettingsScreen(
             onAtFirstLaunch = { baselineChoice = false; onSave(toSave) },
         )
     }
-    val state = GlobalPageState(env, current) { draft.current = it }
+    val state = GlobalPageState(env, current, onPage) { draft.current = it }
     SettingsShell(
         pages = GlobalPage.entries,
         selected = page,
         onSelect = onPage,
         error = env.error,
+        dimmed = env.applying,
         modifier = modifier,
         topBar = {
             SettingsTopBar(
@@ -205,8 +213,9 @@ private fun GlobalSettingsScreenPreview() {
                     other = 150L shl 20, unusedAppData = Unused(1, 1L shl 20), unusedHomes = Unused(0, 0), sharedDotfiles = 0,
                 ),
                 storageBusy = false, canReset = true, canOpenTerminal = true,
-                actions = GlobalStorageActions({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}),
+                actions = GlobalStorageActions({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, { _, _ -> }, {}, { _, _, _ -> }),
                 onReset = {}, onResetSettings = {}, onTerminal = {},
+                apps = emptyList(), taskText = null, hasCamera = true, cameraResolutions = emptyMap(),
             ),
             onSave = {}, onSaveAndReinstallAll = {}, onSaveAndBaselineAll = {}, onDiscard = {},
         )

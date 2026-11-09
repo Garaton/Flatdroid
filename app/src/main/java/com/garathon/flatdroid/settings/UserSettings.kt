@@ -1,6 +1,7 @@
 package com.garathon.flatdroid.settings
 
 import com.garathon.flatdroid.alpine.GuestFiles
+import com.garathon.flatdroid.camera.AndroidCameras
 import com.garathon.flatdroid.flatpak.FlatpakCommands
 import com.garathon.flatdroid.util.writeTextAtomically
 import java.io.File
@@ -22,6 +23,24 @@ enum class FlatpakTheme {
     DARK,
     LIGHT,
 }
+
+/** Flatdroid's own theme: Android's light or dark mode, or one of them; AMOLED is dark with black backgrounds. */
+enum class InterfaceTheme(val key: String) {
+    SYSTEM("system"), LIGHT("light"), DARK("dark"), AMOLED("amoled");
+
+    /** Whether the dark colors are used, given Android's own mode. */
+    fun isDark(systemDark: Boolean): Boolean = when (this) {
+        SYSTEM -> systemDark
+        LIGHT -> false
+        DARK, AMOLED -> true
+    }
+}
+
+/** What Flatpak tasks do on a connection Android calls metered (mobile data, mostly). */
+enum class MobileData(val key: String) { ASK("ask"), ALWAYS("always"), NEVER("never") }
+
+/** What the right column of the home list shows for each app. */
+enum class AppTime(val key: String) { TIME_USED("used"), LAST_OPENED("lastOpened") }
 
 /** PulseAudio's resampler (`--resample-method`), used for apps whose rate differs from the device's. */
 enum class Resampler(val pulseName: String) {
@@ -56,8 +75,6 @@ data class UserSettings(
     val uncappedFrameRate: Boolean = false,
     /** Developer setting: let Flatpak install vendor GPU runtimes (masked otherwise; see [commands]). */
     val installGpuRuntimes: Boolean = false,
-    /** Developer setting: whether Openbox draws title bars (close, maximize) on windows. */
-    val titleBars: TitleBars = TitleBars.AUTO,
     /** Developer setting: the audio player's buffer in milliseconds; null for [DEFAULT_AUDIO_LATENCY_MS]. */
     val customAudioLatencyMs: Int? = null,
     /** The player uses Android's low latency output instead of the power saving one ([audioOutputMode]). */
@@ -67,8 +84,15 @@ data class UserSettings(
     /** The shared home's absolute path; null for the default, `Documents/Flatdroid`. */
     val sharedHome: String? = null,
     val flatpakTheme: FlatpakTheme = FlatpakTheme.SYSTEM,
-    /** Flatdroid's own dark theme with black backgrounds (AMOLED screens); not applied to apps. */
-    val pureBlack: Boolean = false,
+    /** Flatdroid's own theme; not applied to apps ([flatpakTheme]). */
+    val theme: InterfaceTheme = InterfaceTheme.SYSTEM,
+    /** What installs and updates do on a metered connection. */
+    val mobileData: MobileData = MobileData.ASK,
+    /** What the home list shows next to each app. */
+    val appTime: AppTime = AppTime.TIME_USED,
+    /** The camera's frames' short side and rate for apps that don't override them (see [AppSettings]). */
+    val cameraResolution: Int = AndroidCameras.DEFAULT_RESOLUTION,
+    val cameraFrameRate: Int = AndroidCameras.DEFAULT_FRAME_RATE,
     /** What the security level sets ([SecurityLevel]). */
     val security: SecuritySettings = SecuritySettings(),
     /** Developer setting: the terminal's commands run behind fdsec's filter. */
@@ -102,14 +126,12 @@ data class UserSettings(
 
     /**
      * Whether windows get title bars: with an external viewer, which has no other way to close a
-     * window; not in Flatdroid's viewer, whose bar closes the focused one. The developer setting
-     * counts only while developer options are on.
+     * window; not in Flatdroid's viewer, whose bar closes the focused one.
      */
-    val windowTitleBars: Boolean get() = when (titleBars.takeIf { developerOptions } ?: TitleBars.AUTO) {
-        TitleBars.AUTO -> externalViewer
-        TitleBars.ON -> true
-        TitleBars.OFF -> false
-    }
+    val windowTitleBars: Boolean get() = externalViewer
+
+    /** What an app's own settings start as. */
+    val appDefaults: AppDefaults get() = security.appDefaults.copy(cameraResolution = cameraResolution, cameraFrameRate = cameraFrameRate)
 
     /** The audio player's buffer; the developer setting counts only while developer options are on. */
     val audioLatencyMs: Int get() = customAudioLatencyMs?.takeIf { developerOptions } ?: DEFAULT_AUDIO_LATENCY_MS
@@ -154,7 +176,7 @@ class UserSettingsStore(private val file: File) {
     /** Reads [LiveSettings] (at start-up; [save] keeps them current). */
     fun loadLive() {
         val settings = runCatching { load() }.getOrNull()
-        LiveSettings.pureBlack.value = settings?.pureBlack == true
+        LiveSettings.theme.value = settings?.theme ?: InterfaceTheme.SYSTEM
         LiveSettings.hideScreen.value = settings?.security?.hideScreen == true
     }
 
@@ -167,13 +189,18 @@ class UserSettingsStore(private val file: File) {
             flatpakLanguages = languages,
             developerOptions = props.getProperty(KEY_DEVELOPER) == "true",
             externalViewer = props.getProperty(KEY_EXTERNAL_VIEWER) == "true",
-            pureBlack = props.getProperty(KEY_PURE_BLACK) == "true",
+            theme = InterfaceTheme.entries.firstOrNull { it.key == props.getProperty(KEY_THEME_FLATDROID) } ?: InterfaceTheme.SYSTEM,
+            mobileData = MobileData.entries.firstOrNull { it.key == props.getProperty(KEY_MOBILE_DATA) } ?: MobileData.ASK,
+            appTime = AppTime.entries.firstOrNull { it.key == props.getProperty(KEY_APP_TIME) } ?: AppTime.TIME_USED,
+            cameraResolution = props.getProperty(KEY_CAMERA_RESOLUTION)?.toIntOrNull()
+                ?.takeIf { it in AndroidCameras.RESOLUTIONS || it == AndroidCameras.FULL_RESOLUTION } ?: AndroidCameras.DEFAULT_RESOLUTION,
+            cameraFrameRate = props.getProperty(KEY_CAMERA_FRAME_RATE)?.toIntOrNull()?.takeIf { it in 1..AndroidCameras.MAX_FRAME_RATE }
+                ?: AndroidCameras.DEFAULT_FRAME_RATE,
             vncViewer = props.getProperty(KEY_VNC_VIEWER)?.takeIf { it.isNotBlank() },
             frameRate60 = props.getProperty(KEY_FRAME_RATE_60) == "true",
             customFrameRate = props.getProperty(KEY_CUSTOM_FRAME_RATE)?.toIntOrNull()?.takeIf { it in UserSettings.CUSTOM_FRAME_RATES },
             uncappedFrameRate = props.getProperty(KEY_UNCAPPED_FRAME_RATE) == "true",
             installGpuRuntimes = props.getProperty(KEY_GPU_RUNTIMES) == "true",
-            titleBars = TitleBars.entries.firstOrNull { it.key == props.getProperty(KEY_TITLE_BARS) } ?: TitleBars.AUTO,
             customAudioLatencyMs = props.getProperty(KEY_AUDIO_LATENCY)?.toIntOrNull()?.takeIf { it in UserSettings.AUDIO_LATENCIES_MS },
             lowLatencyAudio = props.getProperty(KEY_LOW_LATENCY_AUDIO) == "true",
             highQualityAudio = props.getProperty(KEY_HIGH_QUALITY_AUDIO) == "true",
@@ -202,12 +229,10 @@ class UserSettingsStore(private val file: File) {
             defaultHomeMode = HomeMode.entries.firstOrNull { it.name.lowercase() == props.getProperty(KEY_DEFAULT_HOME) } ?: default.defaultHomeMode,
             limitDevices = flag(KEY_LIMIT_DEVICES, default.limitDevices),
             hideScreen = flag(KEY_HIDE_SCREEN, default.hideScreen),
-            exportWithPicker = flag(KEY_EXPORT_PICKER, default.exportWithPicker),
             checkFilesBeforeLaunch = flag(KEY_CHECK_FILES, default.checkFilesBeforeLaunch),
             androidFonts = flag(KEY_ANDROID_FONTS, default.androidFonts),
             shareClipboard = flag(KEY_SHARE_CLIPBOARD, default.shareClipboard),
-            shareTimeZone = flag(KEY_SHARE_TIME_ZONE, default.shareTimeZone),
-            shareLanguage = flag(KEY_SHARE_LANGUAGE, default.shareLanguage),
+            shareLocale = flag(KEY_SHARE_LOCALE, default.shareLocale),
         )
     }
 
@@ -216,13 +241,16 @@ class UserSettingsStore(private val file: File) {
         props.setProperty(KEY_LANGUAGES, settings.flatpakLanguages)
         if (settings.developerOptions) props.setProperty(KEY_DEVELOPER, "true")
         if (settings.externalViewer) props.setProperty(KEY_EXTERNAL_VIEWER, "true")
-        if (settings.pureBlack) props.setProperty(KEY_PURE_BLACK, "true")
+        if (settings.theme != InterfaceTheme.SYSTEM) props.setProperty(KEY_THEME_FLATDROID, settings.theme.key)
+        if (settings.mobileData != MobileData.ASK) props.setProperty(KEY_MOBILE_DATA, settings.mobileData.key)
+        if (settings.appTime != AppTime.TIME_USED) props.setProperty(KEY_APP_TIME, settings.appTime.key)
+        if (settings.cameraResolution != AndroidCameras.DEFAULT_RESOLUTION) props.setProperty(KEY_CAMERA_RESOLUTION, settings.cameraResolution.toString())
+        if (settings.cameraFrameRate != AndroidCameras.DEFAULT_FRAME_RATE) props.setProperty(KEY_CAMERA_FRAME_RATE, settings.cameraFrameRate.toString())
         settings.vncViewer?.let { props.setProperty(KEY_VNC_VIEWER, it) }
         if (settings.frameRate60) props.setProperty(KEY_FRAME_RATE_60, "true")
         settings.customFrameRate?.let { props.setProperty(KEY_CUSTOM_FRAME_RATE, it.toString()) }
         if (settings.uncappedFrameRate) props.setProperty(KEY_UNCAPPED_FRAME_RATE, "true")
         if (settings.installGpuRuntimes) props.setProperty(KEY_GPU_RUNTIMES, "true")
-        if (settings.titleBars != TitleBars.AUTO) props.setProperty(KEY_TITLE_BARS, settings.titleBars.key)
         settings.customAudioLatencyMs?.let { props.setProperty(KEY_AUDIO_LATENCY, it.toString()) }
         if (settings.lowLatencyAudio) props.setProperty(KEY_LOW_LATENCY_AUDIO, "true")
         if (settings.highQualityAudio) props.setProperty(KEY_HIGH_QUALITY_AUDIO, "true")
@@ -238,17 +266,15 @@ class UserSettingsStore(private val file: File) {
             props.setProperty(KEY_DEFAULT_HOME, s.defaultHomeMode.name.lowercase())
             props.setProperty(KEY_LIMIT_DEVICES, s.limitDevices.toString())
             props.setProperty(KEY_HIDE_SCREEN, s.hideScreen.toString())
-            props.setProperty(KEY_EXPORT_PICKER, s.exportWithPicker.toString())
             props.setProperty(KEY_CHECK_FILES, s.checkFilesBeforeLaunch.toString())
             props.setProperty(KEY_ANDROID_FONTS, s.androidFonts.toString())
             props.setProperty(KEY_SHARE_CLIPBOARD, s.shareClipboard.toString())
-            props.setProperty(KEY_SHARE_TIME_ZONE, s.shareTimeZone.toString())
-            props.setProperty(KEY_SHARE_LANGUAGE, s.shareLanguage.toString())
+            props.setProperty(KEY_SHARE_LOCALE, s.shareLocale.toString())
         }
         if (!settings.terminalFilter) props.setProperty(KEY_TERMINAL_FILTER, "false")
         if (settings.terminalDuringSession) props.setProperty(KEY_TERMINAL_DURING_SESSION, "true")
         file.writeTextAtomically(StringWriter().also { props.store(it, null) }.toString())
-        LiveSettings.pureBlack.value = settings.pureBlack
+        LiveSettings.theme.value = settings.theme
         LiveSettings.hideScreen.value = settings.security.hideScreen
     }
 
@@ -261,12 +287,10 @@ class UserSettingsStore(private val file: File) {
         private const val KEY_DEFAULT_HOME = "security.defaultHome"
         private const val KEY_LIMIT_DEVICES = "security.limitDevices"
         private const val KEY_HIDE_SCREEN = "security.hideScreen"
-        private const val KEY_EXPORT_PICKER = "security.exportPicker"
         private const val KEY_CHECK_FILES = "security.checkFiles"
         private const val KEY_ANDROID_FONTS = "security.androidFonts"
         private const val KEY_SHARE_CLIPBOARD = "security.shareClipboard"
-        private const val KEY_SHARE_TIME_ZONE = "security.shareTimeZone"
-        private const val KEY_SHARE_LANGUAGE = "security.shareLanguage"
+        private const val KEY_SHARE_LOCALE = "security.shareLocale"
         private const val KEY_TERMINAL_FILTER = "terminal.filter"
         private const val KEY_TERMINAL_DURING_SESSION = "terminal.duringSession"
         private const val KEY_LANGUAGES = "flatpak.languages"
@@ -277,21 +301,21 @@ class UserSettingsStore(private val file: File) {
         private const val KEY_CUSTOM_FRAME_RATE = "vnc.frameRate"
         private const val KEY_UNCAPPED_FRAME_RATE = "vnc.frameRateUncapped"
         private const val KEY_GPU_RUNTIMES = "flatpak.gpuRuntimes"
-        private const val KEY_TITLE_BARS = "display.titleBars"
         private const val KEY_AUDIO_LATENCY = "audio.latencyMs"
         private const val KEY_LOW_LATENCY_AUDIO = "audio.lowLatency"
         private const val KEY_HIGH_QUALITY_AUDIO = "audio.highQuality"
         private const val KEY_SHARED_HOME = "home.shared"
         private const val KEY_THEME = "flatpak.theme"
-        private const val KEY_PURE_BLACK = "ui.pureBlack"
+        private const val KEY_THEME_FLATDROID = "ui.theme"
+        private const val KEY_MOBILE_DATA = "flatpak.mobileData"
+        private const val KEY_APP_TIME = "ui.appTime"
+        private const val KEY_CAMERA_RESOLUTION = "camera.resolution"
+        private const val KEY_CAMERA_FRAME_RATE = "camera.frameRate"
     }
 }
 
-/** The title bar developer setting: Flatdroid decides (by the viewer), or always on or off. */
-enum class TitleBars(val key: String) { AUTO("auto"), ON("on"), OFF("off") }
-
-/** Settings every screen follows as soon as they are saved: the theme's pure black, hiding the screen. */
+/** Settings every screen follows as soon as they are saved: Flatdroid's theme, hiding the screen. */
 object LiveSettings {
-    val pureBlack = kotlinx.coroutines.flow.MutableStateFlow(false)
+    val theme = kotlinx.coroutines.flow.MutableStateFlow(InterfaceTheme.SYSTEM)
     val hideScreen = kotlinx.coroutines.flow.MutableStateFlow(false)
 }

@@ -1,5 +1,9 @@
 package com.garathon.flatdroid.ui
 
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.material3.AlertDialog
@@ -109,5 +113,27 @@ fun ClashDialog(onChoice: (HomeZip.Clash) -> Unit, onDismiss: () -> Unit) {
             }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.reset_cancel)) } },
+    )
+}
+
+/**
+ * The shared home may hold files Flatdroid can't see (asked once per folder): show all files
+ * (Android's All files access), add the files that are needed, or just continue.
+ */
+@Composable
+fun HiddenFilesDialog(title: String, text: String, onShowAll: () -> Unit, onAddFiles: () -> Unit, onContinue: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onContinue,
+        title = { Text(title) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(text)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = onShowAll) { Text(stringResource(R.string.storage_show_all_files)) }
+                    OutlinedButton(onClick = onAddFiles) { Text(stringResource(R.string.storage_add_files)) }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onContinue) { Text(stringResource(R.string.storage_continue)) } },
     )
 }

@@ -1,7 +1,9 @@
 package com.garathon.flatdroid.settings
 
+import com.garathon.flatdroid.flatpak.FlatpakContext
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -20,8 +22,8 @@ class AppSettingsTest {
             Resolution.CUSTOM, 960, 640, newerElectronFlags = true, lastOpened = 1234L, wholeDev = true,
             audio = false, microphone = true, alwaysAllowMicrophone = true, withoutFlatpakInfo = true,
             environment = mapOf("VLC_DATA_PATH" to "/app/share/vlc", "VLC_PLUGIN_PATH" to "/app/lib/vlc/plugins"),
-            homeModeChoice = HomeMode.TEMPORARY, sdcard = true, camera = true, cameraResolution = 1080, cameraFrameRate = 15,
-            network = false, allowExtraSyscalls = true, shareHiddenFiles = true,
+            homeModeChoice = HomeMode.TEMPORARY, sdcard = true, camera = true, cameraResolutionOverride = 1080, cameraFrameRateOverride = 15,
+            network = false, blockExtraSyscalls = false, shareHiddenFiles = true, launches = 3, usedMillis = 90_000L,
         )
         store.save(saved)
         assertEquals(saved, store.load())
@@ -57,7 +59,8 @@ class AppSettingsTest {
         assertFalse(unset.audioAllowed(listOf("x11")))
         assertFalse(unset.copy(audio = false).audioAllowed(listOf("pulseaudio")))
         assertTrue(unset.copy(audio = true).audioAllowed(emptyList()))
-        assertFalse(unset.microphone)
+        assertNull(unset.microphone)
+        assertNull(unset.camera)
         // Unset stays unset in the file, so a later default applies.
         val file = File(tmp.root, "p.properties")
         AppSettingsStore(file).save(unset)
@@ -80,16 +83,18 @@ class AppSettingsTest {
         assertTrue(AppSettings().networkAllowed(listOf("network")))
         assertFalse(AppSettings().networkAllowed(listOf("ipc")))
         assertEquals(HomeMode.SHARED, AppSettings().homeMode)
-        // Android's fonts and the clipboard: shared unless the level or the user says otherwise.
-        assertTrue(AppSettings().usesAndroidFonts && AppSettings().sharesClipboard)
-        val private = AppSettings(defaults = AppDefaults(androidFonts = false, clipboard = false))
-        assertFalse(private.usesAndroidFonts || private.sharesClipboard)
-        assertTrue(private.copy(androidFonts = true, clipboard = true).let { it.usesAndroidFonts && it.sharesClipboard })
-        // The time zone and the language likewise.
-        assertTrue(AppSettings().sharesTimeZone && AppSettings().sharesLanguage)
-        val generic = AppSettings(defaults = AppDefaults(timeZone = false, language = false))
-        assertFalse(generic.sharesTimeZone || generic.sharesLanguage)
-        assertTrue(generic.copy(timeZone = true, language = true).let { it.sharesTimeZone && it.sharesLanguage })
+        // The clipboard: shared unless the level or the user says otherwise.
+        assertTrue(AppSettings().sharesClipboard)
+        val private = AppSettings(defaults = AppDefaults(clipboard = false))
+        assertFalse(private.sharesClipboard)
+        assertTrue(private.copy(clipboard = true).sharesClipboard)
+        // The system call filter and the camera follow the defaults until the app overrides them.
+        assertTrue(AppSettings().blocksExtraSyscalls)
+        assertFalse(AppSettings(defaults = AppDefaults(blockExtraSyscalls = false)).blocksExtraSyscalls)
+        assertFalse(AppSettings(blockExtraSyscalls = false).blocksExtraSyscalls)
+        val cameraDefaults = AppDefaults(cameraResolution = 480, cameraFrameRate = 15)
+        assertEquals(480 to 15, AppSettings(defaults = cameraDefaults).let { it.cameraResolution to it.cameraFrameRate })
+        assertEquals(1080 to 30, AppSettings(defaults = cameraDefaults, cameraResolutionOverride = 1080, cameraFrameRateOverride = 30).let { it.cameraResolution to it.cameraFrameRate })
         // The store hands the defaults to what it loads, saved or not.
         val file = File(tmp.root, "d.properties")
         assertEquals(HomeMode.PRIVATE, AppSettingsStore(file, hardened).load().homeMode)
@@ -125,23 +130,76 @@ class AppSettingsTest {
         val imported = file(
             "home.mode=shared\ndev.whole=true\nstorage.sdcard=true\npermission.microphone=true\npermission.camera=true\n" +
                 "permission.microphone.always=true\nenv.LD_PRELOAD=/home/user/x.so\npermission.network=true\n" +
-                "filter.allowExtraSyscalls=true\npermission.audio=false\nhome.shareHiddenFiles=true\n" +
-                "privacy.androidFonts=true\npermission.clipboard=true\nprivacy.timeZone=true\nprivacy.language=true\n",
+                "filter.blockExtraSyscalls=false\npermission.audio=false\nhome.shareHiddenFiles=true\n" +
+                "permission.clipboard=true\n",
         ).readBytes()
         val local = file(
             "home.mode=private\ndev.whole=false\nenv.LANG=de_DE.UTF-8\npermission.network=false\n" +
-                "privacy.androidFonts=false\npermission.clipboard=false\nprivacy.timeZone=false\n",
+                "permission.clipboard=false\n",
         ).readBytes()
         val loaded = AppSettingsStore(file(AppSettingsStore.imported(imported, local).decodeToString())).load()
         assertEquals(
             AppSettings(
                 homeModeChoice = HomeMode.PRIVATE, microphone = true, network = false, audio = false,
-                androidFonts = false, clipboard = false, timeZone = false, environment = mapOf("LANG" to "de_DE.UTF-8"),
+                clipboard = false, environment = mapOf("LANG" to "de_DE.UTF-8"),
             ),
             loaded,
         )
         val alone = AppSettingsStore(file(AppSettingsStore.imported(imported, null).decodeToString())).load()
         assertEquals(AppSettings(microphone = true, audio = false), alone)
+    }
+
+    @Test
+    fun microphoneAndCameraFollowTheMetadataUntilOverridden() {
+        val sound = listOf("x11", "pulseaudio")
+        val camera = FlatpakContext(devices = listOf("all"))
+        val plain = FlatpakContext(sockets = sound, devices = listOf("dri"))
+        // By default: the microphone for an app that asks for sound, the camera for a hint that it uses one.
+        val unset = AppSettings()
+        assertTrue(unset.microphoneAllowed(sound))
+        assertFalse(unset.microphoneAllowed(listOf("x11")))
+        assertTrue(unset.cameraAllowed(camera))
+        assertFalse(unset.cameraAllowed(plain))
+        // Sound off turns the microphone off with it.
+        assertFalse(unset.copy(audio = false).microphoneAllowed(sound))
+        // An override wins either way.
+        assertFalse(unset.copy(microphone = false).microphoneAllowed(sound))
+        assertTrue(unset.copy(microphone = true).microphoneAllowed(sound))
+        assertTrue(unset.copy(camera = true).cameraAllowed(plain))
+        assertFalse(unset.copy(camera = false).cameraAllowed(camera))
+        // Hardened's level doesn't grant what apps ask for: both are off until turned on.
+        val hardened = AppSettings(defaults = AppDefaults(permissionsFromMetadata = false))
+        assertFalse(hardened.microphoneAllowed(sound))
+        assertFalse(hardened.cameraAllowed(camera))
+        assertTrue(hardened.copy(microphone = true, audio = true).microphoneAllowed(sound))
+        // Not saved unless overridden; an override is saved either way.
+        val file = File(tmp.root, "m.properties")
+        AppSettingsStore(file).save(unset)
+        assertFalse("permission.microphone" in file.readText() || "permission.camera" in file.readText())
+        AppSettingsStore(file).save(unset.copy(microphone = false, camera = true))
+        assertEquals(false to true, AppSettingsStore(file).load().let { it.microphone to it.camera })
+    }
+
+    @Test
+    fun usageStaysLocalOnImport() {
+        val file = File(tmp.root, "u.properties")
+        val imported = "usage.launches=99\nusage.millis=5000000\nresolution=50\n".toByteArray()
+        val local = "usage.launches=2\nusage.millis=60000\n".toByteArray()
+        file.writeBytes(AppSettingsStore.imported(imported, local))
+        assertEquals(2 to 60_000L, AppSettingsStore(file).load().let { it.launches to it.usedMillis })
+        file.writeBytes(AppSettingsStore.imported(imported, null))
+        assertEquals(0 to 0L, AppSettingsStore(file).load().let { it.launches to it.usedMillis })
+    }
+
+    @Test
+    fun aCameraValueEqualToTheDefaultIsNoOverride() {
+        val file = File(tmp.root, "c.properties")
+        file.writeText("camera.resolution=720\ncamera.frameRate=30\n")
+        val loaded = AppSettingsStore(file).load()
+        assertNull(loaded.cameraResolutionOverride)
+        assertNull(loaded.cameraFrameRateOverride)
+        file.writeText("camera.resolution=1080\ncamera.frameRate=15\n")
+        assertEquals(1080 to 15, AppSettingsStore(file).load().let { it.cameraResolutionOverride to it.cameraFrameRateOverride })
     }
 
     @Test

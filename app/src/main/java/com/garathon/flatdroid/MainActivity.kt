@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
 import android.os.Build
 import android.os.Bundle
 import android.os.LocaleList
@@ -42,6 +43,7 @@ import com.garathon.flatdroid.alpine.GuestFiles
 import com.garathon.flatdroid.audio.MicStreamer
 import com.garathon.flatdroid.camera.AndroidCameras
 import com.garathon.flatdroid.flatpak.AppData
+import com.garathon.flatdroid.flatpak.AppDetails
 import com.garathon.flatdroid.flatpak.FlatpakTask
 import com.garathon.flatdroid.flatpak.FlatpakTaskService
 import com.garathon.flatdroid.flatpak.FlatpakTasks
@@ -51,6 +53,8 @@ import com.garathon.flatdroid.viewer.ViewerActivity
 import com.garathon.flatdroid.session.SessionService
 import com.garathon.flatdroid.session.SessionState
 import com.garathon.flatdroid.session.Viewer
+import com.garathon.flatdroid.settings.AppTime
+import com.garathon.flatdroid.settings.MobileData
 import com.garathon.flatdroid.settings.UserSettings
 import com.garathon.flatdroid.storage.ImportTarget
 import com.garathon.flatdroid.storage.SavedSizes
@@ -62,12 +66,12 @@ import com.garathon.flatdroid.setup.SetupStep
 import com.garathon.flatdroid.ui.CommandState
 import com.garathon.flatdroid.ui.ElectronDialog
 import com.garathon.flatdroid.ui.FilesChangedDialog
-import com.garathon.flatdroid.ui.HomeScreen
+import com.garathon.flatdroid.ui.home.HomeScreen
+import com.garathon.flatdroid.ui.home.rememberHomeListState
 import com.garathon.flatdroid.ui.InstallDialog
 import com.garathon.flatdroid.ui.LogDialog
 import com.garathon.flatdroid.ui.MicrophoneLaunchDialog
-import com.garathon.flatdroid.ui.SessionPanel
-import com.garathon.flatdroid.ui.TaskPanel
+import com.garathon.flatdroid.ui.MobileDataDialog
 import com.garathon.flatdroid.ui.SetupSettingsScreen
 import com.garathon.flatdroid.ui.TerminalScreen
 import com.garathon.flatdroid.ui.SetupScreen
@@ -95,6 +99,9 @@ class MainActivity : ComponentActivity() {
 
     /** A launch waiting for the microphone question ([needsMicrophoneQuestion]). */
     private var microphoneQuestion by mutableStateOf<PendingLaunch?>(null)
+
+    /** An install or update waiting for the answer to the mobile data question. */
+    private var meteredQuestion by mutableStateOf<FlatpakTask?>(null)
 
     /** Called with Android's answer to the microphone or camera permission request in flight. */
     private var onPermissionResult: ((Boolean) -> Unit)? = null
@@ -167,7 +174,26 @@ class MainActivity : ComponentActivity() {
         val apps by home.apps.collectAsState()
         val session by SessionController.ui.collectAsState()
         val task by FlatpakTasks.ui.collectAsState()
-        val sessionBusy = SessionController.isBusy || session.state is SessionState.Question
+        // The session's state is always read here (not in a short-circuited `||`): this body must
+        // recompose whenever it changes, since the screens below are drawn in an AnimatedContent
+        // whose lambda keeps what is computed here until this body runs again. Reading it only
+        // while the session was idle left the buttons disabled after a session ended.
+        val sessionState = session.state
+        val sessionActive = sessionState !is SessionState.Idle && sessionState !is SessionState.Question
+        val sessionBusy = sessionState !is SessionState.Idle
+        // The home list's position and search, kept here so they survive a visit to Settings.
+        val homeListState = rememberHomeListState()
+        // Developer options show the logs of what runs; read again whenever the screen changes (Settings can change them).
+        val developerOptions = remember(screen) { savedSettings(languages).developerOptions }
+        val showTimeUsed = remember(screen) { savedSettings(languages).appTime == AppTime.TIME_USED }
+        // The app is up: Flatdroid's window opens it, once, when the user started it from here and is still here.
+        val upSession = sessionState as? SessionState.Running
+        LaunchedEffect(upSession?.password) {
+            if (upSession != null && home.autoOpen) {
+                home.autoOpen = false
+                openViewer(upSession)
+            }
+        }
         val taskRunning = task.running != null
         // No task while an app runs, and no app while a task or (unless allowed) a terminal command
         // runs: a running app could take over Alpine processes started after it ([AlpineCommands]).
@@ -237,7 +263,7 @@ class MainActivity : ComponentActivity() {
                         storage = home.flatdroidStorage.collectAsState().value,
                         storageBusy = storageTasks.running != null || storageTasks.queued.isNotEmpty(),
                         canReset = !sessionBusy && !taskRunning,
-                        canOpenTerminal = !SessionController.isBusy || terminalWithApps,
+                        canOpenTerminal = !sessionActive || terminalWithApps,
                         actions = GlobalStorageActions(
                             onChangeSharedHome = storage::changeSharedHome,
                             onAllFilesAccess = storage::openAllFilesAccess,
@@ -254,10 +280,26 @@ class MainActivity : ComponentActivity() {
                             onExportSettings = storage::exportFlatdroidSettings,
                             // Back to the home screen once applied, as Save does: this@MainActivity screen shows the old values.
                             onImportSettings = { storage.importFlatdroidSettings { go(Screen.Home) } },
+                            onAddFiles = { storage.importFiles(ImportTarget.Shared) },
+                            onAddZip = storage::importZipIntoSharedHome,
+                            onResetAllHomes = home::resetAllHomes,
+                            onResetAllAppData = home::resetAllAppData,
+                            onAppStorage = { id, action -> storage.storageAction(id, action) },
+                            onOpenHome = storage::openHomeInFiles,
+                            onUninstall = { id, deleteData, keepRuntimes ->
+                                if (FlatpakTaskService.start(this@MainActivity, FlatpakTask.Uninstall(id, deleteData, keepRuntimes))) home.uninstallStarted(id)
+                            },
                         ),
                         onReset = { mode -> go(Screen.Home); resetAlpine(mode) },
                         onResetSettings = { viewModel.applySettings(UserSettings.defaults(languages)) { go(Screen.Home) } },
                         onTerminal = { go(Screen.Terminal) },
+                        apps = apps.orEmpty(),
+                        taskText = task.running?.let { task.phase ?: FlatpakTaskService.describe(this@MainActivity, it) },
+                        hasCamera = remember { AndroidCameras.present(this@MainActivity) },
+                        // Asks the camera service, so off the main thread; none until it answers.
+                        cameraResolutions = produceState(emptyMap<Int, List<AndroidCameras.Resolution>>()) {
+                            value = withContext(Dispatchers.IO) { AndroidCameras.resolutions(this@MainActivity) }
+                        }.value,
                     ),
                     onSave = { new -> viewModel.applySettings(withSavedHome(new)) { go(Screen.Home) } },
                     // Settings are persisted before onApplied runs, so the reinstall's baseline sees the check on.
@@ -297,12 +339,16 @@ class MainActivity : ComponentActivity() {
                 val showsWebContent by produceState(false, app.id) {
                     value = withContext(Dispatchers.IO) { InstalledApps(this@MainActivity).showsWebContent(app.id) }
                 }
+                val details by produceState<AppDetails?>(null, app.id) {
+                    value = withContext(Dispatchers.IO) { InstalledApps(this@MainActivity).details(app.id) }
+                }
                 AppSettingsScreen(
                     page = target.page,
                     onPage = { go(Screen.AppSettings(app.id, it)) },
                     draft = draft,
                     env = AppSettingsEnv(
                         app = app,
+                        details = details,
                         storage = appStorage[app.id],
                         canChangeFiles = session.state.appIdOrNull != app.id && !appBusy,
                         canUninstall = !sessionBusy && !taskRunning,
@@ -316,18 +362,23 @@ class MainActivity : ComponentActivity() {
                         onRequestMicrophone = ::requestMicrophone,
                         onRequestCamera = ::requestCamera,
                         onUninstall = { deleteData, keepRuntimes ->
-                            FlatpakTaskService.start(this@MainActivity, FlatpakTask.Uninstall(app.id, deleteData, keepRuntimes))
+                            if (FlatpakTaskService.start(this@MainActivity, FlatpakTask.Uninstall(app.id, deleteData, keepRuntimes))) home.uninstallStarted(app.id)
                             go(Screen.Home)
                         },
                         sharedHome = storage.sharedHomeDisplay,
                         broadAccess = storage.broadAccess,
                         onStorage = { action -> storage.storageAction(app.id, action) },
+                        onOpenHome = { storage.openHomeInFiles(app.id) },
+                        limitDevices = remember { savedSettings(languages).security.limitDevices },
+                        onResetFlatdroidSettings = { store.delete(); go(Screen.Home) },
                     ),
                     onSave = { new ->
                         // Keep what the launcher manages: last opened, the Electron flags and /.flatpak-info.
                         store.update { old ->
                             new.copy(
                                 lastOpened = old.lastOpened,
+                                launches = old.launches,
+                                usedMillis = old.usedMillis,
                                 newerElectronFlags = old.newerElectronFlags,
                                 withoutFlatpakInfo = old.withoutFlatpakInfo,
                                 wholeDev = if (developerOptions) new.wholeDev else old.wholeDev,
@@ -345,9 +396,7 @@ class MainActivity : ComponentActivity() {
                 if (installDialog) {
                     InstallDialog(
                         onInstall = {
-                            if (!FlatpakTaskService.start(this@MainActivity, FlatpakTask.Install(it)) && SessionController.isBusy) {
-                                Toast.makeText(this@MainActivity, R.string.task_install_waits, Toast.LENGTH_LONG).show()
-                            }
+                            startDownload(FlatpakTask.Install(it))
                             installDialog = false
                         },
                         onDismiss = { installDialog = false },
@@ -363,7 +412,7 @@ class MainActivity : ComponentActivity() {
                 (session.state as? SessionState.FilesChanged)?.let { changed ->
                     FilesChangedDialog(
                         changed, nameOf(changed.appId),
-                        onReinstall = { SessionController.ended(null); FlatpakTaskService.start(this@MainActivity, FlatpakTask.Reinstall(changed.appId)) },
+                        onReinstall = { SessionController.ended(null); startDownload(FlatpakTask.Reinstall(changed.appId)) },
                         onDismiss = { SessionController.ended(null) },
                     )
                 }
@@ -378,6 +427,12 @@ class MainActivity : ComponentActivity() {
                     }
                     null -> Unit
                 }
+                meteredQuestion?.let { task ->
+                    MobileDataDialog(
+                        onDownload = { meteredQuestion = null; startTask(task) },
+                        onDismiss = { meteredQuestion = null },
+                    )
+                }
                 microphoneQuestion?.let { pending ->
                     MicrophoneLaunchDialog(
                         nameOf(pending.appId),
@@ -387,35 +442,50 @@ class MainActivity : ComponentActivity() {
                 }
                 HomeScreen(
                     apps = apps,
-                    runningAppId = session.state.appIdOrNull,
+                    session = session,
+                    task = task,
+                    listState = homeListState,
+                    developerOptions = developerOptions,
+                    showTimeUsed = showTimeUsed,
                     canLaunch = !sessionBusy && !taskRunning && (!terminalRunning || terminalWithApps),
                     canInstall = !sessionBusy && !taskRunning,
                     canUpdate = !sessionBusy && !taskRunning,
+                    describeTask = { FlatpakTaskService.describe(this@MainActivity, it) },
                     onLaunch = { launch(it.id) },
                     onAppSettings = { go(Screen.AppSettings(it.id)) },
                     onInstall = { installDialog = true },
-                    onUpdateAll = { FlatpakTaskService.start(this@MainActivity, FlatpakTask.UpdateAll) },
+                    onUpdateAll = { startDownload(FlatpakTask.UpdateAll) },
                     onSettings = { go(Screen.Settings()) },
                     onImportFiles = { storage.importFiles(ImportTarget.Shared) },
                     onImportZip = storage::importZipIntoSharedHome,
+                    onOpenApp = ::openViewer,
+                    onStopApp = { SessionService.stop(this@MainActivity) },
+                    onSessionLog = { log = LogKind.SESSION },
+                    onSkipCheck = { SessionController.skipFileCheck() },
+                    onCancelTask = { FlatpakTaskService.cancel(this@MainActivity) },
+                    onDismissTask = FlatpakTasks::dismiss,
+                    onTaskLog = { log = LogKind.TASK },
+                    onDismissSession = SessionController::dismissMessage,
                     modifier = modifier,
-                ) {
-                    TaskPanel(
-                        task, describe = { FlatpakTaskService.describe(this@MainActivity, it) },
-                        onCancel = { FlatpakTaskService.cancel(this@MainActivity) },
-                        onShowLog = { log = LogKind.TASK },
-                        onDismiss = FlatpakTasks::dismiss,
-                    )
-                    SessionPanel(
-                        session, nameOf,
-                        onOpenViewer = ::openViewer,
-                        onStop = { SessionService.stop(this@MainActivity) },
-                        onShowLog = { log = LogKind.SESSION },
-                        onDismiss = SessionController::dismissMessage,
-                    )
-                }
+                )
             }
         }
+        }
+    }
+
+    private fun startTask(task: FlatpakTask) {
+        if (!FlatpakTaskService.start(this, task) && task is FlatpakTask.Install && SessionController.isBusy) {
+            Toast.makeText(this, R.string.task_install_waits, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /** Starts a task that downloads, first doing what the mobile data setting says on a metered connection. */
+    private fun startDownload(task: FlatpakTask) {
+        val metered = getSystemService(ConnectivityManager::class.java)?.isActiveNetworkMetered == true
+        when (if (metered) SetupController.settings(this).load()?.mobileData ?: MobileData.ASK else MobileData.ALWAYS) {
+            MobileData.ALWAYS -> startTask(task)
+            MobileData.ASK -> meteredQuestion = task
+            MobileData.NEVER -> Toast.makeText(this, R.string.mobile_data_blocked, Toast.LENGTH_LONG).show()
         }
     }
 
@@ -437,6 +507,8 @@ class MainActivity : ComponentActivity() {
     })
 
     private fun start(pending: PendingLaunch, micAnswer: Boolean?) {
+        // Started from this window: when the app is up, its viewer opens, unless the user leaves Flatdroid first.
+        home.autoOpen = true
         if (pending.prepareElectron) SessionService.prepareElectronAndLaunch(this, pending.appId, micAnswer)
         else SessionService.launch(this, pending.appId, micAnswer)
     }
@@ -447,9 +519,8 @@ class MainActivity : ComponentActivity() {
      */
     private fun needsMicrophoneQuestion(appId: String): Boolean {
         val settings = AppData.settings(this, appId).load()
-        return settings.microphone && !settings.alwaysAllowMicrophone &&
-            MicStreamer.hasPermission(this) && !SessionService.canAskInNotification(this) &&
-            settings.audioAllowed(InstalledApps(this).sockets(appId))
+        return !settings.alwaysAllowMicrophone && MicStreamer.hasPermission(this) && !SessionService.canAskInNotification(this) &&
+            settings.microphoneAllowed(InstalledApps(this).sockets(appId))
     }
 
     /** Asks Android for the microphone permission, then calls [onResult] with the answer. */
@@ -476,6 +547,11 @@ class MainActivity : ComponentActivity() {
             val message = if (Viewer.installed(this).isEmpty()) R.string.session_no_viewer else R.string.session_choose_viewer
             Toast.makeText(this, message, Toast.LENGTH_LONG).show()
         }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        home.autoOpen = false
     }
 
     override fun onResume() {

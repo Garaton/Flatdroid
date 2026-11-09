@@ -38,6 +38,7 @@ fun SetupSettingsScreen(
 ) {
     var onlyMyLanguages by rememberSaveable { mutableStateOf(settings.onlyMyLanguages) }
     var security by rememberSaveable(stateSaver = SecuritySaver) { mutableStateOf(settings.security) }
+    var gpuRuntimes by rememberSaveable { mutableStateOf(settings.installGpuRuntimes) }
 
     Column(
         modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
@@ -49,8 +50,15 @@ fun SetupSettingsScreen(
         	onlyMyLanguages, { onlyMyLanguages = it },
         	stringResource(R.string.settings_languages, deviceLanguages.replace(";", ", ")), stringResource(R.string.settings_languages_hint),
         )
+        // Only with developer options, which a reset keeps: a first setup has none yet.
+        if (settings.developerOptions) {
+            SwitchRow(
+                gpuRuntimes, { gpuRuntimes = it },
+                stringResource(R.string.settings_gpu_runtimes), stringResource(R.string.settings_gpu_runtimes_hint), developer = true,
+            )
+        }
         SecuritySection(security, { security = it })
-        Button(onClick = { onContinue(settings.copy(flatpakLanguages = if (onlyMyLanguages) deviceLanguages else GuestFiles.ALL_LANGUAGES, security = security)) }) {
+        Button(onClick = { onContinue(settings.copy(flatpakLanguages = if (onlyMyLanguages) deviceLanguages else GuestFiles.ALL_LANGUAGES, security = security, installGpuRuntimes = gpuRuntimes)) }) {
             Text(stringResource(R.string.setup_settings_continue))
         }
     }
