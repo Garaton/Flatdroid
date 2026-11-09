@@ -59,6 +59,39 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- Flathub links: hands the app to the main window without a screen of its own. Its own
+             (empty) task affinity keeps it out of Flatdroid's task, and it is gone at once. -->
+        <activity
+            android:name=".LinkActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <!-- Flathub's install pages (with or without the language part). The domain can't be verified,
+                 so Android 12 and later open these in the browser until the user allows them (App info,
+                 Open by default); earlier versions ask. The app asks before it installs anything. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data android:scheme="https" />
+                <data android:host="flathub.org" />
+                <data android:host="www.flathub.org" />
+                <data android:pathPattern="/.*apps/.*/install" />
+            </intent-filter>
+            <!-- The address form software centers use: appstream://org.xfce.mousepad. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data android:scheme="appstream" />
+            </intent-filter>
+        </activity>
         <!-- Not recreated on rotation or keyboard changes: the connection and zoom stay. -->
         <activity
             android:name=".viewer.ViewerActivity"

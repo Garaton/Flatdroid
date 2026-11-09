@@ -46,6 +46,15 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     /** The user started an app from Flatdroid's window and hasn't left it: its viewer opens when it is up (not kept through rotation or in the background). */
     @Volatile var autoOpen = false
 
+    private val _installLink = MutableStateFlow<String?>(null)
+
+    /** The Flathub app ID a link asked to install, until the user confirms or dismisses it. */
+    val installLink: StateFlow<String?> = _installLink.asStateFlow()
+
+    fun requestInstall(appId: String) { _installLink.value = appId }
+
+    fun clearInstallLink() { _installLink.value = null }
+
     /** An uninstall of [appId] has started: it leaves the list now, not when the task ends. */
     fun uninstallStarted(appId: String) {
         hiddenSince = FlatpakTasks.ui.value.generation
@@ -227,9 +236,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
      */
     private fun unusedRuntimes(runtimes: Set<String>): Set<String> {
         val env = AlpineEnvironment.get(getApplication())
-        val installation = FlatpakInstallation(env.flatpakDir, env.arch)
-        val used = installation.appIds().flatMap { installation.deploymentsFor(it) }.filter { it.kind == "runtime" }.map { it.ref.name }.toSet()
-        return runtimes - used
+        return FlatpakInstallation(env.flatpakDir, env.arch).unusedRuntimes(runtimes)
     }
 
     /** Deletes every app's private home, installed or not; not while anything runs. */

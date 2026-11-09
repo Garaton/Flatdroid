@@ -112,7 +112,14 @@ class SetupRunnerTest {
         assertFalse(ApkSummary.isFatalError("ERROR: glib-2.88.1-r1.trigger: exit 1"))
         assertFalse(ApkSummary.isFatalError("WARNING: x: temporary error"))
         assertFalse(ApkSummary.isFatalError("( 12/186) Installing glib (2.88.1-r1)"))
-        assertEquals(1, ApkSummary.parse(listOf("ERROR: unable to select packages:")).networkErrors.size)
+        // A missing package isn't a network problem, and apk names it on the next lines, so it doesn't stop the run.
+        val missing = ApkSummary.parse(listOf("ERROR: unable to select packages:", "  wayvnc (no such package):", "    required by: world[wayvnc]"))
+        assertTrue(missing.networkErrors.isEmpty())
+        assertTrue(missing.unselectable)
+        assertEquals(listOf("wayvnc"), missing.missingPackages)
+        assertFalse(ApkSummary.isFatalError("ERROR: unable to select packages:"))
+        assertFalse(ApkSummary.isNetworkError("WARNING: package libdnssec is held back"))
+        assertTrue(ApkSummary.isNoSpace("ERROR: glib-2.88.1-r1: No space left on device"))
         assertEquals(1, ApkSummary.parse(listOf("fetch https://example.org/APKINDEX.tar.gz", "WARNING: x: temporary error (try again later)")).networkErrors.size)
         // A package's own script error is not a network error (apk fix handles it).
         assertTrue(ApkSummary.parse(listOf("ERROR: glib-2.88.1-r1.trigger: fork: Function not implemented", "1 error; 380.3 MiB in 202 packages")).networkErrors.isEmpty())

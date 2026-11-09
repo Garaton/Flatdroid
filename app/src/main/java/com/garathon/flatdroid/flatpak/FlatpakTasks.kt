@@ -19,6 +19,8 @@ sealed interface FlatpakTask {
      * runtimes nothing uses any more for the next update to remove.
      */
     data class Uninstall(val appId: String, val deleteData: Boolean, val keepRuntimes: Boolean = false) : FlatpakTask
+    /** Uninstalls the runtime [runtimeId] (every branch of it), which no installed app uses. */
+    data class RemoveRuntime(val runtimeId: String) : FlatpakTask
     /** The repository clean-up on its own, after an update or uninstall Flatdroid didn't see end. */
     data object Repair : FlatpakTask
     /** Reinstalls [appId] and its runtime, to restore files the integrity check found changed. */

@@ -41,6 +41,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -167,27 +168,30 @@ fun HomeScreen(
     val lazy = listState.list
     val isRunning = runningState != null
     val pinned = remember { Animatable(if (isRunning) 1f else 0f) }
-    val wasRunning = remember { booleanArrayOf(isRunning) }
-    val inPlace = remember { booleanArrayOf(false) }
-    val pinnedId = remember { arrayOfNulls<String>(1) }
-    val pinnedState = remember { arrayOfNulls<SessionState>(1) }
-    if (runningAppId != null) pinnedId[0] = runningAppId
-    if (runningState != null) pinnedState[0] = runningState
+    // The last app that started or ran: the pinned row still shows it while it shrinks away after a stop.
+    var lastState by remember { mutableStateOf(runningState) }
+    LaunchedEffect(runningState) { if (runningState != null) lastState = runningState }
+    val pinnedState = runningState ?: lastState
+    val pinnedId = pinnedState?.appIdOrNull
+    var inPlace by remember { mutableStateOf(false) }
     val sorted = remember(apps, query) { apps?.let { homeListSpec.apply(it, query) } }
-    if (isRunning != wasRunning[0]) {
-        wasRunning[0] = isRunning
-        // At the top: nothing above the first visible row but the app's own row, which has no height while pinned.
-        val atTop = lazy.firstVisibleItemScrollOffset == 0 &&
-            (lazy.firstVisibleItemIndex == 0 || (lazy.firstVisibleItemIndex == 1 && sorted?.firstOrNull()?.id == pinnedId[0]))
-        inPlace[0] = atTop && pinnedId[0] != null && sorted?.firstOrNull()?.id == pinnedId[0]
-    }
+    val currentSorted by rememberUpdatedState(sorted)
     var fadeRow by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(isRunning) {
         val target = if (isRunning) 1f else 0f
-        if (inPlace[0]) {
+        // Already there (the first composition): nothing to move.
+        if (pinned.value == target && !pinned.isRunning) return@LaunchedEffect
+        // Decided before anything moves: the pinned row still has its old height, so the list shows what it showed.
+        val id = (runningState ?: lastState)?.appIdOrNull
+        val first = currentSorted?.firstOrNull()?.id
+        // At the top: nothing above the first visible row but the app's own row, which has no height while pinned.
+        val atTop = lazy.firstVisibleItemScrollOffset == 0 &&
+            (lazy.firstVisibleItemIndex == 0 || (lazy.firstVisibleItemIndex == 1 && first == id))
+        inPlace = atTop && id != null && first == id
+        if (inPlace) {
             if (!isRunning) {
                 // Its row is the first again: show the list from it, and let it fade from the highlight.
-                fadeRow = pinnedId[0]
+                fadeRow = id
                 lazy.scrollToItem(0)
             }
             pinned.snapTo(target)
@@ -214,7 +218,7 @@ fun HomeScreen(
             }
             ListSearchBar(homeListSpec, query, { listState.query = it }, Modifier.padding(horizontal = 16.dp, vertical = 8.dp), placeholder = R.string.home_search)
         }
-        val pinnedNow = pinnedState[0]
+        val pinnedNow = pinnedState
         if (pinnedShown && pinnedNow != null) {
             Box(
                 // The clip comes first: it is the size the layout below gives, not the full row's.
@@ -229,7 +233,7 @@ fun HomeScreen(
                     },
             ) {
                 RunningRow(
-                    pinnedNow, apps?.firstOrNull { it.id == pinnedNow.appIdOrNull }, fromRow = inPlace[0], developerOptions = developerOptions,
+                    pinnedNow, apps?.firstOrNull { it.id == pinnedNow.appIdOrNull }, fromRow = inPlace, developerOptions = developerOptions,
                     onOpen = onOpenApp, onStop = onStopApp, onLog = onSessionLog, onSkipCheck = onSkipCheck,
                 )
             }
@@ -251,7 +255,7 @@ fun HomeScreen(
                 else -> LazyColumn(Modifier.fillMaxSize(), state = lazy) {
                     // Keys: the rows keep their place when the app's row moves or changes size.
                     items(sorted, key = { it.id }) { app ->
-                        val pinnedRow = app.id == pinnedId[0]
+                        val pinnedRow = app.id == pinnedId
                         Column(Modifier.collapsing { if (pinnedRow) 1f - pinned.value else 1f }) {
                             AppRow(
                                 app, enabled = canLaunch, showTimeUsed = showTimeUsed,
@@ -324,13 +328,19 @@ private fun AppRow(
             Text(app.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(app.id, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
+        // An app that never ran says so, rather than "0 min".
+        val never = if (showTimeUsed) app.launches == 0 && app.usedMillis == 0L else app.lastOpened == null
         Column(horizontalAlignment = Alignment.End) {
             Text(
                 stringResource(if (showTimeUsed) R.string.home_time_used else R.string.home_last_opened),
                 style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
-                if (showTimeUsed) durationText(app.usedMillis) else app.lastOpened?.let { formatDateTime(it) } ?: stringResource(R.string.home_never_opened),
+                when {
+                    never -> stringResource(R.string.home_never_opened)
+                    showTimeUsed -> durationText(app.usedMillis)
+                    else -> formatDateTime(app.lastOpened!!)
+                },
                 style = MaterialTheme.typography.labelSmall,
                 textAlign = TextAlign.End,
             )

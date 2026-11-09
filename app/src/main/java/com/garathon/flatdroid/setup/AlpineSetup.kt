@@ -119,6 +119,14 @@ class AlpineSetup(
         if (run.summary.networkErrors.isNotEmpty()) {
             throw IOException(context.getString(R.string.setup_error_network, run.summary.networkErrors.first()))
         }
+        if (run.summary.unselectable) {
+            // Online, so Alpine's packages don't have one setup asks for (renamed or dropped).
+            val names = run.summary.missingPackages.ifEmpty { null }?.joinToString(" ")
+            throw IOException(
+                if (names != null) context.getString(R.string.setup_error_no_such_package, names)
+                else context.getString(R.string.setup_error_unselectable),
+            )
+        }
         if (run.exitCode != 0 && run.summary.errors.isEmpty() && !run.summary.ok) {
             throw IOException(context.getString(R.string.setup_error_apk, run.exitCode ?: -1))
         }
@@ -136,7 +144,8 @@ class AlpineSetup(
      * line that is an error (apk's own, but not a package's script error, which `apk fix` runs
      * again) or says the package servers can't be reached stops it (it would go on for as long as
      * every repository takes to time out) and fails the step at once. The message says the servers
-     * can't be reached when a line said so, and otherwise gives the error line.
+     * can't be reached when a line said so, that storage is full when it is, and otherwise gives the
+     * error line. Packages apk can't select end the run by themselves ([requireApkWorked]).
      */
     private fun apk(args: List<String>, cache: File, reporter: SetupReporter): ApkRun {
         val output = mutableListOf<String>()
@@ -144,7 +153,9 @@ class AlpineSetup(
         val unreachable = AtomicReference<String?>(null)
         val failure = AtomicReference<String?>(null)
         fun failed(line: String) = IOException(
-            unreachable.get()?.let { context.getString(R.string.setup_error_network, it) } ?: context.getString(R.string.setup_error_apk_line, line),
+            unreachable.get()?.let { context.getString(R.string.setup_error_network, it) }
+                ?: if (ApkSummary.isNoSpace(line)) context.getString(R.string.setup_error_disk_full)
+                else context.getString(R.string.setup_error_apk_line, line),
         )
         val result = try {
             run(

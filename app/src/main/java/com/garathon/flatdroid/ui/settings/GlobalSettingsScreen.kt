@@ -66,6 +66,8 @@ class GlobalStorageActions(
     val onAppStorage: (appId: String, StorageAction) -> Unit,
     val onOpenHome: (appId: String) -> Unit,
     val onUninstall: (appId: String, deleteData: Boolean, keepRuntimes: Boolean) -> Unit,
+    /** Uninstalls a runtime no app uses. */
+    val onRemoveRuntime: (runtimeId: String) -> Unit,
 )
 
 /**
@@ -214,7 +216,7 @@ private fun GlobalSettingsScreenPreview() {
                     other = 150L shl 20, unusedAppData = Unused(1, 1L shl 20), unusedHomes = Unused(0, 0), sharedDotfiles = 0,
                 ),
                 storageBusy = false, canReset = true, canOpenTerminal = true,
-                actions = GlobalStorageActions({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, { _, _ -> }, {}, { _, _, _ -> }),
+                actions = GlobalStorageActions({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, { _, _ -> }, {}, { _, _, _ -> }, {}),
                 onReset = {}, onResetSettings = {}, onTerminal = {},
                 apps = emptyList(), taskText = null, hasCamera = true, cameraResolutions = emptyMap(),
             ),

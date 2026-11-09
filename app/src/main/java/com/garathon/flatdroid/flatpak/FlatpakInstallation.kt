@@ -53,6 +53,15 @@ class FlatpakInstallation(root: File, private val arch: String) {
      * under each (GL, codecs, locales, …). Used to baseline and to check files; a deployment's
      * `dir.name` is its OSTree commit, which changes on update, so each has its own baseline.
      */
+    /**
+     * The runtimes among [runtimeIds] (directory names under `runtime/`) that no installed app uses:
+     * not its runtime, and not an extension mounted under it or under the app, by the rules a launch uses.
+     */
+    fun unusedRuntimes(runtimeIds: Set<String>): Set<String> {
+        val used = appIds().flatMap { deploymentsFor(it) }.filter { it.kind == "runtime" }.map { it.ref.name }.toSet()
+        return runtimeIds - used
+    }
+
     fun deploymentsFor(appId: String): List<Deployment> {
         val app = app(appId) ?: return emptyList()
         val runtimeRef = app.metadata.runtime ?: return listOf(app)

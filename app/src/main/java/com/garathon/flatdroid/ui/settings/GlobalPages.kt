@@ -1,5 +1,6 @@
 package com.garathon.flatdroid.ui.settings
 
+import android.os.Build
 import android.text.format.Formatter
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -30,6 +31,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.garathon.flatdroid.R
 import com.garathon.flatdroid.camera.AndroidCameras
+import com.garathon.flatdroid.flatpak.FlathubLinkApproval
 import com.garathon.flatdroid.settings.AppTime
 import com.garathon.flatdroid.settings.Duration
 import com.garathon.flatdroid.settings.FlatpakTheme
@@ -45,6 +47,7 @@ import com.garathon.flatdroid.ui.ResetDialog
 import com.garathon.flatdroid.ui.SettingsCard
 import com.garathon.flatdroid.ui.SwitchRow
 import com.garathon.flatdroid.ui.TextRow
+import com.garathon.flatdroid.ui.rememberFlathubLinksAllowed
 import com.garathon.flatdroid.ui.theme.Spacing
 
 /** A number or name with what it is below it. */
@@ -342,6 +345,25 @@ fun GlobalFlatpakPage(s: GlobalPageState) = SettingsPageColumn(R.string.settings
     SettingsCard {
         LanguagesRow(s.draft.onlyMyLanguages, { v -> s.edit { copy(onlyMyLanguages = v) } }, s.env.deviceLanguages)
         GpuRuntimesRow(s.settings.installGpuRuntimes, { v -> s.editSettings { copy(installGpuRuntimes = v) } })
+    }
+    // Flathub's install pages open Flatdroid only once Android allows it (Android 12 and later: the
+    // domain can't be verified, so the user adds it, and an app can't do that for itself).
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        val context = LocalContext.current
+        val allowed = rememberFlathubLinksAllowed()
+        SettingsCard(title = stringResource(R.string.settings_flathub_links)) {
+            val on = allowed == true
+            Text(
+                stringResource(if (on) R.string.settings_flathub_links_allowed else R.string.settings_flathub_links_not_allowed),
+                style = MaterialTheme.typography.titleSmall,
+                color = if (on) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+            )
+            Text(
+                stringResource(if (on) R.string.settings_flathub_links_hint_allowed else R.string.settings_flathub_links_hint),
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedButton(onClick = { FlathubLinkApproval.openSettings(context) }) { Text(stringResource(R.string.settings_flathub_links_open)) }
+        }
     }
 }
 

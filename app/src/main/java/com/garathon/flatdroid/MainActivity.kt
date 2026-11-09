@@ -2,6 +2,7 @@ package com.garathon.flatdroid
 
 import android.Manifest
 import android.content.ActivityNotFoundException
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.ConnectivityManager
@@ -37,13 +38,13 @@ import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
-import com.garathon.flatdroid.alpine.AlpineCommands
 import com.garathon.flatdroid.alpine.AlpineEnvironment
 import com.garathon.flatdroid.alpine.GuestFiles
 import com.garathon.flatdroid.audio.MicStreamer
 import com.garathon.flatdroid.camera.AndroidCameras
 import com.garathon.flatdroid.flatpak.AppData
 import com.garathon.flatdroid.flatpak.AppDetails
+import com.garathon.flatdroid.flatpak.FlatpakInstallation
 import com.garathon.flatdroid.flatpak.FlatpakTask
 import com.garathon.flatdroid.flatpak.FlatpakTaskService
 import com.garathon.flatdroid.flatpak.FlatpakTasks
@@ -67,6 +68,7 @@ import com.garathon.flatdroid.ui.setup.CommandState
 import com.garathon.flatdroid.ui.ElectronDialog
 import com.garathon.flatdroid.ui.FilesChangedDialog
 import com.garathon.flatdroid.ui.home.HomeScreen
+import com.garathon.flatdroid.ui.home.InstallLinkDialog
 import com.garathon.flatdroid.ui.home.rememberHomeListState
 import com.garathon.flatdroid.ui.InstallDialog
 import com.garathon.flatdroid.ui.LogDialog
@@ -126,8 +128,34 @@ class MainActivity : ComponentActivity() {
 
     private val storage = StorageFlows(this, { home }, { viewModel })
 
+    /**
+     * An app a Flathub link named ([LinkActivity]): its confirmation opens in the window. Not when
+     * the window is reopened from Recents, which hands back the intent that first started it.
+     */
+    private fun handleLink(intent: Intent?) {
+        if (intent == null || intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0) return
+        val id = intent.getStringExtra(EXTRA_INSTALL)?.takeIf(InstalledApps::isValidId) ?: return
+        intent.removeExtra(EXTRA_INSTALL)
+        home.requestInstall(id)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleLink(intent)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Flatdroid's icon, on a task that is open already but was started some other way (from a
+        // notification, say): Android adds a second window on top. Close it, so the task shows what
+        // was open (the viewer of a running app) as the icon would otherwise.
+        if (savedInstanceState == null && !isTaskRoot && isLauncherIntent(intent) && !intent.hasExtra(EXTRA_INSTALL)) {
+            finish()
+            return
+        }
+        // Only on the first creation: a recreation (rotation) still holds the link in the intent.
+        if (savedInstanceState == null) handleLink(intent)
         followHideScreen()
         storage.restore()
         enableEdgeToEdge()
@@ -210,8 +238,11 @@ class MainActivity : ComponentActivity() {
         // The home list's position and search, kept here so they survive a visit to Settings.
         val homeListState = rememberHomeListState()
         // Developer options show the logs of what runs; read again whenever the screen changes (Settings can change them).
-        val developerOptions = remember(screen) { savedSettings(languages).developerOptions }
-        val showTimeUsed = remember(screen) { savedSettings(languages).appTime == AppTime.TIME_USED }
+        // Flatdroid's saved settings, read once per level (on the way back from Settings, which may have
+        // changed them), not on every page of a settings screen.
+        val saved = remember(screen.level) { savedSettings(languages) }
+        val developerOptions = saved.developerOptions
+        val showTimeUsed = saved.appTime == AppTime.TIME_USED
         // The app is up: Flatdroid's window opens it, once, when the user started it from here and is still here.
         val upSession = sessionState as? SessionState.Running
         LaunchedEffect(upSession?.password) {
@@ -223,7 +254,7 @@ class MainActivity : ComponentActivity() {
         val taskRunning = task.running != null
         // No task while an app runs, and no app while a task or (unless allowed) a terminal command
         // runs: a running app could take over Alpine processes started after it ([AlpineCommands]).
-        val terminalWithApps = remember(screen) { AlpineCommands.terminalWithApps(this) }
+        val terminalWithApps = saved.terminalWithApps
         val terminalRunning = running
         val nameOf = { id: String -> apps?.firstOrNull { it.id == id }?.name ?: id }
         // Settings open with fresh drafts. They are not dropped when the screen is left: it is still
@@ -244,6 +275,24 @@ class MainActivity : ComponentActivity() {
         }
 
         storage.Dialogs(nameOf)
+        // A Flathub link (or appstream:// one) that named an app: confirm, then the normal install.
+        val installLink by home.installLink.collectAsState()
+        installLink?.let { id ->
+            InstallLinkDialog(
+                id, remember { AlpineEnvironment.get(this@MainActivity).arch },
+                // Unknown until the list has loaded: no Install before then.
+                installed = apps?.any { it.id == id },
+                busy = sessionBusy || taskRunning,
+                mobileDataBlocked = { mobileDataPolicy() == MobileData.NEVER },
+                runtimeInstalled = { ref ->
+                    // Flathub names its own architecture (the app is the same on ours): look for this phone's.
+                    val env = AlpineEnvironment.get(this@MainActivity)
+                    FlatpakInstallation(env.flatpakDir, env.arch).runtime(ref.copy(arch = env.arch)) != null
+                },
+                onInstall = { home.clearInstallLink(); startDownload(FlatpakTask.Install(listOf(id))) },
+                onDismiss = home::clearInstallLink,
+            )
+        }
         val storageTasks by StorageTasks.ui.collectAsState()
         // A session that ends while Flatdroid is open may leave a temporary home to ask about.
         LaunchedEffect(sessionBusy) { if (!sessionBusy) storage.checkTempHomes() }
@@ -315,6 +364,9 @@ class MainActivity : ComponentActivity() {
                             onUninstall = { id, deleteData, keepRuntimes ->
                                 if (FlatpakTaskService.start(this@MainActivity, FlatpakTask.Uninstall(id, deleteData, keepRuntimes))) home.uninstallStarted(id)
                             },
+                            onRemoveRuntime = { id ->
+                                if (!FlatpakTaskService.start(this@MainActivity, FlatpakTask.RemoveRuntime(id))) Toast.makeText(this@MainActivity, R.string.task_busy, Toast.LENGTH_LONG).show()
+                            },
                         ),
                         onReset = { mode -> go(Screen.Home); resetAlpine(mode) },
                         onResetSettings = { viewModel.applySettings(UserSettings.defaults(languages)) { go(Screen.Home) } },
@@ -352,7 +404,6 @@ class MainActivity : ComponentActivity() {
                     return@AnimatedContent
                 }
                 val store = remember(app.id) { AppData.settings(this@MainActivity, app.id) }
-                val developerOptions = remember { savedSettings(languages).developerOptions }
                 val draft = drafts.app?.takeIf { it.appId == app.id }?.draft
                 if (draft == null) {
                     LaunchedEffect(app.id) { drafts.openApp(app.id, store.load()) }
@@ -395,7 +446,7 @@ class MainActivity : ComponentActivity() {
                         broadAccess = storage.broadAccess,
                         onStorage = { action -> storage.storageAction(app.id, action) },
                         onOpenHome = { storage.openHomeInFiles(app.id) },
-                        limitDevices = remember { savedSettings(languages).security.limitDevices },
+                        limitDevices = saved.security.limitDevices,
                         onResetFlatdroidSettings = { store.delete(); go(Screen.Home) },
                     ),
                     onSave = { new ->
@@ -507,12 +558,17 @@ class MainActivity : ComponentActivity() {
 
     /** Starts a task that downloads, first doing what the mobile data setting says on a metered connection. */
     private fun startDownload(task: FlatpakTask) {
-        val metered = getSystemService(ConnectivityManager::class.java)?.isActiveNetworkMetered == true
-        when (if (metered) SetupController.settings(this).load()?.mobileData ?: MobileData.ASK else MobileData.ALWAYS) {
+        when (mobileDataPolicy()) {
             MobileData.ALWAYS -> startTask(task)
             MobileData.ASK -> meteredQuestion = task
             MobileData.NEVER -> Toast.makeText(this, R.string.mobile_data_blocked, Toast.LENGTH_LONG).show()
         }
+    }
+
+    /** What a download does now: the mobile data setting on a metered connection, and always otherwise. */
+    private fun mobileDataPolicy(): MobileData {
+        val metered = getSystemService(ConnectivityManager::class.java)?.isActiveNetworkMetered == true
+        return if (metered) SetupController.settings(this).load()?.mobileData ?: MobileData.ASK else MobileData.ALWAYS
     }
 
     /** Launches [appId]; the notification permission is asked first, as for setup. */
@@ -563,7 +619,8 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun openViewer(session: SessionState.Running) {
-        if (session.socket != null) return startActivity(Intent(this, ViewerActivity::class.java))
+        // An open viewer comes forward rather than a second one (a link can bring this window above it).
+        if (session.socket != null) return startActivity(Intent(this, ViewerActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
         val settings = SetupController.settings(this).load()
         try {
             val intent = Viewer.intent(this, session.password, settings?.vncViewer, username = session.username)
@@ -638,6 +695,23 @@ class MainActivity : ComponentActivity() {
     private fun deviceLanguageTags(): List<String> {
         val locales = LocaleList.getDefault()
         return (0 until locales.size()).map { locales[it].toLanguageTag() }
+    }
+
+    companion object {
+        private const val EXTRA_INSTALL = "com.garathon.flatdroid.INSTALL"
+
+        private fun isLauncherIntent(intent: Intent?) = intent?.action == Intent.ACTION_MAIN && intent.hasCategory(Intent.CATEGORY_LAUNCHER)
+
+        /**
+         * Brings Flatdroid's window forward, as it was, to ask about installing [appId]. The intent
+         * is the launcher's (extras don't count), so the task it may start is the one the icon
+         * opens later, and the window already open is reused, not stacked again.
+         */
+        fun installIntent(context: Context, appId: String): Intent = Intent(Intent.ACTION_MAIN)
+            .addCategory(Intent.CATEGORY_LAUNCHER)
+            .setClass(context, MainActivity::class.java)
+            .putExtra(EXTRA_INSTALL, appId)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
     }
 }
 

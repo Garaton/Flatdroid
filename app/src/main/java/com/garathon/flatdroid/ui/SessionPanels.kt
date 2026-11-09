@@ -2,6 +2,7 @@ package com.garathon.flatdroid.ui
 
 import android.content.ClipData
 import android.os.PersistableBundle
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,12 +35,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import com.garathon.flatdroid.R
+import com.garathon.flatdroid.flatpak.FlathubLinkApproval
 import com.garathon.flatdroid.flatpak.FlatpakTask
 import com.garathon.flatdroid.flatpak.FlatpakTaskUi
 import com.garathon.flatdroid.flatpak.InstalledApps
@@ -73,6 +78,18 @@ fun InstallDialog(onInstall: (List<String>) -> Unit, onDismiss: () -> Unit) {
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(stringResource(R.string.install_text))
+                // Flathub links that Android doesn't open in Flatdroid yet: say where to allow them (Android 12 and later).
+                val context = LocalContext.current
+                if (rememberFlathubLinksAllowed() == false) {
+                    // A link to Android's screen for it (Open by default).
+                    Text(
+                        stringResource(R.string.install_tip_links),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        textDecoration = TextDecoration.Underline,
+                        modifier = Modifier.clickable(role = Role.Button) { FlathubLinkApproval.openSettings(context) },
+                    )
+                }
                 OutlinedTextField(
                     value = id,
                     onValueChange = { id = it },

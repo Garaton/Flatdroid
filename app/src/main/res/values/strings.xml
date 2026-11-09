@@ -34,7 +34,10 @@
     <string name="setup_error_scripts">Package scripts failed:\n%1$s</string>
     <string name="setup_error_packages">Packages not installed: %1$s</string>
     <string name="setup_error_network">The package servers can\'t be reached: %1$s\nCheck your connection and retry.</string>
-    <string name="setup_error_apk_line">apk stopped with an error: %1$s</string>
+    <string name="setup_error_apk_line">Installing Alpine\'s packages stopped with an error: %1$s</string>
+    <string name="setup_error_disk_full">The phone ran out of storage while installing Alpine\'s packages. Free some space and retry.</string>
+    <string name="setup_error_no_such_package">Alpine has no package named %1$s. Alpine may have renamed or dropped it; a newer Flatdroid may be needed.</string>
+    <string name="setup_error_unselectable">Alpine\'s packages that setup needs can\'t be installed together. The log says why.</string>
     <string name="setup_error_apk">apk failed (exit %1$d)</string>
     <string name="setup_error_missing">A step finished but its files are missing: %1$s</string>
     <string name="setup_error_flatpak_check">Flatpak does not run: %1$s</string>
@@ -64,6 +67,13 @@
     <string name="settings_interface_theme_hint">Light or dark for Flatdroid\'s own screens. AMOLED is dark with black backgrounds, which saves power on AMOLED screens. Apps have their own theme under Display.</string>
     <string name="settings_theme_amoled">AMOLED</string>
     <string name="settings_mobile_data">Mobile data</string>
+    <string name="settings_flathub_links">Flathub links</string>
+    <string name="settings_flathub_links_allowed">Allowed</string>
+    <string name="settings_flathub_links_not_allowed">Not allowed yet</string>
+    <string name="settings_flathub_links_hint">The Install button on a Flathub page, opened from a browser, can open Flatdroid, which asks before it installs the app. Android lets Flatdroid open these only after you allow it: in the screen this opens, turn on Open supported links, then tap Add link and choose flathub.org.</string>
+    <string name="settings_flathub_links_hint_allowed">The Install button on a Flathub page, opened from a browser, opens Flatdroid, which asks before it installs the app. To stop that, change it in Android\'s setting.</string>
+    <string name="install_tip_links">Tap here to let Flathub\'s Install button open Flatdroid.</string>
+    <string name="settings_flathub_links_open">Open Android\'s setting</string>
     <string name="settings_mobile_data_hint">What installs and updates do when the connection is metered, as mobile data usually is.</string>
     <string name="settings_mobile_data_ask">Ask first</string>
     <string name="settings_mobile_data_always">Download</string>
@@ -131,6 +141,9 @@
     <string name="storage_list_empty">Nothing matches.</string>
     <string name="storage_runtime">Runtime</string>
     <string name="storage_runtime_unused">Runtime, no app uses it</string>
+    <string name="storage_remove_runtime">Uninstall runtime</string>
+    <string name="storage_remove_runtime_title">Uninstall %1$s?</string>
+    <string name="storage_remove_runtime_text">No installed app uses this runtime. Uninstalling it frees its space; an app installed later that needs it downloads it again.</string>
     <string name="storage_not_installed">Not installed</string>
     <string name="storage_delete">Delete</string>
     <string name="storage_open_in_files">Open in Files</string>
@@ -224,7 +237,7 @@
     <string name="home_no_match">No app matches.</string>
     <string name="home_last_opened">Last opened:</string>
     <string name="home_time_used">Time used:</string>
-    <string name="home_never_opened">Never</string>
+    <string name="home_never_opened">Never opened</string>
     <string name="app_settings_open">Settings for %1$s</string>
     <string name="show_log">Show log</string>
     <string name="dismiss">Close</string>
@@ -233,6 +246,21 @@
     <string name="install_text">Enter the app\'s ID, as shown on its Flathub page. Separate several IDs with spaces to install them together.</string>
     <string name="install_id_label">App IDs</string>
     <string name="install_confirm">Install</string>
+    <string name="install_link_title">Install %1$s?</string>
+    <string name="install_link_loading">Asking Flathub…</string>
+    <string name="install_link_not_found">Flathub has no app with the ID %1$s.</string>
+    <string name="install_link_failed">Flathub can\'t be reached. Check the connection.</string>
+    <string name="install_link_server_error">Flathub answered with an error (%1$d). Try again later.</string>
+    <string name="install_link_bad_answer">Flathub\'s answer couldn\'t be read. Flatdroid may need an update.</string>
+    <string name="install_link_mobile_data">Downloads on mobile data are off, so Flatdroid doesn\'t ask Flathub either. Connect to Wi-Fi and try again, or change it in Flatdroid\'s settings under Flatpak.</string>
+    <string name="install_link_verified">Verified on Flathub</string>
+    <string name="install_link_retry">Try again</string>
+    <string name="install_link_app_size">App size: %1$s</string>
+    <string name="install_link_runtimes">Runtimes:\n%1$s - %2$s</string>
+    <string name="install_link_runtime_installed">installed</string>
+    <string name="install_link_asks">Asks for: %1$s</string>
+    <string name="install_link_no_arch">This app has no build for this phone (%1$s). Flathub has: %2$s.</string>
+    <string name="install_link_installed">Already installed.</string>
 
     <string name="task_channel">Installing and updating</string>
     <string name="task_installing">Installing %1$s</string>
@@ -253,6 +281,8 @@
     <string name="task_install_waits">Installs wait until the running app is closed.</string>
     <string name="task_baseline_progress">Baseline %1$s: %2$d/%3$d</string>
     <string name="task_uninstalling">Uninstalling %1$s</string>
+    <string name="task_removing_runtime">Uninstalling the runtime %1$s</string>
+    <string name="task_runtime_in_use">An installed app uses %1$s now, so it was kept.</string>
     <string name="task_done">Done: %1$s</string>
     <string name="task_failed_title">Failed: %1$s</string>
     <string name="task_failed">Failed: %1$s (%2$s)</string>

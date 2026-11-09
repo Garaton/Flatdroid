@@ -29,6 +29,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.garathon.flatdroid.R
+import com.garathon.flatdroid.ui.ConfirmDialog
 import com.garathon.flatdroid.ui.IconAction
 import com.garathon.flatdroid.ui.SettingsCard
 import com.garathon.flatdroid.ui.StorageAction
@@ -95,6 +96,7 @@ fun GlobalStoragePage(s: GlobalPageState) = SettingsPageColumn(R.string.settings
     fun sizeOf(bytes: Long?) = bytes?.let(::size) ?: context.getString(R.string.app_settings_measuring)
     var confirm by rememberSaveable { mutableStateOf<String?>(null) }
     var uninstall by rememberSaveable { mutableStateOf<String?>(null) }
+    var removeRuntime by rememberSaveable { mutableStateOf<String?>(null) }
     val names = remember(env.apps) { env.apps.associate { it.id to it.name } }
     val nameOf = { id: String -> names[id] ?: id }
     val canChange = env.canReset && !env.storageBusy
@@ -125,6 +127,15 @@ fun GlobalStoragePage(s: GlobalPageState) = SettingsPageColumn(R.string.settings
             nameOf(id),
             onConfirm = { data, runtimes -> uninstall = null; actions.onUninstall(id, data, runtimes) },
             onDismiss = { uninstall = null },
+        )
+    }
+
+    removeRuntime?.let { id ->
+        ConfirmDialog(
+            stringResource(R.string.storage_remove_runtime_title, id), stringResource(R.string.storage_remove_runtime_text),
+            stringResource(R.string.uninstall_confirm),
+            onConfirm = { removeRuntime = null; actions.onRemoveRuntime(id) },
+            onDismiss = { removeRuntime = null },
         )
     }
 
@@ -196,7 +207,10 @@ fun GlobalStoragePage(s: GlobalPageState) = SettingsPageColumn(R.string.settings
                     entry.name, size(entry.bytes),
                     subtitle = stringResource(if (entry.unused) R.string.storage_runtime_unused else R.string.storage_runtime),
                     dimmed = entry.unused,
-                )
+                ) {
+                    // Only one no app uses: removing a used runtime would stop its apps from starting.
+                    if (entry.unused) IconAction(Icons.Filled.Delete, R.string.storage_remove_runtime, { removeRuntime = entry.id }, enabled = env.canReset, danger = true)
+                }
             }
         }
     }

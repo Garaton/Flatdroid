@@ -79,7 +79,7 @@ class FlatpakTaskService : Service() {
         // A task that ends with baselines: if it doesn't finish (cancelled, failed, killed), they are
         // recorded at the next start instead. A Repair finishes them too, if they were pending.
         val baselineMarker = AppData.baselineMarker(applicationContext).takeIf {
-            checkFilesOn(this) && task !is FlatpakTask.Uninstall && (task != FlatpakTask.Repair || it.exists())
+            checkFilesOn(this) && task !is FlatpakTask.Uninstall && task !is FlatpakTask.RemoveRuntime && (task != FlatpakTask.Repair || it.exists())
         }
         killed = false
         job = scope.launch {
@@ -222,6 +222,15 @@ class FlatpakTaskService : Service() {
                 run(env, FlatpakCommands.uninstall(task.appId))
                 if (!task.keepRuntimes) run(env, FlatpakCommands.uninstallUnused, getString(R.string.task_removing_unused))
                 removeAppFiles(task.appId, task.deleteData)
+                IntegrityGuard(applicationContext).cleanOrphans()
+            }
+            is FlatpakTask.RemoveRuntime -> {
+                // Checked again here: an app installed since the list was shown may use it now.
+                val installation = FlatpakInstallation(env.flatpakDir, env.arch)
+                if (task.runtimeId !in installation.unusedRuntimes(setOf(task.runtimeId))) {
+                    throw IOException(getString(R.string.task_runtime_in_use, task.runtimeId))
+                }
+                run(env, FlatpakCommands.uninstallRuntime(task.runtimeId))
                 IntegrityGuard(applicationContext).cleanOrphans()
             }
             is FlatpakTask.Reinstall -> {
@@ -478,6 +487,7 @@ class FlatpakTaskService : Service() {
                 is FlatpakTask.Uninstall -> intent.putExtra(EXTRA_TASK, "uninstall").putExtra(EXTRA_APP_ID, task.appId)
                     .putExtra(EXTRA_DELETE_DATA, task.deleteData).putExtra(EXTRA_KEEP_RUNTIMES, task.keepRuntimes)
                 is FlatpakTask.Reinstall -> intent.putExtra(EXTRA_TASK, "reinstall").putExtra(EXTRA_APP_ID, task.appId)
+                is FlatpakTask.RemoveRuntime -> intent.putExtra(EXTRA_TASK, "removeRuntime").putExtra(EXTRA_APP_ID, task.runtimeId)
                 FlatpakTask.ReinstallAll -> intent.putExtra(EXTRA_TASK, "reinstallAll")
             }
             ContextCompat.startForegroundService(context, intent)
@@ -495,6 +505,7 @@ class FlatpakTaskService : Service() {
                 "repair" -> FlatpakTask.Repair
                 "baselineAll" -> FlatpakTask.BaselineAll
                 "reinstall" -> appId?.let { FlatpakTask.Reinstall(it) }
+                "removeRuntime" -> appId?.let { FlatpakTask.RemoveRuntime(it) }
                 "reinstallAll" -> FlatpakTask.ReinstallAll
                 "uninstall" -> appId?.let {
                     FlatpakTask.Uninstall(it, intent.getBooleanExtra(EXTRA_DELETE_DATA, false), intent.getBooleanExtra(EXTRA_KEEP_RUNTIMES, false))
@@ -515,6 +526,7 @@ class FlatpakTaskService : Service() {
             FlatpakTask.BaselineAll -> context.getString(R.string.task_baselining_all)
             is FlatpakTask.Uninstall -> context.getString(R.string.task_uninstalling, task.appId)
             is FlatpakTask.Reinstall -> context.getString(R.string.task_reinstalling, task.appId)
+            is FlatpakTask.RemoveRuntime -> context.getString(R.string.task_removing_runtime, task.runtimeId)
             FlatpakTask.ReinstallAll -> context.getString(R.string.task_reinstalling_all)
         }
     }

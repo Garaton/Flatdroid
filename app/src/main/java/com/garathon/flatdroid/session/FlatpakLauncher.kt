@@ -175,12 +175,14 @@ class FlatpakLauncher(private val context: Context) {
             }
             else -> throw LaunchException(describe(result))
         }
-        store.update { it.copy(lastOpened = System.currentTimeMillis(), launches = it.launches + 1) }
+        store.update { it.copy(lastOpened = System.currentTimeMillis()) }
 
         if (userSettings?.security?.checkFilesBeforeLaunch == true && !checkFiles(appId)) return false
 
         SessionController.starting(appId, context.getString(R.string.session_preparing_files))
         val home = prepareHome(appId, settings.homeMode)
+        // What is there before the launch is the user's, even when empty: the clean-up afterwards leaves it.
+        val existedBefore = mountPointChains(plan).filter { rel -> File(home, rel).let { it.exists() || AndroidTarFs.isSymlink(it) } }.toSet()
         // Before prepareDirs, which makes the mount points by what they are bound from.
         writeDesktopFiles(home, plan, userSettings)
         writeTimeZone(plan, (userSettings?.security ?: SecuritySettings()).shareLocale)
@@ -313,7 +315,11 @@ class FlatpakLauncher(private val context: Context) {
                     if (LaunchPlanner.PROOT_KILLED_BY_SIGNAL in line) killedBySignal.set(true)
                     SessionController.log(line)
                 }
-                if (runningSince == null) runningSince = System.currentTimeMillis()
+                if (runningSince == null) {
+                    runningSince = System.currentTimeMillis()
+                    // Counted once the app runs, so a launch that failed or was stopped while starting isn't.
+                    store.update { it.copy(launches = it.launches + 1) }
+                }
                 SessionController.running(
                     if (externalViewer) SessionState.Running(appId, password, username = WaylandVnc.USERNAME.takeIf { plan.wayland })
                     else SessionState.Running(
@@ -383,30 +389,42 @@ class FlatpakLauncher(private val context: Context) {
             // user sees them (empty .ssh, .bashrc, .config and the rest). Remove the empty ones.
             // A private home gets them too when it shares hidden files (a temporary one goes anyway).
             if (settings.homeMode == HomeMode.SHARED || settings.homeMode == HomeMode.ANDROID || (settings.shareHiddenFiles && settings.homeMode == HomeMode.PRIVATE)) {
-                cleanSharedHomeMountPoints(home, plan)
+                cleanSharedHomeMountPoints(home, plan, existedBefore)
             }
         }
     }
 
     /**
-     * Removes the mount points a launch's private binds leave empty in [home] (each bind's path
-     * under [GuestPaths.HOME]), and the folders above one that are left empty, up to the home.
-     * Only an empty file or an empty folder goes, so a real file the user keeps under one of these
-     * names (a hand-written `.bashrc`), or an empty folder of their own elsewhere, stays.
+     * The home-relative mount points of the private binds under the home, deepest first, so parents
+     * are empty by their turn. Paths that would leave the home are left out.
      */
-    private fun cleanSharedHomeMountPoints(home: File, plan: LaunchPlan) {
+    private fun mountPoints(plan: LaunchPlan): List<String> {
         val prefix = GuestPaths.HOME + "/"
-        val points = (plan.binds.appDirs + plan.binds.privateFiles)
+        return (plan.binds.appDirs + plan.binds.privateFiles)
             .map { it.second }
             .filter { it.startsWith(prefix) }
             .map { it.removePrefix(prefix) }
             .filter { rel -> rel.split('/').none { it.isEmpty() || it == "." || it == ".." } }
             .distinct()
-            .sortedByDescending { rel -> rel.count { it == '/' } } // deepest first, so parents are empty by their turn
-        for (rel in points) {
-            // The mount point itself, then the folders proot made for it, up to the home.
-            var file: File? = File(home, rel)
-            while (file != null && file != home && deleteIfEmpty(file)) file = file.parentFile
+            .sortedByDescending { rel -> rel.count { it == '/' } }
+    }
+
+    /** The mount points and every folder between them and the home ([mountPoints]). */
+    private fun mountPointChains(plan: LaunchPlan): Set<String> =
+        mountPoints(plan).flatMap { rel -> generateSequence(rel) { it.substringBeforeLast('/', "").ifEmpty { null } }.toList() }.toSet()
+
+    /**
+     * proot leaves the private binds' mount points behind (empty files and folders) where the user
+     * sees them. Removes the empty ones it made: the mount point, then the folders made for it, up to
+     * the home; never one in [existedBefore] (there before the launch, so the user's). Only an empty
+     * file or folder goes, so a real file under one of these names (a hand-written `.bashrc`) stays.
+     */
+    private fun cleanSharedHomeMountPoints(home: File, plan: LaunchPlan, existedBefore: Set<String>) {
+        for (rel in mountPoints(plan)) {
+            var current: String? = rel
+            while (current != null && current !in existedBefore && deleteIfEmpty(File(home, current))) {
+                current = current.substringBeforeLast('/', "").ifEmpty { null }
+            }
         }
     }
 
