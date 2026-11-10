@@ -56,7 +56,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.garathon.flatdroid.R
-import com.garathon.flatdroid.flatpak.FlatpakTask
 import com.garathon.flatdroid.flatpak.FlatpakTaskUi
 import com.garathon.flatdroid.flatpak.InstalledApp
 import com.garathon.flatdroid.session.SessionState
@@ -70,6 +69,7 @@ import com.garathon.flatdroid.ui.settings.durationText
 import com.garathon.flatdroid.ui.theme.FlatdroidTheme
 import java.text.DateFormat
 import java.util.Date
+import kotlinx.coroutines.delay
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -79,6 +79,8 @@ internal val ROW_HEIGHT = 64.dp
 /** How long the pinned row takes to come or go, and the list to fade in at start-up. */
 private const val PIN_MILLIS = 300
 private const val LIST_FADE_MILLIS = 700
+/** A row of an app just stopped in place fades from the running row's color to the list's. */
+private const val ROW_FADE_MILLIS = 500
 
 /**
  * The home list's scroll position and search, kept by the activity so they survive a visit to
@@ -126,7 +128,6 @@ fun HomeScreen(
     canLaunch: Boolean,
     canInstall: Boolean,
     canUpdate: Boolean,
-    describeTask: (FlatpakTask) -> String,
     onLaunch: (InstalledApp) -> Unit,
     onAppSettings: (InstalledApp) -> Unit,
     onInstall: () -> Unit,
@@ -138,10 +139,8 @@ fun HomeScreen(
     onStopApp: () -> Unit,
     onSessionLog: () -> Unit,
     onSkipCheck: () -> Unit,
-    onCancelTask: () -> Unit,
-    onDismissTask: () -> Unit,
-    onTaskLog: () -> Unit,
-    onDismissSession: () -> Unit,
+    /** The task and session bar ([StatusBar]), shared with the browser. */
+    bottomBar: @Composable () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
@@ -195,6 +194,12 @@ fun HomeScreen(
                 lazy.scrollToItem(0)
             }
             pinned.snapTo(target)
+            // Once faded, the row is a plain row again: a row scrolled out and back in is made anew, and
+            // would otherwise start from the highlight again.
+            if (!isRunning) {
+                delay(ROW_FADE_MILLIS.toLong())
+                fadeRow = null
+            }
         } else {
             fadeRow = null
             pinned.animateTo(target, tween(PIN_MILLIS))
@@ -267,11 +272,7 @@ fun HomeScreen(
                 }
             }
         }
-        StatusBar(
-            task, session, describeTask, developerOptions,
-            onCancelTask = onCancelTask, onDismissTask = onDismissTask, onTaskLog = onTaskLog,
-            onDismissSession = onDismissSession, onSessionLog = onSessionLog,
-        )
+        bottomBar()
     }
 }
 
@@ -316,7 +317,7 @@ private fun AppRow(
 ) {
     val colors = MaterialTheme.colorScheme
     val background = remember(app.id, fadeFromHighlight) { Animatable(if (fadeFromHighlight) colors.secondaryContainer else colors.surface) }
-    LaunchedEffect(app.id, fadeFromHighlight) { if (fadeFromHighlight) background.animateTo(colors.surface, tween(500)) }
+    LaunchedEffect(app.id, fadeFromHighlight) { if (fadeFromHighlight) background.animateTo(colors.surface, tween(ROW_FADE_MILLIS)) }
     Row(
         modifier = Modifier.fillMaxWidth().height(ROW_HEIGHT).background(background.value).clickable(enabled = enabled, onClick = onLaunch)
             .padding(start = 16.dp, end = 4.dp),
@@ -386,9 +387,9 @@ private fun HomeScreenPreview() {
             session = SessionUi(SessionState.Starting("org.xfce.mousepad", "Starting the display")),
             task = FlatpakTaskUi(),
             listState = rememberHomeListState(),
-            developerOptions = true, showTimeUsed = true, canLaunch = true, canInstall = true, canUpdate = false, describeTask = { "" },
+            developerOptions = true, showTimeUsed = true, canLaunch = true, canInstall = true, canUpdate = false,
             onLaunch = {}, onAppSettings = {}, onInstall = {}, onUpdateAll = {}, onSettings = {}, onImportFiles = {}, onImportZip = {},
-            onOpenApp = {}, onStopApp = {}, onSessionLog = {}, onSkipCheck = {}, onCancelTask = {}, onDismissTask = {}, onTaskLog = {}, onDismissSession = {},
+            onOpenApp = {}, onStopApp = {}, onSessionLog = {}, onSkipCheck = {}, bottomBar = {},
         )
     }
 }

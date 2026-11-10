@@ -21,6 +21,9 @@ import com.garathon.flatdroid.alpine.AlpineCommands
 import com.garathon.flatdroid.audio.MicStreamer
 import com.garathon.flatdroid.camera.AndroidCameras
 import com.garathon.flatdroid.flatpak.AppData
+import com.garathon.flatdroid.launcher.AppEnding
+import com.garathon.flatdroid.launcher.ProotExit
+import com.garathon.flatdroid.flatpak.FlatpakTaskService
 import com.garathon.flatdroid.flatpak.InstalledApps
 import com.garathon.flatdroid.settings.HomeMode
 import com.garathon.flatdroid.setup.SetupController
@@ -124,7 +127,14 @@ class SessionService : Service() {
                         launcher.prepareElectron(appId)
                     }
                     if (!launcher.run(appId, micAnswer)) return@runInterruptible
-                    message = getString(R.string.session_ended, label(appId))
+                    // A crash, a kill or an error exit is an error, not a plain close.
+                    message = when (val ending = launcher.ending) {
+                        is AppEnding.Crashed -> getString(R.string.session_crashed, label(appId), ProotExit.signalName(ending.signal))
+                        is AppEnding.Ended -> getString(R.string.session_signal_ended, label(appId), ProotExit.signalName(ending.signal))
+                        is AppEnding.Failed -> getString(R.string.session_exit_error, label(appId), ending.code)
+                        null -> getString(R.string.session_ended, label(appId))
+                    }
+                    failed = launcher.ending != null
                 }
             } catch (e: CancellationException) {
                 message = null
@@ -149,6 +159,8 @@ class SessionService : Service() {
                 // A question (an Electron offer, a files-changed report) stays up for the UI to answer.
                 val awaitingUi = SessionController.ui.value.state is SessionState.Question
                 if (!awaitingUi) SessionController.ended(message, failed)
+                // Tasks that waited for the app start now (while this service still runs in the foreground).
+                if (!awaitingUi) FlatpakTaskService.startNext(applicationContext)
                 stopSelf()
             }
         }

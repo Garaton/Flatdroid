@@ -67,11 +67,38 @@ fun MobileDataDialog(onDownload: () -> Unit, onDismiss: () -> Unit) {
     )
 }
 
-/** Asks for one or more app IDs (separated by spaces) to install from Flathub. */
+/**
+ * Typed app IDs to install. Install checks them first and names the ones that can't work: not an
+ * app ID at all, or (when Flathub's catalog for this phone is loaded, [inCatalog]) not in it, which
+ * would fail the whole install, other apps waiting with it included; or installed already
+ * ([installed], when the list of installed apps is known).
+ */
 @Composable
-fun InstallDialog(onInstall: (List<String>) -> Unit, onDismiss: () -> Unit) {
+fun InstallDialog(
+    onInstall: (List<String>) -> Unit,
+    onDismiss: () -> Unit,
+    inCatalog: ((String) -> Boolean)? = null,
+    installed: Set<String>? = null,
+) {
     var id by rememberSaveable { mutableStateOf("") }
-    val ids = InstalledApps.parseIds(id)
+    var problem by rememberSaveable { mutableStateOf<String?>(null) }
+    val words = InstalledApps.splitIds(id)
+    val notIds = words.filterNot(InstalledApps::isValidId)
+    val problemText = when (problem) {
+        PROBLEM_NOT_ID -> stringResource(R.string.install_not_an_id, notIds.joinToString(", "))
+        PROBLEM_UNKNOWN -> stringResource(R.string.install_unknown_id, words.filter { inCatalog != null && !inCatalog(it) }.joinToString(", "))
+        PROBLEM_INSTALLED -> stringResource(R.string.install_already_installed, words.filter { installed != null && it in installed }.joinToString(", "))
+        else -> null
+    }
+    val submit = {
+        problem = when {
+            notIds.isNotEmpty() -> PROBLEM_NOT_ID
+            inCatalog != null && words.any { !inCatalog(it) } -> PROBLEM_UNKNOWN
+            installed != null && words.any { it in installed } -> PROBLEM_INSTALLED
+            else -> null
+        }
+        if (problem == null && words.isNotEmpty()) onInstall(words)
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.install_title)) },
@@ -92,23 +119,31 @@ fun InstallDialog(onInstall: (List<String>) -> Unit, onDismiss: () -> Unit) {
                 }
                 OutlinedTextField(
                     value = id,
-                    onValueChange = { id = it },
+                    onValueChange = {
+                        id = it
+                        problem = null
+                    },
                     label = { Text(stringResource(R.string.install_id_label)) },
                     placeholder = { Text("org.xfce.mousepad") },
                     singleLine = true,
-                    isError = id.isNotBlank() && ids == null,
+                    isError = notIds.isNotEmpty() || problemText != null,
+                    supportingText = problemText?.let { { Text(it) } },
                     // The keyboard's action key installs, like the button.
                     keyboardOptions = KeyboardOptions(
                         capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false, imeAction = ImeAction.Go,
                     ),
-                    keyboardActions = KeyboardActions(onGo = { ids?.let(onInstall) }),
+                    keyboardActions = KeyboardActions(onGo = { submit() }),
                 )
             }
         },
-        confirmButton = { Button(onClick = { ids?.let(onInstall) }, enabled = ids != null) { Text(stringResource(R.string.install_confirm)) } },
+        confirmButton = { Button(onClick = submit, enabled = words.isNotEmpty() && problemText == null) { Text(stringResource(R.string.install_confirm)) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.reset_cancel)) } },
     )
 }
+
+private const val PROBLEM_NOT_ID = "notId"
+private const val PROBLEM_UNKNOWN = "unknown"
+private const val PROBLEM_INSTALLED = "installed"
 
 /** Asks before downloading Electron for this device, or explains why a swap can't work. */
 @Composable

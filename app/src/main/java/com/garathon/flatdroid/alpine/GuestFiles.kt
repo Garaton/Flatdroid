@@ -244,9 +244,17 @@ object GuestFiles {
 
     /**
      * Stand-ins for /proc and /proc/sys entries that Android doesn't let apps read, keyed by guest
-     * path. The values are plausible rather than real; tools only need them to parse.
+     * path. Most values are plausible rather than real (tools only need them to parse); the ones in
+     * [REAL_PROC] are the kernel's own.
      */
-    fun fakeProc(cpuCount: Int, kernelRelease: String, kernelVersion: String, uptimeSeconds: Long, bootEpochSeconds: Long): Map<String, String> {
+    fun fakeProc(
+        cpuCount: Int,
+        kernelRelease: String,
+        kernelVersion: String,
+        uptimeSeconds: Long,
+        bootEpochSeconds: Long,
+        capLastCap: Int,
+    ): Map<String, String> {
         val cpus = cpuCount.coerceAtLeast(1)
         val idle = uptimeSeconds.coerceAtLeast(1) * 100 // USER_HZ ticks
         val perCpu = "100 0 100 $idle 0 0 0 0 0 0"
@@ -261,10 +269,20 @@ object GuestFiles {
             "/proc/uptime" to "$uptimeSeconds.00 ${idle * cpus / 100}.00\n",
             "/proc/version" to "Linux version $kernelRelease (android) $kernelVersion\n",
             "/proc/vmstat" to "pgpgin 0\npgpgout 0\npswpin 0\npswpout 0\npgfault 0\npgmajfault 0\n",
-            "/proc/sys/kernel/cap_last_cap" to "40\n",
+            "/proc/sys/kernel/cap_last_cap" to "$capLastCap\n",
             "/proc/sys/fs/inotify/max_user_watches" to "8192\n",
             "/proc/sys/kernel/overflowuid" to "65534\n",
             "/proc/sys/kernel/overflowgid" to "65534\n",
         )
     }
+
+    /**
+     * The stand-ins ([fakeProc]) that hold the real values: the kernel's version (from uname), its
+     * last capability, and Linux's fixed overflow IDs. Flatpaks get these too; the others (frozen
+     * counters, a load of 0) would only mislead an app that reads them.
+     */
+    val REAL_PROC = setOf("/proc/version", "/proc/sys/kernel/cap_last_cap", "/proc/sys/kernel/overflowuid", "/proc/sys/kernel/overflowgid")
+
+    /** cap_last_cap when the kernel's can't be found: Linux 5.9's. */
+    const val DEFAULT_CAP_LAST_CAP = 40
 }

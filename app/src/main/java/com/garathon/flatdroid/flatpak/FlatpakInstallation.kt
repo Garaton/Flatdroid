@@ -62,6 +62,22 @@ class FlatpakInstallation(root: File, private val arch: String) {
         return runtimeIds - used
     }
 
+    /**
+     * Installed runtime and extension branches (ID and branch) that no installed app's launch uses,
+     * by the rules a launch uses. Flatpak's `uninstall --unused` works per branch too, so when this
+     * is empty there is nothing for it to remove; anything uncertain counts as unused here (an app's
+     * other branches, say), so a mistake only means running it when it wasn't needed.
+     */
+    fun unusedRuntimeRefs(): List<FlatpakRef> {
+        val used = appIds().flatMap { deploymentsFor(it) }.filter { it.kind == "runtime" }.map { it.ref }.toSet()
+        val installed = File(root, "runtime").list().orEmpty().sorted().flatMap { name ->
+            File(root, "runtime/$name/$arch").list().orEmpty().sorted()
+                .map { branch -> FlatpakRef(name, arch, branch) }
+                .filter { runtime(it) != null }
+        }
+        return installed.filter { it !in used }
+    }
+
     fun deploymentsFor(appId: String): List<Deployment> {
         val app = app(appId) ?: return emptyList()
         val runtimeRef = app.metadata.runtime ?: return listOf(app)

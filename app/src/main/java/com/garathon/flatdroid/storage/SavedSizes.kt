@@ -5,6 +5,7 @@ import com.garathon.flatdroid.alpine.AlpineEnvironment
 import com.garathon.flatdroid.flatpak.AppData
 import com.garathon.flatdroid.flatpak.FlatpakInstallation
 import com.garathon.flatdroid.flatpak.InstalledApps
+import com.garathon.flatdroid.flatpak.catalog.Catalog
 import com.garathon.flatdroid.util.DebugLog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.asCoroutineDispatcher
@@ -210,8 +211,11 @@ object SavedSizes {
             // As each app's own size counts them, so that the rest is what neither counts. Saved with
             // the app's sizes (apps are measured before this), so read rather than walked again.
             val appFiles = apps.sumOf { id -> (app(context, id) ?: throw MeasureStopped()).flatpak }
-            // Measured per app instead: their data, settings and Electron swaps, and these sizes.
-            val perApp = setOf(AppData.root(context), AppData.electronDir(context), AppData.settingsDir(context), File(context.filesDir, "storage-sizes"))
+            // Measured per app instead: their data, settings and Electron swaps, and these sizes; and
+            // the browser's index, which counts with the cache (Clear all caches removes it).
+            val perApp = setOf(
+                AppData.root(context), AppData.electronDir(context), AppData.settingsDir(context), File(context.filesDir, "storage-sizes"), Catalog.dir(context),
+            )
                 .map { it.canonicalPath }
             val files = context.filesDir.canonicalFile.listFiles().orEmpty().filter { it.canonicalPath !in perApp }.sumOf { StorageSizes.of(it, stop) }
             mapOf("runtimes" to runtimes, "other" to (files - runtimes - appFiles).coerceAtLeast(0))
@@ -254,6 +258,15 @@ object SavedSizes {
     /** Before anything that changes [appId]'s files. */
     fun forget(context: Context, appId: String) {
         if (InstalledApps.isValidId(appId)) store(context).forget(appId)
+    }
+
+    /**
+     * After a change to Flatpak's own files alone, such as its catalog (`update --appstream`): only
+     * the shared size ([shared]) is forgotten and measured again; apps and runtimes keep theirs.
+     */
+    fun changedShared(context: Context) {
+        store(context).forget(SHARED)
+        measureLater(context, listOf(SHARED))
     }
 
     /** Before anything that changes apps' files, but not Alpine, Flatpak or runtimes. */

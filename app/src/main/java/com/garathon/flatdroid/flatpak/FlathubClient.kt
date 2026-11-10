@@ -31,6 +31,12 @@ data class FlathubApp(
     fun builtFor(arch: String) = arch in arches
 }
 
+/** An app of one of Flathub's lists, with its installs of the last month (null when not given). */
+data class CollectionApp(val id: String, val installsLastMonth: Long?)
+
+/** An app's installs from Flathub: in all, and in the last month; null when not given. */
+data class FlathubStats(val total: Long?, val lastMonth: Long?)
+
 /** Flathub has no app with this ID. */
 class FlathubNotFoundException(id: String) : IOException("No app $id on Flathub")
 
@@ -50,6 +56,8 @@ object FlathubClient {
     private const val TIMEOUT_MS = 10_000
     private const val MAX_BYTES = 2 * 1024 * 1024
     private const val VERIFIED = "flathub::verification::verified"
+    /** How many apps of each of Flathub's lists are asked for (one answer each, about 0.5 MB). */
+    const val COLLECTION_COUNT = 250
 
     /** [id] must be a valid app ID (it goes into the address). */
     fun fetch(id: String): FlathubApp {
@@ -62,6 +70,45 @@ object FlathubClient {
         } catch (e: JSONException) {
             throw FlathubBadAnswerException(e)
         }
+    }
+
+    /**
+     * One of Flathub's lists (`popular`, `recently-added`, `recently-updated`): its first
+     * [COLLECTION_COUNT] apps in order, each with its installs of the last month when Flathub says.
+     */
+    fun collection(name: String): List<CollectionApp> {
+        val answer = get("$API/collection/$name?page=1&per_page=$COLLECTION_COUNT", name)
+        return try {
+            parseCollection(answer)
+        } catch (e: JSONException) {
+            throw FlathubBadAnswerException(e)
+        }
+    }
+
+    /** The apps of a collection answer (`hits[].app_id`, `installs_last_month`), valid IDs only, each once. */
+    fun parseCollection(json: String): List<CollectionApp> {
+        val hits = JSONObject(json).optJSONArray("hits") ?: return emptyList()
+        return (0 until hits.length()).mapNotNull { i ->
+            val hit = hits.optJSONObject(i) ?: return@mapNotNull null
+            val id = hit.optString("app_id").takeIf(InstalledApps::isValidId) ?: return@mapNotNull null
+            CollectionApp(id, hit.longOrNull("installs_last_month"))
+        }.distinctBy { it.id }
+    }
+
+    /** [id]'s installs from Flathub's statistics. Network work. */
+    fun stats(id: String): FlathubStats {
+        require(InstalledApps.isValidId(id)) { "Not an app ID: $id" }
+        val answer = get("$API/stats/$id", id)
+        return try {
+            parseStats(answer)
+        } catch (e: JSONException) {
+            throw FlathubBadAnswerException(e)
+        }
+    }
+
+    fun parseStats(json: String): FlathubStats {
+        val stats = JSONObject(json)
+        return FlathubStats(stats.longOrNull("installs_total"), stats.longOrNull("installs_last_month"))
     }
 
     /** Builds the confirmation's data from the two JSON answers. */

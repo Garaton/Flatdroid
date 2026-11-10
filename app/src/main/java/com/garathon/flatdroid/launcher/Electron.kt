@@ -1,5 +1,6 @@
 package com.garathon.flatdroid.launcher
 
+import com.garathon.flatdroid.flatpak.Keyfile
 import java.io.File
 import java.io.InputStream
 
@@ -65,19 +66,26 @@ object Electron {
         .filter { it.isNotEmpty() }
         .map { code -> code.split(Regex("\\s+")).map { it.trim('"', '\'') } }
 
+    /** cobalt's configuration in the app: `[Application]` with `EntryPoint`, the browser it starts when not its default. */
+    const val COBALT_CONFIG = "/app/etc/cobalt.ini"
+
     /**
-     * The browser a command script hands to cobalt (`exec cobalt "$@"`): cobalt's own entry
-     * point, `/app/extra/<name>` with the name from the app ID's last part (`chrome` for
-     * `com.google.Chrome`), when [exists] finds it. Null if the script doesn't use cobalt.
+     * The browser a command script hands to cobalt (`exec cobalt "$@"`), when [exists] finds it:
+     * the `EntryPoint` of cobalt's configuration ([config], the text of [COBALT_CONFIG], read only
+     * for a script that uses cobalt), as a browser built from source sets it; else cobalt's default,
+     * `/app/extra/<name>` with the name from the app ID's last part (`chrome` for `com.google.Chrome`).
+     * Null if the script doesn't use cobalt.
      */
-    fun cobaltTarget(script: String, appId: String, exists: (String) -> Boolean): String? {
+    fun cobaltTarget(script: String, appId: String, config: () -> String? = { null }, exists: (String) -> Boolean): String? {
         val usesCobalt = script.lineSequence().any { line ->
             line.substringBefore('#').trim().split(Regex("\\s+")).map { it.trim('"', '\'') }
                 .any { it.substringAfterLast('/') == COBALT }
         }
         if (!usesCobalt) return null
+        val entryPoint = config()?.let { Keyfile.parse(it).string("Application", "EntryPoint") }?.trim()
+            ?.takeIf { it.startsWith("/app/") && ".." !in it.split('/') }
         val name = appId.substringAfterLast('.').lowercase()
-        return listOf("/app/extra/$name", "/app/extra/$name/$name").firstOrNull(exists)
+        return (listOfNotNull(entryPoint) + listOf("/app/extra/$name", "/app/extra/$name/$name")).firstOrNull(exists)
     }
 
     /** The Electron version a binary was built as (its user agent's `Electron/<version>`). */

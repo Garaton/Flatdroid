@@ -76,4 +76,20 @@ class FlathubClientTest {
         assertNull(app.runtimeRef)
         assertTrue(app.permissions.isEmpty())
     }
+
+    @Test
+    fun collectionsKeepTheOrderValidIdsAndInstalls() {
+        val answer = """{"hits":[{"app_id":"org.vinegarhq.Sober","installs_last_month":240647},{"app_id":"bad id"},{"name":"no id"},{"app_id":"org.mozilla.firefox"},{"app_id":"org.vinegarhq.Sober","installs_last_month":1}],"totalHits":3}"""
+        assertEquals(
+            listOf(CollectionApp("org.vinegarhq.Sober", 240647), CollectionApp("org.mozilla.firefox", null)),
+            FlathubClient.parseCollection(answer),
+        )
+        assertEquals(emptyList<CollectionApp>(), FlathubClient.parseCollection("{}"))
+    }
+
+    @Test
+    fun statsGiveTheTotalAndTheLastMonth() {
+        assertEquals(FlathubStats(541282, 8873), FlathubClient.parseStats("""{"installs_total":541282,"installs_per_day":{"2026-05-12":195},"installs_last_month":8873,"id":"org.gnome.Maps"}"""))
+        assertEquals(FlathubStats(null, null), FlathubClient.parseStats("{}"))
+    }
 }

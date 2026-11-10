@@ -5,6 +5,7 @@ import android.net.LocalSocketAddress
 import android.os.Handler
 import android.os.Looper
 import com.garathon.flatdroid.session.SessionController
+import com.garathon.flatdroid.session.HiddenPause
 import com.garathon.flatdroid.util.DebugLog
 import java.io.EOFException
 import java.io.File
@@ -193,12 +194,14 @@ object ViewerConnection {
         if (this.sink !== sink) return
         this.sink = null
         shown = false
+        HiddenPause.viewerShown(false)
     }
 
     /** [sink] became visible or hidden; a newer viewer may already be the one attached. Main thread. */
     fun shown(sink: ViewerSink, visible: Boolean) {
         if (this.sink !== sink) return
         shown = visible
+        HiddenPause.viewerShown(visible)
         // Nobody sees the output while hidden: the apps needn't draw more than about once a second.
         client?.framebuffer?.let { fb -> waylandClient?.hidden(!visible, fb.width, fb.height) }
         if (visible) {

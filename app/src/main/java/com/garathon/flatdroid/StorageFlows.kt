@@ -366,6 +366,8 @@ class StorageFlows(
             StorageAction.IMPORT_SETTINGS -> pickZip(ZipTarget.AppFiles(appId))
             StorageAction.EXPORT_SETTINGS -> export(StorageTask.ExportAppFiles(appId))
             StorageAction.RESET_SETTINGS -> home.resetAppFiles(appId)
+            StorageAction.DELETE_HOME -> home.deleteUninstalled(appId, privateHome = true)
+            StorageAction.DELETE_SETTINGS -> home.deleteUninstalled(appId, privateHome = false)
         }
     }
 

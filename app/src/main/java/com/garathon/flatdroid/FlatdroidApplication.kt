@@ -6,6 +6,7 @@ import android.system.ErrnoException
 import android.system.Os
 import android.system.OsConstants
 import com.garathon.flatdroid.alpine.AlpineEnvironment
+import com.garathon.flatdroid.flatpak.catalog.CatalogImages
 import com.garathon.flatdroid.flatpak.AppData
 import com.garathon.flatdroid.flatpak.FlatpakInstallation
 import com.garathon.flatdroid.launcher.ElectronSwap
@@ -15,6 +16,7 @@ import com.garathon.flatdroid.setup.AndroidTarFs
 import com.garathon.flatdroid.setup.SetupController
 import com.garathon.flatdroid.storage.SavedSizes
 import com.garathon.flatdroid.util.DebugLog
+import com.garathon.flatdroid.util.DoneNotice
 import com.garathon.flatdroid.util.appScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -48,11 +50,13 @@ class FlatdroidApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         DebugLog.init(cacheDir)
+        DoneNotice.track(this)
         SetupController.settings(this).loadLive()
         // Before anything of this run starts: every process of Flatdroid's that is running now is left over.
         val killed = LeftoverProcesses.kill()
         if (killed > 0) DebugLog.i("Ended $killed processes left by an earlier run")
         appScope.launch(Dispatchers.IO) {
+            CatalogImages.clearAtStart(this@FlatdroidApplication)
             cleanLeftoverFiles()
             SavedSizes.measureMissing(this@FlatdroidApplication)
         }

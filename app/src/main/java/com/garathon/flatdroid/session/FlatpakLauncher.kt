@@ -32,6 +32,8 @@ import com.garathon.flatdroid.launcher.HostDirs
 import com.garathon.flatdroid.launcher.LaunchOptions
 import com.garathon.flatdroid.launcher.LaunchPlan
 import com.garathon.flatdroid.launcher.LaunchPlanner
+import com.garathon.flatdroid.launcher.AppEnding
+import com.garathon.flatdroid.launcher.ProotExit
 import com.garathon.flatdroid.launcher.PlanResult
 import com.garathon.flatdroid.launcher.VncPassword
 import com.garathon.flatdroid.flatpak.InstalledApps
@@ -72,6 +74,7 @@ import java.util.TimeZone
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 /** A launch that can't go ahead; [message] is shown to the user. */
 class LaunchException(message: String) : IOException(message)
@@ -135,10 +138,18 @@ class FlatpakLauncher(private val context: Context) {
     }
 
     /**
+     * How the app the last [run] ran ended when not as it should: killed by a signal or with an
+     * exit code other than 0; null when it closed normally or was stopped.
+     */
+    var ending: AppEnding? = null
+        private set
+
+    /**
      * Launches [appId] and returns when it exits. Returns false without launching if the user
      * must first agree to an Electron swap (the offer is then in [SessionController]).
      */
     fun run(appId: String, micAnswer: Boolean? = null): Boolean {
+        ending = null
         SessionController.starting(appId, context.getString(R.string.session_reading_metadata), clearLog = true)
         // Every Flatpak could otherwise open Flatdroid's memory through /proc (same user).
         if (!FlatdroidApplication.nonDumpable) throw LaunchException(context.getString(R.string.launch_dumpable))
@@ -291,8 +302,13 @@ class FlatpakLauncher(private val context: Context) {
             }
             // The helpers run under proot, which keeps them dumpable: hide what runs now from the app.
             val hidden = if (security.hideHelperProcesses) HelperProcesses.procPaths(ProotRunner.runningPids()) else emptyList()
-            fun hideHelpers(plan: LaunchPlan) =
-                if (hidden.isEmpty()) plan else plan.copy(binds = plan.binds.copy(hiddenProc = hidden, emptyDir = emptyDir.path))
+            // /proc entries Android doesn't let apps read, where Flatdroid knows the real value (the kernel's version, say).
+            val procStandIns = env.realProcStandIns()
+            fun hideHelpers(plan: LaunchPlan) = plan.copy(
+                binds = plan.binds.copy(fakeProc = procStandIns).let { binds ->
+                    if (hidden.isEmpty()) binds else binds.copy(hiddenProc = hidden, emptyDir = emptyDir.path)
+                },
+            )
             plan = hideHelpers(plan)
             SessionController.log("[flatdroid] " + describeFilter(plan.filter, hidden.size))
             var triedNewerFlags = false
@@ -303,6 +319,8 @@ class FlatpakLauncher(private val context: Context) {
                 val gpuFailed = AtomicBoolean(false)
                 val kdeHostProcess = AtomicBoolean(false)
                 val killedBySignal = AtomicBoolean(false)
+                // The signal that ended the app itself (its process 1), from its proot's own report.
+                val appSignal = AtomicInteger(0)
                 // The app's own: a helper's fdsec refusing later (sound, say) doesn't make the app's exit a failure.
                 val appRefused = AtomicBoolean(false)
                 app = ProotRunner.start(
@@ -313,8 +331,12 @@ class FlatpakLauncher(private val context: Context) {
                     if (Electron.GPU_FAILURE in line) gpuFailed.set(true)
                     if (LaunchPlanner.KDE_HOST_PROCESS_WARNING in line) kdeHostProcess.set(true)
                     if (LaunchPlanner.PROOT_KILLED_BY_SIGNAL in line) killedBySignal.set(true)
+                    ProotExit.signalOf(line)?.let { appSignal.compareAndSet(0, it) }
                     SessionController.log(line)
                 }
+                // Hidden, the app goes quiet and then pauses, unless it continues while hidden; with an
+                // external viewer Flatdroid can't tell what is on screen.
+                if (!externalViewer && !settings.continueWhileHidden) app.pid?.let { HiddenPause.attach(it, player) }
                 if (runningSince == null) {
                     runningSince = System.currentTimeMillis()
                     // Counted once the app runs, so a launch that failed or was stopped while starting isn't.
@@ -331,7 +353,10 @@ class FlatpakLauncher(private val context: Context) {
                     ),
                 )
                 val code = app.waitFor()
-                SessionController.log("[flatdroid] the app exited ($code)")
+                val signal = appSignal.get()
+                SessionController.log(
+                    if (signal != 0) "[flatdroid] the app was ended by ${ProotExit.signalName(signal)} ($signal)" else "[flatdroid] the app exited ($code)",
+                )
                 if (appRefused.get()) throw LaunchException(context.getString(R.string.launch_filter_refused))
                 if (plan.isElectron && !settings.newerElectronFlags && gpuFailed.get() && !triedNewerFlags) {
                     // Newer Electron: relaunch once with its extra flags, and keep them if they help.
@@ -369,12 +394,17 @@ class FlatpakLauncher(private val context: Context) {
                     SessionController.log("[flatdroid] the newer Electron flags didn't help; turned them off again")
                     throw LaunchException(context.getString(R.string.launch_newer_flags_failed, code))
                 }
+                // Here the app ended by itself (a Stop cancels the session before this). proot exits 0
+                // when the app was killed by a signal, so its report decides; otherwise the exit code does.
+                ending = ProotExit.ending(signal, code)
                 return true
             }
         } finally {
             // The time the app ran, simply from its start to here: nothing is measured while it runs.
             runningSince?.let { start -> store.update { it.copy(usedMillis = it.usedMillis + (System.currentTimeMillis() - start)) } }
             dns.stop()
+            // A paused app ignores the signals that end it: let it go on first.
+            HiddenPause.detach()
             app?.stop()
             player?.stop()
             mic?.stop()
@@ -953,3 +983,4 @@ class FlatpakLauncher(private val context: Context) {
         const val RUNTIME_CACHE_DIR = ".flatdroid-runtime"
     }
 }
+

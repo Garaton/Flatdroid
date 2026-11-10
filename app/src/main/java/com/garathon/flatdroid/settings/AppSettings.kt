@@ -55,12 +55,23 @@ data class AppDefaults(
     val blockExtraSyscalls: Boolean = true,
     val cameraResolution: Int = AndroidCameras.DEFAULT_RESOLUTION,
     val cameraFrameRate: Int = AndroidCameras.DEFAULT_FRAME_RATE,
-)
+    /** The screen's size for apps that don't choose their own (a share; never custom). */
+    val resolution: Resolution = DEFAULT_RESOLUTION,
+    /** How large Wayland apps draw everything, for apps that don't choose their own ([AppSettings.INTERFACE_SIZES]). */
+    val interfaceSize: Int = DEFAULT_INTERFACE_SIZE,
+) {
+    companion object {
+        val DEFAULT_RESOLUTION = Resolution.THREE_QUARTERS
+        const val DEFAULT_INTERFACE_SIZE = 150
+        /** The resolutions a default can be: the shares (a custom size is the app's own). */
+        val DEFAULT_RESOLUTIONS = Resolution.entries.filter { it.percent != null }
+    }
+}
 
 /** Flatdroid's choices for one Flatpak. */
 data class AppSettings(
-    /** The screen's size: a share of the viewer's, or [customWidth] x [customHeight]. */
-    val resolution: Resolution = Resolution.THREE_QUARTERS,
+    /** The screen's size: a share of the viewer's, or [customWidth] x [customHeight]; null follows [defaults] ([resolution]). */
+    val resolutionChoice: Resolution? = null,
     /** Used with [Resolution.CUSTOM] only. */
     val customWidth: Int = CUSTOM_WIDTH,
     val customHeight: Int = CUSTOM_HEIGHT,
@@ -133,10 +144,16 @@ data class AppSettings(
     val environment: Map<String, String> = emptyMap(),
     /** Developer setting: arguments added after the app's command (one argument each; no quoting). */
     val launchArgs: List<String> = emptyList(),
+    /**
+     * The app keeps running, with its sound, while Flatdroid's viewer isn't on screen. Off (the
+     * default, which Flatdroid's settings don't change): it is muted at once and paused after a
+     * minute, until the viewer is back ([com.garathon.flatdroid.session.HiddenPause]).
+     */
+    val continueWhileHidden: Boolean = false,
     /** X11 for an app that takes both (by default such an app gets Wayland). */
     val forceX11: Boolean = false,
-    /** On Wayland, how large the app draws everything, in percent ([INTERFACE_SIZES]); X11 apps keep their size. */
-    val interfaceSize: Int = 100,
+    /** On Wayland, how large the app draws everything, in percent ([INTERFACE_SIZES]); X11 apps keep their size. Null follows [defaults] ([interfaceSize]). */
+    val interfaceSizeChoice: Int? = null,
     /** The user's choice of home; null follows [defaults] ([homeMode]). */
     val homeModeChoice: HomeMode? = null,
     /**
@@ -148,6 +165,8 @@ data class AppSettings(
     val defaults: AppDefaults = AppDefaults(),
 ) {
     val homeMode: HomeMode get() = homeModeChoice ?: defaults.homeMode
+    val resolution: Resolution get() = resolutionChoice ?: defaults.resolution
+    val interfaceSize: Int get() = interfaceSizeChoice ?: defaults.interfaceSize
     val sharesClipboard: Boolean get() = clipboard ?: defaults.clipboard
     val blocksExtraSyscalls: Boolean get() = blockExtraSyscalls ?: defaults.blockExtraSyscalls
     val cameraResolution: Int get() = cameraResolutionOverride ?: defaults.cameraResolution
@@ -225,7 +244,8 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
         fun size(key: String, default: Int) =
             props.getProperty(key)?.toIntOrNull()?.takeIf { it in AppSettings.MIN_SIZE..AppSettings.MAX_SIZE } ?: default
         return AppSettings(
-            resolution = Resolution.entries.firstOrNull { (it.percent?.toString() ?: "custom") == props.getProperty(KEY_RESOLUTION) } ?: defaults.resolution,
+            resolutionChoice = Resolution.entries.firstOrNull { (it.percent?.toString() ?: "custom") == props.getProperty(KEY_RESOLUTION) }
+                ?.takeIf { it != appDefaults.resolution },
             customWidth = size(KEY_WIDTH, defaults.customWidth),
             customHeight = size(KEY_HEIGHT, defaults.customHeight),
             newerElectronFlags = props.getProperty(KEY_ELECTRON_NEWER) == "true",
@@ -255,7 +275,8 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
                 .associateWith { props.getProperty(KEY_ENV_PREFIX + it) },
             launchArgs = LaunchArgs.parse(props.getProperty(KEY_LAUNCH_ARGS).orEmpty()),
             forceX11 = props.getProperty(KEY_FORCE_X11) == "true",
-            interfaceSize = props.getProperty(KEY_INTERFACE_SIZE)?.toIntOrNull()?.takeIf { it in AppSettings.INTERFACE_SIZES } ?: 100,
+            continueWhileHidden = props.getProperty(KEY_CONTINUE_HIDDEN) == "true",
+            interfaceSizeChoice = props.getProperty(KEY_INTERFACE_SIZE)?.toIntOrNull()?.takeIf { it in AppSettings.INTERFACE_SIZES && it != appDefaults.interfaceSize },
             homeModeChoice = HomeMode.entries.firstOrNull { it.name.lowercase() == props.getProperty(KEY_HOME_MODE) },
             sdcard = props.getProperty(KEY_SDCARD) == "true",
             defaults = appDefaults,
@@ -264,7 +285,7 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
 
     fun save(settings: AppSettings) {
         val props = Properties()
-        props.setProperty(KEY_RESOLUTION, settings.resolution.percent?.toString() ?: "custom")
+        settings.resolutionChoice?.let { props.setProperty(KEY_RESOLUTION, it.percent?.toString() ?: "custom") }
         // Kept while another size is chosen, so switching back finds them.
         props.setProperty(KEY_WIDTH, settings.customWidth.toString())
         props.setProperty(KEY_HEIGHT, settings.customHeight.toString())
@@ -287,7 +308,8 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
         for ((name, value) in settings.environment) props.setProperty(KEY_ENV_PREFIX + name, value)
         if (settings.launchArgs.isNotEmpty()) props.setProperty(KEY_LAUNCH_ARGS, LaunchArgs.format(settings.launchArgs))
         if (settings.forceX11) props.setProperty(KEY_FORCE_X11, "true")
-        if (settings.interfaceSize != 100) props.setProperty(KEY_INTERFACE_SIZE, settings.interfaceSize.toString())
+        settings.interfaceSizeChoice?.let { props.setProperty(KEY_INTERFACE_SIZE, it.toString()) }
+        if (settings.continueWhileHidden) props.setProperty(KEY_CONTINUE_HIDDEN, "true")
         settings.homeModeChoice?.let { props.setProperty(KEY_HOME_MODE, it.name.lowercase()) }
         if (settings.sdcard) props.setProperty(KEY_SDCARD, "true")
         file.writeTextAtomically(StringWriter().also { props.store(it, null) }.toString())
@@ -338,6 +360,7 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
         private const val KEY_LAUNCH_ARGS = "launch.args"
         private const val KEY_FORCE_X11 = "display.x11"
         private const val KEY_INTERFACE_SIZE = "display.interfaceSize"
+        private const val KEY_CONTINUE_HIDDEN = "session.continueWhileHidden"
         private const val KEY_HOME_MODE = "home.mode"
         private const val KEY_SDCARD = "storage.sdcard"
         private const val KEY_NETWORK = "permission.network"

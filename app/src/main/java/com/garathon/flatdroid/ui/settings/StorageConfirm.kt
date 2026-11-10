@@ -56,6 +56,8 @@ fun StorageConfirmDialog(
             StorageAction.IMPORT_HOME -> Triple(R.string.app_settings_import_home_title, R.string.app_settings_import_home_text, R.string.storage_import)
             StorageAction.RESET_HOME -> Triple(R.string.app_settings_reset_home_title, R.string.app_settings_reset_home_text, R.string.storage_reset)
             StorageAction.IMPORT_SETTINGS -> Triple(R.string.app_settings_import_settings_title, R.string.app_settings_import_settings_text, R.string.storage_import)
+            StorageAction.DELETE_HOME -> Triple(R.string.storage_delete_home_title, R.string.storage_delete_home_text, R.string.storage_delete)
+            StorageAction.DELETE_SETTINGS -> Triple(R.string.storage_delete_app_data_title, R.string.storage_delete_app_data_text, R.string.storage_delete)
             else -> Triple(R.string.app_settings_reset_app_settings_title, R.string.app_settings_reset_app_settings_text, R.string.storage_reset)
         }
         ConfirmDialog(

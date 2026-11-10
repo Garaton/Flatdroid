@@ -114,6 +114,33 @@ class FileIntegrityCheck(
         write(commit, baseline - gone.toSet() + present.associateWith { FileIntegrity.entry(File(files, it), withHash) })
     }
 
+    /**
+     * After link2symlink intermediates were repaired ([BrokenLinks.relinkStranded]): entries any
+     * baseline recorded as unreadable (no hash: the link was broken then) whose link goes through
+     * one of [intermediates] (their names) are recorded again from the file as it reads now. A
+     * baseline taken while a link was broken would otherwise report its file changed once it reads
+     * again. Returns how many entries were recorded again.
+     */
+    fun rereadRepaired(intermediates: Collection<String>): Int {
+        if (intermediates.isEmpty()) return 0
+        val names = intermediates.toHashSet()
+        var reread = 0
+        for (file in integrityDir.listFiles().orEmpty()) {
+            if (!file.name.endsWith(SUFFIX)) continue
+            val baseline = runCatching { FileIntegrity.read(file.readText()) }.getOrNull() ?: continue
+            val fixed = baseline.mapValues { (_, entry) ->
+                val link = entry.link
+                if (entry.sha256 != null || link == null || File(link).name !in names) return@mapValues entry
+                val target = File(link)
+                val stat = withHash.stat(target) ?: return@mapValues entry
+                reread++
+                FileIntegrity.Entry(link, stat.first, stat.second, stat.third, withHash.sha256(target))
+            }
+            if (fixed != baseline) write(file.name.removeSuffix(SUFFIX), fixed)
+        }
+        return reread
+    }
+
     /** Records [metadata]'s hash for [commit]; nothing when it can't be read. */
     fun baselineMetadata(commit: String, metadata: File) {
         val hash = runCatching { sha256(metadata) }.getOrNull() ?: return

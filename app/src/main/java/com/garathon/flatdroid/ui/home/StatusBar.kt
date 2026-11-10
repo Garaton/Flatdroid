@@ -1,5 +1,14 @@
 package com.garathon.flatdroid.ui.home
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -14,6 +23,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -23,6 +33,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -67,21 +78,85 @@ fun StatusBar(
     onTaskLog: () -> Unit,
     onDismissSession: () -> Unit,
     onSessionLog: () -> Unit,
+    onClearQueue: () -> Unit,
+    onUnqueue: (FlatpakTask) -> Unit = {},
+    /** An app's name for the waiting tasks (its ID when unknown). */
+    queuedName: (String) -> String = { it },
+    modifier: Modifier = Modifier,
+) {
+    var manage by remember { mutableStateOf(false) }
+    Column(modifier) {
+        // Tasks waiting for the running task or app, above what runs; tapped, a list to remove them from.
+        AnimatedSlot(task.queue.ifEmpty { null }, from = Alignment.Bottom) { queue ->
+            Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.fillMaxWidth().clickable { manage = true }) {
+                Row(
+                    Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(start = 16.dp, end = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(Icons.Filled.Schedule, contentDescription = null, modifier = Modifier.size(20.dp))
+                    Text(
+                        stringResource(R.string.task_queued, queue.map { queuedLabel(it, queuedName) }.joinToString(", ")),
+                        style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+                    )
+                    IconAction(Icons.Filled.Close, R.string.task_queue_clear, onClearQueue, size = 36.dp)
+                }
+            }
+        }
+        if (manage && task.queue.isNotEmpty()) {
+            AlertDialog(
+                onDismissRequest = { manage = false },
+                title = { Text(stringResource(R.string.task_queue_title)) },
+                text = {
+                    Column(Modifier.verticalScroll(rememberScrollState())) {
+                        task.queue.forEachIndexed { i, waiting ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("${i + 1}. ${queuedLabel(waiting, queuedName)}", modifier = Modifier.weight(1f))
+                                IconAction(Icons.Filled.Close, R.string.task_queue_remove, { onUnqueue(waiting) }, size = 36.dp)
+                            }
+                        }
+                    }
+                },
+                confirmButton = { TextButton(onClick = { manage = false }) { Text(stringResource(R.string.dismiss)) } },
+                dismissButton = { TextButton(onClick = { onClearQueue(); manage = false }) { Text(stringResource(R.string.task_queue_clear_all)) } },
+            )
+        }
+        TaskAndSessionBar(task, session, describe, developerOptions, onCancelTask, onDismissTask, onTaskLog, onDismissSession, onSessionLog)
+    }
+}
+
+/** A waiting task as the queue shows it: what it will do, with app names ([name]) where it has apps. */
+@Composable
+private fun queuedLabel(task: FlatpakTask, name: (String) -> String): String = when (task) {
+    is FlatpakTask.Install -> stringResource(R.string.queued_install, task.appIds.joinToString(", ", transform = name))
+    is FlatpakTask.Uninstall -> stringResource(R.string.queued_uninstall, task.appIds.joinToString(", ", transform = name))
+    is FlatpakTask.Reinstall -> stringResource(R.string.queued_reinstall, name(task.appId))
+    is FlatpakTask.RemoveRuntime -> stringResource(R.string.queued_remove_runtime, task.runtimeId)
+    FlatpakTask.UpdateAll -> stringResource(R.string.queued_update_all)
+    FlatpakTask.RefreshCatalog -> stringResource(R.string.queued_refresh_catalog)
+    FlatpakTask.ReinstallAll -> stringResource(R.string.queued_reinstall_all)
+    FlatpakTask.BaselineAll -> stringResource(R.string.queued_baseline_all)
+    FlatpakTask.Repair -> stringResource(R.string.queued_repair)
+}
+
+@Composable
+private fun TaskAndSessionBar(
+    task: FlatpakTaskUi,
+    session: SessionUi,
+    describe: (FlatpakTask) -> String,
+    developerOptions: Boolean,
+    onCancelTask: () -> Unit,
+    onDismissTask: () -> Unit,
+    onTaskLog: () -> Unit,
+    onDismissSession: () -> Unit,
+    onSessionLog: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val running = task.running
     val finished = task.finished
     val content: BarContent? = when {
         running != null -> {
-            val step = task.step
-            val detail = when {
-                step != null -> stringResource(if (step.deploying) R.string.task_step_deploying else R.string.task_step, step.verb, step.index, step.total, step.ref ?: "")
-                task.finishing -> stringResource(R.string.task_finishing)
-                else -> task.status
-            }
-            // Deploying reports nothing, so a full bar would look stuck.
-            val progress = step?.percent?.takeIf { !step.deploying }?.let { it / 100f } ?: task.progress.takeIf { step == null }
-            BarContent(task.phase ?: describe(running), detail, false, true, progress, onCancelTask, !task.cancelling, onTaskLog.takeIf { developerOptions })
+            BarContent(task.phase ?: describe(running), task.detail(LocalContext.current), false, true, task.fraction, onCancelTask, !task.cancelling, onTaskLog.takeIf { developerOptions })
         }
         finished != null -> {
             val failed = task.error != null

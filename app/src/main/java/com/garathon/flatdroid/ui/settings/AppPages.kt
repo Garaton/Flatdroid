@@ -88,6 +88,12 @@ fun AppOverviewPage(s: AppPageState) = SettingsPageColumn(null) {
         Text(stringResource(R.string.app_settings_web_content), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
     }
     PermissionChips(s)
+    SettingsCard {
+        SwitchRow(
+            s.settings.continueWhileHidden, { v -> s.editSettings { copy(continueWhileHidden = v) } },
+            stringResource(R.string.app_settings_continue_hidden), stringResource(R.string.app_settings_continue_hidden_hint),
+        )
+    }
     UsageAndDetails(s)
     if (s.env.developerOptions) {
         SettingsCard {
@@ -266,7 +272,7 @@ fun AppDisplayPage(s: AppPageState) = SettingsPageColumn(R.string.app_page_displ
         DropdownRow(
             selected = s.settings.resolution,
             options = Resolution.entries,
-            onSelect = { v -> s.editSettings { copy(resolution = v) } },
+            onSelect = { v -> s.editSettings { copy(resolutionChoice = v.takeIf { it != defaults.resolution }) } },
             label = { it.percent?.let { p -> percentLabel.format(p) } ?: customLabel },
             title = stringResource(R.string.app_settings_resolution),
             hint = stringResource(R.string.app_settings_resolution_hint),
@@ -290,7 +296,7 @@ fun AppDisplayPage(s: AppPageState) = SettingsPageColumn(R.string.app_page_displ
             DropdownRow(
                 selected = s.settings.interfaceSize,
                 options = AppSettings.INTERFACE_SIZES,
-                onSelect = { v -> s.editSettings { copy(interfaceSize = v) } },
+                onSelect = { v -> s.editSettings { copy(interfaceSizeChoice = v.takeIf { it != defaults.interfaceSize }) } },
                 label = { percentLabel.format(it) },
                 title = stringResource(R.string.app_settings_interface_size),
                 hint = stringResource(R.string.app_settings_interface_size_hint),

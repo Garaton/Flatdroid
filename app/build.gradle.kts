@@ -204,6 +204,9 @@ dependencies {
     implementation(libs.androidx.compose.material.icons.core)
     // Icons the core set lacks (import). Large; only the icons used remain once release builds shrink code.
     implementation(libs.androidx.compose.material.icons.extended)
+    // Screenshots in the Flathub browser: Coil's core and Compose parts only (no network module; Flatdroid's own fetcher).
+    implementation(libs.coil.core)
+    implementation(libs.coil.compose.core)
     // App icons that Flatpaks export only as SVG.
     implementation(libs.androidsvg)
     implementation(libs.androidx.compose.ui)
@@ -215,6 +218,8 @@ dependencies {
     testImplementation(libs.junit)
     // Android's own org.json is a stub in unit tests; this is the same API, for the tests that read Flathub's answers.
     testImplementation("org.json:json:20240303")
+    // The XmlPullParser Android itself uses, for the tests that read AppStream (Android's is a stub in unit tests).
+    testImplementation("net.sf.kxml:kxml2:2.3.0")
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.espresso.core)

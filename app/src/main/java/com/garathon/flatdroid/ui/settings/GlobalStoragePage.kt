@@ -201,7 +201,7 @@ fun GlobalStoragePage(s: GlobalPageState) = SettingsPageColumn(R.string.settings
         StorageList(flatpakSpec, entries, key = { it.id }, emptyText = R.string.storage_list_empty) { entry ->
             when (entry) {
                 is FlatpakEntry.App -> StorageRow(entry.name, size(entry.bytes), subtitle = entry.id) {
-                    IconAction(Icons.Filled.Delete, R.string.uninstall_button, { uninstall = entry.id }, enabled = env.canReset, danger = true)
+                    IconAction(Icons.Filled.Delete, R.string.uninstall_button, { uninstall = entry.id }, danger = true)
                 }
                 is FlatpakEntry.Runtime -> StorageRow(
                     entry.name, size(entry.bytes),
@@ -209,7 +209,7 @@ fun GlobalStoragePage(s: GlobalPageState) = SettingsPageColumn(R.string.settings
                     dimmed = entry.unused,
                 ) {
                     // Only one no app uses: removing a used runtime would stop its apps from starting.
-                    if (entry.unused) IconAction(Icons.Filled.Delete, R.string.storage_remove_runtime, { removeRuntime = entry.id }, enabled = env.canReset, danger = true)
+                    if (entry.unused) IconAction(Icons.Filled.Delete, R.string.storage_remove_runtime, { removeRuntime = entry.id }, danger = true)
                 }
             }
         }
@@ -228,7 +228,11 @@ fun GlobalStoragePage(s: GlobalPageState) = SettingsPageColumn(R.string.settings
                 IconAction(Icons.Filled.FolderOpen, R.string.storage_open_in_files, { actions.onOpenHome(entry.id) }, enabled = entry.bytes > 0)
                 IconAction(Icons.Filled.UploadFile, R.string.storage_import, { confirm = StorageConfirm.app(entry.id, StorageAction.IMPORT_HOME) }, enabled = canChange)
                 IconAction(Icons.Filled.SaveAlt, R.string.storage_export, { actions.onAppStorage(entry.id, StorageAction.EXPORT_HOME) }, enabled = entry.bytes > 0)
-                IconAction(Icons.Filled.Delete, R.string.storage_delete, { confirm = StorageConfirm.app(entry.id, StorageAction.RESET_HOME) }, enabled = canChange && entry.bytes > 0, danger = true)
+                IconAction(
+                    Icons.Filled.Delete, R.string.storage_delete,
+                    { confirm = StorageConfirm.app(entry.id, if (entry.installed) StorageAction.RESET_HOME else StorageAction.DELETE_HOME) },
+                    enabled = canChange && entry.bytes > 0, danger = true,
+                )
             }
         }
     }
@@ -239,7 +243,11 @@ fun GlobalStoragePage(s: GlobalPageState) = SettingsPageColumn(R.string.settings
             StorageRow(entry.name, size(entry.bytes), subtitle = if (entry.installed) entry.id else stringResource(R.string.storage_not_installed), dimmed = !entry.installed, actionsBelow = true) {
                 IconAction(Icons.Filled.UploadFile, R.string.storage_import, { confirm = StorageConfirm.app(entry.id, StorageAction.IMPORT_SETTINGS) }, enabled = canChange)
                 IconAction(Icons.Filled.SaveAlt, R.string.storage_export, { actions.onAppStorage(entry.id, StorageAction.EXPORT_SETTINGS) }, enabled = entry.bytes > 0)
-                IconAction(Icons.Filled.Delete, R.string.storage_delete, { confirm = StorageConfirm.app(entry.id, StorageAction.RESET_SETTINGS) }, enabled = canChange && entry.bytes > 0, danger = true)
+                IconAction(
+                    Icons.Filled.Delete, R.string.storage_delete,
+                    { confirm = StorageConfirm.app(entry.id, if (entry.installed) StorageAction.RESET_SETTINGS else StorageAction.DELETE_SETTINGS) },
+                    enabled = canChange && entry.bytes > 0, danger = true,
+                )
             }
         }
     }

@@ -45,8 +45,9 @@ import com.garathon.flatdroid.ui.theme.FlatdroidTheme
  * can run at and a size they give at that rate ([cameraResolutions], by rate; empty while still
  * asked). [sharedHome] is the shared home as the user knows it; with access to all of shared
  * storage ([broadAccess]) an app can also get /sdcard. [storage] is null while measured;
- * [canChangeFiles] is false while the app runs or its files are copied, [canUninstall] while any
- * app or a Flatpak task runs. [showsWebContent]: an Electron app or a Chromium browser.
+ * [canChangeFiles] is false while the app runs or its files are copied; with [canUninstall] the
+ * uninstall is offered (it waits in the queue behind whatever runs). [showsWebContent]: an Electron
+ * app or a Chromium browser.
  */
 class AppSettingsEnv(
     val app: InstalledApp,

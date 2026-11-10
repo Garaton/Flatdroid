@@ -20,6 +20,10 @@ class ChangedContentTest {
         }
         override fun list(dir: File): Array<String>? = dir.list()
         override fun isDirectory(file: File) = file.isDirectory
+        override fun replaceLink(link: File, target: String) {
+            Files.deleteIfExists(link.toPath())
+            Files.createSymbolicLink(link.toPath(), File(target).toPath())
+        }
     }
 
     private fun link(link: File, target: File) {

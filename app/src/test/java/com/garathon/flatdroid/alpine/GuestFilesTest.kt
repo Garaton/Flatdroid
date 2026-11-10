@@ -61,7 +61,7 @@ class GuestFilesTest {
 
     @Test
     fun fakeStatHasOneLinePerCpuAndConsistentTotals() {
-        val proc = GuestFiles.fakeProc(cpuCount = 8, kernelRelease = "5.15.0", kernelVersion = "#1 SMP", uptimeSeconds = 100, bootEpochSeconds = 1_700_000_000)
+        val proc = GuestFiles.fakeProc(cpuCount = 8, kernelRelease = "5.15.0", kernelVersion = "#1 SMP", uptimeSeconds = 100, bootEpochSeconds = 1_700_000_000, capLastCap = 37)
         val stat = proc.getValue("/proc/stat").lines()
         val cpuLines = stat.filter { Regex("^cpu\\d+ ").containsMatchIn(it) }
         assertEquals(8, cpuLines.size)
@@ -72,6 +72,8 @@ class GuestFilesTest {
         assertTrue("btime 1700000000" in stat)
         assertTrue(proc.getValue("/proc/version").startsWith("Linux version 5.15.0 "))
         assertTrue(proc.keys.all { it.startsWith("/proc/") })
+        assertEquals("37\n", proc.getValue("/proc/sys/kernel/cap_last_cap"))
+        assertTrue(proc.keys.containsAll(GuestFiles.REAL_PROC))
     }
 
     @Test

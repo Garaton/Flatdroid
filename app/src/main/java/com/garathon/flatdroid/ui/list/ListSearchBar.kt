@@ -43,13 +43,14 @@ fun <T> rememberListQuery(spec: ListSpec<T>) = rememberSaveable(
 
 /**
  * The search bar every searchable list shares: the search field with the sort menu and the
- * direction beside it, and under it the filters of [spec] as chips. [query] is applied with
- * [ListSpec.apply].
+ * direction beside it, and under it the filters of [spec] as chips (unless [showFilters] is false:
+ * a list that shows them in a row of its own, [FilterChips]). [query] is applied with [ListSpec.apply].
  */
 @Composable
 fun <T> ListSearchBar(
     spec: ListSpec<T>, query: ListQuery, onQuery: (ListQuery) -> Unit, modifier: Modifier = Modifier,
     @StringRes placeholder: Int = R.string.list_search,
+    showFilters: Boolean = true,
 ) {
     var sortMenu by remember { mutableStateOf(false) }
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -85,16 +86,20 @@ fun <T> ListSearchBar(
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
-        if (spec.filters.isNotEmpty()) {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                for (filter in spec.filters) {
-                    FilterChip(
-                        selected = filter.key in query.filters,
-                        onClick = { onQuery(query.toggled(filter.key)) },
-                        label = { Text(stringResource(filter.label)) },
-                    )
-                }
-            }
+        if (showFilters && spec.filters.isNotEmpty()) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) { FilterChips(spec, query, onQuery) }
         }
+    }
+}
+
+/** [spec]'s filters as chips, for [ListSearchBar] or a row of the list's own. */
+@Composable
+fun <T> FilterChips(spec: ListSpec<T>, query: ListQuery, onQuery: (ListQuery) -> Unit) {
+    for (filter in spec.filters) {
+        FilterChip(
+            selected = filter.key in query.filters,
+            onClick = { onQuery(query.toggled(filter.key)) },
+            label = { Text(stringResource(filter.label)) },
+        )
     }
 }

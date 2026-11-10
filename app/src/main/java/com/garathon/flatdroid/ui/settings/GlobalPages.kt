@@ -32,6 +32,8 @@ import androidx.compose.ui.unit.dp
 import com.garathon.flatdroid.R
 import com.garathon.flatdroid.camera.AndroidCameras
 import com.garathon.flatdroid.flatpak.FlathubLinkApproval
+import com.garathon.flatdroid.settings.AppDefaults
+import com.garathon.flatdroid.settings.AppSettings
 import com.garathon.flatdroid.settings.AppTime
 import com.garathon.flatdroid.settings.Duration
 import com.garathon.flatdroid.settings.FlatpakTheme
@@ -185,6 +187,23 @@ fun GlobalDefaultsPage(s: GlobalPageState) = SettingsPageColumn(R.string.setting
         SwitchRow(
             security.shareClipboard, { v -> s.editSettings { copy(security = security.copy(shareClipboard = v)) } },
             stringResource(R.string.security_share_clipboard), stringResource(R.string.app_settings_clipboard_hint) + appliesToDefault,
+        )
+        val percentLabel = stringResource(R.string.app_settings_resolution_percent)
+        DropdownRow(
+            selected = s.settings.appResolution,
+            options = AppDefaults.DEFAULT_RESOLUTIONS,
+            onSelect = { v -> s.editSettings { copy(appResolution = v) } },
+            label = { percentLabel.format(it.percent) },
+            title = stringResource(R.string.app_settings_resolution),
+            hint = stringResource(R.string.app_settings_resolution_hint) + appliesToDefault,
+        )
+        DropdownRow(
+            selected = s.settings.appInterfaceSize,
+            options = AppSettings.INTERFACE_SIZES,
+            onSelect = { v -> s.editSettings { copy(appInterfaceSize = v) } },
+            label = { percentLabel.format(it) },
+            title = stringResource(R.string.app_settings_interface_size),
+            hint = stringResource(R.string.app_settings_interface_size_hint) + appliesToDefault,
         )
     }
 }

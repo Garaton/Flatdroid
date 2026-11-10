@@ -74,6 +74,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import kotlin.math.roundToInt
+import kotlinx.coroutines.withTimeoutOrNull
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 import androidx.core.view.ViewCompat
@@ -315,6 +316,12 @@ class ViewerActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * A key: pressed when the finger lifts (a modifier then latched for the next key), or once held
+     * [HOLD_MS] (then repeating while held; a modifier held for the keys pressed meanwhile). A touch
+     * that leaves the key or is taken by Android first (a swipe up from the screen's edge to show
+     * its bars or go home starts on the keys) presses nothing. Every key works the same, wherever it is.
+     */
     @Composable
     private fun ExtraKey(label: String, keysym: Int, latched: Boolean, modifier: Modifier) {
         val latchable = Keysyms.isModifier(keysym)
@@ -336,6 +343,25 @@ class ViewerActivity : ComponentActivity() {
                     detectTapGestures(
                         onPress = {
                             pressed = true
+                            // Wait for what this is: a tap, a hold, or a touch Android takes (its swipe).
+                            val lifted = withTimeoutOrNull(HOLD_MS) { tryAwaitRelease() }
+                            if (lifted == false) {
+                                // Android took it, or the finger left the key: nothing pressed.
+                                pressed = false
+                                return@detectTapGestures
+                            }
+                            if (lifted == true) {
+                                // A tap: pressed now, all at once.
+                                if (latchable) {
+                                    view.keys.hold(keysym)
+                                    view.keys.release(keysym, true)
+                                } else {
+                                    view.keys.tap(keysym)
+                                }
+                                pressed = false
+                                return@detectTapGestures
+                            }
+                            // Held still: a press like any other from here.
                             if (latchable) {
                                 // Held: down for the keys pressed meanwhile; tapped: latched for the next key.
                                 view.keys.hold(keysym)
@@ -461,6 +487,9 @@ class ViewerActivity : ComponentActivity() {
         const val KEY_F4 = Keysyms.F1 + 3
 
         val EXTRA_KEY_HEIGHT = 40.dp
+
+        /** How long an extra key waits, held, before it presses (Android takes a swipe well before). */
+        const val HOLD_MS = 150L
 
         /** The bar's buttons never take key focus: every key goes to the app (Enter would press a focused button). */
         val NO_KEY_FOCUS = Modifier.focusProperties { canFocus = false }

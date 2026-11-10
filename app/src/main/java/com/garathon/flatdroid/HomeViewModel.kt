@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.garathon.flatdroid.alpine.AlpineEnvironment
+import com.garathon.flatdroid.flatpak.catalog.Catalog
 import com.garathon.flatdroid.flatpak.AppData
 import com.garathon.flatdroid.flatpak.FlatpakInstallation
 import com.garathon.flatdroid.flatpak.FlatpakTasks
@@ -130,7 +131,8 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             // Not while a Flatpak task changes everything: the parts left keep their earlier sizes, marked.
             val apps = ids.associateWith { SavedSizes.app(context, it) ?: return@launch }
             done(Part.APPS) { it.withApps(apps, installed) }
-            done(Part.CACHE) { it.copy(cache = StorageSizes.of(context.cacheDir)) }
+            // With the browser's index, which Clear all caches removes too.
+            done(Part.CACHE) { it.copy(cache = StorageSizes.of(context.cacheDir) + StorageSizes.of(Catalog.dir(context))) }
             val shared = SavedSizes.shared(context) ?: return@launch
             val runtimeSizes = SavedSizes.runtimes(context) ?: return@launch
             val unusedRuntimes = unusedRuntimes(runtimeSizes.keys)
@@ -163,11 +165,12 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Every app's cache; not while one runs. */
+    /** Every app's cache, and the browser's index and screenshots; not while an app runs. */
     fun clearAllCaches() {
         if (SessionController.isBusy) return
         viewModelScope.launch(Dispatchers.IO) {
             AndroidTarFs.deleteTree(AppData.cacheRoot(getApplication()))
+            Catalog.clear(getApplication())
             _storage.update { m -> m.mapValues { it.value.copy(measuring = true) } }
             measureFlatdroid()
         }
@@ -177,6 +180,31 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     fun clearUnusedAppData() = whileAllIdle { context, appId ->
         AppFiles.dirs(File(AppData.root(context), appId), appId).forEach { AndroidTarFs.deleteTree(it) }
         AppData.settingsFile(context, appId).delete()
+    }
+
+    /**
+     * For an app that isn't installed: deletes its private home ([privateHome]) or its app data
+     * with Flatdroid's settings for it; its folder goes when nothing is left, and so does its row.
+     */
+    fun deleteUninstalled(appId: String, privateHome: Boolean) {
+        if (StorageTasks.busyWith(appId)) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val context = getApplication<Application>()
+            if (appId in installedIds()) return@launch
+            SavedSizes.forget(context, appId)
+            try {
+                if (privateHome) {
+                    AndroidTarFs.deleteTree(AppData.privateHome(context, appId))
+                } else {
+                    AppFiles.dirs(File(AppData.root(context), appId), appId).forEach { AndroidTarFs.deleteTree(it) }
+                    AppData.settingsFile(context, appId).delete()
+                }
+                File(AppData.root(context), appId).delete()
+            } finally {
+                if (appId in SavedSizes.appIds(context)) SavedSizes.changed(context, appId) else SavedSizes.forget(context, appId)
+            }
+            measureFlatdroid()
+        }
     }
 
     /** Deletes the private homes of apps that aren't installed; not while anything runs. */

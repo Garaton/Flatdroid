@@ -54,10 +54,14 @@ object FlatpakCommands {
 
     // Each ID must pass InstalledApps.isValidId, so it can't be read as an option.
     fun install(ids: List<String>) = listOf(FLATPAK, "--user", "install", "-y", "flathub") + ids.map(::checked)
-    fun uninstall(id: String) = listOf(FLATPAK, "--user", "uninstall", "-y", checked(id))
+    fun uninstall(id: String) = uninstall(listOf(id))
+    /** Several apps in one transaction. */
+    fun uninstall(ids: List<String>) = listOf(FLATPAK, "--user", "uninstall", "-y") + ids.map(::checked)
     /** Every installed branch of the runtime [id] (its ID is matched exactly: IDs have no glob characters). */
     fun uninstallRuntime(id: String) = uninstallMatching(listOf(checked(id)))
     val update = listOf(FLATPAK, "--user", "update", "-y")
+    /** Only Flathub's catalog (AppStream data), nothing installed changes. */
+    val updateCatalog = listOf(FLATPAK, "--user", "update", "--appstream", "flathub")
     /** Re-deploys [refs] (IDs or full refs) from Flathub, replacing their files. */
     fun reinstall(refs: List<String>) = listOf(FLATPAK, "--user", "install", "--reinstall", "-y", "flathub") + refs
     /** Removes runtimes and extensions no installed app uses any more. */

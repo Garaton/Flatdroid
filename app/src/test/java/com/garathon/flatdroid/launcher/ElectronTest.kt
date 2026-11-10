@@ -35,6 +35,18 @@ class ElectronTest {
     }
 
     @Test
+    fun cobaltsConfigurationNamesABrowserBuiltFromSource() {
+        val script = "#!/bin/bash\nmerge_extensions policies/managed\nexec cobalt \"\$@\"\n"
+        val config = "[Application]\nName=chromium\nEntryPoint=/app/chromium/chrome\n"
+        val appId = "io.github.ungoogled_software.ungoogled_chromium"
+        assertEquals("/app/chromium/chrome", Electron.cobaltTarget(script, appId, { config }) { it == "/app/chromium/chrome" })
+        // A configuration without an entry point (Chrome's) leaves cobalt's default.
+        assertEquals("/app/extra/chrome", Electron.cobaltTarget(script, "com.google.Chrome", { "[Application]\n" }) { it == "/app/extra/chrome" })
+        // Only a path in /app: another is ignored, and cobalt's default is looked for.
+        assertEquals("/app/extra/ungoogled_chromium", Electron.cobaltTarget(script, appId, { "[Application]\nEntryPoint=/app/../etc/passwd\n" }) { true })
+    }
+
+    @Test
     fun readsTheVersionFromTheBinary() {
         val binary = ByteArray(200_000) { 'x'.code.toByte() }
         val ua = "Mozilla/5.0 Chrome/83.0.4103.122 Electron/9.4.4 Safari/537.36".toByteArray()

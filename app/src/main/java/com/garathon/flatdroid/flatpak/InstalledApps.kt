@@ -151,8 +151,10 @@ class InstalledApps(private val context: Context) {
             id.length <= 255 && Regex("[A-Za-z_][A-Za-z0-9_-]*(\\.[A-Za-z0-9_-]+)+").matches(id)
 
         /** The app IDs in [text], separated by whitespace, each once; null if there are none or any isn't valid. */
-        fun parseIds(text: String): List<String>? =
-            text.split(Regex("\\s+")).filter { it.isNotEmpty() }.distinct().takeIf { ids -> ids.isNotEmpty() && ids.all(::isValidId) }
+        fun parseIds(text: String): List<String>? = splitIds(text).takeIf { ids -> ids.isNotEmpty() && ids.all(::isValidId) }
+
+        /** The words of [text] (IDs separated by spaces), each once, valid or not. */
+        fun splitIds(text: String): List<String> = text.split(Regex("\\s+")).filter { it.isNotEmpty() }.distinct()
 
         fun runsInTerminal(desktop: Keyfile): Boolean = desktop.string("Desktop Entry", "Terminal")?.trim() == "true"
 

@@ -27,6 +27,8 @@ class AudioPlayer(
     private val outputMode: AudioOutputMode,
 ) {
     @Volatile private var running = false
+    /** Played as silence (the app's screen is hidden): the track pauses as in any quiet stretch, and the socket is still read, so the app never blocks on it. */
+    @Volatile var muted = false
     @Volatile private var connection: LocalSocket? = null
     private var thread: Thread? = null
 
@@ -67,7 +69,7 @@ class AudioPlayer(
             var playing = false
             while (running) {
                 input.readFully(buffer)
-                if (Pcm.isSilent(buffer, buffer.size)) {
+                if (muted || Pcm.isSilent(buffer, buffer.size)) {
                     silentBytes = (silentBytes + buffer.size).coerceAtMost(pauseAfter)
                     if (playing && silentBytes >= pauseAfter) {
                         track.pause()

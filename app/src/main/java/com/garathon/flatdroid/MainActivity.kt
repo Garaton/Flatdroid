@@ -5,7 +5,6 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.ConnectivityManager
 import android.os.Build
 import android.os.Bundle
 import android.os.LocaleList
@@ -56,6 +55,7 @@ import com.garathon.flatdroid.session.SessionState
 import com.garathon.flatdroid.session.Viewer
 import com.garathon.flatdroid.settings.AppTime
 import com.garathon.flatdroid.settings.MobileData
+import com.garathon.flatdroid.settings.mobileDataPolicy
 import com.garathon.flatdroid.settings.UserSettings
 import com.garathon.flatdroid.storage.ImportTarget
 import com.garathon.flatdroid.storage.SavedSizes
@@ -69,6 +69,16 @@ import com.garathon.flatdroid.ui.ElectronDialog
 import com.garathon.flatdroid.ui.FilesChangedDialog
 import com.garathon.flatdroid.ui.home.HomeScreen
 import com.garathon.flatdroid.ui.home.InstallLinkDialog
+import com.garathon.flatdroid.ui.home.StatusBar
+import com.garathon.flatdroid.ui.browse.BrowseAppScreen
+import com.garathon.flatdroid.ui.browse.BrowseScreen
+import com.garathon.flatdroid.ui.browse.InstallState
+import com.garathon.flatdroid.ui.browse.rememberBrowseListState
+import com.garathon.flatdroid.flatpak.catalog.Catalog
+import com.garathon.flatdroid.flatpak.catalog.CatalogImages
+import com.garathon.flatdroid.flatpak.catalog.CatalogState
+import com.garathon.flatdroid.ui.home.forgetIcons
+import com.garathon.flatdroid.util.DoneNotice
 import com.garathon.flatdroid.ui.home.rememberHomeListState
 import com.garathon.flatdroid.ui.InstallDialog
 import com.garathon.flatdroid.ui.LogDialog
@@ -237,6 +247,7 @@ class MainActivity : ComponentActivity() {
         val sessionBusy = sessionState !is SessionState.Idle
         // The home list's position and search, kept here so they survive a visit to Settings.
         val homeListState = rememberHomeListState()
+        val browseListState = rememberBrowseListState()
         // Developer options show the logs of what runs; read again whenever the screen changes (Settings can change them).
         // Flatdroid's saved settings, read once per level (on the way back from Settings, which may have
         // changed them), not on every page of a settings screen.
@@ -275,7 +286,7 @@ class MainActivity : ComponentActivity() {
         }
 
         storage.Dialogs(nameOf)
-        // A Flathub link (or appstream:// one) that named an app: confirm, then the normal install.
+        // A Flathub link (or appstream:// one) that named an app: confirm, then the normal install (queued if something runs).
         val installLink by home.installLink.collectAsState()
         installLink?.let { id ->
             InstallLinkDialog(
@@ -293,9 +304,68 @@ class MainActivity : ComponentActivity() {
                 onDismiss = home::clearInstallLink,
             )
         }
+        // Flathub's catalog (the browser's): app names for the waiting installs, IDs for the typed ones.
+        val catalog by Catalog.state.collectAsState()
+        val catalogIndex = (catalog as? CatalogState.Ready)?.index
+        // Over Home and the browser: typed app IDs, the mobile data question, the logs of the bottom bar.
+        var installDialog by rememberSaveable { mutableStateOf(false) }
+        var log by rememberSaveable { mutableStateOf<LogKind?>(null) }
+        if (installDialog) {
+            InstallDialog(
+                onInstall = {
+                    startDownload(FlatpakTask.Install(it))
+                    installDialog = false
+                },
+                onDismiss = { installDialog = false },
+                inCatalog = catalogIndex?.let { index -> { id: String -> id in index } },
+                installed = apps?.mapTo(HashSet()) { it.id },
+            )
+        }
+        when (log) {
+            LogKind.SESSION -> {
+                val lines by SessionController.log.collectAsState()
+                LogDialog(getString(R.string.session_log_title), lines) { log = null }
+            }
+            LogKind.TASK -> {
+                val lines by FlatpakTasks.log.collectAsState()
+                LogDialog(getString(R.string.task_log_title), lines) { log = null }
+            }
+            null -> Unit
+        }
+        meteredQuestion?.let { task ->
+            MobileDataDialog(
+                onDownload = { meteredQuestion = null; startTask(task) },
+                onDismiss = { meteredQuestion = null },
+            )
+        }
+        val installedIds = remember(apps) { apps?.map { it.id }?.toSet() }
+        val installingIds = (task.running as? FlatpakTask.Install)?.appIds.orEmpty()
+        val bottomBar = @Composable {
+            StatusBar(
+                task, session, { FlatpakTaskService.describe(this@MainActivity, it) }, developerOptions,
+                onCancelTask = { FlatpakTaskService.cancel(this@MainActivity) }, onDismissTask = FlatpakTasks::dismiss, onTaskLog = { log = LogKind.TASK },
+                onDismissSession = SessionController::dismissMessage, onSessionLog = { log = LogKind.SESSION }, onClearQueue = FlatpakTasks::clearQueue,
+                onUnqueue = FlatpakTasks::unqueue,
+                queuedName = { id -> apps?.firstOrNull { it.id == id }?.name ?: catalogIndex?.app(id)?.name ?: id },
+            )
+        }
+        // The browser was left: its pictures leave memory (those on disk stay for this run).
+        val inBrowser = screen is Screen.Browse || screen is Screen.BrowseApp
+        LaunchedEffect(inBrowser) {
+            if (!inBrowser) {
+                withContext(Dispatchers.IO) { CatalogImages.release() }
+                forgetIcons(Catalog.iconsDir(this@MainActivity))
+            }
+        }
         val storageTasks by StorageTasks.ui.collectAsState()
         // A session that ends while Flatdroid is open may leave a temporary home to ask about.
-        LaunchedEffect(sessionBusy) { if (!sessionBusy) storage.checkTempHomes() }
+        // Also the waiting tasks, when a question after the session (answered here) held them back.
+        LaunchedEffect(sessionBusy) {
+            if (!sessionBusy) {
+                storage.checkTempHomes()
+                FlatpakTaskService.startNext(this@MainActivity)
+            }
+        }
 
         // Measured again after storage tasks, which change it.
         val savedSizes by SavedSizes.updates.collectAsState()
@@ -362,10 +432,10 @@ class MainActivity : ComponentActivity() {
                             onAppStorage = { id, action -> storage.storageAction(id, action) },
                             onOpenHome = storage::openHomeInFiles,
                             onUninstall = { id, deleteData, keepRuntimes ->
-                                if (FlatpakTaskService.start(this@MainActivity, FlatpakTask.Uninstall(id, deleteData, keepRuntimes))) home.uninstallStarted(id)
+                                if (FlatpakTaskService.run(this@MainActivity, FlatpakTask.Uninstall(id, deleteData, keepRuntimes))) home.uninstallStarted(id)
                             },
                             onRemoveRuntime = { id ->
-                                if (!FlatpakTaskService.start(this@MainActivity, FlatpakTask.RemoveRuntime(id))) Toast.makeText(this@MainActivity, R.string.task_busy, Toast.LENGTH_LONG).show()
+                                FlatpakTaskService.run(this@MainActivity, FlatpakTask.RemoveRuntime(id))
                             },
                         ),
                         onReset = { mode -> go(Screen.Home); resetAlpine(mode) },
@@ -421,14 +491,15 @@ class MainActivity : ComponentActivity() {
                 }
                 AppSettingsScreen(
                     page = target.page,
-                    onPage = { go(Screen.AppSettings(app.id, it)) },
+                    onPage = { go(target.copy(page = it)) },
                     draft = draft,
                     env = AppSettingsEnv(
                         app = app,
                         details = details,
                         storage = appStorage[app.id],
                         canChangeFiles = session.state.appIdOrNull != app.id && !appBusy,
-                        canUninstall = !sessionBusy && !taskRunning,
+                        // An uninstall waits in the queue behind what runs (this app too).
+                        canUninstall = true,
                         developerOptions = developerOptions,
                         showsWebContent = showsWebContent,
                         hasCamera = remember { AndroidCameras.present(this@MainActivity) },
@@ -439,7 +510,7 @@ class MainActivity : ComponentActivity() {
                         onRequestMicrophone = ::requestMicrophone,
                         onRequestCamera = ::requestCamera,
                         onUninstall = { deleteData, keepRuntimes ->
-                            if (FlatpakTaskService.start(this@MainActivity, FlatpakTask.Uninstall(app.id, deleteData, keepRuntimes))) home.uninstallStarted(app.id)
+                            if (FlatpakTaskService.run(this@MainActivity, FlatpakTask.Uninstall(app.id, deleteData, keepRuntimes))) home.uninstallStarted(app.id)
                             go(Screen.Home)
                         },
                         sharedHome = storage.sharedHomeDisplay,
@@ -447,7 +518,7 @@ class MainActivity : ComponentActivity() {
                         onStorage = { action -> storage.storageAction(app.id, action) },
                         onOpenHome = { storage.openHomeInFiles(app.id) },
                         limitDevices = saved.security.limitDevices,
-                        onResetFlatdroidSettings = { store.delete(); go(Screen.Home) },
+                        onResetFlatdroidSettings = { store.delete(); go(target.parent ?: Screen.Home) },
                     ),
                     onSave = { new ->
                         // Keep what the launcher manages: last opened, the Electron flags and /.flatpak-info.
@@ -461,24 +532,70 @@ class MainActivity : ComponentActivity() {
                                 wholeDev = if (developerOptions) new.wholeDev else old.wholeDev,
                             )
                         }
-                        go(Screen.Home)
+                        go(target.parent ?: Screen.Home)
                     },
-                    onDiscard = { go(Screen.Home) },
+                    onDiscard = { go(target.parent ?: Screen.Home) },
+                    modifier = modifier,
+                )
+            }
+            Screen.Browse -> {
+                LaunchedEffect(Unit) { Catalog.open(this@MainActivity) }
+                BrowseScreen(
+                    state = catalog,
+                    listState = browseListState,
+                    installed = installedIds.orEmpty(),
+                    queued = task.queuedInstalls,
+                    installing = installingIds,
+                    // A refresh waits in the queue like any task; off while one runs or waits.
+                    canRefresh = task.running != FlatpakTask.RefreshCatalog && FlatpakTask.RefreshCatalog !in task.queue,
+                    onBack = { go(Screen.Home) },
+                    onOpenApp = { go(Screen.BrowseApp(it)) },
+                    onRefresh = { startDownload(FlatpakTask.RefreshCatalog) },
+                    onInstallById = { installDialog = true },
+                    onRetry = { Catalog.open(this@MainActivity) },
+                    bottomBar = bottomBar,
+                    modifier = modifier,
+                )
+            }
+            is Screen.BrowseApp -> {
+                LaunchedEffect(Unit) { Catalog.open(this@MainActivity) }
+                val id = target.appId
+                val entry = catalogIndex?.app(id)
+                BrowseAppScreen(
+                    appId = id,
+                    app = entry,
+                    index = catalogIndex,
+                    catalogLoading = catalog is CatalogState.Loading || catalog is CatalogState.Idle,
+                    arch = remember { AlpineEnvironment.get(this@MainActivity).arch },
+                    installState = when {
+                        id in installingIds -> InstallState.INSTALLING
+                        id in task.queuedInstalls -> InstallState.QUEUED
+                        installedIds == null -> InstallState.UNKNOWN
+                        id in installedIds -> InstallState.INSTALLED
+                        else -> InstallState.NOT_INSTALLED
+                    },
+                    // The setting as loaded for this screen: not read from disk again while the page composes.
+                    mobileDataBlocked = { mobileDataPolicy(this@MainActivity, saved.mobileData) == MobileData.NEVER },
+                    mobileData = { mobileDataPolicy(this@MainActivity, saved.mobileData) },
+                    runtimeInstalled = { ref ->
+                        // Flathub names its own architecture (the app is the same on ours): look for this phone's.
+                        val env = AlpineEnvironment.get(this@MainActivity)
+                        FlatpakInstallation(env.flatpakDir, env.arch).runtime(ref.copy(arch = env.arch)) != null
+                    },
+                    onInstall = { startDownload(FlatpakTask.Install(listOf(id))) },
+                    onUnqueue = { FlatpakTasks.unqueueInstall(id) },
+                    canOpen = !sessionBusy && !taskRunning && (!terminalRunning || terminalWithApps),
+                    onOpen = { launch(id) },
+                    onAppSettings = { go(Screen.AppSettings(id, fromBrowser = true)) },
+                    onUninstall = { deleteData, keepRuntimes ->
+                        if (FlatpakTaskService.run(this@MainActivity, FlatpakTask.Uninstall(id, deleteData, keepRuntimes))) home.uninstallStarted(id)
+                    },
+                    onBack = { go(Screen.Browse) },
+                    bottomBar = bottomBar,
                     modifier = modifier,
                 )
             }
             Screen.Home -> {
-                var installDialog by rememberSaveable { mutableStateOf(false) }
-                var log by rememberSaveable { mutableStateOf<LogKind?>(null) }
-                if (installDialog) {
-                    InstallDialog(
-                        onInstall = {
-                            startDownload(FlatpakTask.Install(it))
-                            installDialog = false
-                        },
-                        onDismiss = { installDialog = false },
-                    )
-                }
                 (session.state as? SessionState.ElectronOffer)?.let { offer ->
                     ElectronDialog(
                         offer, nameOf(offer.appId), remember { AlpineEnvironment.get(this@MainActivity).arch },
@@ -491,23 +608,6 @@ class MainActivity : ComponentActivity() {
                         changed, nameOf(changed.appId),
                         onReinstall = { SessionController.ended(null); startDownload(FlatpakTask.Reinstall(changed.appId)) },
                         onDismiss = { SessionController.ended(null) },
-                    )
-                }
-                when (log) {
-                    LogKind.SESSION -> {
-                        val lines by SessionController.log.collectAsState()
-                        LogDialog(getString(R.string.session_log_title), lines) { log = null }
-                    }
-                    LogKind.TASK -> {
-                        val lines by FlatpakTasks.log.collectAsState()
-                        LogDialog(getString(R.string.task_log_title), lines) { log = null }
-                    }
-                    null -> Unit
-                }
-                meteredQuestion?.let { task ->
-                    MobileDataDialog(
-                        onDownload = { meteredQuestion = null; startTask(task) },
-                        onDismiss = { meteredQuestion = null },
                     )
                 }
                 microphoneQuestion?.let { pending ->
@@ -525,12 +625,13 @@ class MainActivity : ComponentActivity() {
                     developerOptions = developerOptions,
                     showTimeUsed = showTimeUsed,
                     canLaunch = !sessionBusy && !taskRunning && (!terminalRunning || terminalWithApps),
-                    canInstall = !sessionBusy && !taskRunning,
-                    canUpdate = !sessionBusy && !taskRunning,
-                    describeTask = { FlatpakTaskService.describe(this@MainActivity, it) },
+                    // Browsing needs nothing idle; an install then waits in the queue.
+                    canInstall = true,
+                    // Waits in the queue behind what runs; off while an update runs or waits.
+                    canUpdate = task.running != FlatpakTask.UpdateAll && FlatpakTask.UpdateAll !in task.queue,
                     onLaunch = { launch(it.id) },
                     onAppSettings = { go(Screen.AppSettings(it.id)) },
-                    onInstall = { installDialog = true },
+                    onInstall = { go(Screen.Browse) },
                     onUpdateAll = { startDownload(FlatpakTask.UpdateAll) },
                     onSettings = { go(Screen.Settings()) },
                     onImportFiles = { storage.importFiles(ImportTarget.Shared) },
@@ -539,10 +640,7 @@ class MainActivity : ComponentActivity() {
                     onStopApp = { SessionService.stop(this@MainActivity) },
                     onSessionLog = { log = LogKind.SESSION },
                     onSkipCheck = { SessionController.skipFileCheck() },
-                    onCancelTask = { FlatpakTaskService.cancel(this@MainActivity) },
-                    onDismissTask = FlatpakTasks::dismiss,
-                    onTaskLog = { log = LogKind.TASK },
-                    onDismissSession = SessionController::dismissMessage,
+                    bottomBar = bottomBar,
                     modifier = modifier,
                 )
             }
@@ -550,10 +648,9 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** Every task the user starts waits in the queue behind a running task or app (the bottom bar shows it). */
     private fun startTask(task: FlatpakTask) {
-        if (!FlatpakTaskService.start(this, task) && task is FlatpakTask.Install && SessionController.isBusy) {
-            Toast.makeText(this, R.string.task_install_waits, Toast.LENGTH_LONG).show()
-        }
+        FlatpakTaskService.run(this, task)
     }
 
     /** Starts a task that downloads, first doing what the mobile data setting says on a metered connection. */
@@ -566,10 +663,7 @@ class MainActivity : ComponentActivity() {
     }
 
     /** What a download does now: the mobile data setting on a metered connection, and always otherwise. */
-    private fun mobileDataPolicy(): MobileData {
-        val metered = getSystemService(ConnectivityManager::class.java)?.isActiveNetworkMetered == true
-        return if (metered) SetupController.settings(this).load()?.mobileData ?: MobileData.ASK else MobileData.ALWAYS
-    }
+    private fun mobileDataPolicy(): MobileData = mobileDataPolicy(this)
 
     /** Launches [appId]; the notification permission is asked first, as for setup. */
     private fun launch(appId: String) {
@@ -646,35 +740,11 @@ class MainActivity : ComponentActivity() {
             storage.checkUnfinished()
             storage.checkTempHomes()
         }
-        repairAfterKilledTask()
-        resumeBaselines()
-    }
-
-    /**
-     * An update or uninstall that never ended (Flatdroid was killed in the middle) can leave the
-     * repository half-pruned; its marker is still there, so clean up now, before anything else
-     * uses the repository. Not while setup or a reset is unfinished, or anything else runs.
-     */
-    private fun repairAfterKilledTask() {
-        val setup = SetupController.state.value
-        if (!AppData.taskMarker(this).exists() || !setup.isComplete || setup.running) return
-        if (FlatpakTasks.ui.value.running != null || SessionController.isBusy) return
-        FlatpakTaskService.start(this, FlatpakTask.Repair)
-    }
-
-    /**
-     * File baselines a task didn't get to record (it was cancelled, failed or Flatdroid was killed):
-     * recorded now, unless a Repair runs first (it records them itself). Not while anything else runs.
-     */
-    private fun resumeBaselines() {
-        val setup = SetupController.state.value
-        if (!AppData.baselineMarker(this).exists() || !setup.isComplete || setup.running) return
-        if (SetupController.settings(this).load()?.security?.checkFilesBeforeLaunch != true) {
-            AppData.baselineMarker(this).delete()
-            return
-        }
-        if (FlatpakTasks.ui.value.running != null || SessionController.isBusy) return
-        FlatpakTaskService.start(this, FlatpakTask.BaselineAll)
+        // What finished while Flatdroid was away is on the screen now.
+        DoneNotice.cancel(this, DoneNotice.TASKS_ID)
+        DoneNotice.cancel(this, DoneNotice.SETUP_ID)
+        // A repair or baselines Flatdroid owes, then tasks Android didn't let start while Flatdroid was in the background.
+        if (SetupController.state.value.isComplete) FlatpakTaskService.startNext(this)
     }
 
     private fun startSetup() {
@@ -737,15 +807,29 @@ private sealed interface Screen {
         override val side = 1
     }
 
+    /** Flathub's apps; an app's page is a level deeper. */
+    data object Browse : Screen {
+        override val key = "browse"
+        override val level = 1
+        override val side = 1
+    }
+
+    data class BrowseApp(val appId: String) : Screen {
+        override val key get() = "$BROWSE_PREFIX$appId"
+        override val level = 2
+        override val side = 1
+    }
+
     data object Terminal : Screen {
         override val key = "terminal"
         override val level = 2
         override val side = 1
     }
 
-    data class AppSettings(val appId: String, val page: AppPage = AppPage.OVERVIEW) : Screen {
-        override val key get() = "$APP_PREFIX${page.key}:$appId"
-        override val level = 1
+    /** [fromBrowser]: opened from the app's page in the browser, which Back, Save and Discard return to. */
+    data class AppSettings(val appId: String, val page: AppPage = AppPage.OVERVIEW, val fromBrowser: Boolean = false) : Screen {
+        override val key get() = "${if (fromBrowser) BROWSER_APP_PREFIX else APP_PREFIX}${page.key}:$appId"
+        override val level get() = if (fromBrowser) 3 else 1
         override val side = -1
     }
 
@@ -754,12 +838,17 @@ private sealed interface Screen {
         get() = when (this) {
             Home -> null
             Terminal -> Settings(GlobalPage.DEVELOPER)
-            is Settings, is AppSettings -> Home
+            is BrowseApp -> Browse
+            Browse -> Home
+            is AppSettings -> if (fromBrowser) BrowseApp(appId) else Home
+            is Settings -> Home
         }
 
     companion object {
         private const val SETTINGS_PREFIX = "settings:"
         private const val APP_PREFIX = "app:"
+        private const val BROWSER_APP_PREFIX = "browserapp:"
+        private const val BROWSE_PREFIX = "browse:"
 
         val Saver = Saver<Screen, String>(
             save = { it.key },
@@ -767,7 +856,11 @@ private sealed interface Screen {
                 when {
                     key.startsWith(SETTINGS_PREFIX) -> Settings(GlobalPage.of(key.removePrefix(SETTINGS_PREFIX)))
                     key.startsWith(APP_PREFIX) -> key.removePrefix(APP_PREFIX).split(":", limit = 2).let { AppSettings(it.getOrElse(1) { "" }, AppPage.of(it[0])) }
+                    key.startsWith(BROWSER_APP_PREFIX) -> key.removePrefix(BROWSER_APP_PREFIX).split(":", limit = 2)
+                        .let { AppSettings(it.getOrElse(1) { "" }, AppPage.of(it[0]), fromBrowser = true) }
                     key == Terminal.key -> Terminal
+                    key == Browse.key -> Browse
+                    key.startsWith(BROWSE_PREFIX) -> key.removePrefix(BROWSE_PREFIX).takeIf(InstalledApps::isValidId)?.let { BrowseApp(it) } ?: Browse
                     else -> Home
                 }
             },

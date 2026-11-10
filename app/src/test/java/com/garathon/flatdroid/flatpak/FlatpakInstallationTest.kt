@@ -70,4 +70,16 @@ class FlatpakInstallationTest {
             mounted.map { "${it.deployment.ref} -> ${it.guestPath} (${it.addLdPath})" },
         )
     }
+
+    @Test
+    fun unusedRuntimesAreCountedPerBranch() {
+        val inst = TestInstallation(tmp.root)
+        inst.app("org.xfce.mousepad", metadata = "[Application]\nname=org.xfce.mousepad\nruntime=org.gnome.Platform/aarch64/48\n")
+        inst.runtime("org.gnome.Platform", "48")
+        val installation = FlatpakInstallation(tmp.root, "aarch64")
+        assertEquals(emptyList<FlatpakRef>(), installation.unusedRuntimeRefs())
+        // Another branch of a runtime that is in use: unused all the same, as Flatpak sees it.
+        inst.runtime("org.gnome.Platform", "47")
+        assertEquals(listOf(FlatpakRef("org.gnome.Platform", "aarch64", "47")), installation.unusedRuntimeRefs())
+    }
 }

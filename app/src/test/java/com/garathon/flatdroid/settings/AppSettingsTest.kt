@@ -40,7 +40,7 @@ class AppSettingsTest {
         AppSettingsStore(file).save(AppSettings(Resolution.HALF, customWidth = 480, customHeight = 720, lastOpened = 5L))
         val loaded = AppSettingsStore(file).load()
         assertEquals(360 to 660, loaded.size(720, 1320))
-        assertEquals(480 to 720, loaded.copy(resolution = Resolution.CUSTOM).size(720, 1320))
+        assertEquals(480 to 720, loaded.copy(resolutionChoice = Resolution.CUSTOM).size(720, 1320))
     }
 
     @Test
@@ -98,9 +98,26 @@ class AppSettingsTest {
         // The store hands the defaults to what it loads, saved or not.
         val file = File(tmp.root, "d.properties")
         assertEquals(HomeMode.PRIVATE, AppSettingsStore(file, hardened).load().homeMode)
-        AppSettingsStore(file, hardened).save(AppSettings(defaults = hardened, resolution = Resolution.HALF))
+        AppSettingsStore(file, hardened).save(AppSettings(defaults = hardened, resolutionChoice = Resolution.HALF))
         assertEquals(hardened, AppSettingsStore(file, hardened).load().defaults)
         assertEquals(HomeMode.SHARED, AppSettingsStore(file).load().homeMode)
+    }
+
+    @Test
+    fun resolutionAndInterfaceSizeFollowTheDefaultsUntilChosen() {
+        // Flatdroid's own defaults: 75% and 150%.
+        assertEquals(Resolution.THREE_QUARTERS to 150, AppSettings().let { it.resolution to it.interfaceSize })
+        val defaults = AppDefaults(resolution = Resolution.HALF, interfaceSize = 125)
+        val file = File(tmp.root, "r.properties")
+        AppSettingsStore(file, defaults).save(AppSettings(defaults = defaults))
+        assertEquals(Resolution.HALF to 125, AppSettingsStore(file, defaults).load().let { it.resolution to it.interfaceSize })
+        // An app's own choice stays; one equal to the default is read as following it, so it follows a new default.
+        AppSettingsStore(file, defaults).save(AppSettings(defaults = defaults, resolutionChoice = Resolution.FULL, interfaceSizeChoice = 125))
+        val reread = AppSettingsStore(file, defaults).load()
+        assertEquals(Resolution.FULL to null, reread.resolutionChoice to reread.interfaceSizeChoice)
+        AppSettingsStore(file, defaults).save(reread)
+        val loaded = AppSettingsStore(file, AppDefaults(resolution = Resolution.QUARTER, interfaceSize = 200)).load()
+        assertEquals(Resolution.FULL to 200, loaded.resolution to loaded.interfaceSize)
     }
 
     @Test

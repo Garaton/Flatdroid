@@ -37,7 +37,7 @@ class DraftsTest {
     @Test
     fun untouchedAppDraftSavesTheSameSettings() {
         val settings = AppSettings(
-            resolution = Resolution.CUSTOM, customWidth = 800, customHeight = 600,
+            resolutionChoice = Resolution.CUSTOM, customWidth = 800, customHeight = 600,
             environment = mapOf("A" to "1"), launchArgs = listOf("--x"),
         )
         assertEquals(settings, AppSettingsDraft.of(settings).toSettings(developerOptions = true))
@@ -49,7 +49,7 @@ class DraftsTest {
         assertFalse(draft.widthValid)
         // Not chosen: the bad text is ignored and the saved size stays.
         assertEquals(AppSettings.CUSTOM_WIDTH, draft.toSettings(developerOptions = false)?.customWidth)
-        val chosen = draft.copy(settings = draft.settings.copy(resolution = Resolution.CUSTOM))
+        val chosen = draft.copy(settings = draft.settings.copy(resolutionChoice = Resolution.CUSTOM))
         assertNull(chosen.toSettings(developerOptions = false))
         assertEquals(1200, chosen.copy(width = "1200").toSettings(developerOptions = false)?.customWidth)
     }

@@ -9,6 +9,7 @@ import com.garathon.flatdroid.proot.Fdsec
 import com.garathon.flatdroid.proot.FlatpakBinds
 import com.garathon.flatdroid.proot.GuestPaths
 import java.io.File
+import com.garathon.flatdroid.util.readTextUpTo
 
 /** Host directories for one launch of one app; see AppPaths for where they live. */
 data class HostDirs(
@@ -174,7 +175,11 @@ class LaunchPlanner(
         val scripts = launchScripts(app, commandPath)
         val electronBinary = scripts.firstNotNullOfOrNull(Electron::zypakTarget)
         val cobaltBrowser = if (electronBinary != null) null
-            else scripts.firstNotNullOfOrNull { Electron.cobaltTarget(it, appId) { path -> hostPath(app, path)?.isFile == true } }
+            else scripts.firstNotNullOfOrNull { script ->
+                Electron.cobaltTarget(script, appId, config = { hostPath(app, Electron.COBALT_CONFIG)?.takeIf { it.isFile }?.readTextUpTo() }) { path ->
+                    hostPath(app, path)?.isFile == true
+                }
+            }
         if (electronBinary != null) {
             isElectron = true
             val host = hostPath(app, electronBinary) ?: return PlanResult.NoCommand(appId)

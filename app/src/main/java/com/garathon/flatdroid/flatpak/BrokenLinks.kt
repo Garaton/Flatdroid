@@ -15,6 +15,10 @@ interface LinkFs {
     fun list(dir: File): Array<String>?
     /** A directory itself (only asked of entries that aren't links). */
     fun isDirectory(file: File): Boolean
+    /** Makes [link] a symlink to [target], replacing what is there in one step. */
+    fun replaceLink(link: File, target: String)
+    /** Whether [file] is there (a content file in the store: a plain file). */
+    fun exists(file: File): Boolean = file.exists()
 }
 
 /**
@@ -34,6 +38,51 @@ interface LinkFs {
  * named after it (the intermediate's name plus ".NNNN", the count), with no further reads.
  */
 class BrokenLinks(private val l2sDir: File, private val fs: LinkFs) {
+    /**
+     * Points stranded intermediates back at their content; returns how many. An intermediate is
+     * stranded when the content file it names is gone but one other content file of it is there:
+     * link2symlink renamed the content to its new count, and a kill came before it rewrote the
+     * intermediate. Every link through it then fails (proot answers EPERM), though nothing is lost.
+     * The content's own count is kept: it is link2symlink's latest, and recounting from Flatpak's
+     * folder alone could miss links elsewhere. One listing of `.l2s` and one read per intermediate;
+     * the names of the intermediates repaired.
+     */
+    fun relinkStranded(): List<String> {
+        val names = fs.list(l2sDir).orEmpty()
+        val nameSet = names.toHashSet()
+        val contents = names.filter { COUNT.containsMatchIn(it) }.groupBy { it.dropLast(COUNT_LENGTH) }
+        val relinked = mutableListOf<String>()
+        for (name in names) {
+            if (Thread.interrupted()) throw InterruptedException()
+            if (COUNT.containsMatchIn(name)) continue
+            val own = contents[name]?.singleOrNull() ?: continue
+            val intermediate = File(l2sDir, name)
+            val target = fs.readlink(intermediate) ?: continue
+            val targetName = File(target).name
+            if (targetName in nameSet) continue
+            // Same directory form as link2symlink wrote it (its path for the store, not ours).
+            fs.replaceLink(intermediate, File(File(target).parentFile ?: l2sDir, own).path)
+            relinked += name
+        }
+        return relinked
+    }
+
+    /**
+     * [relinkStranded] for the repository objects an error names ([namedObjects]) only: no listing
+     * of `.l2s`, a few reads per object. The names of the intermediates repaired; empty when none
+     * of them was stranded (or can't be told so), and the full check is left to the caller.
+     */
+    fun relinkObjects(objectsDir: File, objects: Collection<String>): List<String> = objects.mapNotNull { relative ->
+        val stored = fs.readlink(File(objectsDir, relative))?.let { L2s.storedName(it, l2sDir) } ?: return@mapNotNull null
+        val intermediate = File(l2sDir, stored)
+        val target = fs.readlink(intermediate) ?: return@mapNotNull null
+        if (fs.exists(File(l2sDir, File(target).name))) return@mapNotNull null
+        // The content under some other count: link2symlink's counts are small, so they are tried in turn.
+        val own = (1..MAX_COUNT).asSequence().map { "$stored.%04d".format(it) }.firstOrNull { fs.exists(File(l2sDir, it)) } ?: return@mapNotNull null
+        fs.replaceLink(intermediate, File(File(target).parentFile ?: l2sDir, own).path)
+        stored
+    }
+
     /** Removes the broken links under [dir] (and their dangling intermediates); returns how many. */
     fun removeUnder(dir: File): Int {
         val names = fs.list(l2sDir).orEmpty().toHashSet()
@@ -60,10 +109,26 @@ class BrokenLinks(private val l2sDir: File, private val fs: LinkFs) {
         return removed
     }
 
-    private companion object {
+    companion object {
+        /**
+         * Whether a command's error looks like a stranded intermediate ([relinkStranded]): proot
+         * answers a rename, unlink or link through one with EPERM, which ostree reports as
+         * `renameat(…): Operation not permitted`. Only then is `.l2s` looked at.
+         */
+        fun mayBeStranded(error: String?): Boolean = error != null && STRANDED_ERROR.containsMatchIn(error)
+
+        /** The repository objects (`xx/<checksum>.<kind>`, under `objects/`) an error names, as ostree prints them. */
+        fun namedObjects(error: String?): List<String> =
+            error?.let { OBJECT.findAll(it).map { m -> m.value }.distinct().toList() }.orEmpty()
+
+        private val OBJECT = Regex("""\b[0-9a-f]{2}/[0-9a-f]{62}\.(file|dirtree|dirmeta|commit)\b""")
+        private const val MAX_COUNT = 9999
+
+        private val STRANDED_ERROR = Regex("""\b(rename|renameat|unlink|unlinkat|link|linkat)\b[^\n]*Operation not permitted""")
+
         /** A content file's ending: its link count. */
-        val COUNT = Regex("""\.\d{4}$""")
-        const val COUNT_LENGTH = 5
+        private val COUNT = Regex("""\.\d{4}$""")
+        private const val COUNT_LENGTH = 5
     }
 }
 
@@ -83,4 +148,11 @@ object AndroidLinkFs : LinkFs {
     override fun list(dir: File): Array<String>? = dir.list()
 
     override fun isDirectory(file: File) = file.isDirectory
+
+    override fun replaceLink(link: File, target: String) {
+        val temporary = File(link.parentFile, link.name + ".relink")
+        temporary.delete()
+        Os.symlink(target, temporary.path)
+        Os.rename(temporary.path, link.path)
+    }
 }

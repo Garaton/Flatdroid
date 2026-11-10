@@ -54,7 +54,7 @@ private sealed interface LinkApp {
  * Flathub verified the developer), ID, summary, size, the runtime it needs (installed already or
  * its size) and what it asks for, from Flathub. Install is offered only when it is built for
  * [arch], isn't installed ([installed]; null while the list of installed apps isn't known yet) and
- * nothing runs that would stop an install ([busy]). The answer is fetched here, so the same dialog
+ * says when it would wait for what runs ([busy]). The answer is fetched here, so the same dialog
  * can open for an app picked in a list later; not on a metered connection when [mobileDataBlocked]
  * says downloads there are off.
  */
@@ -95,7 +95,8 @@ fun InstallLinkDialog(
         }
     }
     val found = (result as? LinkApp.Found)?.app
-    val canInstall = found != null && found.builtFor(arch) && installed == false && !busy
+    // While a task or app runs, Install queues it (FlatpakTaskService.run).
+    val canInstall = found != null && found.builtFor(arch) && installed == false
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
@@ -148,7 +149,7 @@ fun InstallLinkDialog(
                                 color = MaterialTheme.colorScheme.error,
                             )
                             installed == true -> Text(stringResource(R.string.install_link_installed))
-                            busy -> Text(stringResource(R.string.task_busy), color = MaterialTheme.colorScheme.error)
+                            busy -> Text(stringResource(R.string.install_link_waits))
                         }
                     }
                 }
