@@ -88,8 +88,7 @@ fun RunningRow(
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSecondaryContainer,
-                    // What a file check is on can be long: two lines, which fit the fixed row height.
-                    maxLines = 2, overflow = TextOverflow.Ellipsis,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
             }
             when (state) {

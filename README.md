@@ -34,7 +34,7 @@ Requirements:
 
 - Version and Architecture: Android 7+ (minSdk 24), arm64-v8a (aka: aarch64) or x86_64.
 - Internet: For initial setup, and Flatpak downloading.
-- Storage Space: ~450 MB for initial required packages, and 0.4-1 GB per Flatpak runtime.
+- Storage Space: ~600 MB for initial required packages, and 0.4-1 GB per Flatpak runtime.
 
 ## Screenshots
 
@@ -89,7 +89,7 @@ There are three home modes for apps:
         - To get around this you are able to "import" files into the shared home through Android's file picker, this is done through the download icon on the home screen.
     - Default home mode for Performant and Default.
     - Shared by all apps that use it.
-- Private Home
+- App Home
     - Home is private to each individual app.
     - Default home mode for Hardened.
     - Good enough for most Flatpaks, just slightly worse UX.
@@ -98,14 +98,31 @@ There are three home modes for apps:
 - Temporary Home
     - Private home except that it only exists per session and is deleted afterwards.
     - When a session ends you have the option to export what was made.
+- Android Home (requires all file access)
+    - Sets the home to Androids shared home.
+    - Most lenient, and therefore most dangerous.
 
 You can also optionally per-app mount all of Android's shared storage to `/sdcard` so you can access more than just `Documents/Flatdroid` (needs all files access).
 
+### Flatpak Installing
+
+#### Embedded Browser
+
+Hitting the '+' icon on the home screen pulls up an embedded Flathub browser for you to easily search for and install new Flatpaks. You can sort based on popular, total installs, latest updated/added, and name.
+
+#### Manual Install
+
+Within the browser you can hit the '[->]' icon to open up a dialog that allows you to manually enter Flatpak IDs which are then passed to `flatpak install`.
+
+#### Flathub Browsing
+
+If you want to browse instead from Flathub you can grant Flatdroid access to flathub.org links. After that is done when you hit "Install" on Flathub you are prompted to open Flatdroid when that is done you can install the Flatpak from there.
+
 ### Embedded VNC Viewer
 
-Instead of needing an external VNC viewer (you may still use one by going into settings), which comes with security issues, Flatdroid has it's own opinionated VNC viewer.
+Instead of needing an external VNC viewer (you may still use one by going into settings), which comes with security issues, Flatdroid has its own opinionated VNC viewer.
 
-The reason this is safer is because the VNC connection isn't exposed to the rest of Android over localhost. Instead Flatdroid uses a local unix socket to transfer data directly to our embedded viewer. Due to Flatdroid controlling the viewer this also allows to implement more features, and optimizations that wouldn't be possible with an external viewer.
+The reason this is safer is because the VNC connection isn't exposed to the rest of Android over localhost. Instead Flatdroid uses a local unix socket to transfer data directly to our embedded viewer. Due to Flatdroid controlling the viewer this allows us to implement more features, and optimizations that wouldn't be possible with an external viewer.
 
 #### Controls
 
@@ -118,7 +135,7 @@ Topbar Buttons:
 
 User Controls:
 
-- Taps correlate to clicks, with double taps correlating to double clips.
+- Taps correlate to clicks, with double taps correlating to double clicks.
 - Dragging correlates to scrolling, with there being support for fling scrolling.
 - Tapping, holding, and releasing without a drag correlates to a right click.
 - Tapping, holding, and dragging correlates to a left click and drag.
@@ -132,9 +149,9 @@ User Controls:
 You are able to export/import:
 
 - Flatdroid's global and per-app settings.
-- All private homes.
+- All app homes.
 - All Flatpak settings.
-- Individual files to shared/private homes.
+- Individual files to shared/app homes.
 - Groups of files via zips to the shared home (Flatdroid unzips the files).
 
 ### flatdroid-sync

@@ -45,12 +45,11 @@ data class FlatpakContext(
 
     /**
      * The app may use a camera. Metadata can't say it: the camera portal needs no declaration, so
-     * this is a hint, from what an app that opens a camera itself asks for: all devices, or the
-     * PipeWire socket.
+     * this is a hint, from what an app that opens a camera itself asks for: the PipeWire socket.
+     * In the future, when we support faux camera based devices that we also include all /dev.
      */
     val mayUseCamera: Boolean
-        get() = DevNodes.ALL in devices || filesystems.any { it.substringBefore(':') == PIPEWIRE_SOCKET }
-
+        get() = filesystems.any { it.substringBefore(':') == PIPEWIRE_SOCKET }
     /** Asks for both Wayland and X11 (`x11` or `fallback-x11`), so X11 can be forced. */
     val waylandAndX11: Boolean
         get() = wayland && ("x11" in sockets || "fallback-x11" in sockets)

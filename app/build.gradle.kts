@@ -38,6 +38,10 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
+
     // One APK per ABI plus a universal one; each carries its own proot.
     flavorDimensions += "abi"
     productFlavors {

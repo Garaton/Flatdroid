@@ -169,13 +169,15 @@ class AppSettingsTest {
     @Test
     fun microphoneAndCameraFollowTheMetadataUntilOverridden() {
         val sound = listOf("x11", "pulseaudio")
-        val camera = FlatpakContext(devices = listOf("all"))
+        val allDevices = FlatpakContext(devices = listOf("all"))
+        val camera = FlatpakContext(filesystems = listOf("xdg-run/pipewire-0:ro"))
         val plain = FlatpakContext(sockets = sound, devices = listOf("dri"))
         // By default: the microphone for an app that asks for sound, the camera for a hint that it uses one.
         val unset = AppSettings()
         assertTrue(unset.microphoneAllowed(sound))
         assertFalse(unset.microphoneAllowed(listOf("x11")))
         assertTrue(unset.cameraAllowed(camera))
+        assertFalse(unset.cameraAllowed(allDevices))
         assertFalse(unset.cameraAllowed(plain))
         // Sound off turns the microphone off with it.
         assertFalse(unset.copy(audio = false).microphoneAllowed(sound))
@@ -183,10 +185,12 @@ class AppSettingsTest {
         assertFalse(unset.copy(microphone = false).microphoneAllowed(sound))
         assertTrue(unset.copy(microphone = true).microphoneAllowed(sound))
         assertTrue(unset.copy(camera = true).cameraAllowed(plain))
+        assertTrue(unset.copy(camera = true).cameraAllowed(allDevices))
         assertFalse(unset.copy(camera = false).cameraAllowed(camera))
         // Hardened's level doesn't grant what apps ask for: both are off until turned on.
         val hardened = AppSettings(defaults = AppDefaults(permissionsFromMetadata = false))
         assertFalse(hardened.microphoneAllowed(sound))
+        assertFalse(hardened.cameraAllowed(allDevices))
         assertFalse(hardened.cameraAllowed(camera))
         assertTrue(hardened.copy(microphone = true, audio = true).microphoneAllowed(sound))
         // Not saved unless overridden; an override is saved either way.

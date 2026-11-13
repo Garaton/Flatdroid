@@ -25,7 +25,7 @@ import java.io.File
  */
 object HiddenPause {
     /** How long the viewer stays hidden before the app is paused: switching to another app and back for a moment doesn't pause it. */
-    const val GRACE_MS = 60_000L
+    const val GRACE_MS = 30_000L
 
     private class Session(val prootPid: Int, val player: AudioPlayer?)
 

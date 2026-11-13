@@ -78,7 +78,7 @@ class ChangedContentTest {
     fun theStoreIsKnownByItsNameWhicheverPathALinkReachesItBy() {
         // Android reaches app data as /data/data/<package> and /data/user/0/<package>: one store, two prefixes.
         val real = tmp.newFolder("user0", "pkg", "rootfs")
-        val alias = File(tmp.root, "data").also { it.mkdirs(); Files.createSymbolicLink(File(it, "pkg").toPath(), real.parentFile.toPath()) }
+        val alias = File(tmp.root, "data").also { it.mkdirs(); Files.createSymbolicLink(File(it, "pkg").toPath(), real.parentFile!!.toPath()) }
         val l2s = File(real, ".l2s").apply { mkdirs() }
         File(l2s, ".l2s.b7.file0001.0001").writeText("changed")
         val viaAlias = File(alias, "pkg/rootfs/.l2s/.l2s.b7.file0001")

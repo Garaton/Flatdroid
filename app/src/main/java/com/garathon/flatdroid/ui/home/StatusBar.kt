@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.CheckCircle
@@ -186,12 +185,10 @@ private fun TaskAndSessionBar(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     if (!bar.running) Icon(if (bar.failed) Icons.Filled.Error else Icons.Filled.CheckCircle, contentDescription = null, modifier = Modifier.size(20.dp))
-                    SelectionContainer(Modifier.weight(1f).padding(vertical = 6.dp)) {
-                        Column {
-                            Text(bar.title, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            bar.detail?.let {
-                                Text(it, style = MaterialTheme.typography.bodySmall, maxLines = if (bar.failed) 2 else 1, overflow = TextOverflow.Ellipsis)
-                            }
+                    Column(Modifier.weight(1f).padding(vertical = 6.dp)) {
+                        Text(bar.title, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        bar.detail?.let {
+                            Text(it, style = MaterialTheme.typography.bodySmall, maxLines = if (bar.failed) 2 else 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
                     // The log is always left of cancel or dismiss, as the running app's is left of its icons.

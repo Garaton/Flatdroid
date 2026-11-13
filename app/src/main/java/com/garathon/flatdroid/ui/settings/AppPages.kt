@@ -88,13 +88,14 @@ fun AppOverviewPage(s: AppPageState) = SettingsPageColumn(null) {
         Text(stringResource(R.string.app_settings_web_content), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
     }
     PermissionChips(s)
+    UsageAndDetails(s)
+
     SettingsCard {
         SwitchRow(
             s.settings.continueWhileHidden, { v -> s.editSettings { copy(continueWhileHidden = v) } },
             stringResource(R.string.app_settings_continue_hidden), stringResource(R.string.app_settings_continue_hidden_hint),
         )
     }
-    UsageAndDetails(s)
     if (s.env.developerOptions) {
         SettingsCard {
             TextRow(
@@ -377,7 +378,7 @@ fun AppPermissionsPage(s: AppPageState) = SettingsPageColumn(R.string.app_page_p
             stringResource(R.string.app_settings_always_allow_microphone), stringResource(R.string.app_settings_always_allow_microphone_hint),
             enabled = audio && micOn,
         )
-        
+
         val cameraDefault = fromMetadata && app.mayUseCamera
         val cameraSet = s.settings.camera
         val cameraOn = (cameraSet ?: cameraDefault) && AndroidCameras.hasPermission(context)
@@ -425,7 +426,7 @@ fun AppPermissionsPage(s: AppPageState) = SettingsPageColumn(R.string.app_page_p
 @Composable
 fun AppOverridesPage(s: AppPageState) = SettingsPageColumn(R.string.app_page_overrides) {
     val defaults = s.settings.defaults
-    Text(stringResource(R.string.app_overrides_intro), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
     SettingsCard {
         SwitchRow(
             s.settings.blocksExtraSyscalls, { v -> s.editSettings { copy(blockExtraSyscalls = v.takeIf { it != defaults.blockExtraSyscalls }) } },

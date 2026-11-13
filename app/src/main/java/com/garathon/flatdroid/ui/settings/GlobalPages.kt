@@ -29,9 +29,11 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.garathon.flatdroid.BuildConfig
 import com.garathon.flatdroid.R
 import com.garathon.flatdroid.camera.AndroidCameras
 import com.garathon.flatdroid.flatpak.FlathubLinkApproval
+import com.garathon.flatdroid.session.SessionScript
 import com.garathon.flatdroid.settings.AppDefaults
 import com.garathon.flatdroid.settings.AppSettings
 import com.garathon.flatdroid.settings.AppTime
@@ -89,6 +91,10 @@ fun GlobalOverviewPage(s: GlobalPageState) = SettingsPageColumn(null) {
         FlatdroidIcon(size = 88.dp)
         Text(stringResource(R.string.app_name), style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(top = 8.dp))
         Text(
+            BuildConfig.VERSION_NAME,
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center,
+        )
+        Text(
             stringResource(R.string.settings_logline),
             style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center,
         )
@@ -124,16 +130,16 @@ fun GlobalOverviewPage(s: GlobalPageState) = SettingsPageColumn(null) {
         )
     
         val appTimeNames = mapOf(
-            AppTime.TIME_USED to stringResource(R.string.settings_app_time_used),
-            AppTime.LAST_OPENED to stringResource(R.string.settings_app_time_last_opened),
+            AppTime.TIME_USED to stringResource(R.string.settings_app_list_used),
+            AppTime.LAST_OPENED to stringResource(R.string.settings_app_list_last_opened),
         )
         DropdownRow(
             selected = s.settings.appTime,
             options = AppTime.entries,
             onSelect = { v -> s.editSettings { copy(appTime = v) } },
             label = { appTimeNames.getValue(it) },
-            title = stringResource(R.string.settings_app_time),
-            hint = stringResource(R.string.settings_app_time_hint),
+            title = stringResource(R.string.settings_app_list),
+            hint = stringResource(R.string.settings_app_list_hint),
         )
     
     }
@@ -247,7 +253,7 @@ fun GlobalDisplayPage(s: GlobalPageState) = SettingsPageColumn(R.string.settings
             hint = stringResource(R.string.settings_viewer_hint),
         )
         if (s.settings.externalViewer) {
-            Text(stringResource(R.string.settings_viewer_external_warning), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            Text(stringResource(R.string.settings_viewer_external_warning, SessionScript.VNC_PORT), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
         }
     }
     SettingsCard {
@@ -378,7 +384,7 @@ fun GlobalFlatpakPage(s: GlobalPageState) = SettingsPageColumn(R.string.settings
                 color = if (on) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
             )
             Text(
-                stringResource(if (on) R.string.settings_flathub_links_hint_allowed else R.string.settings_flathub_links_hint),
+                stringResource(R.string.settings_flathub_links_hint),
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             OutlinedButton(onClick = { FlathubLinkApproval.openSettings(context) }) { Text(stringResource(R.string.settings_flathub_links_open)) }
