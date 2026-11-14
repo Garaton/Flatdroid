@@ -1,11 +1,11 @@
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <string name="app_name">Flatdroid</string>
 
     <string name="setup_title">Set up Flatdroid</string>
     <string name="setup_intro">Flatdroid downloads Alpine Linux, then installs Flatpak, the display servers (Wayland\'s labwc, and Xvnc and Openbox for X11) and PulseAudio into it. Press Start when you are ready.</string>
     <string name="setup_title_running">Setting up Flatdroid</string>
     <string name="setup_screen_count">Part %1$d of %2$d</string>
-    <string name="setup_steps_done">%1$d of %2$d steps done</string>
+    <string name="setup_steps_done" tools:ignore="PluralsCandidate">%1$d of %2$d steps done</string>
     <string name="setup_running_note">Setup continues in the background, and you will be given a notification when it\'s complete.</string>
     <string name="setup_estimate">Setup downloads Alpine Linux and its packages. It needs about 600 MB of free storage.</string>
     <string name="setup_start">Start setup</string>
@@ -62,7 +62,6 @@
     <string name="app_settings_home_android_hint">All of Android\'s shared storage is the home. Needs All files access. Hidden config and key files (.ssh, .config and the like) stay private to the app.</string>
     <string name="app_settings_sdcard_needs_access">Needs All files access, which is in Flatdroid\'s settings under Storage.</string>
     <string name="app_settings_force_x11_unavailable">Only for apps that ask for both Wayland and X11.</string>
-    <string name="app_settings_interface_size_unavailable">Only for apps that run on Wayland. X11 apps keep their size.</string>
     <string name="settings_interface_theme">Flatdroid theme</string>
     <string name="settings_interface_theme_hint">How Flatdroid themes its own UI. AMOLED is pure black background and save power on AMOLED screens.</string>
     <string name="settings_theme_amoled">AMOLED</string>
@@ -90,7 +89,10 @@
     <string name="duration_hours_minutes">%1$d h %2$d min</string>
     <string name="duration_days_hours">%1$d d %2$d h</string>
     <string name="app_overview_used">Used</string>
-    <string name="app_overview_used_value">%1$s, opened %2$d times</string>
+    <plurals name="app_overview_used_value">
+        <item quantity="one">%1$s, opened %2$d time</item>
+        <item quantity="other">%1$s, opened %2$d times</item>
+    </plurals>
     <string name="app_overview_not_used">Not used yet</string>
     <string name="app_overview_details">Details</string>
     <string name="app_detail_runtime">Runtime</string>
@@ -114,8 +116,6 @@
     <string name="app_reset_flatdroid_confirm">Reset</string>
     <string name="storage_reset_app_data">Reset app data…</string>
     <string name="app_overrides_camera_off">Turn on the app\'s camera under Permissions first.</string>
-    <string name="storage_import_app_data">Import app data</string>
-    <string name="storage_export_app_data">Export app data</string>
     <string name="storage_part_runtimes">Runtimes</string>
     <string name="storage_part_apps">Apps</string>
     <string name="storage_part_app_data">App data</string>
@@ -151,14 +151,12 @@
     <string name="storage_show_all_files">Show all files</string>
     <string name="storage_add_files">Add files</string>
     <string name="storage_add_zip">Add a zip</string>
-    <string name="storage_backup_flatdroid_settings">Flatdroid settings</string>
     <string name="storage_reset_all_homes">Reset all app homes…</string>
     <string name="storage_reset_all_app_data">Reset all app data…</string>
     <string name="storage_reset_all_homes_title">Reset all app homes?</string>
     <string name="storage_reset_all_homes_text">Every file in every app home is deleted, installed apps\' too. New, empty ones are made when they are next used.</string>
     <string name="storage_reset_all_app_data_title">Reset all app data?</string>
     <string name="storage_reset_all_app_data_text">The settings and all other Flatpak data of every app are deleted, as if none had ever run.</string>
-    <string name="storage_uninstall_row">Uninstall %1$s</string>
     <string name="storage_no_files_app">Android\'s Files app can\'t open this folder.</string>
     <string name="storage_measuring_runtimes">Measuring runtimes…</string>
     <string name="list_search">Search</string>
@@ -186,12 +184,10 @@
     <string name="settings_discard_text">The changes you made to these settings are lost.</string>
     <string name="settings_discard_confirm">Discard</string>
     <string name="settings_title">Settings</string>
-    <string name="settings_section_flatpak">Flatpak</string>
     <string name="settings_languages">Only download translations for my languages (%1$s)</string>
     <string name="settings_languages_hint">Flatpak skips translations for other languages when it installs and updates apps, saving space.</string>
     <string name="settings_save">Save</string>
     <string name="settings_back">Back</string>
-    <string name="settings_applying">Applying…</string>
     <string name="settings_failed">Could not apply the settings: %1$s</string>
     <string name="settings_open">Settings</string>
     <string name="settings_section_danger">Danger zone</string>
@@ -367,7 +363,6 @@
     <string name="task_runtime_in_use">An installed app uses %1$s now, so it was kept.</string>
     <string name="task_done">Done: %1$s</string>
     <string name="task_failed_title">Failed: %1$s</string>
-    <string name="task_failed">Failed: %1$s (%2$s)</string>
     <string name="task_cancelled">cancelled</string>
     <string name="task_log_title">Flatpak output</string>
     <string name="task_step">%1$s %2$d of %3$d: %4$s</string>
@@ -404,7 +399,6 @@
     </plurals>
     <string name="log_top">Top</string>
     <string name="log_bottom">Bottom</string>
-    <string name="settings_section_viewer">Viewer</string>
     <string name="settings_viewer">Show apps in</string>
     <string name="settings_viewer_hint">The chosen VNC viewer for interacting with Flatpaks. Flatdroid\'s viewer is recommended due to its better security, resource usage, and compatibility with Flatdroid\'s features. However, external VNC viewer apps are supported.</string>
     <string name="settings_viewer_flatdroid">Flatdroid\'s viewer</string>
@@ -420,14 +414,12 @@
     <string name="settings_gpu_runtimes">Install GPU runtimes</string>
     <string name="settings_gpu_runtimes_hint">Lets Flatpak install vendor GPU and video decoding runtimes (NVIDIA, VAAPI) with apps. Flatdroid renders in software and doesn\'t use them, off saves space. Turning this off removes these runtimes.</string>
     <string name="developer_setting">Developer setting</string>
-    <string name="settings_section_audio">Audio</string>
     <string name="settings_low_latency_audio">Low latency audio</string>
     <string name="settings_low_latency_audio_hint">Plays sound through Android\'s low latency output instead of its power saving one. Gives less delay and fewer crackles, significantly increases CPU usage.</string>
     <string name="settings_high_quality_audio">High quality audio</string>
     <string name="settings_high_quality_audio_hint">When an app\'s sample rate differs from the phone\'s it gets converted to a higher quality, slightly increases CPU usage.</string>
     <string name="settings_audio_latency">Audio latency (ms)</string>
     <string name="settings_audio_latency_hint">%1$d to %2$d; clear the field for the default %3$d ms. Lower is more responsive but can crackle.</string>
-    <string name="settings_section_developer">Developer</string>
     <string name="settings_developer_options">Developer options</string>
     <string name="settings_developer_options_hint">Shows extra settings that Flatdroid manages itself or that are risky for most users.</string>
 
@@ -435,7 +427,7 @@
     <string name="session_checking_files">Checking files: %1$s (%2$d/%3$d)</string>
     <string name="session_listing_files">Checking files: listing %1$s</string>
     <string name="session_files_changed">Some files changed since this app was installed, so it was not started. Another app may have altered them. Reinstall restores the affected packages.</string>
-    <string name="session_files_changed_item">• %1$s: %2$d changed, %3$d removed</string>
+    <string name="session_files_changed_item" tools:ignore="PluralsCandidate">• %1$s: %2$d changed, %3$d removed</string>
     <string name="session_reinstall">Reinstall</string>
     <string name="session_skip_check">Skip check</string>
     <string name="files_changed_title">%1$s\'s files changed</string>
@@ -448,10 +440,7 @@
     <string name="mic_allow">Allow</string>
     <string name="mic_deny">Deny</string>
     <string name="session_starting">Starting…</string>
-    <string name="session_starting_app">Starting %1$s</string>
-    <string name="session_running_app">%1$s is running</string>
     <string name="session_stopping_short">Stopping…</string>
-    <string name="session_stopping">Stopping %1$s…</string>
     <string name="session_notification_viewer">Running. Open the app to see it.</string>
     <string name="viewer_back">Back to the app list</string>
     <string name="viewer_keyboard">Keyboard</string>
@@ -466,7 +455,6 @@
     <string name="session_external_title">Connect a VNC viewer</string>
     <string name="session_address">Address: %1$s:%2$d</string>
     <string name="session_password_label">Password</string>
-    <string name="session_password">Password: %1$s</string>
     <string name="session_username">Username: %1$s</string>
     <string name="session_copy_password">Copy password</string>
     <string name="session_open_viewer">Open viewer</string>
@@ -501,7 +489,6 @@
     <string name="electron_cannot">%1$s comes with Electron built for %2$s, which can\'t run on this device, and it can\'t be replaced: %3$s</string>
     <string name="electron_download">Download</string>
     <string name="electron_preparing">Preparing Electron</string>
-    <string name="electron_preparing_app">Preparing Electron for %1$s</string>
     <string name="electron_version_unknown">Its Electron version could not be read.</string>
     <string name="electron_native_modules">It has native modules built for %1$s, which another Electron can\'t load.</string>
     <string name="electron_step_checksums">Downloading Electron\'s checksums</string>
@@ -510,15 +497,13 @@
     <string name="electron_step_extract">Extracting %1$s</string>
     <string name="electron_step_resources">Copying the app\'s resources</string>
 
-    <string name="app_settings_display">Display</string>
     <string name="app_settings_resolution">Resolution</string>
     <string name="app_settings_resolution_hint">The app\'s screen as a share of the phone\'s size. Higher is sharper but uses more CPU.</string>
     <string name="app_settings_resolution_percent">%1$d%%</string>
     <string name="app_settings_custom">Custom</string>
     <string name="app_settings_width">Width</string>
-    <string name="app_settings_custom_invalid">Width and height must be between %1$d and %2$d.</string>
+    <string name="app_settings_custom_invalid" tools:ignore="PluralsCandidate">Width and height must be between %1$d and %2$d.</string>
     <string name="app_settings_height">Height</string>
-    <string name="app_settings_permissions">Permissions</string>
     <string name="app_settings_audio">Sound</string>
     <string name="app_settings_audio_requested">The app asks for sound.</string>
     <string name="app_settings_audio_not_requested">The app doesn\'t ask for sound, turning this on may still work.</string>
@@ -531,7 +516,7 @@
     <string name="app_settings_camera_none">This device has no camera Flatdroid can use.</string>
     <string name="app_settings_camera_android_denied">Android didn\'t allow Flatdroid to use the camera.</string>
     <string name="app_settings_camera_frame_rate">Camera frame rate</string>
-    <string name="app_settings_camera_frame_rate_value">%1$d frames per second</string>
+    <string name="app_settings_camera_frame_rate_value" tools:ignore="PluralsCandidate">%1$d frames per second</string>
     <string name="app_settings_camera_frame_rate_high">\nSome apps don\'t recognize cameras above 30 frames per second. If a camera is missing, it is likely due to this.</string>
     <string name="app_settings_camera_resolution">Camera resolution</string>
     <string name="app_settings_camera_resolution_value">%1$dp</string>
@@ -542,10 +527,8 @@
     <string name="camera_front">Front camera</string>
     <string name="camera_external">External camera</string>
     <string name="app_settings_microphone_android_denied">Android didn\'t allow Flatdroid to use the microphone.</string>
-    <string name="app_settings_devices">Devices</string>
     <string name="app_settings_whole_dev">All of /dev</string>
     <string name="app_settings_whole_dev_hint">Gives the app every device node the phone has, including Android\'s Binder, through which it can call Android\'s system services as Flatdroid.</string>
-    <string name="app_settings_launch">Launch</string>
     <string name="app_settings_environment">Environment variables</string>
     <string name="app_settings_environment_hint">One NAME=value per line, added to the app\'s environment over Flatdroid\'s own. Lines starting with # are skipped.</string>
     <string name="app_settings_launch_args">Launch arguments</string>
@@ -555,9 +538,7 @@
     <string name="app_settings_force_x11_hint">Runs the app on X11 instead of Wayland, using more CPU. Try X11 if the app misbehaves.</string>
     <string name="app_settings_launch_args_hint">Added after the app\'s own command, separated by spaces. Each is passed as it is: no quoting.</string>
     <string name="app_settings_environment_invalid">Each line needs NAME=value; names use letters, digits and _, not starting with a digit.</string>
-    <string name="app_settings_storage">Storage</string>
     <string name="app_settings_clear_cache">Clear cache</string>
-    <string name="app_settings_cache_cleared">Cache cleared</string>
 
     <string name="uninstall_button">Uninstall…</string>
     <string name="uninstall_title">Uninstall %1$s?</string>
@@ -570,13 +551,9 @@
     <string name="ok">OK</string>
     <string name="home_import">Add files to the shared home</string>
     <string name="home_import_files">Add files to the shared home</string>
-    <string name="settings_section_storage">Storage</string>
-    <string name="settings_shared_home">Shared home: %1$s</string>
-    <string name="settings_shared_home_hint">Apps set to Shared home use this folder.</string>
     <string name="settings_change_shared_home">Change shared home</string>
     <string name="settings_all_files_access">All files access</string>
     <string name="settings_all_files_access_hint">Gives Flatdroid access to every file in Android\'s shared storage. This allows apps to see files not made by Flatdroid within the shared home. Opens Android\'s setting.</string>
-    <string name="app_settings_files">Files</string>
     <string name="app_settings_home_shared">Shared home</string>
     <string name="app_settings_home_shared_hint">%1$s, shared with every app set to it.</string>
     <string name="app_settings_home_private">App home</string>
@@ -624,11 +601,6 @@
     <string name="settings_theme_dark">Dark</string>
     <string name="settings_theme_light">Light</string>
     <string name="settings_storage_total">Total: %1$s</string>
-    <string name="settings_storage_runtimes">Flatpak Runtimes: %1$s</string>
-    <string name="settings_storage_apps">Flatpak Apps: %1$s</string>
-    <string name="settings_storage_app_data">Flatpak Settings/App Data: %1$s</string>
-    <string name="settings_storage_homes">App Homes: %1$s</string>
-    <string name="settings_storage_cache">Cache: %1$s</string>
     <string name="settings_clear_all_caches">Clear all caches</string>
     <string name="settings_clear_unused_app_data">Clear unused app data</string>
     <string name="settings_clear_unused_homes">Clear unused app homes</string>
@@ -643,12 +615,6 @@
         <item quantity="other">Deletes the app homes (%2$s) of %1$d apps that aren\'t installed, with every file in them.</item>
     </plurals>
     <string name="settings_clear">Clear</string>
-    <string name="settings_all_apps">All apps</string>
-    <string name="settings_all_apps_hint">Every app home or Flatpak settings in one zip, a folder per app ID, installed or not. Importing replaces those of the apps in the zip; other apps\' stay.</string>
-    <string name="storage_import_all_homes">Import all app homes</string>
-    <string name="storage_export_all_homes">Export all app homes</string>
-    <string name="storage_import_all_settings">Import all app data</string>
-    <string name="storage_export_all_settings">Export all app data</string>
     <string name="storage_import_all_homes_title">Import all app homes?</string>
     <string name="storage_import_all_homes_text">The app home of each app in the zip is replaced with the zip\'s. Other apps are unaffected.</string>
     <string name="storage_import_all_settings_title">Import all app data?</string>
@@ -656,7 +622,6 @@
     <string name="storage_import">Import</string>
     <string name="storage_reset">Reset</string>
     <string name="settings_shared_dotfiles">Shared hidden files</string>
-    <string name="settings_shared_dotfiles_hint">The shell start-up files, Git settings and keys (.ssh, .gnupg and the like) shared by the apps whose \"Share hidden files and keys with other apps\" is on: %1$s.</string>
     <string name="storage_import_shared_dotfiles_title">Import shared hidden files?</string>
     <string name="storage_import_shared_dotfiles_text">The shared hidden files are replaced by the zip\'s.</string>
     <string name="storage_reset_shared_dotfiles_title">Reset shared hidden files?</string>
@@ -675,16 +640,9 @@
     <string name="app_settings_measuring">Measuring…</string>
     <string name="storage_measuring_size">%1$s (Measuring…)</string>
     <string name="app_settings_app_storage">App storage: %1$s</string>
-    <string name="app_settings_cache">Cache: %1$s</string>
-    <string name="app_settings_private_home">App home: %1$s</string>
-    <string name="app_settings_settings">Settings: %1$s</string>
     <string name="storage_copy_into_home">Import files into app home</string>
     <string name="storage_download_from_home">Export files from app home</string>
-    <string name="storage_import_home">Import app home</string>
-    <string name="storage_export_home">Export app home</string>
     <string name="storage_reset_home">Reset app home…</string>
-    <string name="storage_import_settings">Import Flatdroid settings</string>
-    <string name="storage_export_settings">Export Flatdroid settings</string>
     <string name="storage_reset_settings">Reset settings…</string>
     <string name="app_settings_import_home_title">Replace %1$s\'s app home?</string>
     <string name="app_settings_import_home_text">Its app home is replaced with the contents of a zip you choose next (from Export app home).</string>
@@ -765,7 +723,6 @@
     <string name="storage_settings_invalid">The zip doesn\'t hold Flatdroid settings it can read.</string>
     <string name="storage_failed">Failed: %1$s</string>
     <!-- Security -->
-    <string name="settings_section_security">Security</string>
     <string name="security_level">Security level</string>
     <string name="security_level_performant">Performant</string>
     <string name="security_level_default">Default</string>

@@ -79,12 +79,12 @@ fun StatusBar(
     onDismissSession: () -> Unit,
     onSessionLog: () -> Unit,
     onClearQueue: () -> Unit,
+    modifier: Modifier = Modifier,
     onUnqueue: (FlatpakTask) -> Unit = {},
     /** Takes one app out of a waiting install or uninstall of several. */
     onUnqueueApp: (FlatpakTask, String) -> Unit = { _, _ -> },
     /** An app's name for the waiting tasks (its ID when unknown). */
     queuedName: (String) -> String = { it },
-    modifier: Modifier = Modifier,
 ) {
     var manage by remember { mutableStateOf(false) }
     Column(modifier) {

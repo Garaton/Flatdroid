@@ -3,6 +3,7 @@ package com.garathon.flatdroid.viewer
 import android.net.LocalSocket
 import android.net.LocalSocketAddress
 import android.os.Handler
+import android.os.Build
 import android.os.Looper
 import com.garathon.flatdroid.session.SessionController
 import com.garathon.flatdroid.session.HiddenPause
@@ -99,7 +100,7 @@ object ViewerConnection {
         try {
             socket.connect(LocalSocketAddress(socketPath, LocalSocketAddress.Namespace.FILESYSTEM))
             val tileSize = ViewerDebug.tileSize(cacheDir)
-            native = if (tileSize == null) NativeFrames.open(socket) else null
+            native = if (tileSize == null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) NativeFrames.open(socket) else null
             frames = native ?: TileFrames(tileSize ?: TileFrames.SIZE)
             DebugLog.i("Viewer: drawing through ${frames?.javaClass?.simpleName}")
             val client = RfbClient(
@@ -166,7 +167,7 @@ object ViewerConnection {
             // viewer closes, the session stays.
             if (this.socket === socket) error = e.message ?: e.javaClass.simpleName
         }
-        native?.close()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) native?.close()
         main.post {
             if (this.socket === socket) {
                 DebugLog.i("Viewer: disconnected${error?.let { ": $it" }.orEmpty()}")

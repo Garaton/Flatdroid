@@ -155,14 +155,14 @@ class NativeFrames private constructor(private val descriptor: ParcelFileDescrip
         placed.set(destination)
         placedWidth = width
         placedHeight = height
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             // Placed to the fraction of a pixel, as the view's zoom and pan put it.
             placing.setPosition(control, destination.left, destination.top)
                 .setScale(control, destination.width() / width, destination.height() / height)
         } else {
             source.set(0, 0, width, height)
             destination.round(rounded)
-            @Suppress("DEPRECATION") // the only way before Android 12
+            @Suppress("DEPRECATION") // the only way before Android 13
             placing.setGeometry(control, source, rounded, Surface.ROTATION_0)
         }
         placing.apply()
@@ -175,9 +175,8 @@ class NativeFrames private constructor(private val descriptor: ParcelFileDescrip
     }
 
     companion object {
-        /** A [NativeFrames] reading [socket], or null where it can't run (Android before 10). */
+        /** A [NativeFrames] reading [socket], or null where it can't run (the caller checks for Android 10). */
         fun open(socket: LocalSocket): NativeFrames? {
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
             return runCatching {
                 System.loadLibrary("fdview")
                 reset()

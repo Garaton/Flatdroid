@@ -14,7 +14,7 @@ import com.garathon.flatdroid.setup.rootfs.DownloadRootfsSource
 import com.garathon.flatdroid.setup.rootfs.deleteTree
 import java.io.File
 import java.io.IOException
-import java.nio.file.Files
+import android.system.Os
 import java.util.concurrent.atomic.AtomicReference
 
 /** What each [SetupStep] does in Alpine. */
@@ -138,7 +138,7 @@ class AlpineSetup(
     /** Fails when one of [paths] (relative to the rootfs) is missing: a step that said it finished has to have left them. */
     private fun requireFiles(paths: List<String>) {
         val root = env.installer.rootfs
-        val missing = paths.filter { val f = File(root, it); !f.exists() && !Files.isSymbolicLink(f.toPath()) }
+        val missing = paths.filter { val f = File(root, it); !f.exists() && runCatching { Os.readlink(f.path) }.isFailure }
         if (missing.isNotEmpty()) throw IOException(context.getString(R.string.setup_error_missing, missing.joinToString(" ")))
     }
 

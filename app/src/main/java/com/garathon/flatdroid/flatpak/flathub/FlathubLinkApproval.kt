@@ -4,9 +4,9 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.verify.domain.DomainVerificationManager
 import android.content.pm.verify.domain.DomainVerificationUserState
-import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import androidx.core.net.toUri
 
 /**
  * Whether Android opens Flathub install links in Flatdroid. From Android 12 a link whose domain the
@@ -26,7 +26,7 @@ object FlathubLinkApproval {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
         runCatching {
             context.startActivity(
-                Intent(Settings.ACTION_APP_OPEN_BY_DEFAULT_SETTINGS, Uri.parse("package:${context.packageName}"))
+                Intent(Settings.ACTION_APP_OPEN_BY_DEFAULT_SETTINGS, "package:${context.packageName}".toUri())
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
             )
         }

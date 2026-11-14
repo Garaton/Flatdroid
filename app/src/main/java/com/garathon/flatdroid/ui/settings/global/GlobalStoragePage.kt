@@ -107,7 +107,8 @@ fun GlobalStoragePage(s: GlobalPageState) = SettingsPageColumn(R.string.settings
     val storage = env.storage
     val context = LocalContext.current
     fun size(bytes: Long) = Formatter.formatShortFileSize(context, bytes)
-    fun sizeOf(bytes: Long?) = bytes?.let(::size) ?: context.getString(R.string.app_settings_measuring)
+    val measuring = stringResource(R.string.app_settings_measuring)
+    fun sizeOf(bytes: Long?) = bytes?.let(::size) ?: measuring
     var confirm by rememberSaveable { mutableStateOf<String?>(null) }
     var uninstall by rememberSaveable { mutableStateOf<String?>(null) }
     var removeRuntime by rememberSaveable { mutableStateOf<String?>(null) }

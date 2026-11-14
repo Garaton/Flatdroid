@@ -34,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -148,12 +149,11 @@ fun AppOverviewPage(s: AppPageState) = SettingsPageColumn(null) {
 /** How long the app was used, and what its metadata says about it. */
 @Composable
 private fun UsageAndDetails(s: AppPageState) {
-    val context = LocalContext.current
     val app = s.app
     SettingsCard(title = stringResource(R.string.app_overview_used)) {
         Text(
             if (app.launches == 0) stringResource(R.string.app_overview_not_used)
-            else stringResource(R.string.app_overview_used_value, durationText(app.usedMillis), app.launches),
+            else pluralStringResource(R.plurals.app_overview_used_value, app.launches, durationText(app.usedMillis), app.launches),
             style = MaterialTheme.typography.bodyMedium,
         )
     }
@@ -179,7 +179,7 @@ private fun UsageAndDetails(s: AppPageState) {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             for ((label, value) in rows) {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(context.getString(label), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(84.dp))
+                    Text(stringResource(label), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(84.dp))
                     Text(value, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
                 }
             }

@@ -6,6 +6,8 @@ import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.RectF
+import androidx.core.graphics.createBitmap
+import androidx.core.graphics.withSave
 import com.garathon.flatdroid.viewer.input.ScrollMeter
 import com.garathon.flatdroid.viewer.protocol.Framebuffer
 import com.garathon.flatdroid.viewer.protocol.Rfb
@@ -78,7 +80,7 @@ class TileFrames(private val size: Int = SIZE) : FrameDrawer {
         fb.onChange = { x, y, width, height -> layout.forEachTouching(x, y, width, height) { dirty[it] = true } }
     }
 
-    private fun bitmap(width: Int, height: Int) = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).apply { setHasAlpha(false) }
+    private fun bitmap(width: Int, height: Int) = createBitmap(width, height).apply { setHasAlpha(false) }
 
     private fun inSight(i: Int, visible: Rect): Boolean {
         val tile = layout.tiles[i]
@@ -118,15 +120,15 @@ class TileFrames(private val size: Int = SIZE) : FrameDrawer {
         if (drawWhole) return canvas.drawBitmap(wholeBitmap, matrix, paint)
         for (i in tiles.indices) {
             val tile = layout.tiles[i]
-            canvas.save()
-            // Only the tile's own area: its extra pixels are there for scaling, the neighbours draw them.
-            tileClip.set(tile.left.toFloat(), tile.top.toFloat(), tile.right.toFloat(), tile.bottom.toFloat())
-            matrix.mapRect(tileClip)
-            canvas.clipRect(tileClip)
-            tileMatrix.set(matrix)
-            tileMatrix.preTranslate(tile.bitmapLeft.toFloat(), tile.bitmapTop.toFloat())
-            canvas.drawBitmap(tiles[i], tileMatrix, paint)
-            canvas.restore()
+            canvas.withSave {
+                // Only the tile's own area: its extra pixels are there for scaling, the neighbours draw them.
+                tileClip.set(tile.left.toFloat(), tile.top.toFloat(), tile.right.toFloat(), tile.bottom.toFloat())
+                matrix.mapRect(tileClip)
+                clipRect(tileClip)
+                tileMatrix.set(matrix)
+                tileMatrix.preTranslate(tile.bitmapLeft.toFloat(), tile.bitmapTop.toFloat())
+                drawBitmap(tiles[i], tileMatrix, paint)
+            }
         }
     }
 

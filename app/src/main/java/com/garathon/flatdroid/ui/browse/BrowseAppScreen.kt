@@ -2,7 +2,6 @@ package com.garathon.flatdroid.ui.browse
 
 import android.content.ActivityNotFoundException
 import android.content.Intent
-import android.net.Uri
 import android.text.format.Formatter
 import androidx.annotation.StringRes
 import androidx.compose.foundation.background
@@ -22,6 +21,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.core.net.toUri
 import com.garathon.flatdroid.flatpak.catalog.CatalogIndex
 import com.garathon.flatdroid.flatpak.catalog.Screenshot
 import com.garathon.flatdroid.settings.MobileData
@@ -435,7 +435,7 @@ fun BrowseAppScreen(
                         Row(
                             Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable {
                                 try {
-                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(link)).addCategory(Intent.CATEGORY_BROWSABLE))
+                                    context.startActivity(Intent(Intent.ACTION_VIEW, link.toUri()).addCategory(Intent.CATEGORY_BROWSABLE))
                                 } catch (_: ActivityNotFoundException) {
                                 }
                             }.padding(vertical = 6.dp),
