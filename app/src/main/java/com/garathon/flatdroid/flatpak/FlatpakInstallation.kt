@@ -1,6 +1,6 @@
 package com.garathon.flatdroid.flatpak
 
-import com.garathon.flatdroid.util.readTextUpTo
+import com.garathon.flatdroid.util.io.readTextUpTo
 import java.io.File
 
 /** An installed app or runtime: its ref and deployed directory (with `files/` and `metadata`). */

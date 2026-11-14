@@ -17,8 +17,8 @@ import com.garathon.flatdroid.MainActivity
 import com.garathon.flatdroid.R
 import com.garathon.flatdroid.util.DoneNotice
 import com.garathon.flatdroid.alpine.AlpineEnvironment
-import com.garathon.flatdroid.flatpak.AppData
-import com.garathon.flatdroid.storage.SavedSizes
+import com.garathon.flatdroid.storage.AppData
+import com.garathon.flatdroid.storage.sizes.SavedSizes
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers

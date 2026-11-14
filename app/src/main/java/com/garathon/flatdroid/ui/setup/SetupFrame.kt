@@ -18,8 +18,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.garathon.flatdroid.R
-import com.garathon.flatdroid.ui.FlatdroidIcon
-import com.garathon.flatdroid.ui.aboveKeyboard
+import com.garathon.flatdroid.ui.common.FlatdroidIcon
+import com.garathon.flatdroid.ui.common.aboveKeyboard
 import com.garathon.flatdroid.ui.theme.Spacing
 
 /** How many screens setup has before Flatdroid is ready: the choices, then the installation. */

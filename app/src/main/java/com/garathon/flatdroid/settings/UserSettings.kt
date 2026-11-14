@@ -2,8 +2,8 @@ package com.garathon.flatdroid.settings
 
 import com.garathon.flatdroid.alpine.GuestFiles
 import com.garathon.flatdroid.camera.AndroidCameras
-import com.garathon.flatdroid.flatpak.FlatpakCommands
-import com.garathon.flatdroid.util.writeTextAtomically
+import com.garathon.flatdroid.flatpak.tasks.FlatpakCommands
+import com.garathon.flatdroid.util.io.writeTextAtomically
 import java.io.File
 import java.io.StringWriter
 import java.util.Properties

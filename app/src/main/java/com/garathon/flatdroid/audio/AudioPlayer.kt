@@ -7,7 +7,7 @@ import android.net.LocalSocket
 import android.net.LocalSocketAddress
 import android.os.Build
 import com.garathon.flatdroid.settings.AudioOutputMode
-import com.garathon.flatdroid.util.DebugLog
+import com.garathon.flatdroid.util.debug.DebugLog
 import java.io.DataInputStream
 import java.io.EOFException
 import java.io.File

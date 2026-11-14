@@ -43,9 +43,9 @@ import com.garathon.flatdroid.R
 import com.garathon.flatdroid.setup.ResetMode
 import com.garathon.flatdroid.setup.SetupStep
 import com.garathon.flatdroid.setup.SetupUi
-import com.garathon.flatdroid.ui.CommandInput
-import com.garathon.flatdroid.ui.LogText
-import com.garathon.flatdroid.ui.ResetDialog
+import com.garathon.flatdroid.ui.terminal.CommandInput
+import com.garathon.flatdroid.ui.common.LogText
+import com.garathon.flatdroid.ui.dialogs.ResetDialog
 import com.garathon.flatdroid.ui.theme.FlatdroidTheme
 
 /**

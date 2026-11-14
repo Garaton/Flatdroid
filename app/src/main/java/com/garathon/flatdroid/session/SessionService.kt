@@ -16,18 +16,19 @@ import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.garathon.flatdroid.MainActivity
 import com.garathon.flatdroid.R
+import com.garathon.flatdroid.session.helpers.SessionScript
 import com.garathon.flatdroid.viewer.ViewerActivity
 import com.garathon.flatdroid.alpine.AlpineCommands
 import com.garathon.flatdroid.audio.MicStreamer
 import com.garathon.flatdroid.camera.AndroidCameras
-import com.garathon.flatdroid.flatpak.AppData
+import com.garathon.flatdroid.storage.AppData
 import com.garathon.flatdroid.launcher.AppEnding
 import com.garathon.flatdroid.launcher.ProotExit
-import com.garathon.flatdroid.flatpak.FlatpakTaskService
+import com.garathon.flatdroid.flatpak.tasks.FlatpakTaskService
 import com.garathon.flatdroid.flatpak.InstalledApps
 import com.garathon.flatdroid.settings.HomeMode
 import com.garathon.flatdroid.setup.SetupController
-import com.garathon.flatdroid.storage.SavedSizes
+import com.garathon.flatdroid.storage.sizes.SavedSizes
 import com.garathon.flatdroid.storage.TempHomePrompt
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -251,7 +252,7 @@ class SessionService : Service() {
         val viewerIntent = (state as? SessionState.Running)?.let {
             // An open viewer comes forward rather than a second one.
             if (it.socket != null) Intent(this, ViewerActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
-            else Viewer.intent(this, it.password, SetupController.settings(this).load()?.vncViewer, username = it.username)
+            else ExternalViewer.intent(this, it.password, SetupController.settings(this).load()?.vncViewer, username = it.username)
         }
         if (viewerIntent != null) {
             // Cancel, not update: an update keeps the old intent's flags (one from before an app update, say).

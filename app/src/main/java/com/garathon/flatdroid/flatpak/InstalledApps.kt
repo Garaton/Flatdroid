@@ -2,11 +2,12 @@ package com.garathon.flatdroid.flatpak
 
 import android.content.Context
 import com.garathon.flatdroid.alpine.AlpineEnvironment
-import com.garathon.flatdroid.launcher.Electron
+import com.garathon.flatdroid.launcher.electron.Electron
 import com.garathon.flatdroid.launcher.Executable
 import com.garathon.flatdroid.proot.DevNodes
 import com.garathon.flatdroid.settings.AppSettings
-import com.garathon.flatdroid.util.readTextUpTo
+import com.garathon.flatdroid.storage.AppData
+import com.garathon.flatdroid.util.io.readTextUpTo
 import java.io.File
 import java.util.Locale
 

@@ -28,7 +28,7 @@ object GuestFiles {
     /**
      * Flatpak's CLI runs an app's or extension's `/app/bin/apply_extra` through bwrap, which can't
      * run under proot; this answers that call as done, and Flatdroid runs the script itself
-     * afterwards ([com.garathon.flatdroid.flatpak.ExtraData]). Every other call goes to bwrap.
+     * afterwards ([com.garathon.flatdroid.flatpak.tasks.ExtraData]). Every other call goes to bwrap.
      * Flatpak may pass the arguments in a file descriptor (`--args`).
      */
     val BWRAP_STAND_IN = """

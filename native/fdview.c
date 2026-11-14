@@ -2,7 +2,7 @@
  * The embedded viewer's frames: RFB pixels read from the socket straight into one frame in memory,
  * and each update's changed area copied from it into the next buffer of a surface's queue, which
  * Android's compositor shows as it is (placed and scaled by the compositor, nothing drawn by the
- * app). Called from viewer/NativeFrames.kt, on Android 10 and later only.
+ * app). Called from viewer/frames/NativeFrames.kt, on Android 10 and later only.
  */
 #include <android/hardware_buffer.h>
 #include <android/native_window_jni.h>
@@ -14,7 +14,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#define FN(name) Java_com_garathon_flatdroid_viewer_NativeFrames_##name
+#define FN(name) Java_com_garathon_flatdroid_viewer_frames_NativeFrames_##name
 #define BYTES_PER_PIXEL 4
 
 /* All of the connection's reading comes here (one reading thread): few system calls for many small rows. */

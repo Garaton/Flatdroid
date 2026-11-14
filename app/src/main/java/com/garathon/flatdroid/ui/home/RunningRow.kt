@@ -40,7 +40,7 @@ import androidx.compose.ui.unit.dp
 import com.garathon.flatdroid.R
 import com.garathon.flatdroid.flatpak.InstalledApp
 import com.garathon.flatdroid.session.SessionState
-import com.garathon.flatdroid.ui.IconAction
+import com.garathon.flatdroid.ui.common.IconAction
 
 /**
  * The app that starts or runs, pinned above the list in the shape of a list row: its icon and

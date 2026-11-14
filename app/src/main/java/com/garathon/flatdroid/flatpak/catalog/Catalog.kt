@@ -5,12 +5,12 @@ import android.os.LocaleList
 import android.system.Os
 import android.util.Xml
 import com.garathon.flatdroid.alpine.AlpineEnvironment
-import com.garathon.flatdroid.flatpak.FlathubApp
-import com.garathon.flatdroid.flatpak.FlathubClient
-import com.garathon.flatdroid.flatpak.FlathubStats
+import com.garathon.flatdroid.flatpak.flathub.FlathubApp
+import com.garathon.flatdroid.flatpak.flathub.FlathubClient
+import com.garathon.flatdroid.flatpak.flathub.FlathubStats
 import com.garathon.flatdroid.settings.MobileData
 import com.garathon.flatdroid.settings.mobileDataPolicy
-import com.garathon.flatdroid.util.DebugLog
+import com.garathon.flatdroid.util.debug.DebugLog
 import com.garathon.flatdroid.util.appScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow

@@ -1,7 +1,10 @@
 package com.garathon.flatdroid.proot
 
 import android.os.Build
-import com.garathon.flatdroid.util.forEachLineLimited
+import com.garathon.flatdroid.proot.processes.AndroidSignals
+import com.garathon.flatdroid.proot.processes.ProcessStopper
+import com.garathon.flatdroid.proot.processes.Signals
+import com.garathon.flatdroid.util.io.forEachLineLimited
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit

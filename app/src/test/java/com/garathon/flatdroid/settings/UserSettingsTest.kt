@@ -1,6 +1,6 @@
 package com.garathon.flatdroid.settings
 
-import com.garathon.flatdroid.flatpak.FlatpakCommands
+import com.garathon.flatdroid.flatpak.tasks.FlatpakCommands
 import com.garathon.flatdroid.alpine.GuestFiles
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse

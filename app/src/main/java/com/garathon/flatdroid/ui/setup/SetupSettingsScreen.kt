@@ -27,7 +27,7 @@ import androidx.compose.ui.unit.dp
 import com.garathon.flatdroid.R
 import com.garathon.flatdroid.alpine.GuestFiles
 import com.garathon.flatdroid.settings.UserSettings
-import com.garathon.flatdroid.ui.LocalDeveloperOptions
+import com.garathon.flatdroid.ui.common.LocalDeveloperOptions
 import com.garathon.flatdroid.ui.settings.GpuRuntimesRow
 import com.garathon.flatdroid.ui.settings.LanguagesRow
 import com.garathon.flatdroid.ui.settings.SecurityLevelRow

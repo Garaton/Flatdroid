@@ -3,7 +3,8 @@ package com.garathon.flatdroid.launcher
 import com.garathon.flatdroid.flatpak.Deployment
 import com.garathon.flatdroid.flatpak.FlatpakInstallation
 import com.garathon.flatdroid.flatpak.FlatpakRef
-import com.garathon.flatdroid.flatpak.L2s
+import com.garathon.flatdroid.launcher.electron.Electron
+import com.garathon.flatdroid.proot.L2s
 import com.garathon.flatdroid.flatpak.MountedExtension
 import com.garathon.flatdroid.proot.DevNodes
 import com.garathon.flatdroid.proot.Fdsec
@@ -11,7 +12,7 @@ import com.garathon.flatdroid.proot.FlatpakBinds
 import com.garathon.flatdroid.proot.GuestPaths
 import java.io.File
 import java.security.MessageDigest
-import com.garathon.flatdroid.util.readTextUpTo
+import com.garathon.flatdroid.util.io.readTextUpTo
 
 /** Host directories for one launch of one app; see AppPaths for where they live. */
 data class HostDirs(

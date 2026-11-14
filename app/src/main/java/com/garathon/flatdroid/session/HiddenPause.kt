@@ -4,7 +4,7 @@ import android.system.ErrnoException
 import android.system.Os
 import android.system.OsConstants
 import com.garathon.flatdroid.audio.AudioPlayer
-import com.garathon.flatdroid.util.DebugLog
+import com.garathon.flatdroid.util.debug.DebugLog
 import com.garathon.flatdroid.util.appScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job

@@ -15,7 +15,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.garathon.flatdroid.R
-import com.garathon.flatdroid.ui.FlatdroidIcon
+import com.garathon.flatdroid.ui.common.FlatdroidIcon
 import com.garathon.flatdroid.ui.theme.FlatdroidTheme
 
 /** While the Alpine environment is reset: a screen of its own, so it doesn't pass for a step of setup. [detail] is what it is doing. */

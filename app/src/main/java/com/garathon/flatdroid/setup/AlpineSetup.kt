@@ -5,10 +5,13 @@ import android.os.StatFs
 import com.garathon.flatdroid.BuildConfig
 import com.garathon.flatdroid.R
 import com.garathon.flatdroid.alpine.AlpineEnvironment
-import com.garathon.flatdroid.flatpak.FlatpakCommands
-import com.garathon.flatdroid.flatpak.LauncherFiles
+import com.garathon.flatdroid.flatpak.tasks.FlatpakCommands
+import com.garathon.flatdroid.launcher.LauncherFiles
 import com.garathon.flatdroid.proot.ProcessResult
 import com.garathon.flatdroid.settings.UserSettings
+import com.garathon.flatdroid.setup.rootfs.AndroidTarFs
+import com.garathon.flatdroid.setup.rootfs.DownloadRootfsSource
+import com.garathon.flatdroid.setup.rootfs.deleteTree
 import java.io.File
 import java.io.IOException
 import java.nio.file.Files

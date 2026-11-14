@@ -2,10 +2,11 @@ package com.garathon.flatdroid.setup
 
 import android.content.Context
 import com.garathon.flatdroid.alpine.AlpineEnvironment
-import com.garathon.flatdroid.flatpak.AppData
-import com.garathon.flatdroid.launcher.ElectronSwap
+import com.garathon.flatdroid.setup.rootfs.AndroidTarFs
+import com.garathon.flatdroid.storage.AppData
+import com.garathon.flatdroid.launcher.electron.ElectronSwap
 import com.garathon.flatdroid.settings.UserSettingsStore
-import com.garathon.flatdroid.util.DebugLog
+import com.garathon.flatdroid.util.debug.DebugLog
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow

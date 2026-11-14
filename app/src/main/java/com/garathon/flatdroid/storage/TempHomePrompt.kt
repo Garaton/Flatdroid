@@ -2,6 +2,8 @@ package com.garathon.flatdroid.storage
 
 import android.content.Context
 import com.garathon.flatdroid.session.SessionController
+import com.garathon.flatdroid.storage.tasks.StorageTaskService
+import com.garathon.flatdroid.storage.tasks.StorageTasks
 
 /**
  * What happens to the temporary home after its app closes: an empty one is deleted; otherwise

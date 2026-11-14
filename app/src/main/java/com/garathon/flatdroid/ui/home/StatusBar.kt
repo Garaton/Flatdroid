@@ -38,11 +38,11 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.garathon.flatdroid.R
-import com.garathon.flatdroid.flatpak.FlatpakTask
-import com.garathon.flatdroid.flatpak.FlatpakTaskUi
+import com.garathon.flatdroid.flatpak.tasks.FlatpakTask
+import com.garathon.flatdroid.flatpak.tasks.FlatpakTaskUi
 import com.garathon.flatdroid.session.SessionState
 import com.garathon.flatdroid.session.SessionUi
-import com.garathon.flatdroid.ui.IconAction
+import com.garathon.flatdroid.ui.common.IconAction
 
 /**
  * What the bottom bar says now: a Flatpak task under way or finished, or how the last session

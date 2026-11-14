@@ -2,6 +2,7 @@ package com.garathon.flatdroid.launcher
 
 import com.garathon.flatdroid.flatpak.FlatpakInstallation
 import com.garathon.flatdroid.flatpak.TestInstallation
+import com.garathon.flatdroid.launcher.electron.Electron
 import com.garathon.flatdroid.proot.DevNodes
 import com.garathon.flatdroid.proot.Fdsec
 import org.junit.Assert.assertEquals

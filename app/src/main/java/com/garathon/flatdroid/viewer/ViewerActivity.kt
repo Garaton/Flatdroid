@@ -73,6 +73,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.garathon.flatdroid.viewer.frames.NativeFrames
+import com.garathon.flatdroid.viewer.input.Keysyms
 import kotlin.math.roundToInt
 import kotlinx.coroutines.withTimeoutOrNull
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -90,7 +92,7 @@ import com.garathon.flatdroid.flatpak.InstalledApps
 import com.garathon.flatdroid.session.SessionController
 import com.garathon.flatdroid.session.SessionService
 import com.garathon.flatdroid.session.SessionState
-import com.garathon.flatdroid.ui.followHideScreen
+import com.garathon.flatdroid.ui.common.followHideScreen
 import com.garathon.flatdroid.ui.theme.FlatdroidTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope

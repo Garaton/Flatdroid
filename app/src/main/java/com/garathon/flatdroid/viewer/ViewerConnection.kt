@@ -6,7 +6,16 @@ import android.os.Handler
 import android.os.Looper
 import com.garathon.flatdroid.session.SessionController
 import com.garathon.flatdroid.session.HiddenPause
-import com.garathon.flatdroid.util.DebugLog
+import com.garathon.flatdroid.util.debug.DebugLog
+import com.garathon.flatdroid.viewer.frames.FrameDrawer
+import com.garathon.flatdroid.viewer.frames.NativeFrames
+import com.garathon.flatdroid.viewer.frames.TileFrames
+import com.garathon.flatdroid.viewer.input.Keysyms
+import com.garathon.flatdroid.viewer.input.ScrollSpeed
+import com.garathon.flatdroid.viewer.protocol.Framebuffer
+import com.garathon.flatdroid.viewer.protocol.RfbClient
+import com.garathon.flatdroid.viewer.protocol.RfbListener
+import com.garathon.flatdroid.viewer.protocol.WaylandClient
 import java.io.EOFException
 import java.io.File
 import java.io.IOException

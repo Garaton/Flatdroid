@@ -1,5 +1,6 @@
 package com.garathon.flatdroid.flatpak
 
+import com.garathon.flatdroid.flatpak.tasks.FlatpakCommands
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

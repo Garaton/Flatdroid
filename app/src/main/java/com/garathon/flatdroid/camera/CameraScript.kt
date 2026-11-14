@@ -1,6 +1,6 @@
 package com.garathon.flatdroid.camera
 
-import com.garathon.flatdroid.session.SessionBus
+import com.garathon.flatdroid.session.helpers.SessionBus
 
 /**
  * The camera's helpers for one session, in a proot of their own: proot hides a process's root

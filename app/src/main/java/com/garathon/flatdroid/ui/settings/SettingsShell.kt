@@ -52,8 +52,8 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.input.pointer.pointerInput
 import com.garathon.flatdroid.R
-import com.garathon.flatdroid.ui.LocalDeveloperOptions
-import com.garathon.flatdroid.ui.aboveKeyboard
+import com.garathon.flatdroid.ui.common.LocalDeveloperOptions
+import com.garathon.flatdroid.ui.common.aboveKeyboard
 import com.garathon.flatdroid.ui.theme.Spacing
 
 /** A page of a settings screen: its icon in the rail, and its title (the rail has no text, the page shows it). */

@@ -1,8 +1,10 @@
 package com.garathon.flatdroid.session
 
-import com.garathon.flatdroid.flatpak.FlatpakTasks
-import com.garathon.flatdroid.util.DebugLog
-import com.garathon.flatdroid.util.LineBuffer
+import com.garathon.flatdroid.flatpak.tasks.FlatpakTasks
+import com.garathon.flatdroid.session.helpers.SessionScript
+import com.garathon.flatdroid.session.helpers.WaylandVnc
+import com.garathon.flatdroid.util.debug.DebugLog
+import com.garathon.flatdroid.util.io.LineBuffer
 import com.garathon.flatdroid.util.appScope
 import com.garathon.flatdroid.viewer.ViewerConnection
 import kotlinx.coroutines.flow.MutableStateFlow

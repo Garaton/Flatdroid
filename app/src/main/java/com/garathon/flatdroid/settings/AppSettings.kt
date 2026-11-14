@@ -3,7 +3,7 @@ package com.garathon.flatdroid.settings
 import com.garathon.flatdroid.camera.AndroidCameras
 import com.garathon.flatdroid.flatpak.FlatpakContext
 import com.garathon.flatdroid.launcher.LaunchEnvironment
-import com.garathon.flatdroid.util.writeTextAtomically
+import com.garathon.flatdroid.util.io.writeTextAtomically
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.StringWriter

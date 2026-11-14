@@ -28,10 +28,10 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.garathon.flatdroid.R
-import com.garathon.flatdroid.session.SessionScript
+import com.garathon.flatdroid.session.helpers.SessionScript
 import com.garathon.flatdroid.session.SessionState
-import com.garathon.flatdroid.session.Viewer
-import com.garathon.flatdroid.ui.IconAction
+import com.garathon.flatdroid.session.ExternalViewer
+import com.garathon.flatdroid.ui.common.IconAction
 import kotlinx.coroutines.launch
 
 /**
@@ -48,7 +48,7 @@ fun ExternalViewerDialog(session: SessionState.Running, onDismiss: () -> Unit) {
         title = { Text(stringResource(R.string.session_external_title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(stringResource(R.string.session_address, Viewer.HOST, SessionScript.VNC_PORT))
+                Text(stringResource(R.string.session_address, ExternalViewer.HOST, SessionScript.VNC_PORT))
                 session.username?.let { Text(stringResource(R.string.session_username, it)) }
                 // The password on a line of its own, bullets or not, so showing it moves nothing.
                 Text(stringResource(R.string.session_password_label))

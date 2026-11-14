@@ -3,7 +3,7 @@ package com.garathon.flatdroid
 import android.app.Activity
 import android.content.Intent
 import android.os.Bundle
-import com.garathon.flatdroid.flatpak.FlathubLink
+import com.garathon.flatdroid.flatpak.flathub.FlathubLink
 
 /**
  * Receives Flathub app links (Flathub's install page, or appstream://) and hands the app ID to

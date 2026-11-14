@@ -72,7 +72,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Surface
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.ui.graphics.vector.ImageVector
-import com.garathon.flatdroid.ui.SettingsCard
+import com.garathon.flatdroid.ui.common.SettingsCard
 import androidx.compose.material3.Button
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.ButtonDefaults
@@ -102,11 +102,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.garathon.flatdroid.R
-import com.garathon.flatdroid.flatpak.FlathubApp
-import com.garathon.flatdroid.flatpak.FlathubBadAnswerException
-import com.garathon.flatdroid.flatpak.FlathubHttpException
-import com.garathon.flatdroid.flatpak.FlathubNotFoundException
-import com.garathon.flatdroid.flatpak.FlathubStats
+import com.garathon.flatdroid.flatpak.flathub.FlathubApp
+import com.garathon.flatdroid.flatpak.flathub.FlathubBadAnswerException
+import com.garathon.flatdroid.flatpak.flathub.FlathubHttpException
+import com.garathon.flatdroid.flatpak.flathub.FlathubNotFoundException
+import com.garathon.flatdroid.flatpak.flathub.FlathubStats
 import com.garathon.flatdroid.flatpak.FlatpakRef
 import com.garathon.flatdroid.flatpak.catalog.Catalog
 import com.garathon.flatdroid.flatpak.catalog.CatalogApp
@@ -114,8 +114,8 @@ import com.garathon.flatdroid.flatpak.catalog.CatalogDetails
 import com.garathon.flatdroid.flatpak.catalog.CatalogImages
 import com.garathon.flatdroid.flatpak.catalog.TextBlock
 import com.garathon.flatdroid.ui.home.AppIcon
-import com.garathon.flatdroid.ui.settings.UninstallDialog
-import com.garathon.flatdroid.util.DebugLog
+import com.garathon.flatdroid.ui.settings.app.UninstallDialog
+import com.garathon.flatdroid.util.debug.DebugLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 

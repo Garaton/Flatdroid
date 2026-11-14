@@ -2,8 +2,8 @@ package com.garathon.flatdroid.storage
 
 import android.content.Context
 import com.garathon.flatdroid.flatpak.InstalledApps
-import com.garathon.flatdroid.setup.AndroidTarFs
-import com.garathon.flatdroid.setup.deleteTree
+import com.garathon.flatdroid.setup.rootfs.AndroidTarFs
+import com.garathon.flatdroid.setup.rootfs.deleteTree
 import java.io.File
 
 /**

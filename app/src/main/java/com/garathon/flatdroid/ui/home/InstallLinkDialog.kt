@@ -28,13 +28,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.garathon.flatdroid.R
-import com.garathon.flatdroid.flatpak.FlathubApp
-import com.garathon.flatdroid.flatpak.FlathubBadAnswerException
-import com.garathon.flatdroid.flatpak.FlathubHttpException
-import com.garathon.flatdroid.flatpak.FlathubClient
-import com.garathon.flatdroid.flatpak.FlathubNotFoundException
+import com.garathon.flatdroid.flatpak.flathub.FlathubApp
+import com.garathon.flatdroid.flatpak.flathub.FlathubBadAnswerException
+import com.garathon.flatdroid.flatpak.flathub.FlathubHttpException
+import com.garathon.flatdroid.flatpak.flathub.FlathubClient
+import com.garathon.flatdroid.flatpak.flathub.FlathubNotFoundException
 import com.garathon.flatdroid.flatpak.FlatpakRef
-import com.garathon.flatdroid.util.DebugLog
+import com.garathon.flatdroid.util.debug.DebugLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 

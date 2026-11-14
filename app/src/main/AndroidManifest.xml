@@ -107,7 +107,7 @@
             android:foregroundServiceType="dataSync" />
 
         <service
-            android:name=".flatpak.FlatpakTaskService"
+            android:name=".flatpak.tasks.FlatpakTaskService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
@@ -121,7 +121,7 @@
         </service>
 
         <service
-            android:name=".storage.StorageTaskService"
+            android:name=".storage.tasks.StorageTaskService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 

@@ -21,8 +21,8 @@ import android.system.Os
 import android.system.OsConstants
 import android.util.Range
 import com.garathon.flatdroid.BuildConfig
-import com.garathon.flatdroid.util.DebugLog
-import com.garathon.flatdroid.util.DebugMeter
+import com.garathon.flatdroid.util.debug.DebugLog
+import com.garathon.flatdroid.util.debug.DebugMeter
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream

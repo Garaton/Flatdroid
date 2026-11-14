@@ -113,10 +113,10 @@ class GuestFilesTest {
 
     @Test
     fun interfaceSizesAreScales() {
-        org.junit.Assert.assertEquals("1.00", com.garathon.flatdroid.session.SessionScript.scale(100))
-        org.junit.Assert.assertEquals("1.25", com.garathon.flatdroid.session.SessionScript.scale(125))
-        org.junit.Assert.assertEquals("2.00", com.garathon.flatdroid.session.SessionScript.scale(200))
-        org.junit.Assert.assertEquals("0.75", com.garathon.flatdroid.session.SessionScript.scale(75))
-        org.junit.Assert.assertEquals("0.50", com.garathon.flatdroid.session.SessionScript.scale(50))
+        org.junit.Assert.assertEquals("1.00", com.garathon.flatdroid.session.helpers.SessionScript.scale(100))
+        org.junit.Assert.assertEquals("1.25", com.garathon.flatdroid.session.helpers.SessionScript.scale(125))
+        org.junit.Assert.assertEquals("2.00", com.garathon.flatdroid.session.helpers.SessionScript.scale(200))
+        org.junit.Assert.assertEquals("0.75", com.garathon.flatdroid.session.helpers.SessionScript.scale(75))
+        org.junit.Assert.assertEquals("0.50", com.garathon.flatdroid.session.helpers.SessionScript.scale(50))
     }
 }

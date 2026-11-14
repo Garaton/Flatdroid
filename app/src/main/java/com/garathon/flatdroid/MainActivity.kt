@@ -41,32 +41,34 @@ import com.garathon.flatdroid.alpine.AlpineEnvironment
 import com.garathon.flatdroid.alpine.GuestFiles
 import com.garathon.flatdroid.audio.MicStreamer
 import com.garathon.flatdroid.camera.AndroidCameras
-import com.garathon.flatdroid.flatpak.AppData
+import com.garathon.flatdroid.storage.AppData
 import com.garathon.flatdroid.flatpak.AppDetails
 import com.garathon.flatdroid.flatpak.FlatpakInstallation
-import com.garathon.flatdroid.flatpak.FlatpakTask
-import com.garathon.flatdroid.flatpak.FlatpakTaskService
-import com.garathon.flatdroid.flatpak.FlatpakTasks
+import com.garathon.flatdroid.flatpak.tasks.FlatpakTask
+import com.garathon.flatdroid.flatpak.tasks.FlatpakTaskService
+import com.garathon.flatdroid.flatpak.tasks.FlatpakTasks
 import com.garathon.flatdroid.flatpak.InstalledApps
 import com.garathon.flatdroid.session.SessionController
+import com.garathon.flatdroid.ui.home.HomeViewModel
+import com.garathon.flatdroid.ui.storage.StorageFlows
 import com.garathon.flatdroid.viewer.ViewerActivity
 import com.garathon.flatdroid.session.SessionService
 import com.garathon.flatdroid.session.SessionState
-import com.garathon.flatdroid.session.Viewer
+import com.garathon.flatdroid.session.ExternalViewer
 import com.garathon.flatdroid.settings.AppTime
 import com.garathon.flatdroid.settings.MobileData
 import com.garathon.flatdroid.settings.mobileDataPolicy
 import com.garathon.flatdroid.settings.UserSettings
-import com.garathon.flatdroid.storage.ImportTarget
-import com.garathon.flatdroid.storage.SavedSizes
-import com.garathon.flatdroid.storage.StorageTasks
+import com.garathon.flatdroid.storage.tasks.ImportTarget
+import com.garathon.flatdroid.storage.sizes.SavedSizes
+import com.garathon.flatdroid.storage.tasks.StorageTasks
 import com.garathon.flatdroid.setup.ResetMode
 import com.garathon.flatdroid.setup.SetupController
 import com.garathon.flatdroid.setup.SetupService
 import com.garathon.flatdroid.setup.SetupStep
 import com.garathon.flatdroid.ui.setup.CommandState
-import com.garathon.flatdroid.ui.ElectronDialog
-import com.garathon.flatdroid.ui.FilesChangedDialog
+import com.garathon.flatdroid.ui.dialogs.ElectronDialog
+import com.garathon.flatdroid.ui.dialogs.FilesChangedDialog
 import com.garathon.flatdroid.ui.home.HomeScreen
 import com.garathon.flatdroid.ui.home.InstallLinkDialog
 import com.garathon.flatdroid.ui.home.StatusBar
@@ -82,22 +84,22 @@ import com.garathon.flatdroid.flatpak.catalog.CatalogState
 import com.garathon.flatdroid.ui.home.forgetIcons
 import com.garathon.flatdroid.util.DoneNotice
 import com.garathon.flatdroid.ui.home.rememberHomeListState
-import com.garathon.flatdroid.ui.InstallDialog
-import com.garathon.flatdroid.ui.LogDialog
-import com.garathon.flatdroid.ui.MicrophoneLaunchDialog
-import com.garathon.flatdroid.ui.MobileDataDialog
+import com.garathon.flatdroid.ui.dialogs.InstallDialog
+import com.garathon.flatdroid.ui.dialogs.LogDialog
+import com.garathon.flatdroid.ui.dialogs.MicrophoneLaunchDialog
+import com.garathon.flatdroid.ui.dialogs.MobileDataDialog
 import com.garathon.flatdroid.ui.setup.ResetScreen
 import com.garathon.flatdroid.ui.setup.SetupSettingsScreen
-import com.garathon.flatdroid.ui.TerminalScreen
+import com.garathon.flatdroid.ui.terminal.TerminalScreen
 import com.garathon.flatdroid.ui.setup.SetupScreen
-import com.garathon.flatdroid.ui.followHideScreen
+import com.garathon.flatdroid.ui.common.followHideScreen
 import com.garathon.flatdroid.ui.settings.AppPage
-import com.garathon.flatdroid.ui.settings.AppSettingsEnv
-import com.garathon.flatdroid.ui.settings.AppSettingsScreen
+import com.garathon.flatdroid.ui.settings.app.AppSettingsEnv
+import com.garathon.flatdroid.ui.settings.app.AppSettingsScreen
 import com.garathon.flatdroid.ui.settings.GlobalPage
-import com.garathon.flatdroid.ui.settings.GlobalSettingsEnv
-import com.garathon.flatdroid.ui.settings.GlobalSettingsScreen
-import com.garathon.flatdroid.ui.settings.GlobalStorageActions
+import com.garathon.flatdroid.ui.settings.global.GlobalSettingsEnv
+import com.garathon.flatdroid.ui.settings.global.GlobalSettingsScreen
+import com.garathon.flatdroid.ui.settings.global.GlobalStorageActions
 import com.garathon.flatdroid.ui.settings.SettingsDraftModel
 import com.garathon.flatdroid.ui.theme.FlatdroidTheme
 import kotlinx.coroutines.Dispatchers
@@ -410,7 +412,7 @@ class MainActivity : ComponentActivity() {
                     draft = draft,
                     env = GlobalSettingsEnv(
                         deviceLanguages = languages,
-                        viewers = remember { Viewer.installed(this@MainActivity) },
+                        viewers = remember { ExternalViewer.installed(this@MainActivity) },
                         applying = applying,
                         error = settingsError,
                         sharedHome = storage.sharedHomeDisplay,
@@ -739,11 +741,11 @@ class MainActivity : ComponentActivity() {
         if (session.socket != null) return startActivity(Intent(this, ViewerActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
         val settings = SetupController.settings(this).load()
         try {
-            val intent = Viewer.intent(this, session.password, settings?.vncViewer, username = session.username)
+            val intent = ExternalViewer.intent(this, session.password, settings?.vncViewer, username = session.username)
                 ?: throw ActivityNotFoundException()
             startActivity(intent)
         } catch (_: ActivityNotFoundException) {
-            val message = if (Viewer.installed(this).isEmpty()) R.string.session_no_viewer else R.string.session_choose_viewer
+            val message = if (ExternalViewer.installed(this).isEmpty()) R.string.session_no_viewer else R.string.session_choose_viewer
             Toast.makeText(this, message, Toast.LENGTH_LONG).show()
         }
     }

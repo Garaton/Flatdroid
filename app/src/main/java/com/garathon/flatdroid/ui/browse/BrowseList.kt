@@ -8,7 +8,7 @@ import com.garathon.flatdroid.ui.list.ListFilter
 import com.garathon.flatdroid.ui.list.ListQuery
 import com.garathon.flatdroid.ui.list.ListSort
 import com.garathon.flatdroid.ui.list.ListSpec
-import com.garathon.flatdroid.util.DebugLog
+import com.garathon.flatdroid.util.debug.DebugLog
 
 /** The browser's orders: by Flathub's installs or dates (apps Flathub doesn't list after them, by name), by name, or shuffled. */
 enum class BrowseOrder(val key: String) { POPULAR("popular"), ADDED("added"), UPDATED("updated"), NAME("name"), RANDOM("random") }

@@ -12,8 +12,8 @@ import com.garathon.flatdroid.camera.AndroidCameras
 import com.garathon.flatdroid.settings.HomeMode
 import com.garathon.flatdroid.settings.SecurityLevel
 import com.garathon.flatdroid.settings.SecuritySettings
-import com.garathon.flatdroid.ui.DropdownRow
-import com.garathon.flatdroid.ui.SwitchRow
+import com.garathon.flatdroid.ui.common.DropdownRow
+import com.garathon.flatdroid.ui.common.SwitchRow
 
 // Settings that show in more than one place (the settings pages and the setup choices, or the global
 // pages and an app's), written once. Everything else is in the pages themselves.

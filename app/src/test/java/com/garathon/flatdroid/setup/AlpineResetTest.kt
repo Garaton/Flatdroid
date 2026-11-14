@@ -1,5 +1,9 @@
 package com.garathon.flatdroid.setup
 
+import com.garathon.flatdroid.setup.rootfs.JvmTarFs
+import com.garathon.flatdroid.setup.rootfs.RootfsInstaller
+import com.garathon.flatdroid.setup.rootfs.RootfsSource
+import com.garathon.flatdroid.setup.rootfs.Tar
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
