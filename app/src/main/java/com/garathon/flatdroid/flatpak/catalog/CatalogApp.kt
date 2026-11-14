@@ -13,8 +13,8 @@ data class CatalogApp(
     val keywords: List<String>,
     /** The icon's file name in the catalog's icon folders (`128x128/<name>`, `64x64/<name>`); null when it has none. */
     val icon: String?,
-    /** It says it can be used by touch. */
-    val touch: Boolean,
+    /** The runtime it needs, as `<ID>/<branch>` (`org.gnome.Platform/49`); null when the catalog doesn't say. */
+    val runtime: String? = null,
 )
 
 /** What an app's page adds to [CatalogApp]: read from the index when the page opens. */

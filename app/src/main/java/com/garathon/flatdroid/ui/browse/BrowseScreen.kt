@@ -59,17 +59,35 @@ import com.garathon.flatdroid.ui.list.ListSearchBar
 import com.garathon.flatdroid.ui.list.ScrollToTopOnNewOrder
 import com.garathon.flatdroid.ui.list.rememberListQuery
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Locale
 import android.icu.text.CompactDecimalFormat
 import androidx.compose.ui.platform.LocalDensity
 
-/** The browser's list position, search and category, kept while an app's page is open and through rotation. */
-class BrowseListState(val list: LazyListState, private val queryState: androidx.compose.runtime.MutableState<ListQuery>, private val categoryState: androidx.compose.runtime.MutableState<String?>) {
+/**
+ * The browser's list position, search and category, kept while an app's page is open and through
+ * rotation; also the random order's seed, new each time that order is chosen (again, too).
+ */
+class BrowseListState(
+    val list: LazyListState,
+    private val queryState: androidx.compose.runtime.MutableState<ListQuery>,
+    private val categoryState: androidx.compose.runtime.MutableState<String?>,
+    private val seedState: androidx.compose.runtime.MutableIntState,
+) {
     var query: ListQuery
         get() = queryState.value
-        set(value) { queryState.value = value }
+        set(value) {
+            val old = queryState.value
+            // Random chosen, or chosen again (nothing but the order changed): a new shuffle.
+            if (value.sort == BrowseOrder.RANDOM.key && (old.sort != value.sort || (old.text == value.text && old.filters == value.filters))) {
+                seedState.intValue = kotlin.random.Random.nextInt()
+            }
+            queryState.value = value
+        }
+
+    val seed: Int get() = seedState.intValue
 
     /** The [BrowseCategory] shown, by name; null for all. */
     var category: String?
@@ -82,12 +100,14 @@ fun rememberBrowseListState(): BrowseListState {
     val list = rememberLazyListState()
     val query = rememberListQuery(browseListSpec(FlathubLists()))
     val category = rememberSaveable { mutableStateOf<String?>(null) }
-    return remember(list, query, category) { BrowseListState(list, query, category) }
+    val seed = rememberSaveable { androidx.compose.runtime.mutableIntStateOf(kotlin.random.Random.nextInt()) }
+    return remember(list, query, category, seed) { BrowseListState(list, query, category, seed) }
 }
 
 /**
  * Flathub's apps for this phone, from Flatpak's own catalog ([Catalog]): the shared search bar
- * (Popular or name order, verified and touch filters), the categories, and a row per app (icon,
+ * ([BrowseOrder]s, verified and installed-runtime filters; [installedRuntimes] as `<ID>/<branch>`),
+ * the categories, and a row per app (icon,
  * name with the verified check, summary; installed or waiting to install). The top bar has Back,
  * typing app IDs directly ([onInstallById]) and refreshing the catalog ([onRefresh], a download
  * that follows the mobile data setting). Nothing is downloaded by just opening it.
@@ -97,6 +117,7 @@ fun BrowseScreen(
     state: CatalogState,
     listState: BrowseListState,
     installed: Set<String>,
+    installedRuntimes: Set<String>,
     queued: Set<String>,
     installing: List<String>,
     canRefresh: Boolean,
@@ -112,10 +133,19 @@ fun BrowseScreen(
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     Column(modifier.fillMaxSize()) {
         ScrollToTopOnNewOrder(listState.query, listState.list)
+        // The text searched for: what is typed once typing pauses, so each keystroke doesn't search
+        // thousands of apps for a word not finished yet. Cleared at once.
+        val typed = listState.query.text
+        var searched by remember { mutableStateOf(typed) }
+        LaunchedEffect(typed) {
+            if (typed.isNotEmpty()) delay(SEARCH_DELAY_MS)
+            searched = typed
+        }
+        val query = listState.query.copy(text = searched)
         // A list of thousands: a new search, filter or category starts at its top too (the shared rule keeps the place, which suits short lists).
-        var seenSelection by remember { mutableStateOf(Triple(listState.query.text, listState.query.filters, listState.category)) }
-        LaunchedEffect(listState.query.text, listState.query.filters, listState.category) {
-            val now = Triple(listState.query.text, listState.query.filters, listState.category)
+        var seenSelection by remember { mutableStateOf(listOf(query.text, query.filters, listState.category, listState.seed)) }
+        LaunchedEffect(query.text, query.filters, listState.category, listState.seed) {
+            val now = listOf(query.text, query.filters, listState.category, listState.seed)
             if (now != seenSelection) {
                 seenSelection = now
                 listState.list.scrollToItem(0)
@@ -123,13 +153,8 @@ fun BrowseScreen(
         }
         val ready = state as? CatalogState.Ready
         val lists = ready?.lists ?: FlathubLists()
-        val spec = remember(lists) { browseListSpec(lists) }
-        // Prepared off the main thread, once per index and set of Flathub's lists; new lists (a
-        // refresh fetched them) reorder the list at once, the old order shown meanwhile.
-        val items by produceState(ready?.let { BrowseItems.ready(it.index, it.lists) }, ready?.index, ready?.lists) {
-            val now = ready ?: return@produceState
-            value = BrowseItems.ready(now.index, now.lists) ?: withContext(Dispatchers.Default) { BrowseItems.prepare(now.index, now.lists) }
-        }
+        val spec = remember(lists, installedRuntimes) { browseListSpec(lists, installedRuntimes) }
+        val items = rememberBrowseItems(ready)
         val back = @Composable { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.settings_back)) } }
         val actions = @Composable {
             IconButton(onClick = onInstallById) { Icon(Icons.AutoMirrored.Filled.Input, contentDescription = stringResource(R.string.browse_install_by_id)) }
@@ -183,7 +208,7 @@ fun BrowseScreen(
                         CircularProgressIndicator(Modifier.align(Alignment.Center))
                         return@Box
                     }
-                    val apps = remember(prepared, spec, listState.query, category) { prepared.select(spec, listState.query, category) }
+                    val apps = remember(prepared, spec, query, category, listState.seed) { prepared.select(spec, query, category, listState.seed) }
                     // The icons' folder once; a row's icon is a path in it (a missing file just shows none).
                     val iconsDir = remember(state.index) { Catalog.iconsDir(context) }
                     val iconPx = with(LocalDensity.current) { ROW_ICON_SIZE.roundToPx() }
@@ -208,6 +233,38 @@ fun BrowseScreen(
         }
         bottomBar()
     }
+}
+
+/**
+ * The browser's list prepared ([BrowseItems]) off the main thread, once per index and set of
+ * Flathub's lists; new lists (a refresh fetched them) reorder the list at once, the old order shown
+ * meanwhile. Null until the first is ready.
+ */
+@Composable
+private fun rememberBrowseItems(ready: CatalogState.Ready?): BrowseItems? {
+    val items by produceState(ready?.let { BrowseItems.ready(it.index, it.lists) }, ready?.index, ready?.lists) {
+        val now = ready ?: return@produceState
+        value = BrowseItems.ready(now.index, now.lists) ?: withContext(Dispatchers.Default) { BrowseItems.prepare(now.index, now.lists) }
+    }
+    return items
+}
+
+/**
+ * The IDs of the apps the browser's list shows now (its search, filters, category and order), in
+ * its order: an app's page swipes through them. Null until the list is ready.
+ */
+@Composable
+fun rememberBrowseOrder(state: CatalogState, listState: BrowseListState, installedRuntimes: Set<String>): List<String>? {
+    val ready = state as? CatalogState.Ready
+    val items = rememberBrowseItems(ready)
+    val lists = ready?.lists ?: FlathubLists()
+    val spec = remember(lists, installedRuntimes) { browseListSpec(lists, installedRuntimes) }
+    val category = BrowseCategory.entries.firstOrNull { it.name == listState.category }
+    val ids by produceState<List<String>?>(null, items, spec, listState.query, category, listState.seed) {
+        val prepared = items ?: return@produceState
+        value = withContext(Dispatchers.Default) { prepared.select(spec, listState.query, category, listState.seed).map { it.id } }
+    }
+    return ids
 }
 
 @Composable
@@ -257,6 +314,9 @@ private fun BrowseRow(app: CatalogApp, icon: File?, iconPx: Int, label: Int?, in
 }
 
 private val ROW_ICON_SIZE = 48.dp
+
+/** How long typing pauses before the list is searched. */
+private const val SEARCH_DELAY_MS = 250L
 
 /** A count as short as it reads well: 950, 8.9K, 241K, 1.2M, in the user's locale. */
 fun compactCount(count: Long): String = synchronized(CompactFormat) { CompactFormat.forLocale(Locale.getDefault()).format(count) }

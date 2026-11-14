@@ -38,7 +38,7 @@ import com.garathon.flatdroid.ui.list.ListFilter
 import com.garathon.flatdroid.ui.list.ListSort
 import com.garathon.flatdroid.ui.list.ListSpec
 
-/** A row of the apps and runtimes list. */
+/** A row of the apps and runtimes list, with Flatdroid's environment among them. */
 private sealed interface FlatpakEntry {
     val id: String
     val name: String
@@ -47,6 +47,10 @@ private sealed interface FlatpakEntry {
     data class App(override val id: String, override val name: String, override val bytes: Long) : FlatpakEntry
     data class Runtime(override val id: String, override val bytes: Long, val unused: Boolean) : FlatpakEntry {
         override val name get() = id
+    }
+    /** The Alpine system, Flatpak's repository and Flatdroid's own files ([FlatdroidStorage.other]). */
+    data class Environment(override val name: String, override val bytes: Long) : FlatpakEntry {
+        override val id get() = ".environment"
     }
 }
 
@@ -191,9 +195,11 @@ fun GlobalStoragePage(s: GlobalPageState) = SettingsPageColumn(R.string.settings
 
     // What each app and runtime takes.
     SettingsCard(title = stringResource(R.string.storage_section_flatpaks)) {
-        val entries = remember(env.apps, storage) {
+        val environmentName = stringResource(R.string.storage_part_other)
+        val entries = remember(env.apps, storage, environmentName) {
             env.apps.map { FlatpakEntry.App(it.id, it.name, storage?.perApp?.get(it.id)?.app ?: 0) } +
-                storage?.runtimeSizes.orEmpty().map { (id, bytes) -> FlatpakEntry.Runtime(id, bytes, id in storage!!.unusedRuntimes) }
+                storage?.runtimeSizes.orEmpty().map { (id, bytes) -> FlatpakEntry.Runtime(id, bytes, id in storage!!.unusedRuntimes) } +
+                listOfNotNull(storage?.other?.let { FlatpakEntry.Environment(environmentName, it) })
         }
         if (storage?.runtimeSizes == null) {
             Text(stringResource(R.string.storage_measuring_runtimes), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -211,6 +217,7 @@ fun GlobalStoragePage(s: GlobalPageState) = SettingsPageColumn(R.string.settings
                     // Only one no app uses: removing a used runtime would stop its apps from starting.
                     if (entry.unused) IconAction(Icons.Filled.Delete, R.string.storage_remove_runtime, { removeRuntime = entry.id }, danger = true)
                 }
+                is FlatpakEntry.Environment -> StorageRow(entry.name, size(entry.bytes), subtitle = stringResource(R.string.storage_environment_hint)) {}
             }
         }
     }

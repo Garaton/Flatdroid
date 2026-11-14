@@ -81,9 +81,9 @@ class UserSettingsTest {
     }
 
     @Test
-    fun audioLatencyIs60UnlessTheDeveloperSettingIsOn() {
-        assertEquals(60, UserSettings("en").audioLatencyMs)
-        assertEquals(60, UserSettings("en", customAudioLatencyMs = 20).audioLatencyMs)
+    fun audioLatencyIs40UnlessTheDeveloperSettingIsOn() {
+        assertEquals(40, UserSettings("en").audioLatencyMs)
+        assertEquals(40, UserSettings("en", customAudioLatencyMs = 20).audioLatencyMs)
         assertEquals(20, UserSettings("en", developerOptions = true, customAudioLatencyMs = 20).audioLatencyMs)
     }
 

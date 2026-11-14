@@ -130,6 +130,8 @@ class SizeStore(private val dir: File, private val onMeasured: (name: String, mi
 object SavedSizes {
     private const val SHARED = "shared"
     private const val RUNTIMES = "runtimes"
+    /** In [RUNTIMES]' file, beside each runtime's size: all of them, shared files once (no Flatpak ID starts with a dot). */
+    private const val RUNTIMES_ONCE = ".once"
     private val APP_KEYS = setOf("app", "flatpak", "home", "settings")
     private val SHARED_KEYS = setOf("runtimes", "other")
 
@@ -207,7 +209,7 @@ object SavedSizes {
         val sizes = measuring { store(context).get(SHARED, SHARED_KEYS) {
             val env = AlpineEnvironment.get(context)
             val apps = FlatpakInstallation(env.flatpakDir, env.arch).appIds()
-            val runtimes = (runtimes(context) ?: throw MeasureStopped()).values.sum()
+            val runtimes = runtimesOnce(context) ?: throw MeasureStopped()
             // As each app's own size counts them, so that the rest is what neither counts. Saved with
             // the app's sizes (apps are measured before this), so read rather than walked again.
             val appFiles = apps.sumOf { id -> (app(context, id) ?: throw MeasureStopped()).flatpak }
@@ -227,18 +229,24 @@ object SavedSizes {
      * Each runtime's size (ID to bytes; its branches and their extensions' own deployments with it),
      * without apps' own extensions (counted with the app). Null while everything is changing.
      */
-    fun runtimes(context: Context): Map<String, Long>? = measuring {
+    fun runtimes(context: Context): Map<String, Long>? = measuredRuntimes(context)?.minus(RUNTIMES_ONCE)
+
+    /** All runtimes together, each file they share counted once ([StorageSizes.followingEach]). */
+    private fun runtimesOnce(context: Context): Long? = measuredRuntimes(context)?.get(RUNTIMES_ONCE)
+
+    private fun measuredRuntimes(context: Context): Map<String, Long>? = measuring {
         val env = AlpineEnvironment.get(context)
         val l2s = File(env.paths().l2sDir)
         val dirs = runtimeDirs(env)
-        store(context).get(RUNTIMES, dirs.map { it.name }.toSet()) {
-            dirs.associate { dir -> dir.name to StorageSizes.following(listOf(dir), l2s, stop) }
+        store(context).get(RUNTIMES, dirs.map { it.name }.toSet() + RUNTIMES_ONCE) {
+            val (each, once) = StorageSizes.followingEach(dirs, l2s, stop)
+            dirs.map { it.name }.zip(each).toMap() + (RUNTIMES_ONCE to once)
         }
     }
 
     /** The runtimes' sizes as last saved, perhaps from before a change; null when never measured. Never measures. */
     fun lastRuntimes(context: Context): Map<String, Long>? =
-        store(context).last(RUNTIMES, runtimeDirs(AlpineEnvironment.get(context)).map { it.name }.toSet())
+        store(context).last(RUNTIMES, runtimeDirs(AlpineEnvironment.get(context)).map { it.name }.toSet() + RUNTIMES_ONCE)?.minus(RUNTIMES_ONCE)
 
     private fun runtimeDirs(env: AlpineEnvironment): List<File> {
         val apps = FlatpakInstallation(env.flatpakDir, env.arch).appIds()

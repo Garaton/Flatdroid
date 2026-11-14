@@ -7,6 +7,7 @@ import com.garathon.flatdroid.alpine.AlpineEnvironment
 import com.garathon.flatdroid.flatpak.catalog.Catalog
 import com.garathon.flatdroid.flatpak.AppData
 import com.garathon.flatdroid.flatpak.FlatpakInstallation
+import com.garathon.flatdroid.flatpak.FlatpakTask
 import com.garathon.flatdroid.flatpak.FlatpakTasks
 import com.garathon.flatdroid.flatpak.InstalledApp
 import com.garathon.flatdroid.flatpak.InstalledApps
@@ -28,6 +29,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.distinctUntilChangedBy
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
@@ -56,16 +58,19 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     fun clearInstallLink() { _installLink.value = null }
 
-    /** An uninstall of [appId] has started: it leaves the list now, not when the task ends. */
-    fun uninstallStarted(appId: String) {
+    /** An uninstall of [appIds] has started (at once, or from the queue): they leave the list now, not when the task ends. */
+    private fun uninstallStarted(appIds: List<String>) {
         hiddenSince = FlatpakTasks.ui.value.generation
-        uninstalling.update { it + appId }
+        uninstalling.update { it + appIds }
     }
 
     /** The task generation the apps were hidden in: they are listed again once a task has ended since. */
     @Volatile private var hiddenSince = 0
 
     init {
+        viewModelScope.launch {
+            FlatpakTasks.ui.map { it.running as? FlatpakTask.Uninstall }.distinctUntilChanged().collect { task -> task?.let { uninstallStarted(it.appIds) } }
+        }
         viewModelScope.launch {
             merge(
                 FlatpakTasks.ui.distinctUntilChangedBy { it.generation }.map { },
@@ -287,7 +292,7 @@ data class FlatdroidStorage(
     val appData: Long? = null,
     val privateHomes: Long? = null,
     val cache: Long? = null,
-    /** Alpine and Flatdroid's own files: counted in [total], not shown on its own. */
+    /** Flatdroid's environment: Alpine, Flatpak's repository and Flatdroid's own files. */
     val other: Long? = null,
     /** Of [appData], what apps that aren't installed have. */
     val unusedAppData: Unused? = null,

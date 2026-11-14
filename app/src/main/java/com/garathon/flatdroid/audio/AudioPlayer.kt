@@ -119,7 +119,10 @@ class AudioPlayer(
                 AudioOutputMode.POWER_SAVING -> builder.setPerformanceMode(AudioTrack.PERFORMANCE_MODE_POWER_SAVING)
             }
         }
-        return builder.build()
+        return builder.build().also { track ->
+            // Android may make the buffer larger than asked (its minimum, or its own rounding).
+            DebugLog.i("Audio player: ${track.bufferSizeInFrames * 1000L / rate} ms buffer (asked $latencyMs ms, $outputMode)")
+        }
     }
 
     companion object {

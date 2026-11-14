@@ -410,10 +410,12 @@ fun AppPermissionsPage(s: AppPageState) = SettingsPageColumn(R.string.app_page_p
             stringResource(R.string.app_settings_clipboard_hint),
             onReset = if (s.settings.clipboard != null) ({ s.editSettings { copy(clipboard = null) } }) else null,
         )
+        // Any app, whether or not it asks for all devices; off by default.
         SwitchRow(
-            s.settings.wholeDev && app.requestsAllDevices, { v -> s.editSettings { copy(wholeDev = v) } },
+            s.settings.wholeDev, { v -> s.editSettings { copy(wholeDev = v) } },
             stringResource(R.string.app_settings_whole_dev), stringResource(R.string.app_settings_whole_dev_hint),
-            enabled = app.requestsAllDevices, developer = true,
+            developer = true,
+            onReset = if (s.settings.wholeDev) ({ s.editSettings { copy(wholeDev = false) } }) else null,
         )
     }
 }

@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cancel
@@ -79,6 +80,8 @@ fun StatusBar(
     onSessionLog: () -> Unit,
     onClearQueue: () -> Unit,
     onUnqueue: (FlatpakTask) -> Unit = {},
+    /** Takes one app out of a waiting install or uninstall of several. */
+    onUnqueueApp: (FlatpakTask, String) -> Unit = { _, _ -> },
     /** An app's name for the waiting tasks (its ID when unknown). */
     queuedName: (String) -> String = { it },
     modifier: Modifier = Modifier,
@@ -109,9 +112,24 @@ fun StatusBar(
                 text = {
                     Column(Modifier.verticalScroll(rememberScrollState())) {
                         task.queue.forEachIndexed { i, waiting ->
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("${i + 1}. ${queuedLabel(waiting, queuedName)}", modifier = Modifier.weight(1f))
-                                IconAction(Icons.Filled.Close, R.string.task_queue_remove, { onUnqueue(waiting) }, size = 36.dp)
+                            // An install or uninstall of several apps: its apps below it, each removable on its own.
+                            val apps = (waiting as? FlatpakTask.Install)?.appIds ?: (waiting as? FlatpakTask.Uninstall)?.appIds
+                            if (apps != null && apps.size > 1) {
+                                Text(
+                                    "${i + 1}. ${stringResource(if (waiting is FlatpakTask.Install) R.string.queued_install_group else R.string.queued_uninstall_group)}",
+                                    modifier = Modifier.heightIn(min = 36.dp).wrapContentHeight(Alignment.CenterVertically),
+                                )
+                                for (id in apps) {
+                                    Row(Modifier.padding(start = 24.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Text(queuedName(id), modifier = Modifier.weight(1f))
+                                        IconAction(Icons.Filled.Close, R.string.task_queue_remove, { onUnqueueApp(waiting, id) }, size = 36.dp)
+                                    }
+                                }
+                            } else {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("${i + 1}. ${queuedLabel(waiting, queuedName)}", modifier = Modifier.weight(1f))
+                                    IconAction(Icons.Filled.Close, R.string.task_queue_remove, { onUnqueue(waiting) }, size = 36.dp)
+                                }
                             }
                         }
                     }

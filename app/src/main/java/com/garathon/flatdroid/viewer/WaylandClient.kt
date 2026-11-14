@@ -17,6 +17,7 @@ import java.util.ArrayDeque
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.math.roundToInt
 
 /**
  * Wayland's wire format: messages of an object, an opcode and arguments, in the machine's byte
@@ -107,6 +108,10 @@ object WaylandWire {
  *   apps that draw when the compositor asks then draw about once a second.
  * - **Characters outside wayvnc's keymap:** it drops those. [key] presses them on a virtual keyboard
  *   of its own, whose keymap holds what has been typed so far.
+ * - **Touch scrolling in small steps:** RFB has only wheel notches. [scroll] moves a virtual pointer of
+ *   its own and scrolls as a touchpad does (axis source finger), in steps of [SCROLL_STEP] of the
+ *   app's pixels, [scrollEnd] when the scroll stops. What a step does is up to the app (GTK 4 moves
+ *   about twice its pixels, a terminal by the line); the viewer starts from [stepPixels] and learns each app's own.
  */
 class WaylandClient(
     private val socketPath: String,
@@ -119,6 +124,9 @@ class WaylandClient(
     @Volatile private var closed = false
     /** A virtual keyboard can be had. */
     @Volatile var canType = false
+        private set
+    /** A virtual pointer can be had ([scroll]). */
+    @Volatile var canScroll = false
         private set
     private val pastes = AtomicInteger()
 
@@ -155,6 +163,11 @@ class WaylandClient(
 
     private var keyboards = 0
     private var keyboard = 0
+    private var pointerName = 0
+    private var pointers = 0
+    private var pointer = 0
+    /** The output's scale (Interface size), from its head. */
+    @Volatile private var outputScale = 1f
     /** The keymap's keysyms: each on the key code of its index + 1. */
     private var mapped = emptyList<Int>()
 
@@ -206,6 +219,42 @@ class WaylandClient(
         }
         val code = mapped.indexOf(keysym) + 1
         send(WaylandWire.message(keyboard, KEYBOARD_KEY, SystemClock.uptimeMillis().toInt(), code, if (down) 1 else 0))
+    }
+
+    /**
+     * What a step typically moves, in framebuffer pixels: where a drag starts until the viewer has
+     * learnt the app's own (measured: GTK 4 about 2.5 times the step's pixels, Firefox 4, Qt 4.4,
+     * GTK 3 about 7 in a 1000 pixel tall window, growing with the window).
+     */
+    val stepPixels: Float get() = SCROLL_STEP * outputScale * TYPICAL_STEP_FACTOR
+
+    /**
+     * Scrolls [down] and [right] steps (positive: the content moves up and left), at ([x], [y]) of a
+     * [width]×[height] framebuffer.
+     */
+    fun scroll(x: Int, y: Int, width: Int, height: Int, down: Int, right: Int) = post {
+        if (pointers == 0) return@post
+        if (pointer == 0) {
+            pointer = id()
+            send(WaylandWire.message(pointers, POINTERS_CREATE, seat, pointer))
+        }
+        val time = SystemClock.uptimeMillis().toInt()
+        // Every time: wayvnc moves the same pointer (a tap elsewhere), and the scroll goes where the pointer is.
+        send(WaylandWire.message(pointer, POINTER_MOTION_ABSOLUTE, time, x, y, width, height))
+        send(WaylandWire.message(pointer, POINTER_AXIS_SOURCE, AXIS_SOURCE_FINGER))
+        if (down != 0) send(WaylandWire.message(pointer, POINTER_AXIS, time, AXIS_VERTICAL, fixed(down * SCROLL_STEP)))
+        if (right != 0) send(WaylandWire.message(pointer, POINTER_AXIS, time, AXIS_HORIZONTAL, fixed(right * SCROLL_STEP)))
+        send(WaylandWire.message(pointer, POINTER_FRAME))
+    }
+
+    /** The scroll stopped (the finger lifted without a fling, or the fling ended). */
+    fun scrollEnd() = post {
+        if (pointer == 0) return@post
+        val time = SystemClock.uptimeMillis().toInt()
+        send(WaylandWire.message(pointer, POINTER_AXIS_SOURCE, AXIS_SOURCE_FINGER))
+        send(WaylandWire.message(pointer, POINTER_AXIS_STOP, time, AXIS_VERTICAL))
+        send(WaylandWire.message(pointer, POINTER_AXIS_STOP, time, AXIS_HORIZONTAL))
+        send(WaylandWire.message(pointer, POINTER_FRAME))
     }
 
     fun close() {
@@ -284,6 +333,7 @@ class WaylandClient(
                     type == "wl_seat" -> seatName = name
                     type == OUTPUT_MANAGER -> outputName = name
                     type == KEYBOARD_MANAGER -> keyboardName = name
+                    type == POINTER_MANAGER -> pointerName = name
                     type in CLIPBOARD_MANAGERS && (clipboardName == 0 || type == CLIPBOARD_MANAGERS[0]) -> {
                         clipboardName = name
                         clipboardInterface = type
@@ -303,6 +353,7 @@ class WaylandClient(
                 source = 0
             }
             event.target == output && event.opcode == OUTPUT_HEAD -> if (head == 0) head = event.int()
+            event.target == head && head != 0 && event.opcode == HEAD_SCALE -> outputScale = (event.int() / 256f).takeIf { it > 0f } ?: 1f
             event.target == output && event.opcode == OUTPUT_DONE -> {
                 serial = event.int()
                 applyMode()
@@ -329,7 +380,8 @@ class WaylandClient(
             send(WaylandWire.message(clipboard, MANAGER_GET_DEVICE, device, seat))
             DebugLog.i("Wayland client: clipboard through $clipboardInterface")
         }
-        if (refresh != null && outputName != 0) {
+        // Also without a refresh to set: the scale comes from it.
+        if (outputName != 0) {
             output = id()
             bind(outputName, OUTPUT_MANAGER, output)
         }
@@ -337,6 +389,11 @@ class WaylandClient(
             keyboards = id()
             bind(keyboardName, KEYBOARD_MANAGER, keyboards)
             canType = true
+        }
+        if (seat != 0 && pointerName != 0) {
+            pointers = id()
+            bind(pointerName, POINTER_MANAGER, pointers)
+            canScroll = true
         }
         if (pending) {
             pending = false
@@ -399,11 +456,18 @@ class WaylandClient(
 
     private fun id() = nextId++
 
+    /** Wayland's fixed-point number (24.8). */
+    private fun fixed(value: Float) = (value * 256).roundToInt()
+
     private fun send(bytes: ByteArray) {
         socket.outputStream.write(bytes)
     }
 
     private companion object {
+        /** A touch scroll step, in the app's pixels: small enough to look smooth where an app scrolls by the pixel. */
+        const val SCROLL_STEP = 2f
+        /** How many times a step's pixels apps typically move ([stepPixels]). */
+        const val TYPICAL_STEP_FACTOR = 4f
         const val BUFFER = 64 * 1024
         /** No paste needs more; beyond these the other end is misbehaving. */
         const val MAX_FDS = 16
@@ -422,6 +486,7 @@ class WaylandClient(
         val MIME_TYPES = listOf("text/plain", "UTF8_STRING", "STRING", "TEXT")
         const val OUTPUT_MANAGER = "zwlr_output_manager_v1"
         const val KEYBOARD_MANAGER = "zwp_virtual_keyboard_manager_v1"
+        const val POINTER_MANAGER = "zwlr_virtual_pointer_manager_v1"
 
         const val DISPLAY_SYNC = 0
         const val DISPLAY_GET_REGISTRY = 1
@@ -452,5 +517,15 @@ class WaylandClient(
         const val KEYBOARD_KEY = 1
         /** The keymap format: XKB's text. */
         const val XKB_V1 = 1
+        const val HEAD_SCALE = 8
+        const val POINTERS_CREATE = 0
+        const val POINTER_MOTION_ABSOLUTE = 1
+        const val POINTER_AXIS = 3
+        const val POINTER_FRAME = 4
+        const val POINTER_AXIS_SOURCE = 5
+        const val POINTER_AXIS_STOP = 6
+        const val AXIS_VERTICAL = 0
+        const val AXIS_HORIZONTAL = 1
+        const val AXIS_SOURCE_FINGER = 1
     }
 }

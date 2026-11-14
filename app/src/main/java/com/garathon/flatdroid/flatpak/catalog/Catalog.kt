@@ -16,10 +16,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
@@ -40,16 +37,41 @@ sealed interface CatalogState {
 }
 
 /**
- * Flathub's own lists of apps, for the browser's orders: each app ID's place in [popular],
- * [added] (newest first) and [updated] (most recent first), and its installs of the last month
- * for the apps the lists name ([installs]).
+ * Flathub's apps, for the browser's orders: each app ID's place in [popular] (most installs in the
+ * last month first, Flathub's Popular list), [added] (newest first) and [updated] (most recent
+ * first), and its installs of the last month ([installs]). Every app on Flathub is in each.
  */
 data class FlathubLists(
     val popular: Map<String, Int> = emptyMap(),
     val added: Map<String, Int> = emptyMap(),
     val updated: Map<String, Int> = emptyMap(),
     val installs: Map<String, Long> = emptyMap(),
-)
+) {
+    companion object {
+        /**
+         * Catalog's saved lines (`<app ID>\t<installs>\t<added>\t<updated>`, in Popular's order):
+         * an app's first line counts; one without a date goes after those with one.
+         */
+        fun parse(lines: List<String>): FlathubLists {
+            val popular = LinkedHashMap<String, Int>()
+            val installs = HashMap<String, Long>()
+            val added = HashMap<String, Long>()
+            val updated = HashMap<String, Long>()
+            for (line in lines) {
+                val parts = line.split('\t')
+                if (parts.size != 4 || parts[0] in popular) continue
+                val id = parts[0]
+                popular[id] = popular.size
+                parts[1].toLongOrNull()?.let { installs[id] = it }
+                added[id] = parts[2].toLongOrNull() ?: Long.MIN_VALUE
+                updated[id] = parts[3].toLongOrNull() ?: Long.MIN_VALUE
+            }
+            // Newest first; the same date keeps Popular's order (a stable sort).
+            fun ranks(dates: Map<String, Long>) = popular.keys.sortedByDescending { dates.getValue(it) }.withIndex().associate { it.value to it.index }
+            return FlathubLists(popular, ranks(added), ranks(updated), installs)
+        }
+    }
+}
 
 /**
  * Flathub's catalog for the browser: Flatpak's own AppStream data for this phone's architecture
@@ -73,7 +95,7 @@ object Catalog {
     /** The index and Flathub's lists: kept, as rebuilding the index takes a while. Screenshots are in the cache ([CatalogImages]). */
     fun dir(context: Context) = File(context.filesDir, "catalog")
     private fun indexDir(context: Context) = File(dir(context), "index")
-    private fun listsFile(context: Context) = File(dir(context), "lists")
+    private fun listsFile(context: Context) = File(dir(context), "flathub-apps")
 
     /** Flatpak's AppStream folder for Flathub and this phone's architecture (a link to the current version). */
     private fun source(context: Context): File {
@@ -185,20 +207,21 @@ object Catalog {
     }
 
     /**
-     * Flathub's lists, saved in cache as `<list>\t<app ID>\t<installs>` lines in each list's order;
-     * not on mobile data when downloads there are off. The browser's state changes only when they
-     * differ, so an unchanged answer doesn't reorder the list.
+     * Every Flathub app's installs and dates, saved as `<app ID>\t<installs>\t<added>\t<updated>`
+     * lines in Popular's order; not on mobile data when downloads there are off. The browser's state
+     * changes only when they differ, so an unchanged answer doesn't reorder the list.
      */
     private fun fetchLists(context: Context) {
         if (mobileDataPolicy(context) == MobileData.NEVER) return
         try {
-            // The three at once, on the shared IO threads.
-            val fetched = runBlocking(Dispatchers.IO) {
-                LIST_NAMES.map { name -> async { name to FlathubClient.collection(name) } }.awaitAll().toMap()
-            }
+            val started = System.currentTimeMillis()
+            val apps = FlathubClient.allApps()
             listsFile(context).apply { parentFile?.mkdirs() }.writeText(
-                fetched.entries.joinToString("") { (list, apps) -> apps.joinToString("") { "$list\t${it.id}\t${it.installsLastMonth ?: ""}\n" } },
+                apps.joinToString("") { "${it.id}\t${it.installsLastMonth ?: ""}\t${it.addedAt ?: ""}\t${it.updatedAt ?: ""}\n" },
             )
+            // Written by earlier versions: three lists of 250 apps.
+            File(dir(context), "lists").delete()
+            DebugLog.i("Catalog: Flathub's ${apps.size} apps fetched in ${System.currentTimeMillis() - started} ms")
             val lists = readLists(context)
             (_state.value as? CatalogState.Ready)?.takeIf { it.lists != lists }?.let { _state.value = it.copy(lists = lists) }
         } catch (e: IOException) {
@@ -206,19 +229,8 @@ object Catalog {
         }
     }
 
-    private fun readLists(context: Context): FlathubLists {
-        // Each list's apps in its order (an app's first place counts), in one pass over the lines.
-        val ranks = LIST_NAMES.associateWith { LinkedHashMap<String, Int>() }
-        val installs = HashMap<String, Long>()
-        runCatching { listsFile(context).readLines() }.getOrDefault(emptyList()).forEach { line ->
-            val parts = line.split('\t')
-            val rank = ranks[parts[0]]
-            if (parts.size != 3 || rank == null) return@forEach
-            rank.putIfAbsent(parts[1], rank.size)
-            parts[2].toLongOrNull()?.let { installs[parts[1]] = it }
-        }
-        return FlathubLists(ranks.getValue(POPULAR), ranks.getValue(ADDED), ranks.getValue(UPDATED), installs)
-    }
+    private fun readLists(context: Context): FlathubLists =
+        FlathubLists.parse(runCatching { listsFile(context).readLines() }.getOrDefault(emptyList()))
 
     /**
      * Storage's Clear all caches: the index, Flathub's lists and the screenshots are deleted, and
@@ -248,8 +260,4 @@ object Catalog {
     fun iconsDir(context: Context) = File(source(context), "icons")
 
     private const val APPSTREAM = "appstream.xml.gz"
-    private const val POPULAR = "popular"
-    private const val ADDED = "recently-added"
-    private const val UPDATED = "recently-updated"
-    private val LIST_NAMES = listOf(POPULAR, ADDED, UPDATED)
 }

@@ -18,6 +18,7 @@ class AppStreamReaderTest {
         <components version="0.8" origin="flatpak">
           <component type="desktop-application">
             <id>org.gnome.Maps</id>
+            <bundle type="flatpak" runtime="org.gnome.Platform/aarch64/49" sdk="org.gnome.Sdk/aarch64/49">app/org.gnome.Maps/aarch64/stable</bundle>
             <name>Maps</name>
             <name xml:lang="de">Karten</name>
             <summary>Find places around the world</summary>
@@ -89,7 +90,7 @@ class AppStreamReaderTest {
         assertEquals("Find places around the world", maps.app.summary)
         assertEquals("The GNOME Project", maps.app.developer)
         assertTrue(maps.app.verified)
-        assertTrue(maps.app.touch)
+        assertEquals("org.gnome.Platform/49", maps.app.runtime)
         assertEquals(listOf("Utility"), maps.app.categories)
         assertEquals("128x128/org.gnome.Maps.png", maps.app.icon)
         assertEquals(listOf("maps", "location finder"), maps.app.keywords)
@@ -151,5 +152,29 @@ class AppStreamReaderTest {
         assertNull(again.details("org.example.Missing"))
         // Nothing half-written is left beside it.
         assertFalse(java.io.File(dir.parentFile, "index.new").exists())
+    }
+
+    @Test
+    fun anAppInTheCatalogForSeveralBranchesIsKeptOnceAsItsStableOne() {
+        // As Flathub lists QGIS: its lts branch, then stable, under the same ID.
+        fun component(branch: String, name: String) = """
+            <component type="desktop-application"><id>org.qgis.qgis.desktop</id><name>$name</name>
+            <bundle type="flatpak" runtime="org.kde.Platform/aarch64/6.11">app/org.qgis.qgis/aarch64/$branch</bundle>
+            <description><p>$name</p></description></component>
+        """
+        val xml = "<components>" + component("lts", "QGIS LTR") + component("stable", "QGIS") +
+            "<component type=\"desktop-application\"><id>org.example.Beta</id><name>Beta</name><bundle type=\"flatpak\">app/org.example.Beta/aarch64/beta</bundle></component>" +
+            "</components>"
+        val parser = KXmlParser().apply { setInput(xml.byteInputStream(), "UTF-8") }
+        val entries = mutableListOf<CatalogEntry>()
+        AppStreamReader(listOf("en")).read(parser) { entries += it }
+        assertEquals(listOf("lts", "stable", "beta"), entries.map { it.branch })
+
+        val dir = folder.newFolder("catalog", "index")
+        val written = CatalogIndex.write(dir, "v") { add -> entries.forEach(add) }
+        assertEquals(listOf("QGIS" to "org.qgis.qgis", "Beta" to "org.example.Beta"), written.apps.map { it.name to it.id })
+        val again = CatalogIndex.read(dir)!!
+        assertEquals(written.apps, again.apps)
+        assertEquals(listOf(TextBlock.Paragraph("QGIS")), again.details("org.qgis.qgis")!!.description)
     }
 }

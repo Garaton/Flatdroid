@@ -218,6 +218,17 @@ object FlatpakTasks {
     /** Takes [appId] out of the waiting installs. */
     fun unqueueInstall(appId: String) = _ui.update { it.copy(queue = TaskQueue.withoutInstall(it.queue, appId)) }
 
+    /** Takes [appId] out of [task], a waiting install or uninstall (the task goes when it has no app left). */
+    fun unqueueApp(task: FlatpakTask, appId: String) = _ui.update {
+        it.copy(
+            queue = when (task) {
+                is FlatpakTask.Install -> TaskQueue.withoutInstall(it.queue, appId)
+                is FlatpakTask.Uninstall -> TaskQueue.withoutUninstall(it.queue, appId)
+                else -> it.queue - task
+            },
+        )
+    }
+
     fun clearQueue() = _ui.update { it.copy(queue = emptyList()) }
 
     /** The next waiting task, taken out of the queue; null when none waits. */

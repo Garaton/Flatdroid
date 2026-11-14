@@ -9,7 +9,7 @@ import android.view.SurfaceView
 
 /**
  * How the framebuffer gets to the screen: [NativeFrames], or [TileFrames] where that can't run.
- * Main thread; [frame], [reveal] and [hashRows] under [RfbClient.frameLock].
+ * Main thread; [frame], [reveal] and [profile] under [RfbClient.frameLock].
  */
 interface FrameDrawer {
     /** There are changes out of sight that [reveal] could catch up. */
@@ -32,6 +32,6 @@ interface FrameDrawer {
     /** On the surface: shows the latest frame at [destination] (the surface's pixels). */
     fun show(destination: RectF) {}
 
-    /** [ScrollMeter.hashRows] of the latest frame; false when there is no whole frame to hash now. */
-    fun hashRows(fb: Framebuffer, out: IntArray): Boolean
+    /** [ScrollMeter.profile] of the latest frame (of its [columns]); false when there is no whole frame to read now. */
+    fun profile(fb: Framebuffer, out: IntArray, columns: Boolean): Boolean
 }

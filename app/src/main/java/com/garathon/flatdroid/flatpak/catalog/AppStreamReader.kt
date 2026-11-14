@@ -3,8 +3,11 @@ package com.garathon.flatdroid.flatpak.catalog
 import com.garathon.flatdroid.flatpak.InstalledApps
 import org.xmlpull.v1.XmlPullParser
 
-/** One app as [AppStreamReader] reads it: the list's part and the page's part. */
-data class CatalogEntry(val app: CatalogApp, val details: CatalogDetails)
+/**
+ * One app as [AppStreamReader] reads it: the list's part and the page's part. [branch] is its
+ * Flatpak bundle's (`stable`, `lts`, …): an app can be in the catalog once per branch.
+ */
+data class CatalogEntry(val app: CatalogApp, val details: CatalogDetails, val branch: String? = null)
 
 /**
  * Reads Flatpak's AppStream catalog (`appstream.xml`) one app at a time, so the whole file (tens of
@@ -69,7 +72,8 @@ class AppStreamReader(languages: List<String>) {
         val keywords = Best<List<String>>()
         var icon: String? = null
         var iconSize = 0
-        var touch = false
+        var branch: String? = null
+        var runtime: String? = null
         var verified = false
         var license: String? = null
         val urls = mutableListOf<Pair<String, String>>()
@@ -80,6 +84,12 @@ class AppStreamReader(languages: List<String>) {
             val lang = lang(parser)
             when (parser.name) {
                 "id" -> id = text(parser).trim()
+                // app/<ID>/<arch>/<branch>
+                "bundle" -> if (parser.getAttributeValue(null, "type") == "flatpak") {
+                    // runtime="<ID>/<arch>/<branch>": kept without the architecture.
+                    runtime = parser.getAttributeValue(null, "runtime")?.split('/')?.takeIf { it.size == 3 }?.let { "${it[0]}/${it[2]}" }
+                    branch = text(parser).trim().split('/').takeIf { it.size == 4 }?.get(3)
+                } else skip(parser)
                 "name" -> if (name.wants(lang)) name.offer(lang, text(parser).trim()) else skip(parser)
                 "summary" -> if (summary.wants(lang)) summary.offer(lang, text(parser).trim()) else skip(parser)
                 "description" -> if (description.wants(lang)) description.offer(lang, description(parser)) else skip(parser)
@@ -108,7 +118,6 @@ class AppStreamReader(languages: List<String>) {
                     if (link.startsWith("https://") || link.startsWith("http://")) urls += kind to link
                 }
                 "screenshots" -> children(parser, "screenshot") { screenshot(it)?.let(screenshots::add) }
-                "supports", "recommends", "requires" -> children(parser, "control") { if (text(it).trim() == "touch") touch = true }
                 "custom" -> children(parser, "value") {
                     val key = it.getAttributeValue(null, "key")
                     val value = text(it).trim()
@@ -127,9 +136,9 @@ class AppStreamReader(languages: List<String>) {
             categories = categories.distinct(),
             keywords = (defaultKeywords + keywords.value.orEmpty()).filter { it.isNotEmpty() }.distinct(),
             icon = icon,
-            touch = touch,
+            runtime = runtime,
         )
-        return CatalogEntry(app, CatalogDetails(description.value.orEmpty(), license, urls, screenshots))
+        return CatalogEntry(app, CatalogDetails(description.value.orEmpty(), license, urls, screenshots), branch)
     }
 
     /** `<developer><name>…</name></developer>`: the untagged name. */

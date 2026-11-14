@@ -70,12 +70,14 @@ class FlatpakInstallation(root: File, private val arch: String) {
      */
     fun unusedRuntimeRefs(): List<FlatpakRef> {
         val used = appIds().flatMap { deploymentsFor(it) }.filter { it.kind == "runtime" }.map { it.ref }.toSet()
-        val installed = File(root, "runtime").list().orEmpty().sorted().flatMap { name ->
-            File(root, "runtime/$name/$arch").list().orEmpty().sorted()
-                .map { branch -> FlatpakRef(name, arch, branch) }
-                .filter { runtime(it) != null }
-        }
-        return installed.filter { it !in used }
+        return runtimeRefs().filter { it !in used }
+    }
+
+    /** Every installed runtime and extension branch for this architecture, sorted. */
+    fun runtimeRefs(): List<FlatpakRef> = File(root, "runtime").list().orEmpty().sorted().flatMap { name ->
+        File(root, "runtime/$name/$arch").list().orEmpty().sorted()
+            .map { branch -> FlatpakRef(name, arch, branch) }
+            .filter { runtime(it) != null }
     }
 
     fun deploymentsFor(appId: String): List<Deployment> {

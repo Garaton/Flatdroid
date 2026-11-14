@@ -167,7 +167,12 @@ data class UserSettings(
          */
         const val UNCAPPED_FRAME_RATE = 1000
         val CUSTOM_FRAME_RATES = 1..UNCAPPED_FRAME_RATE
-        const val DEFAULT_AUDIO_LATENCY_MS = 60
+        /**
+         * Measured on a Cortex-A53 phone: Android gives the power saving output 85 ms whatever is
+         * asked; on the low latency one 40 ms played SuperTux and VLC without underruns, and its
+         * floor of 32 ms underran once.
+         */
+        const val DEFAULT_AUDIO_LATENCY_MS = 40
         val AUDIO_LATENCIES_MS = 1..1000
         /** Per command of [commands]: uninstalling runtimes can take minutes under proot. */
         const val APPLY_TIMEOUT_SECONDS = 15 * 60L

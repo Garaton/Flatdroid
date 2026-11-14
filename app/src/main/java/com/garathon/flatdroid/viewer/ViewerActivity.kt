@@ -211,7 +211,7 @@ class ViewerActivity : ComponentActivity() {
         })
         view.requestFocus()
         ViewerConnection.attach(view)
-        ViewerConnection.open(socket, cacheDir, session.waylandSocket, session.shareClipboard, session.outputRefresh)
+        ViewerConnection.open(socket, cacheDir, session.waylandSocket, session.shareClipboard, session.outputRefresh, session.appId)
         appLabel = session.appId
         lifecycleScope.launch(Dispatchers.IO) {
             InstalledApps(applicationContext).name(session.appId)?.let { name -> withContext(Dispatchers.Main) { appLabel = name } }
@@ -228,7 +228,8 @@ class ViewerActivity : ComponentActivity() {
     @Composable
     private fun TopBar(keyboardShown: Boolean, onToggleKeys: () -> Unit) {
         var confirmStop by rememberSaveable { mutableStateOf(false) }
-        Surface(color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
+        // Flatdroid's background, as its other screens' top bars, so leaving for the list doesn't change it.
+        Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxWidth()) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier

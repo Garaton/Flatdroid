@@ -23,15 +23,16 @@ interface PointerOutput {
  * instead). Not thread-safe: called from the UI thread.
  *
  * [slop]: movement (px) that still counts as holding still; [scrollStep]: finger travel (px) per
- * wheel notch, which may change between moves. While [paused] a drag sends no notches; [resume]
- * sends the ones its travel adds up to meanwhile, also after the finger has lifted. A drag let go
- * with speed goes on through [flingTo] (the viewer moves a virtual finger on, slowing down).
+ * wheel notch, which may change between moves. A drag let go with speed goes on through [flingTo]
+ * (the viewer moves a virtual finger on, slowing down).
  */
 class TouchGestures(private val output: PointerOutput, private val slop: Float, scrollStep: Float) {
     /** Changed during a drag, the notches already sent count at the new step: the content stays with the finger. */
     var scrollStep = scrollStep
+    /** As [scrollStep], sideways (apps may scroll a different distance across than down). */
+    var scrollStepAcross = scrollStep
 
-    /** [SCROLLED]: a drag ended; [flingTo] and [resume] still scroll on from it. */
+    /** [SCROLLED]: a drag ended; [flingTo] still scrolls on from it. */
     private enum class State { IDLE, DOWN, SCROLLING, SCROLLED, HELD, DRAGGING, CANCELLED }
 
     private var state = State.IDLE
@@ -45,21 +46,6 @@ class TouchGestures(private val output: PointerOutput, private val slop: Float, 
     private var lastX = 0f
     private var lastY = 0f
 
-    /** Holds a drag's notches back (while the viewer measures how far one scrolls). */
-    var paused = false
-        private set
-
-    fun pause() {
-        paused = true
-    }
-
-    /** Sends what the drag travelled while paused, at the current [scrollStep]. */
-    fun resume() {
-        if (!paused) return
-        paused = false
-        if (state == State.SCROLLING || state == State.SCROLLED) sendNotches(lastX, lastY)
-    }
-
     /** The finger is down and scrolling (a lift now may fling). */
     val scrolling: Boolean get() = state == State.SCROLLING
 
@@ -67,7 +53,7 @@ class TouchGestures(private val output: PointerOutput, private val slop: Float, 
     fun flingTo(x: Float, y: Float) {
         if (state != State.SCROLLED) return
         lastX = x; lastY = y
-        if (!paused) sendNotches(x, y)
+        sendNotches(x, y)
     }
 
     /** The gesture waits for [holdRecognised] (the view schedules it at the long-press delay). */
@@ -89,7 +75,7 @@ class TouchGestures(private val output: PointerOutput, private val slop: Float, 
                 // Scrolling starts where the finger crossed the slop: no jump of a slop's worth.
                 scrollX = x; scrollY = y
             }
-            State.SCROLLING -> if (!paused) sendNotches(x, y)
+            State.SCROLLING -> sendNotches(x, y)
             State.HELD -> if (moved(x, y)) {
                 state = State.DRAGGING
                 output.press(BUTTON_LEFT, downX, downY)
@@ -106,7 +92,7 @@ class TouchGestures(private val output: PointerOutput, private val slop: Float, 
      */
     private fun sendNotches(x: Float, y: Float) {
         val down = ((scrollY - y) / scrollStep).roundToInt() - sentDown
-        val right = ((scrollX - x) / scrollStep).roundToInt() - sentRight
+        val right = ((scrollX - x) / scrollStepAcross).roundToInt() - sentRight
         if (down != 0 || right != 0) {
             output.scroll(downX, downY, down, right)
             sentDown += down
@@ -127,7 +113,7 @@ class TouchGestures(private val output: PointerOutput, private val slop: Float, 
             State.DRAGGING -> output.release(x, y)
             State.SCROLLING -> {
                 lastX = x; lastY = y
-                if (!paused) sendNotches(x, y)
+                sendNotches(x, y)
                 state = State.SCROLLED
                 return
             }
@@ -145,6 +131,26 @@ class TouchGestures(private val output: PointerOutput, private val slop: Float, 
     private fun moved(x: Float, y: Float) = hypot(abs(x - downX), abs(y - downY)) > slop
 
     companion object {
+        /**
+         * [down] and [right] notches (signs give the direction) in the order a diagonal travels them:
+         * each as soon as its share of the way is reached, rather than all of one axis first.
+         * True for a vertical notch, false for a horizontal one.
+         */
+        fun interleave(down: Int, right: Int): List<Boolean> {
+            val v = abs(down)
+            val h = abs(right)
+            val order = ArrayList<Boolean>(v + h)
+            var sentV = 0
+            var sentH = 0
+            while (sentV < v || sentH < h) {
+                // Each notch sits at the middle of its share of the way; the one that comes first goes first.
+                val nextV = if (sentV < v) (sentV + 0.5f) / v else Float.MAX_VALUE
+                val nextH = if (sentH < h) (sentH + 0.5f) / h else Float.MAX_VALUE
+                if (nextV <= nextH) { order += true; sentV++ } else { order += false; sentH++ }
+            }
+            return order
+        }
+
         /** RFB button numbers (bit positions in the pointer message's mask). */
         const val BUTTON_LEFT = 0
         const val BUTTON_MIDDLE = 1

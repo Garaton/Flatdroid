@@ -122,7 +122,8 @@
     <string name="storage_part_home">App home</string>
     <string name="storage_part_homes">App homes</string>
     <string name="storage_part_cache">Cache</string>
-    <string name="storage_part_other">Other</string>
+    <string name="storage_part_other">Flatdroid environment</string>
+    <string name="storage_environment_hint">Alpine, Flatpak\'s repository and Flatdroid\'s own files</string>
     <string name="storage_section_shared_home">Shared home</string>
     <string name="storage_section_flatpaks">Apps and runtimes</string>
     <string name="storage_section_homes">App homes</string>
@@ -274,13 +275,23 @@
     <string name="browse_load_screenshots">Load screenshots on mobile data</string>
     <string name="browse_screenshots_mobile_data">Screenshots aren\'t loaded on mobile data, as set under Flatpak in Flatdroid\'s settings.</string>
     <string name="browse_filter_verified">Verified</string>
-    <string name="browse_filter_touch">Touch-friendly</string>
+    <string name="browse_filter_runtimes">Uses installed runtimes</string>
     <string name="browse_sort_popular">Popular</string>
     <string name="browse_sort_name">Name</string>
     <string name="browse_sort_added">Recently added</string>
     <string name="browse_sort_updated">Recently updated</string>
+    <string name="browse_sort_random">Random</string>
     <string name="browse_installs_month">Monthly installs:</string>
-    <string name="browse_installs">Total installs: %1$s\nMonthly installs: %2$s</string>
+    <string name="browse_stat_installs">Installs</string>
+    <string name="browse_stat_month">This month</string>
+    <string name="browse_stat_size">App size</string>
+    <string name="browse_about">About</string>
+    <string name="browse_details">Details</string>
+    <string name="browse_links">Links</string>
+    <string name="browse_runtime">Runtime</string>
+    <string name="browse_runtime_installed">Installed already</string>
+    <string name="browse_runtime_size">Not installed yet, %1$s</string>
+    <string name="browse_asks_for">Asks for</string>
     <string name="browse_category_audio_video">Audio and video</string>
     <string name="browse_category_development">Development</string>
     <string name="browse_category_education">Education</string>
@@ -291,7 +302,7 @@
     <string name="browse_category_science">Science</string>
     <string name="browse_category_system">System</string>
     <string name="browse_category_utility">Utilities</string>
-    <string name="browse_license">License: %1$s</string>
+    <string name="browse_license_title">License</string>
     <string name="browse_license_proprietary">Proprietary</string>
     <string name="browse_link_homepage">Website</string>
     <string name="browse_link_help">Help</string>
@@ -338,6 +349,8 @@
     <string name="task_queue_clear_all">Remove all</string>
     <string name="queued_install">Install %1$s</string>
     <string name="queued_uninstall">Uninstall %1$s</string>
+    <string name="queued_install_group">Install</string>
+    <string name="queued_uninstall_group">Uninstall</string>
     <string name="queued_reinstall">Reinstall %1$s</string>
     <string name="queued_remove_runtime">Uninstall the runtime %1$s</string>
     <string name="queued_update_all">Update all apps</string>
@@ -531,7 +544,7 @@
     <string name="app_settings_microphone_android_denied">Android didn\'t allow Flatdroid to use the microphone.</string>
     <string name="app_settings_devices">Devices</string>
     <string name="app_settings_whole_dev">All of /dev</string>
-    <string name="app_settings_whole_dev_hint">This app asks for all devices. Normally it only gets graphics, input, KVM and USB devices where the phone has them. With this on it gets every device node, including Android\'s Binder, through which it can call Android\'s system services as Flatdroid.</string>
+    <string name="app_settings_whole_dev_hint">Gives the app every device node the phone has, including Android\'s Binder, through which it can call Android\'s system services as Flatdroid.</string>
     <string name="app_settings_launch">Launch</string>
     <string name="app_settings_environment">Environment variables</string>
     <string name="app_settings_environment_hint">One NAME=value per line, added to the app\'s environment over Flatdroid\'s own. Lines starting with # are skipped.</string>

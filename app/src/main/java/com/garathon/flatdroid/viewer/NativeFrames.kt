@@ -163,9 +163,9 @@ class NativeFrames private constructor(private val descriptor: ParcelFileDescrip
         placing.apply()
     }
 
-    override fun hashRows(fb: Framebuffer, out: IntArray): Boolean {
+    override fun profile(fb: Framebuffer, out: IntArray, columns: Boolean): Boolean {
         if (updating || frame == 0L || width != fb.width || height != fb.height) return false
-        hashRows(frame, ScrollMeter.BANDS, out)
+        profile(frame, ScrollMeter.BANDS, columns, out)
         return true
     }
 
@@ -188,7 +188,7 @@ class NativeFrames private constructor(private val descriptor: ParcelFileDescrip
         @JvmStatic private external fun resize(frame: Long, width: Int, height: Int): Boolean
         @JvmStatic private external fun readRect(fd: Int, frame: Long, x: Int, y: Int, width: Int, height: Int): Int
         @JvmStatic private external fun moveRect(frame: Long, sx: Int, sy: Int, x: Int, y: Int, width: Int, height: Int)
-        @JvmStatic private external fun hashRows(frame: Long, bands: Int, out: IntArray)
+        @JvmStatic private external fun profile(frame: Long, bands: Int, columns: Boolean, out: IntArray)
         @JvmStatic private external fun attach(frame: Long, surface: Surface?): Boolean
         @JvmStatic private external fun post(frame: Long, left: Int, top: Int, right: Int, bottom: Int)
     }

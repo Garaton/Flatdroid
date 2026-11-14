@@ -31,8 +31,14 @@ data class FlathubApp(
     fun builtFor(arch: String) = arch in arches
 }
 
-/** An app of one of Flathub's lists, with its installs of the last month (null when not given). */
-data class CollectionApp(val id: String, val installsLastMonth: Long?)
+/**
+ * An app of Flathub's list, with its installs of the last month and when it was added to Flathub
+ * and last updated there (seconds since the epoch); each null when not given.
+ */
+data class CollectionApp(val id: String, val installsLastMonth: Long?, val addedAt: Long? = null, val updatedAt: Long? = null)
+
+/** One page of a Flathub list, and how many pages it has. */
+data class CollectionPage(val apps: List<CollectionApp>, val pages: Int)
 
 /** An app's installs from Flathub: in all, and in the last month; null when not given. */
 data class FlathubStats(val total: Long?, val lastMonth: Long?)
@@ -56,8 +62,10 @@ object FlathubClient {
     private const val TIMEOUT_MS = 10_000
     private const val MAX_BYTES = 2 * 1024 * 1024
     private const val VERIFIED = "flathub::verification::verified"
-    /** How many apps of each of Flathub's lists are asked for (one answer each, about 0.5 MB). */
-    const val COLLECTION_COUNT = 250
+    /** Apps per page of [allApps] (about 0.9 MB each, a quarter of that compressed). */
+    const val PAGE_SIZE = 500
+    /** More pages than Flathub could have: a bad page count stops here. */
+    private const val MAX_PAGES = 40
 
     /** [id] must be a valid app ID (it goes into the address). */
     fun fetch(id: String): FlathubApp {
@@ -73,26 +81,38 @@ object FlathubClient {
     }
 
     /**
-     * One of Flathub's lists (`popular`, `recently-added`, `recently-updated`): its first
-     * [COLLECTION_COUNT] apps in order, each with its installs of the last month when Flathub says.
+     * Every app on Flathub, most installed in the last month first (Flathub's Popular list, read
+     * page by page so only one page is in memory at a time), each with its installs and dates.
      */
-    fun collection(name: String): List<CollectionApp> {
-        val answer = get("$API/collection/$name?page=1&per_page=$COLLECTION_COUNT", name)
-        return try {
-            parseCollection(answer)
-        } catch (e: JSONException) {
-            throw FlathubBadAnswerException(e)
-        }
+    fun allApps(): List<CollectionApp> {
+        val apps = mutableListOf<CollectionApp>()
+        var page = 1
+        do {
+            val answer = get("$API/collection/popular?page=$page&per_page=$PAGE_SIZE", "popular")
+            val parsed = try {
+                parseCollection(answer)
+            } catch (e: JSONException) {
+                throw FlathubBadAnswerException(e)
+            }
+            apps += parsed.apps
+            page++
+        } while (page <= minOf(parsed.pages, MAX_PAGES))
+        return apps.distinctBy { it.id }
     }
 
-    /** The apps of a collection answer (`hits[].app_id`, `installs_last_month`), valid IDs only, each once. */
-    fun parseCollection(json: String): List<CollectionApp> {
-        val hits = JSONObject(json).optJSONArray("hits") ?: return emptyList()
-        return (0 until hits.length()).mapNotNull { i ->
+    /**
+     * The apps of a collection answer (`hits[].app_id`, `installs_last_month`, `added_at`,
+     * `updated_at`), valid IDs only, each once, and its page count (`totalPages`).
+     */
+    fun parseCollection(json: String): CollectionPage {
+        val answer = JSONObject(json)
+        val hits = answer.optJSONArray("hits") ?: return CollectionPage(emptyList(), 0)
+        val apps = (0 until hits.length()).mapNotNull { i ->
             val hit = hits.optJSONObject(i) ?: return@mapNotNull null
             val id = hit.optString("app_id").takeIf(InstalledApps::isValidId) ?: return@mapNotNull null
-            CollectionApp(id, hit.longOrNull("installs_last_month"))
+            CollectionApp(id, hit.longOrNull("installs_last_month"), hit.longOrNull("added_at"), hit.longOrNull("updated_at"))
         }.distinctBy { it.id }
+        return CollectionPage(apps, answer.optInt("totalPages", 1))
     }
 
     /** [id]'s installs from Flathub's statistics. Network work. */

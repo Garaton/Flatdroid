@@ -78,6 +78,40 @@ class LaunchPlannerTest {
     }
 
     @Test
+    fun ldCacheIsBuiltOnceThenOnlyBound() {
+        val runtime = runtimeWithGl()
+        inst.runtime("org.freedesktop.Platform.GL.default", "26.08")
+        val id = "org.example.Scanner"
+        File(inst.app(id, metadata = appMetadata(id, "scanner")), "bin").mkdirs()
+        val withCache = dirs.copy(ldCache = File(tmp.root, "ld"))
+
+        // No ldconfig in the runtime: nothing to build it with.
+        assertEquals(null, Ready(planner.plan(id, withCache)).ldCache)
+
+        File(runtime, "bin/ldconfig").writeText("")
+        File(runtime, "bin/sh").writeText("")
+        val first = Ready(planner.plan(id, withCache))
+        val ld = first.ldCache!!
+        assertTrue(ld.generate)
+        assertEquals(withCache.ldCache, ld.dir.parentFile)
+        assertEquals("include /app/etc/ld.so.conf\n/app/lib\n/usr/lib/aarch64-linux-gnu/GL/default/lib\n", ld.conf)
+        assertEquals(LaunchPlanner.LD_CACHE_COMMAND + "/app/bin/scanner", first.command)
+        assertEquals(
+            baseExtra(id) + listOf(ld.cache.path to "/etc/ld.so.cache", ld.dir.path to "/run/flatdroid/ld"),
+            first.binds.extra,
+        )
+
+        // Built: the next launch only binds it.
+        ld.dir.mkdirs()
+        ld.cache.writeText("glibc-ld.so.cache")
+        val next = Ready(planner.plan(id, withCache))
+        assertEquals(ld.dir, next.ldCache!!.dir)
+        assertFalse(next.ldCache!!.generate)
+        assertEquals(listOf("/app/bin/scanner"), next.command)
+        assertEquals(baseExtra(id) + (ld.cache.path to "/etc/ld.so.cache"), next.binds.extra)
+    }
+
+    @Test
     fun networkOffDropsResolvConfAndInternetSocketsAndDevicesCanBeLimited() {
         runtimeWithGl()
         val files = inst.app("org.example.Tool", metadata = appMetadata("org.example.Tool", "tool", extra = "[Context]\ndevices=all;\n"))
@@ -299,8 +333,9 @@ class LaunchPlannerTest {
         assertEquals(DevNodes.BASE + listOf("/dev/dri", "/dev/input", "/dev/bus/usb"), all.binds.dev)
         assertFalse(all.binds.wholeDev)
         assertTrue(plan("a.All2", "all;", LaunchOptions(wholeDev = true)).binds.wholeDev)
-        // The setting only applies to apps that ask for all devices.
-        assertFalse(plan("a.Dri2", "dri;", LaunchOptions(wholeDev = true)).binds.wholeDev)
+        // The setting applies to any app, whatever it asks for.
+        assertTrue(plan("a.Dri2", "dri;", LaunchOptions(wholeDev = true)).binds.wholeDev)
+        assertTrue(plan("a.Plain2", null, LaunchOptions(wholeDev = true)).binds.wholeDev)
     }
 
     @Test

@@ -86,19 +86,6 @@ class TouchGesturesTest {
     }
 
     @Test
-    fun aPausedDragCatchesUpWhenResumedEvenAfterLifting() {
-        touch.down(100f, 500f)
-        touch.move(100f, 480f) // scrolling starts here
-        touch.move(100f, 430f) // one notch
-        touch.pause()
-        touch.move(100f, 280f) // three more, held back
-        touch.up(100f, 280f)
-        touch.scrollStep = 75f
-        touch.resume()
-        assertEquals(listOf("scroll 100,500 down 1 right 0", "scroll 100,500 down 2 right 0"), out.events)
-    }
-
-    @Test
     fun aNewStepDuringADragRecountsTheNotchesSent() {
         touch.down(100f, 500f)
         touch.move(100f, 480f)
@@ -107,6 +94,15 @@ class TouchGesturesTest {
         touch.move(100f, 390f) // 90 px: still one
         touch.move(100f, 320f) // 160 px: two
         assertEquals(listOf("scroll 100,500 down 1 right 0", "scroll 100,500 down 1 right 0"), out.events)
+    }
+
+    @Test
+    fun sidewaysHasAStepOfItsOwn() {
+        touch.scrollStepAcross = 25f
+        touch.down(500f, 500f)
+        touch.move(480f, 480f) // scrolling starts here
+        touch.move(430f, 430f) // 50 px each way: one notch down, two across
+        assertEquals(listOf("scroll 500,500 down 1 right 2"), out.events)
     }
 
     @Test
@@ -121,5 +117,13 @@ class TouchGesturesTest {
         touch.down(100f, 300f) // a touch ends it
         touch.flingTo(100f, 100f)
         assertEquals(listOf("scroll 100,500 down 1 right 0", "scroll 100,500 down 2 right 0"), out.events)
+    }
+
+    @Test
+    fun aDiagonalsNotchesAlternateAlongItsWay() {
+        assertEquals(listOf(true, false, true, false), TouchGestures.interleave(2, -2))
+        assertEquals(listOf(true, false, true, true, false, true), TouchGestures.interleave(-4, 2))
+        assertEquals(listOf(false, false, false), TouchGestures.interleave(0, 3))
+        assertEquals(emptyList<Boolean>(), TouchGestures.interleave(0, 0))
     }
 }

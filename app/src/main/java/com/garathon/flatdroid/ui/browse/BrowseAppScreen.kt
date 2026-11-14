@@ -6,15 +6,17 @@ import android.net.Uri
 import android.text.format.Formatter
 import androidx.annotation.StringRes
 import androidx.compose.foundation.background
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
+import androidx.compose.animation.Crossfade
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
@@ -30,6 +32,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -42,7 +45,37 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Verified
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.outlined.BugReport
+import androidx.compose.material.icons.outlined.Code
+import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material3.OutlinedIconButton
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.material.icons.outlined.Gavel
+import androidx.compose.material.icons.outlined.Layers
+import androidx.compose.material.icons.outlined.Public
+import androidx.compose.material.icons.outlined.Shield
+import androidx.compose.material.icons.outlined.Usb
+import androidx.compose.material.icons.outlined.VolunteerActivism
+import androidx.compose.material.icons.outlined.Wifi
+import androidx.compose.material.icons.automirrored.outlined.HelpOutline
+import androidx.compose.material.icons.automirrored.outlined.OpenInNew
+import androidx.compose.material.icons.automirrored.outlined.VolumeUp
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.Surface
+import androidx.compose.material3.VerticalDivider
+import androidx.compose.ui.graphics.vector.ImageVector
+import com.garathon.flatdroid.ui.SettingsCard
 import androidx.compose.material3.Button
+import androidx.compose.material3.LocalTextStyle
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -61,6 +94,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
+import android.content.res.Configuration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -99,8 +134,9 @@ enum class InstallState { NOT_INSTALLED, QUEUED, INSTALLING, INSTALLED, UNKNOWN 
 
 /**
  * An app's page: its icon, name (with the check when Flathub verified it), developer and ID,
- * Install (queued behind whatever runs), screenshots, the description, what it asks for, its size
- * and the runtime it needs (installed already or its size), its license and links. The catalog
+ * Install (queued behind whatever runs), its installs and size, screenshots, and cards for the
+ * description, the details (the runtime it needs, installed already or its size; what it asks for;
+ * its license) and its links. The catalog
  * ([app], [Catalog]) gives most of it; sizes and permissions come from Flathub when the page opens,
  * not on mobile data when downloads there are off. An app the catalog doesn't have (a link to one
  * with no build for this phone) shows what Flathub says. The top bar shows the name once the
@@ -130,8 +166,8 @@ fun BrowseAppScreen(
     onOpen: () -> Unit,
     onAppSettings: () -> Unit,
     onUninstall: (deleteData: Boolean, keepRuntimes: Boolean) -> Unit,
-    onBack: () -> Unit,
-    bottomBar: @Composable () -> Unit,
+    /** The title the shared top bar shows for this page ([BrowseAppPager]): the name once the header has scrolled away, else null. */
+    onTitle: (String?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -184,20 +220,75 @@ fun BrowseAppScreen(
     // This page's own answer to Load screenshots on mobile data.
     var loadScreenshots by remember(appId) { mutableStateOf(CatalogImages.allowedOnMobileData(appId)) }
 
-    Column(modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 16.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.settings_back)) }
-            AnimatedVisibility(headerGone, enter = fadeIn(), exit = fadeOut()) {
-                Text(name, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 4.dp))
+    val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    // Beside the header in landscape, as tall as suits it.
+    val tall = if (landscape) Modifier.height(LANDSCAPE_BUTTON_HEIGHT) else Modifier
+    // A pill that tall looks swollen: rounded corners instead.
+    val tallShape = if (landscape) RoundedCornerShape(30.dp) else ButtonDefaults.shape
+    val installButtons = @Composable { boxModifier: Modifier ->
+        Box(boxModifier) {
+            when (installState) {
+                // Open with its label; settings and uninstall as icons beside it, uninstall in red.
+                InstallState.INSTALLED -> Row(Modifier.height(IntrinsicSize.Min), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val settingsButton = @Composable {
+                        OutlinedIconButton(onClick = onAppSettings) { Icon(Icons.Outlined.Settings, contentDescription = stringResource(R.string.settings_title)) }
+                    }
+                    val uninstallButton = @Composable {
+                        OutlinedIconButton(
+                            onClick = { confirmUninstall = true },
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.error),
+                            colors = IconButtonDefaults.outlinedIconButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                        ) { Icon(Icons.Outlined.Delete, contentDescription = stringResource(R.string.uninstall_button)) }
+                    }
+                    // In landscape the icons stay square, one over the other, and Open is as tall as both.
+                    Button(onClick = onOpen, enabled = canOpen, shape = tallShape, modifier = Modifier.weight(1f).then(if (landscape) Modifier.fillMaxHeight() else Modifier)) {
+                        ButtonContent(Icons.Filled.PlayArrow, stringResource(R.string.browse_open), large = landscape)
+                    }
+                    if (landscape) {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            settingsButton()
+                            uninstallButton()
+                        }
+                    } else {
+                        settingsButton()
+                        uninstallButton()
+                    }
+                }
+                // Muted, but as big as Install, with a spinner where its icon was.
+                InstallState.INSTALLING -> OutlinedButton(
+                    onClick = {}, enabled = false, shape = tallShape, modifier = Modifier.fillMaxWidth().then(tall),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                    colors = ButtonDefaults.outlinedButtonColors(disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant),
+                ) {
+                    CircularProgressIndicator(Modifier.size(if (landscape) 24.dp else 16.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.width(if (landscape) 12.dp else 8.dp))
+                    Text(stringResource(R.string.browse_installing), style = if (landscape) MaterialTheme.typography.titleLarge else LocalTextStyle.current)
+                }
+                InstallState.QUEUED -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(stringResource(R.string.browse_queued_waiting), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                    OutlinedButton(onClick = onUnqueue) { Text(stringResource(R.string.browse_queued_cancel)) }
+                }
+                InstallState.UNKNOWN -> Button(onClick = {}, enabled = false, shape = tallShape, modifier = Modifier.fillMaxWidth().then(tall)) {
+                    ButtonContent(Icons.Filled.Download, stringResource(R.string.install_confirm), large = landscape)
+                }
+                InstallState.NOT_INSTALLED -> Button(onClick = onInstall, enabled = builtHere, shape = tallShape, modifier = Modifier.fillMaxWidth().then(tall)) {
+                    ButtonContent(Icons.Filled.Download, stringResource(R.string.install_confirm), large = landscape)
+                }
             }
         }
-        Column(Modifier.weight(1f).verticalScroll(scroll).padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            // Header.
+    }
+
+    val title = name.takeIf { headerGone }
+    LaunchedEffect(title) { onTitle(title) }
+
+    Column(modifier.fillMaxSize()) {
+        Column(Modifier.weight(1f).verticalScroll(scroll).padding(top = 8.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            // Header: the icon, the name, who made it, the ID.
             Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                AppIcon(Catalog.iconFile(context, app?.icon), Modifier.size(64.dp))
+                AppIcon(Catalog.iconFile(context, app?.icon), Modifier.size(80.dp))
                 Column(Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(name, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f, fill = false))
+                        Text(name, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f, fill = false))
                         if (verified) {
                             Icon(
                                 Icons.Filled.Verified, contentDescription = stringResource(R.string.install_link_verified),
@@ -205,29 +296,19 @@ fun BrowseAppScreen(
                             )
                         }
                     }
-                    app?.developer?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
+                    app?.developer?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary) }
                     Text(appId, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+                // Centered in the room beside the name.
+                if (landscape) Box(Modifier.weight(1f), contentAlignment = Alignment.Center) { installButtons(Modifier.widthIn(max = 320.dp)) }
             }
-            (app?.summary?.takeIf { it.isNotEmpty() } ?: found?.summary)?.let { Text(it, Modifier.padding(horizontal = 16.dp)) }
+            (app?.summary?.takeIf { it.isNotEmpty() } ?: found?.summary)?.let {
+                // Two lines kept for it, so pages swiped through keep the rest in the same place.
+                Text(it, style = MaterialTheme.typography.bodyLarge, minLines = 2, modifier = Modifier.padding(horizontal = 16.dp))
+            }
 
-            // Install.
-            Box(Modifier.padding(horizontal = 16.dp)) {
-                when (installState) {
-                    InstallState.INSTALLED -> FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Button(onClick = onOpen, enabled = canOpen) { Text(stringResource(R.string.browse_open)) }
-                        OutlinedButton(onClick = onAppSettings) { Text(stringResource(R.string.settings_title)) }
-                        OutlinedButton(onClick = { confirmUninstall = true }) { Text(stringResource(R.string.uninstall_button)) }
-                    }
-                    InstallState.INSTALLING -> OutlinedButton(onClick = {}, enabled = false) { Text(stringResource(R.string.browse_installing)) }
-                    InstallState.QUEUED -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text(stringResource(R.string.browse_queued_waiting), style = MaterialTheme.typography.bodyMedium)
-                        OutlinedButton(onClick = onUnqueue) { Text(stringResource(R.string.browse_queued_cancel)) }
-                    }
-                    InstallState.UNKNOWN -> Button(onClick = {}, enabled = false) { Text(stringResource(R.string.install_confirm)) }
-                    InstallState.NOT_INSTALLED -> Button(onClick = onInstall, enabled = builtHere) { Text(stringResource(R.string.install_confirm)) }
-                }
-            }
+            // Install: under the header, or beside it in landscape.
+            if (!landscape) installButtons(Modifier.padding(horizontal = 16.dp))
             if (!builtHere && found != null) {
                 Text(
                     stringResource(R.string.install_link_no_arch, arch, found.arches.joinToString(", ").ifEmpty { "?" }),
@@ -235,37 +316,24 @@ fun BrowseAppScreen(
                 )
             }
 
-            // What Flathub says about sizes and permissions.
-            Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                when (val s = summary) {
-                    Summary.Loading -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                        Text(stringResource(R.string.install_link_loading), style = MaterialTheme.typography.bodySmall)
-                    }
-                    Summary.NotFound -> Text(stringResource(R.string.install_link_not_found, appId), style = MaterialTheme.typography.bodySmall)
-                    Summary.MobileData -> Retry(stringResource(R.string.install_link_mobile_data)) { attempt++ }
-                    is Summary.Failed -> Retry(if (s.code != null) stringResource(s.message, s.code) else stringResource(s.message)) { attempt++ }
-                    is Summary.Found -> {
-                        val info = s.app
-                        info.installedSize?.let {
-                            Text(stringResource(R.string.install_link_app_size, Formatter.formatShortFileSize(context, it)), style = MaterialTheme.typography.bodySmall)
-                        }
-                        if (info.runtime != null) {
-                            val state = if (s.runtimeInstalled) stringResource(R.string.install_link_runtime_installed)
-                            else info.runtimeSize?.let { Formatter.formatShortFileSize(context, it) } ?: "?"
-                            Text(stringResource(R.string.install_link_runtimes, info.runtime, state), style = MaterialTheme.typography.bodySmall)
-                        }
-                        val asks = info.permissions.map { stringResource(permissionName(it)) }
-                        if (asks.isNotEmpty()) Text(stringResource(R.string.install_link_asks, asks.joinToString(", ")), style = MaterialTheme.typography.bodySmall)
-                        stats?.let { counts ->
-                            val total = counts.total
-                            val month = counts.lastMonth
-                            if (total != null && month != null) {
-                                Text(stringResource(R.string.browse_installs, compactCount(total), compactCount(month)), style = MaterialTheme.typography.bodySmall)
-                            }
-                        }
-                    }
+            // Installs and size at a glance; or why Flathub didn't say.
+            when (val s = summary) {
+                Summary.Loading -> Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    Text(stringResource(R.string.install_link_loading), style = MaterialTheme.typography.bodySmall)
                 }
+                Summary.NotFound -> Text(stringResource(R.string.install_link_not_found, appId), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp))
+                Summary.MobileData -> Column(Modifier.padding(horizontal = 16.dp)) { Retry(stringResource(R.string.install_link_mobile_data)) { attempt++ } }
+                is Summary.Failed -> Column(Modifier.padding(horizontal = 16.dp)) {
+                    Retry(if (s.code != null) stringResource(s.message, s.code) else stringResource(s.message)) { attempt++ }
+                }
+                is Summary.Found -> Stats(
+                    listOfNotNull(
+                        stats?.total?.let { compactCount(it) to stringResource(R.string.browse_stat_installs) },
+                        stats?.lastMonth?.let { compactCount(it) to stringResource(R.string.browse_stat_month) },
+                        s.app.installedSize?.let { Formatter.formatShortFileSize(context, it) to stringResource(R.string.browse_stat_size) },
+                    ),
+                )
             }
 
             val shown = details
@@ -287,7 +355,7 @@ fun BrowseAppScreen(
                                 AsyncImage(
                                     model = shot.image, contentDescription = shot.caption, imageLoader = loader, contentScale = ContentScale.Fit,
                                     modifier = Modifier.height(SCREENSHOT_HEIGHT).widthIn(min = 120.dp, max = 480.dp)
-                                        .clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
+                                        .clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
                                         .clickable { fullScreenshot = i },
                                 )
                             }
@@ -311,42 +379,128 @@ fun BrowseAppScreen(
 
             // The description.
             shown?.description?.takeIf { it.isNotEmpty() }?.let { blocks ->
-                Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                SettingsCard(Modifier.padding(horizontal = 16.dp), title = stringResource(R.string.browse_about)) {
                     for (block in blocks) when (block) {
                         is TextBlock.Paragraph -> Text(block.text, style = MaterialTheme.typography.bodyMedium)
-                        is TextBlock.Items -> Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        is TextBlock.Items -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             block.items.forEachIndexed { i, item ->
-                                Text(if (block.ordered) "${i + 1}. $item" else "• $item", style = MaterialTheme.typography.bodyMedium)
+                                Row {
+                                    Text(
+                                        if (block.ordered) "${i + 1}." else "•", style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.primary, modifier = Modifier.widthIn(min = 20.dp),
+                                    )
+                                    Text(item, style = MaterialTheme.typography.bodyMedium)
+                                }
                             }
                         }
                     }
                 }
             }
 
-            // License and links (opened in the browser).
-            shown?.license?.let { license ->
-                // Flathub marks a closed app as `LicenseRef-proprietary=<its terms>`.
-                val name = if (license.startsWith("LicenseRef-proprietary")) stringResource(R.string.browse_license_proprietary) else license
-                Text(stringResource(R.string.browse_license, name), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp))
-            }
-            val links = shown?.urls.orEmpty().mapNotNull { (kind, link) -> LINK_LABELS[kind]?.let { it to link } }.distinctBy { it.first }
-            if (links.isNotEmpty()) {
-                FlowRow(Modifier.padding(horizontal = 8.dp)) {
-                    for ((label, link) in links) {
-                        TextButton(onClick = {
-                            try {
-                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(link)).addCategory(Intent.CATEGORY_BROWSABLE))
-                            } catch (_: ActivityNotFoundException) {
+            // What it needs and asks for, and its license.
+            val info = found
+            val license = shown?.license
+            if (info?.runtime != null || info?.permissions?.isNotEmpty() == true || license != null) {
+                SettingsCard(Modifier.padding(horizontal = 16.dp), title = stringResource(R.string.browse_details)) {
+                    info?.runtime?.let { runtime ->
+                        val state = if ((summary as? Summary.Found)?.runtimeInstalled == true) stringResource(R.string.browse_runtime_installed)
+                        else stringResource(R.string.browse_runtime_size, info.runtimeSize?.let { Formatter.formatShortFileSize(context, it) } ?: "?")
+                        InfoRow(Icons.Outlined.Layers, stringResource(R.string.browse_runtime)) {
+                            Text(runtime, style = MaterialTheme.typography.bodyMedium)
+                            Text(state, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    info?.permissions?.takeIf { it.isNotEmpty() }?.let { permissions ->
+                        InfoRow(Icons.Outlined.Shield, stringResource(R.string.browse_asks_for)) {
+                            FlowRow(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                for (permission in permissions) PermissionTag(permission)
                             }
-                        }) { Text(stringResource(label)) }
+                        }
+                    }
+                    license?.let {
+                        // Flathub marks a closed app as `LicenseRef-proprietary=<its terms>`.
+                        val licenseName = if (it.startsWith("LicenseRef-proprietary")) stringResource(R.string.browse_license_proprietary) else it
+                        InfoRow(Icons.Outlined.Gavel, stringResource(R.string.browse_license_title)) {
+                            Text(licenseName, style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                }
+            }
+
+            // Links (opened in the browser).
+            val links = shown?.urls.orEmpty().mapNotNull { (kind, link) -> LINKS[kind]?.let { it to link } }.distinctBy { it.first }
+            if (links.isNotEmpty()) {
+                SettingsCard(Modifier.padding(horizontal = 16.dp), title = stringResource(R.string.browse_links)) {
+                    for ((kind, link) in links) {
+                        Row(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable {
+                                try {
+                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(link)).addCategory(Intent.CATEGORY_BROWSABLE))
+                                } catch (_: ActivityNotFoundException) {
+                                }
+                            }.padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        ) {
+                            Icon(kind.second, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            Text(stringResource(kind.first), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                            Icon(
+                                Icons.AutoMirrored.Outlined.OpenInNew, contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp),
+                            )
+                        }
                     }
                 }
             }
         }
-        bottomBar()
     }
     fullScreenshot?.let { start ->
         details?.screenshots?.takeIf { start in it.indices }?.let { shots -> ScreenshotViewer(shots, start) { fullScreenshot = null } }
+    }
+}
+
+/**
+ * App pages side by side in the browser's list order ([ids], as searched, filtered and sorted;
+ * null while it is prepared): swiped sideways to the next app (from the right) or the one before.
+ * A drag that starts up or down scrolls the page instead. [onSettled] gets the app swiped to and
+ * its place in [ids]. An app not in [ids] (opened from a link) has no neighbors. The top bar (Back,
+ * and the app's name once its header has scrolled away) stays put while pages slide.
+ */
+@Composable
+fun BrowseAppPager(
+    ids: List<String>?,
+    current: String,
+    onSettled: (id: String, index: Int) -> Unit,
+    onBack: () -> Unit,
+    bottomBar: @Composable () -> Unit,
+    modifier: Modifier = Modifier,
+    page: @Composable (id: String, onTitle: (String?) -> Unit) -> Unit,
+) {
+    val pages = remember(ids, current) { ids?.takeIf { current in it } ?: listOf(current) }
+    val pager = rememberPagerState(initialPage = pages.indexOf(current).coerceAtLeast(0)) { pages.size }
+    val shown by rememberUpdatedState(current)
+    // The list was prepared or changed (a filter) with the page open: keep the app shown.
+    LaunchedEffect(pages) {
+        val at = pages.indexOf(shown)
+        if (at >= 0 && at != pager.currentPage) pager.scrollToPage(at)
+    }
+    LaunchedEffect(pager, pages) {
+        snapshotFlow { pager.settledPage }.collect { at -> pages.getOrNull(at)?.takeIf { it != shown }?.let { onSettled(it, at) } }
+    }
+    // Each page's title, by app.
+    val titles = remember { mutableStateMapOf<String, String?>() }
+    Column(modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 16.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.settings_back)) }
+            Crossfade(pages.getOrNull(pager.currentPage)?.let { titles[it] }, label = "title") { title ->
+                if (title != null) Text(title, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 4.dp))
+            }
+        }
+        HorizontalPager(pager, Modifier.weight(1f), key = { pages[it] }, verticalAlignment = Alignment.Top) { at ->
+            val id = pages[at]
+            page(id) { titles[id] = it }
+        }
+        bottomBar()
     }
 }
 
@@ -386,6 +540,59 @@ private fun Retry(text: String, onRetry: () -> Unit) {
     TextButton(onClick = onRetry, contentPadding = PaddingValues(0.dp)) { Text(stringResource(R.string.install_link_retry)) }
 }
 
+/** A button's icon and label; [large] for the tall buttons beside the header in landscape. */
+@Composable
+private fun ButtonContent(icon: ImageVector, label: String, large: Boolean = false) {
+    Icon(icon, contentDescription = null, modifier = Modifier.size(if (large) 28.dp else 18.dp))
+    Spacer(Modifier.width(if (large) 12.dp else 8.dp))
+    Text(label, style = if (large) MaterialTheme.typography.titleLarge else LocalTextStyle.current)
+}
+
+/** Figures side by side, each over what it counts, lines between them. */
+@Composable
+private fun Stats(stats: List<Pair<String, String>>) {
+    if (stats.isEmpty()) return
+    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp).height(IntrinsicSize.Min)) {
+        stats.forEachIndexed { i, (value, label) ->
+            if (i > 0) VerticalDivider(Modifier.padding(vertical = 4.dp))
+            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(value, style = MaterialTheme.typography.titleMedium, maxLines = 1)
+                Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+            }
+        }
+    }
+}
+
+/** A row of the details card: an icon, what the row is, and [content] under that. */
+@Composable
+private fun InfoRow(icon: ImageVector, title: String, content: @Composable ColumnScope.() -> Unit) {
+    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 2.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            content()
+        }
+    }
+}
+
+/** What an app asks for, as a small tag with its icon. */
+@Composable
+private fun PermissionTag(permission: FlathubApp.Permission) {
+    Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.secondaryContainer) {
+        Row(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Icon(permissionIcon(permission), contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSecondaryContainer)
+            Text(stringResource(permissionName(permission)), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSecondaryContainer)
+        }
+    }
+}
+
+private fun permissionIcon(permission: FlathubApp.Permission) = when (permission) {
+    FlathubApp.Permission.NETWORK -> Icons.Outlined.Wifi
+    FlathubApp.Permission.SOUND -> Icons.AutoMirrored.Outlined.VolumeUp
+    FlathubApp.Permission.ALL_DEVICES -> Icons.Outlined.Usb
+    FlathubApp.Permission.FILES -> Icons.Outlined.Folder
+}
+
 private fun permissionName(permission: FlathubApp.Permission) = when (permission) {
     FlathubApp.Permission.NETWORK -> R.string.app_settings_network
     FlathubApp.Permission.SOUND -> R.string.app_settings_audio
@@ -395,14 +602,17 @@ private fun permissionName(permission: FlathubApp.Permission) = when (permission
 
 private val SCREENSHOT_HEIGHT = 240.dp
 
+/** The buttons' height beside the header in landscape: two icon buttons, one over the other. */
+private val LANDSCAPE_BUTTON_HEIGHT = 84.dp
+
 /** How far the page scrolls before the top bar shows the app's name: about the header's height. */
 private val HEADER_HEIGHT = 72.dp
 
-/** The AppStream link types the page offers, in this order. */
-private val LINK_LABELS = linkedMapOf(
-    "homepage" to R.string.browse_link_homepage,
-    "help" to R.string.browse_link_help,
-    "bugtracker" to R.string.browse_link_bugtracker,
-    "vcs-browser" to R.string.browse_link_source,
-    "donation" to R.string.browse_link_donation,
+/** The AppStream link types the page offers, in this order: label and icon. */
+private val LINKS = linkedMapOf(
+    "homepage" to (R.string.browse_link_homepage to Icons.Outlined.Public),
+    "help" to (R.string.browse_link_help to Icons.AutoMirrored.Outlined.HelpOutline),
+    "bugtracker" to (R.string.browse_link_bugtracker to Icons.Outlined.BugReport),
+    "vcs-browser" to (R.string.browse_link_source to Icons.Outlined.Code),
+    "donation" to (R.string.browse_link_donation to Icons.Outlined.VolunteerActivism),
 )

@@ -49,7 +49,13 @@ object StorageSizes {
      * the content it leads to (Flatpak's files are such links), each content once however many
      * links lead to it: Flatpak keeps one copy of identical files, and deployments share them.
      */
-    fun following(files: List<File>, l2sDir: File, stop: () -> Boolean = { false }): Long {
+    fun following(
+        files: List<File>,
+        l2sDir: File,
+        stop: () -> Boolean = { false },
+        /** Each content counted, with its bytes: once per call. */
+        onContent: (inode: Long, bytes: Long) -> Unit = { _, _ -> },
+    ): Long {
         val seen = HashSet<Long>()
         fun walk(entry: File): Long {
             val stat = lstat(entry) ?: return 0L
@@ -62,7 +68,10 @@ object StorageSizes {
                     val target = try { Os.readlink(entry.path) } catch (_: ErrnoException) { null }
                     if (target != null && L2s.inStore(target, l2sDir)) {
                         val content = try { Os.stat(entry.path) } catch (_: ErrnoException) { null }
-                        stat.st_blocks * 512 + if (content != null && seen.add(content.st_ino)) content.st_blocks * 512 else 0L
+                        stat.st_blocks * 512 + if (content != null && seen.add(content.st_ino)) {
+                            onContent(content.st_ino, content.st_blocks * 512)
+                            content.st_blocks * 512
+                        } else 0L
                     } else {
                         stat.st_blocks * 512
                     }
@@ -71,6 +80,19 @@ object StorageSizes {
             }
         }
         return files.sumOf(::walk)
+    }
+
+    /**
+     * [following] for each of [dirs] on its own (what each holds, contents it shares with others
+     * included), and their sum with each content counted once across all of them: Flatpak's
+     * runtimes share many identical files (one runtime built on another), and adding up their own
+     * sizes counted those again for each.
+     */
+    fun followingEach(dirs: List<File>, l2sDir: File, stop: () -> Boolean = { false }): Pair<List<Long>, Long> {
+        val all = HashSet<Long>()
+        var again = 0L
+        val each = dirs.map { dir -> following(listOf(dir), l2sDir, stop) { inode, bytes -> if (!all.add(inode)) again += bytes } }
+        return each to each.sum() - again
     }
 
     private fun lstat(file: File) = try {

@@ -29,6 +29,7 @@ import com.garathon.flatdroid.launcher.DesktopConfig
 import com.garathon.flatdroid.launcher.Electron
 import com.garathon.flatdroid.launcher.ElectronSwap
 import com.garathon.flatdroid.launcher.HostDirs
+import com.garathon.flatdroid.launcher.LdCache
 import com.garathon.flatdroid.launcher.LaunchOptions
 import com.garathon.flatdroid.launcher.LaunchPlan
 import com.garathon.flatdroid.launcher.LaunchPlanner
@@ -729,6 +730,8 @@ class FlatpakLauncher(private val context: Context) {
             runtimeCache = File(cache, RUNTIME_CACHE_DIR),
             runtimeDir = File(tmpBase, "run"),
             userId = Os.getuid(),
+            // Also under the app's cache: cleared with it, and only this app's own launches read it.
+            ldCache = File(cache, LD_CACHE_DIR),
         )
     }
 
@@ -775,6 +778,7 @@ class FlatpakLauncher(private val context: Context) {
         for ((host, guest) in plan.binds.extra) {
             if (guest in LaunchPlanner.RUNTIME_CACHE_DIRS) File(host).mkdirs()
         }
+        plan.ldCache?.let(::prepareLdCache)
         // Mount points for the further binds: in the root, or in the app's own directory they fall in.
         for ((host, guest) in plan.binds.extra) {
             if (guest == "/app" || guest.startsWith("/app/") || guest.startsWith("/usr/")) continue
@@ -783,6 +787,22 @@ class FlatpakLauncher(private val context: Context) {
             if (target.exists()) continue
             if (File(host).isDirectory) target.mkdirs() else target.apply { parentFile?.mkdirs() }.createNewFile()
         }
+    }
+
+    /**
+     * Keeps only [ld]'s directory under its base (older ones were for other commits). One to build
+     * gets the configuration and an empty cache file to bind at /etc/ld.so.cache, which `ldconfig`
+     * replaces. The app can write here, so links in the way are removed rather than followed.
+     */
+    private fun prepareLdCache(ld: LdCache) {
+        val base = ld.dir.parentFile!!
+        if (AndroidTarFs.isSymlink(base)) base.delete()
+        base.listFiles()?.filter { it.name != ld.dir.name }?.forEach { AndroidTarFs.deleteTree(it) }
+        if (!ld.generate) return
+        AndroidTarFs.deleteTree(ld.dir)
+        ld.dir.mkdirs()
+        ld.confFile.writeTextAtomically(ld.conf, durable = false)
+        ld.cache.createNewFile()
     }
 
     /**
@@ -981,6 +1001,7 @@ class FlatpakLauncher(private val context: Context) {
         const val MAX_ZONE_BYTES = 1L shl 16
         /** Hidden subdirectory of the app's cache holding the runtime-cache scratch overlays. */
         const val RUNTIME_CACHE_DIR = ".flatdroid-runtime"
+        const val LD_CACHE_DIR = ".flatdroid-ld"
     }
 }
 

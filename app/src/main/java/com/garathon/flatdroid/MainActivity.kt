@@ -70,7 +70,9 @@ import com.garathon.flatdroid.ui.FilesChangedDialog
 import com.garathon.flatdroid.ui.home.HomeScreen
 import com.garathon.flatdroid.ui.home.InstallLinkDialog
 import com.garathon.flatdroid.ui.home.StatusBar
+import com.garathon.flatdroid.ui.browse.BrowseAppPager
 import com.garathon.flatdroid.ui.browse.BrowseAppScreen
+import com.garathon.flatdroid.ui.browse.rememberBrowseOrder
 import com.garathon.flatdroid.ui.browse.BrowseScreen
 import com.garathon.flatdroid.ui.browse.InstallState
 import com.garathon.flatdroid.ui.browse.rememberBrowseListState
@@ -339,6 +341,13 @@ class MainActivity : ComponentActivity() {
             )
         }
         val installedIds = remember(apps) { apps?.map { it.id }?.toSet() }
+        // As the catalog names them (`<ID>/<branch>`), for the browser's filter; read again when the apps change.
+        val installedRuntimes by produceState(emptySet<String>(), apps) {
+            value = withContext(Dispatchers.IO) {
+                val env = AlpineEnvironment.get(this@MainActivity)
+                runCatching { FlatpakInstallation(env.flatpakDir, env.arch).runtimeRefs().mapTo(HashSet()) { "${it.name}/${it.branch}" } }.getOrDefault(emptySet())
+            }
+        }
         val installingIds = (task.running as? FlatpakTask.Install)?.appIds.orEmpty()
         val bottomBar = @Composable {
             StatusBar(
@@ -346,6 +355,7 @@ class MainActivity : ComponentActivity() {
                 onCancelTask = { FlatpakTaskService.cancel(this@MainActivity) }, onDismissTask = FlatpakTasks::dismiss, onTaskLog = { log = LogKind.TASK },
                 onDismissSession = SessionController::dismissMessage, onSessionLog = { log = LogKind.SESSION }, onClearQueue = FlatpakTasks::clearQueue,
                 onUnqueue = FlatpakTasks::unqueue,
+                onUnqueueApp = FlatpakTasks::unqueueApp,
                 queuedName = { id -> apps?.firstOrNull { it.id == id }?.name ?: catalogIndex?.app(id)?.name ?: id },
             )
         }
@@ -432,7 +442,7 @@ class MainActivity : ComponentActivity() {
                             onAppStorage = { id, action -> storage.storageAction(id, action) },
                             onOpenHome = storage::openHomeInFiles,
                             onUninstall = { id, deleteData, keepRuntimes ->
-                                if (FlatpakTaskService.run(this@MainActivity, FlatpakTask.Uninstall(id, deleteData, keepRuntimes))) home.uninstallStarted(id)
+                                FlatpakTaskService.run(this@MainActivity, FlatpakTask.Uninstall(id, deleteData, keepRuntimes))
                             },
                             onRemoveRuntime = { id ->
                                 FlatpakTaskService.run(this@MainActivity, FlatpakTask.RemoveRuntime(id))
@@ -510,7 +520,7 @@ class MainActivity : ComponentActivity() {
                         onRequestMicrophone = ::requestMicrophone,
                         onRequestCamera = ::requestCamera,
                         onUninstall = { deleteData, keepRuntimes ->
-                            if (FlatpakTaskService.run(this@MainActivity, FlatpakTask.Uninstall(app.id, deleteData, keepRuntimes))) home.uninstallStarted(app.id)
+                            FlatpakTaskService.run(this@MainActivity, FlatpakTask.Uninstall(app.id, deleteData, keepRuntimes))
                             go(Screen.Home)
                         },
                         sharedHome = storage.sharedHomeDisplay,
@@ -544,6 +554,7 @@ class MainActivity : ComponentActivity() {
                     state = catalog,
                     listState = browseListState,
                     installed = installedIds.orEmpty(),
+                    installedRuntimes = installedRuntimes,
                     queued = task.queuedInstalls,
                     installing = installingIds,
                     // A refresh waits in the queue like any task; off while one runs or waits.
@@ -559,41 +570,52 @@ class MainActivity : ComponentActivity() {
             }
             is Screen.BrowseApp -> {
                 LaunchedEffect(Unit) { Catalog.open(this@MainActivity) }
-                val id = target.appId
-                val entry = catalogIndex?.app(id)
-                BrowseAppScreen(
-                    appId = id,
-                    app = entry,
-                    index = catalogIndex,
-                    catalogLoading = catalog is CatalogState.Loading || catalog is CatalogState.Idle,
-                    arch = remember { AlpineEnvironment.get(this@MainActivity).arch },
-                    installState = when {
-                        id in installingIds -> InstallState.INSTALLING
-                        id in task.queuedInstalls -> InstallState.QUEUED
-                        installedIds == null -> InstallState.UNKNOWN
-                        id in installedIds -> InstallState.INSTALLED
-                        else -> InstallState.NOT_INSTALLED
-                    },
-                    // The setting as loaded for this screen: not read from disk again while the page composes.
-                    mobileDataBlocked = { mobileDataPolicy(this@MainActivity, saved.mobileData) == MobileData.NEVER },
-                    mobileData = { mobileDataPolicy(this@MainActivity, saved.mobileData) },
-                    runtimeInstalled = { ref ->
-                        // Flathub names its own architecture (the app is the same on ours): look for this phone's.
-                        val env = AlpineEnvironment.get(this@MainActivity)
-                        FlatpakInstallation(env.flatpakDir, env.arch).runtime(ref.copy(arch = env.arch)) != null
-                    },
-                    onInstall = { startDownload(FlatpakTask.Install(listOf(id))) },
-                    onUnqueue = { FlatpakTasks.unqueueInstall(id) },
-                    canOpen = !sessionBusy && !taskRunning && (!terminalRunning || terminalWithApps),
-                    onOpen = { launch(id) },
-                    onAppSettings = { go(Screen.AppSettings(id, fromBrowser = true)) },
-                    onUninstall = { deleteData, keepRuntimes ->
-                        if (FlatpakTaskService.run(this@MainActivity, FlatpakTask.Uninstall(id, deleteData, keepRuntimes))) home.uninstallStarted(id)
+                BrowseAppPager(
+                    ids = rememberBrowseOrder(catalog, browseListState, installedRuntimes),
+                    current = target.appId,
+                    // Back to the list shows the app swiped to.
+                    onSettled = { id, index ->
+                        browseListState.list.requestScrollToItem(index)
+                        go(Screen.BrowseApp(id))
                     },
                     onBack = { go(Screen.Browse) },
                     bottomBar = bottomBar,
                     modifier = modifier,
-                )
+                ) { id, onTitle ->
+                    val entry = catalogIndex?.app(id)
+                    BrowseAppScreen(
+                        appId = id,
+                        app = entry,
+                        index = catalogIndex,
+                        catalogLoading = catalog is CatalogState.Loading || catalog is CatalogState.Idle,
+                        arch = remember { AlpineEnvironment.get(this@MainActivity).arch },
+                        installState = when {
+                            id in installingIds -> InstallState.INSTALLING
+                            id in task.queuedInstalls -> InstallState.QUEUED
+                            installedIds == null -> InstallState.UNKNOWN
+                            id in installedIds -> InstallState.INSTALLED
+                            else -> InstallState.NOT_INSTALLED
+                        },
+                        // The setting as loaded for this screen: not read from disk again while the page composes.
+                        mobileDataBlocked = { mobileDataPolicy(this@MainActivity, saved.mobileData) == MobileData.NEVER },
+                        mobileData = { mobileDataPolicy(this@MainActivity, saved.mobileData) },
+                        runtimeInstalled = { ref ->
+                            // Flathub names its own architecture (the app is the same on ours): look for this phone's.
+                            val env = AlpineEnvironment.get(this@MainActivity)
+                            FlatpakInstallation(env.flatpakDir, env.arch).runtime(ref.copy(arch = env.arch)) != null
+                        },
+                        onInstall = { startDownload(FlatpakTask.Install(listOf(id))) },
+                        onUnqueue = { FlatpakTasks.unqueueInstall(id) },
+                        // The app already running opens its viewer again, as Home's running row does.
+                        canOpen = upSession?.appId == id || (!sessionBusy && !taskRunning && (!terminalRunning || terminalWithApps)),
+                        onOpen = { upSession?.takeIf { it.appId == id }?.let(::openViewer) ?: launch(id) },
+                        onAppSettings = { go(Screen.AppSettings(id, fromBrowser = true)) },
+                        onUninstall = { deleteData, keepRuntimes ->
+                            FlatpakTaskService.run(this@MainActivity, FlatpakTask.Uninstall(id, deleteData, keepRuntimes))
+                        },
+                        onTitle = onTitle,
+                    )
+                }
             }
             Screen.Home -> {
                 (session.state as? SessionState.ElectronOffer)?.let { offer ->

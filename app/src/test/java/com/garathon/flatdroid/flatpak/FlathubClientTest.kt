@@ -79,12 +79,12 @@ class FlathubClientTest {
 
     @Test
     fun collectionsKeepTheOrderValidIdsAndInstalls() {
-        val answer = """{"hits":[{"app_id":"org.vinegarhq.Sober","installs_last_month":240647},{"app_id":"bad id"},{"name":"no id"},{"app_id":"org.mozilla.firefox"},{"app_id":"org.vinegarhq.Sober","installs_last_month":1}],"totalHits":3}"""
+        val answer = """{"hits":[{"app_id":"org.vinegarhq.Sober","installs_last_month":240647,"added_at":1743316841,"updated_at":1793923967},{"app_id":"bad id"},{"name":"no id"},{"app_id":"org.mozilla.firefox"},{"app_id":"org.vinegarhq.Sober","installs_last_month":1}],"totalHits":3,"totalPages":7}"""
         assertEquals(
-            listOf(CollectionApp("org.vinegarhq.Sober", 240647), CollectionApp("org.mozilla.firefox", null)),
+            CollectionPage(listOf(CollectionApp("org.vinegarhq.Sober", 240647, 1743316841, 1793923967), CollectionApp("org.mozilla.firefox", null)), 7),
             FlathubClient.parseCollection(answer),
         )
-        assertEquals(emptyList<CollectionApp>(), FlathubClient.parseCollection("{}"))
+        assertEquals(CollectionPage(emptyList(), 0), FlathubClient.parseCollection("{}"))
     }
 
     @Test

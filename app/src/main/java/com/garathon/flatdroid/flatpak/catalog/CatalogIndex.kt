@@ -12,7 +12,8 @@ import java.io.RandomAccessFile
 /**
  * The catalog as Flatdroid keeps it in cache: [LIST] holds every app's list data (read whole when
  * the browser opens), [DETAILS] each app's page data, read one app at a time at the offset the list
- * gives. Both start with [FORMAT] and the catalog [version] they were made from.
+ * gives, and [SEARCH] each app's description as plain lowercase text, in the list's order, for the
+ * browser's search ([descriptions]). All start with [FORMAT] and the catalog [version] they were made from.
  */
 class CatalogIndex private constructor(
     val version: String,
@@ -46,30 +47,62 @@ class CatalogIndex private constructor(
         }
     }
 
+    /**
+     * Each app's description as lowercase text, in [apps]' order; null when the file can't be read
+     * (the search then leaves descriptions out).
+     */
+    fun descriptions(): List<String>? = try {
+        DataInputStream(BufferedInputStream(File(detailsFile.parentFile, SEARCH).inputStream(), 64 * 1024)).use { input ->
+            if (input.readInt() != FORMAT || input.readUTF() != version) return null
+            List(input.readInt().also { if (it != apps.size) return null }) { readLong(input) }
+        }
+    } catch (_: IOException) {
+        null
+    }
+
     /** Whether its files are still there (Android's Clear cache removes them under a running Flatdroid). */
     fun exists() = detailsFile.isFile && File(detailsFile.parentFile, LIST).isFile
 
     companion object {
         const val LIST = "list"
         const val DETAILS = "details"
-        private const val FORMAT = 1
+        const val SEARCH = "search"
+        /** 3: each app once (format 1 could hold an app twice, once per branch), its runtime, and [SEARCH]. */
+        private const val FORMAT = 3
+        private const val STABLE = "stable"
 
         /**
          * Writes the entries [entries] produces (passed one at a time to its callback) into [dir],
-         * through a folder beside it, so a half-written index never replaces a whole one.
+         * through a folder beside it, so a half-written index never replaces a whole one. An app in
+         * the catalog for several branches is kept once: its `stable` one, else the first.
          */
         fun write(dir: File, version: String, entries: ((CatalogEntry) -> Unit) -> Unit): CatalogIndex {
             val temp = File(dir.parentFile, dir.name + ".new").apply { deleteRecursively(); mkdirs() }
             val apps = mutableListOf<CatalogApp>()
             val offsets = mutableListOf<Long>()
+            val descriptions = mutableListOf<String>()
+            val kept = HashMap<String, Int>()
             // DataOutputStream counts what it wrote: that is each app's offset.
             DataOutputStream(BufferedOutputStream(File(temp, DETAILS).outputStream())).use { details ->
                 details.writeInt(FORMAT)
                 details.writeUTF(version)
                 entries { entry ->
-                    offsets += details.size().toLong()
+                    val at = kept[entry.app.id]
+                    if (at != null && entry.branch != STABLE) return@entries
+                    val offset = details.size().toLong()
                     writeDetails(details, entry.details)
-                    apps += entry.app
+                    val description = searchText(entry.details.description)
+                    if (at != null) {
+                        // A stable one after another branch's: it takes that one's place (the other's page data stays unread).
+                        apps[at] = entry.app
+                        offsets[at] = offset
+                        descriptions[at] = description
+                    } else {
+                        kept[entry.app.id] = apps.size
+                        apps += entry.app
+                        offsets += offset
+                        descriptions += description
+                    }
                 }
             }
             DataOutputStream(BufferedOutputStream(File(temp, LIST).outputStream())).use { out ->
@@ -77,6 +110,12 @@ class CatalogIndex private constructor(
                 out.writeUTF(version)
                 out.writeInt(apps.size)
                 apps.forEachIndexed { i, app -> writeApp(out, app); out.writeLong(offsets[i]) }
+            }
+            DataOutputStream(BufferedOutputStream(File(temp, SEARCH).outputStream())).use { out ->
+                out.writeInt(FORMAT)
+                out.writeUTF(version)
+                out.writeInt(descriptions.size)
+                descriptions.forEach { writeLong(out, it) }
             }
             dir.deleteRecursively()
             if (!temp.renameTo(dir)) throw IOException("Can't move the catalog index into place")
@@ -117,6 +156,14 @@ class CatalogIndex private constructor(
             }
         }
 
+        /** A description's paragraphs and list items as one lowercase line. */
+        private fun searchText(blocks: List<TextBlock>): String = blocks.joinToString(" ") { block ->
+            when (block) {
+                is TextBlock.Paragraph -> block.text
+                is TextBlock.Items -> block.items.joinToString(" ")
+            }
+        }.lowercase()
+
         private fun writeApp(out: DataOutputStream, app: CatalogApp) {
             out.writeUTF(app.id)
             writeLong(out, app.name)
@@ -126,7 +173,7 @@ class CatalogIndex private constructor(
             writeList(out, app.categories)
             writeList(out, app.keywords)
             writeOptional(out, app.icon)
-            out.writeBoolean(app.touch)
+            writeOptional(out, app.runtime)
         }
 
         private fun readApp(input: DataInputStream) = CatalogApp(
@@ -138,7 +185,7 @@ class CatalogIndex private constructor(
             categories = readList(input),
             keywords = readList(input),
             icon = readOptional(input),
-            touch = input.readBoolean(),
+            runtime = readOptional(input),
         )
 
         private fun writeDetails(out: DataOutputStream, details: CatalogDetails) {

@@ -127,8 +127,8 @@ class TileFrames(private val size: Int = SIZE) : FrameDrawer {
         }
     }
 
-    override fun hashRows(fb: Framebuffer, out: IntArray): Boolean {
-        ScrollMeter.hashRows(fb.pixels, fb.stride, fb.width, fb.height, out)
+    override fun profile(fb: Framebuffer, out: IntArray, columns: Boolean): Boolean {
+        ScrollMeter.profile(fb.pixels, fb.stride, fb.width, fb.height, out, columns)
         return true
     }
 

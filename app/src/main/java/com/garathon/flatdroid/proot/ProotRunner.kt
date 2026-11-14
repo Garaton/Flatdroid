@@ -1,5 +1,6 @@
 package com.garathon.flatdroid.proot
 
+import android.os.Build
 import com.garathon.flatdroid.util.forEachLineLimited
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
@@ -25,7 +26,7 @@ class ProotProcess internal constructor(
     private val process: Process,
     private val signals: Signals,
     private val reader: Thread,
-    private val writer: Thread,
+    private val writer: Thread?,
 ) {
     // Process.isAlive needs API 26; minSdk is 24.
     val isAlive: Boolean get() = !ProcessStopper.waitForExit(process, 0)
@@ -37,7 +38,7 @@ class ProotProcess internal constructor(
     fun waitFor(): Int {
         val code = process.waitFor()
         reader.join(TimeUnit.SECONDS.toMillis(5))
-        writer.join(TimeUnit.SECONDS.toMillis(1))
+        writer?.join(TimeUnit.SECONDS.toMillis(1))
         return code
     }
 
@@ -74,7 +75,11 @@ object ProotRunner {
     /** Longer output lines are handed on in pieces of this size. */
     const val MAX_LINE_CHARS = 8192
 
-    /** Starts [invocation]; [stdin] is written and closed (empty when null). */
+    /**
+     * Starts [invocation]; [stdin] is written and closed. Without [stdin] the input is /dev/null, as
+     * a desktop starts apps: some read a pipe on their input as data to work on (a QR scanner
+     * decoding an image from it, say). Android 7 can't redirect, so there it is an empty pipe (verify).
+     */
     fun start(
         invocation: ProotInvocation,
         workDir: File,
@@ -89,8 +94,10 @@ object ProotRunner {
             clear()
             putAll(invocation.env)
         }
+        val devNull = stdin == null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+        if (devNull) builder.redirectInput(File("/dev/null"))
         val process = builder.start()
-        val writer = thread(name = "proot-input") {
+        val writer = if (devNull) null else thread(name = "proot-input") {
             try {
                 process.outputStream.use { if (stdin != null) it.write(stdin) }
             } catch (_: java.io.IOException) {
