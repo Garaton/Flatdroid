@@ -1,8 +1,10 @@
 package com.garathon.flatdroid.launcher
 
 import com.garathon.flatdroid.flatpak.FlatpakInstallation
-import com.garathon.flatdroid.setup.TarFs
-import com.garathon.flatdroid.setup.deleteTree
+import com.garathon.flatdroid.launcher.electron.Electron
+import com.garathon.flatdroid.launcher.electron.ElectronSwap
+import com.garathon.flatdroid.setup.rootfs.TarFs
+import com.garathon.flatdroid.setup.rootfs.deleteTree
 import java.io.File
 
 /**

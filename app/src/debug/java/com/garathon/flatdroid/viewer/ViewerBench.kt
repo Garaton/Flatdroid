@@ -1,6 +1,8 @@
 package com.garathon.flatdroid.viewer
 
-import com.garathon.flatdroid.util.DebugLog
+import com.garathon.flatdroid.util.debug.DebugLog
+import com.garathon.flatdroid.viewer.input.Keysyms
+import com.garathon.flatdroid.viewer.protocol.RfbClient
 import java.util.Locale
 import java.util.concurrent.ConcurrentLinkedQueue
 import kotlin.concurrent.thread

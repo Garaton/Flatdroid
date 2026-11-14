@@ -25,7 +25,7 @@ android {
         minSdk = 24
         targetSdk = 35
         versionCode = 2
-        versionName = "0.7"
+        versionName = "0.8.0"
 
         buildConfigField("String", "ALPINE_BRANCH", "\"${alpine.getProperty("branch")}\"")
         buildConfigField("String", "ALPINE_VERSION", "\"${alpine.getProperty("version")}\"")
@@ -36,6 +36,10 @@ android {
         }
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
     }
 
     // One APK per ABI plus a universal one; each carries its own proot.
@@ -204,6 +208,9 @@ dependencies {
     implementation(libs.androidx.compose.material.icons.core)
     // Icons the core set lacks (import). Large; only the icons used remain once release builds shrink code.
     implementation(libs.androidx.compose.material.icons.extended)
+    // Screenshots in the Flathub browser: Coil's core and Compose parts only (no network module; Flatdroid's own fetcher).
+    implementation(libs.coil.core)
+    implementation(libs.coil.compose.core)
     // App icons that Flatpaks export only as SVG.
     implementation(libs.androidsvg)
     implementation(libs.androidx.compose.ui)
@@ -213,6 +220,10 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.ktx)
     testImplementation(libs.junit)
+    // Android's own org.json is a stub in unit tests; this is the same API, for the tests that read Flathub's answers.
+    testImplementation(libs.org.json)
+    // The XmlPullParser Android itself uses, for the tests that read AppStream (Android's is a stub in unit tests).
+    testImplementation(libs.kxml2)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.espresso.core)

@@ -8,10 +8,11 @@ VLC_PLUGIN_PATH=/app/lib/vlc/plugins
 VLC_DATA_PATH=/app/share/vlc
 ```
 
-# Firefox (org.mozilla.firefox)
+# Firefox based browsers (org.mozilla.firefox, one.ablaze.floorp, etc)
 ```
 # Needed for normal browsing to work
 MOZ_DISABLE_CONTENT_SANDBOX=1
+
 # For videos to work
 MOZ_DISABLE_RDD_SANDBOX=1
 MOZ_DISABLE_UTILITY_SANDBOX=1

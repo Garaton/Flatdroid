@@ -7,7 +7,7 @@ import android.graphics.ImageFormat
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import androidx.core.content.ContextCompat
-import com.garathon.flatdroid.util.DebugLog
+import com.garathon.flatdroid.util.debug.DebugLog
 
 /** Android's cameras, as Flatdroid offers them to apps. */
 object AndroidCameras {

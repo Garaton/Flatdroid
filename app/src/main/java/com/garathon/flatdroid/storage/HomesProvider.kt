@@ -13,10 +13,10 @@ import android.provider.DocumentsProvider
 import android.system.Os
 import android.webkit.MimeTypeMap
 import com.garathon.flatdroid.R
-import com.garathon.flatdroid.flatpak.AppData
 import com.garathon.flatdroid.flatpak.InstalledApps
-import com.garathon.flatdroid.setup.AndroidTarFs
-import com.garathon.flatdroid.setup.deleteTree
+import com.garathon.flatdroid.setup.rootfs.AndroidTarFs
+import com.garathon.flatdroid.setup.rootfs.deleteTree
+import com.garathon.flatdroid.storage.sizes.SavedSizes
 import java.io.File
 import java.io.FileNotFoundException
 

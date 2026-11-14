@@ -25,8 +25,22 @@ import android.widget.OverScroller
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import com.garathon.flatdroid.settings.Resolution
-import com.garathon.flatdroid.util.DebugLog
-import com.garathon.flatdroid.util.DebugMeter
+import com.garathon.flatdroid.util.debug.DebugLog
+import com.garathon.flatdroid.util.debug.DebugMeter
+import com.garathon.flatdroid.viewer.frames.FrameDrawer
+import com.garathon.flatdroid.viewer.input.KeyInput
+import com.garathon.flatdroid.viewer.input.Keysyms
+import com.garathon.flatdroid.viewer.input.MAX_TYPED
+import com.garathon.flatdroid.viewer.input.PointerOutput
+import com.garathon.flatdroid.viewer.input.ScrollMeter
+import com.garathon.flatdroid.viewer.input.ScrollSpeed
+import com.garathon.flatdroid.viewer.input.TouchGestures
+import com.garathon.flatdroid.viewer.input.ViewerKeys
+import com.garathon.flatdroid.viewer.protocol.Rfb
+import com.garathon.flatdroid.viewer.protocol.RfbClient
+import kotlin.math.abs
+import kotlin.math.ceil
+import kotlin.math.floor
 import kotlin.math.min
 import kotlin.math.roundToInt
 
@@ -103,9 +117,15 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
     private var beforeCover: Placement? = null
     private var placing: ValueAnimator? = null
 
+    /** The user panned or zoomed: while the keyboard is up, the frame no longer goes back when it closes. */
+    private fun userPlaced() {
+        if (coverHeight > 0) beforeCover = null
+    }
+
     /**
      * The keyboard and the extra keys cover [px] at the bottom of the view. The moment they start
-     * closing all of the view counts again; once closed, the frame goes back to how it lay.
+     * closing all of the view counts again; once closed, the frame goes back to how it lay, unless
+     * the user moved or zoomed it meanwhile ([userPlaced]): then it stays where they put it.
      */
     fun setCovered(px: Int) {
         val value = px.coerceAtLeast(0)
@@ -166,24 +186,23 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
     private val copyMeter = DebugMeter("Viewer", "frames", listOf("scroll", "copy"))
 
     private val config = ViewConfiguration.get(context)
-    private val gestures = TouchGestures(this, config.scaledTouchSlop.toFloat(), ScrollMeter.DEFAULT_NOTCH)
+    private val gestures = TouchGestures(this, config.scaledTouchSlop.toFloat(), ViewerConnection.WHEEL_NOTCH)
 
     /** The connection's client, from the last frame: a scroll measurement reads its framebuffer. */
     private var client: RfbClient? = null
-    private val scrollMeter = ScrollMeter()
-    /** A scroll is being measured until the content settles, [SCROLL_SETTLE_MS] after the last notch. */
-    private var measuring = false
-    private var measureUntil = 0L
-    /** The row hashes of the frame being measured ([ScrollMeter.hashRows]). */
-    private var rowHashes = IntArray(0)
     /**
-     * Until a notch is measured in the session, a drag sends one notch and holds the rest back
-     * until the content has stopped moving ([PROBE_QUIET_MS], at most [PROBE_MAX_MS]), then
-     * catches up at the measured distance. At most [MAX_PROBES] times a drag.
+     * While an app's scroll speed down or across is still being learnt
+     * ([ViewerConnection.measuringScroll]), a drag is measured that way ([Measure]). The drag
+     * itself is never held back for it, and frames in between aren't read.
      */
-    private var probing = false
-    private var probesThisDrag = 0
-    private val endProbe = Runnable { finishProbe() }
+    private val measureDown = Measure(across = false)
+    private val measureAcross = Measure(across = true)
+    /** When the last frame came, while measuring. */
+    private var lastFrameAt = 0L
+    private val measured = Runnable {
+        measureDown.finish()
+        measureAcross.finish()
+    }
     private val hold = Runnable { gestures.holdRecognised() }
 
     /** A drag let go with speed goes on, slowing down as Android's lists do. */
@@ -195,7 +214,7 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
         override fun run() {
             if (!flinger.computeScrollOffset()) return
             gestures.flingTo(flingFromX + flinger.currX, flingFromY + flinger.currY)
-            if (!flinger.isFinished) postOnAnimation(this)
+            if (!flinger.isFinished) postOnAnimation(this) else endStepScroll()
         }
     }
     /** Two fingers let go at speed: the frame goes on moving, slowing down. */
@@ -247,6 +266,7 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
 
         override fun onScale(detector: ScaleGestureDetector): Boolean {
             val old = scale()
+            userPlaced()
             zoom = (zoom * detector.scaleFactor).coerceIn(minZoom(), MAX_ZOOM)
             val ratio = scale() / old
             // The point under the fingers stays under them.
@@ -281,7 +301,7 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
         var copied: Boolean
         synchronized(client.frameLock) {
             val fb = client.framebuffer
-            if (measuring) measureFrame(fb, frames)
+            if (measureDown.measuring || measureAcross.measuring) lastFrameAt = SystemClock.uptimeMillis()
             copyMeter.step(0)
             if (fb.width != frameWidth || fb.height != frameHeight) {
                 moved = false
@@ -330,65 +350,93 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
         frames?.show(destination)
     }
 
-    /** Starts measuring how far a notch scrolls the content, from the frame as it is now. */
-    private fun startMeasuring() {
-        if (measuring && SystemClock.uptimeMillis() > measureUntil) finishMeasuring()
-        if (measuring) return
-        val client = client ?: return
-        synchronized(client.frameLock) {
-            val fb = client.framebuffer
-            if (fb.width != frameWidth || fb.height != frameHeight) return
-            val size = fb.height * ScrollMeter.BANDS
-            if (rowHashes.size != size) rowHashes = IntArray(size)
-            if (frames?.hashRows(fb, rowHashes) != true) return
-            scrollMeter.start(rowHashes, fb.height)
-        }
-        measuring = true
-    }
+    /**
+     * A drag's scroll one way ([across] or down), measured: the frame before its first notch that
+     * way against the frame once the content has settled, [SCROLL_SETTLE_MS] after the last notch
+     * ([ScrollMeter], of rows down, of columns across).
+     */
+    private inner class Measure(private val across: Boolean) {
+        var measuring = false
+            private set
+        private var notches = 0
+        private var lastNotchAt = 0L
+        private var lines = 0
+        private var before = IntArray(0)
+        private var after = IntArray(0)
 
-    /** A new frame while measuring (under the frame lock): how far the content moved since the last. */
-    private fun measureFrame(fb: Framebuffer, frames: FrameDrawer) {
-        if (fb.width != frameWidth || fb.height * ScrollMeter.BANDS != rowHashes.size) {
-            measuring = false // resized meanwhile
-            scrollMeter.finish()
-            return
+        /** [count] notches sent this way (signed): the first starts measuring, from the frame as it is now. */
+        fun sent(count: Int) {
+            if (count == 0 || !(measuring || connection.measuringScroll(across))) return
+            if (!measuring) start()
+            if (!measuring) return
+            notches += count
+            lastNotchAt = SystemClock.uptimeMillis()
+            removeCallbacks(measured)
+            postDelayed(measured, SCROLL_SETTLE_MS)
         }
-        if (!frames.hashRows(fb, rowHashes)) return // the next update is being read: measured from the next frame
-        val moved = scrollMeter.shift(rowHashes)
-        scrollMeter.movedBy(moved)
-        if (probing && moved != 0) {
-            removeCallbacks(endProbe)
-            postDelayed(endProbe, PROBE_QUIET_MS)
+
+        private fun start() {
+            val client = client ?: return
+            synchronized(client.frameLock) {
+                val fb = client.framebuffer
+                if (fb.width != frameWidth || fb.height != frameHeight) return
+                val count = if (across) fb.width else fb.height
+                if (before.size != count * ScrollMeter.BANDS) {
+                    before = IntArray(count * ScrollMeter.BANDS)
+                    after = IntArray(count * ScrollMeter.BANDS)
+                }
+                if (frames?.profile(fb, before, across) != true) return
+                lines = count
+            }
+            notches = 0
+            if (!measureDown.measuring && !measureAcross.measuring) lastFrameAt = SystemClock.uptimeMillis()
+            measuring = true
         }
-        if (SystemClock.uptimeMillis() > measureUntil) finishMeasuring()
-    }
 
-    private fun finishMeasuring() {
-        measuring = false
-        if (probing) finishProbe()
-        scrollMeter.finish()?.let(::useNotch)
-    }
-
-    private fun finishProbe() {
-        removeCallbacks(endProbe)
-        probing = false
-        val notch = scrollMeter.estimate(minNotches = 1)
-        if (notch != null) {
-            useNotch(notch)
-        } else {
-            // Nothing recognisable moved (an app can redraw more than the scroll the first time,
-            // or there's nothing left to scroll): measured afresh from the next notch on.
+        /**
+         * The content has settled after a measured drag: how far it moved over the notches sent
+         * adjusts the app's speed. A drag that couldn't scroll (the end of the page, nothing
+         * scrollable there, a blank page), or scrolled further than a frame can show, teaches nothing.
+         */
+        fun finish() {
+            if (!measuring) return
+            val client = client ?: return
+            val read = synchronized(client.frameLock) {
+                val fb = client.framebuffer
+                if ((if (across) fb.width else fb.height) != lines || fb.width != frameWidth || fb.height != frameHeight) null else frames?.profile(fb, after, across)
+            }
+            if (read == false) return run { postDelayed(measured, PROFILE_RETRY_MS) } // an update is being read
             measuring = false
-            scrollMeter.finish()
+            val count = abs(notches)
+            val way = if (across) "across" else "down"
+            val skipped = when {
+                read == null -> "the frame was resized"
+                count < ScrollMeter.MIN_NOTCHES -> null
+                // Notches went on after the frames had stopped: the content had reached its end.
+                lastNotchAt - lastFrameAt > EDGE_MS -> "the content stopped before the notches"
+                !ScrollMeter.changed(before, after, lines) -> "nothing moved"
+                ScrollMeter.blank(before, after, lines) -> "nothing to follow (a blank page)"
+                else -> ""
+            }
+            if (skipped != "") return run { skipped?.let { DebugLog.i("Viewer: scroll $way not measured: $it") } }
+            val typical = connection.typicalUnit
+            val min = ceil(count * typical / ScrollSpeed.PLAUSIBLE).toInt()
+            val max = floor(count * typical * ScrollSpeed.PLAUSIBLE).toInt()
+            if (min > lines * ScrollMeter.MAX_MOVE) return DebugLog.i("Viewer: scroll $way not measured: moved too far to compare")
+            val t0 = System.nanoTime()
+            val moved = ScrollMeter.shift(before, after, lines, notches > 0, min, max)
+            val tookMs = (System.nanoTime() - t0) / 1_000_000
+            val unit = moved?.let { abs(it).toFloat() / count }
+            val result = connection.scrollMeasured(across, unit)
+            DebugLog.i("Viewer: scroll $way of $count units measured ${unit?.let { "%.1f px a unit".format(java.util.Locale.ROOT, it) } ?: "nothing recognisable"} in $tookMs ms: $result")
+            setScrollSteps()
         }
-        gestures.resume()
     }
 
-    private fun useNotch(notch: Float) {
-        DebugLog.i("Viewer: a wheel notch scrolls %.1f px".format(java.util.Locale.ROOT, notch))
-        ViewerConnection.scrollNotch = notch
-        ViewerConnection.scrollNotchMeasured = true
-        gestures.scrollStep = notch * scale()
+    /** The finger travel per scroll unit, down and across, at the current zoom: the content follows the finger. */
+    private fun setScrollSteps() {
+        gestures.scrollStep = connection.scrollUnit(across = false) * scale()
+        gestures.scrollStepAcross = connection.scrollUnit(across = true) * scale()
     }
 
     /** The part of the framebuffer on screen now, above the keyboard and the extra keys, into [visible]. */
@@ -528,6 +576,7 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
     private fun pan(event: MotionEvent) {
         val (x, y) = midpoint(event, -1)
         moved = true
+        userPlaced()
         offsetX += x - panX
         offsetY += y - panY
         panX = x; panY = y
@@ -557,15 +606,15 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 if (!hasFocus()) requestFocus()
-                // A touch stops a fling, as in Android's lists.
+                // A touch stops a fling, as in Android's lists; a scroll in steps goes on without a stop.
                 stopFling()
+                removeCallbacks(stepScrollStop)
                 stopPanFling()
                 stopPlacing()
                 (velocity ?: VelocityTracker.obtain().also { velocity = it }).clear()
                 velocity?.addMovement(event)
                 // A notch's worth of the framebuffer, at the current zoom: the content follows the finger.
-                gestures.scrollStep = ViewerConnection.scrollNotch * scale()
-                probesThisDrag = 0
+                setScrollSteps()
                 gestures.down(event.x, event.y)
                 postDelayed(hold, ViewConfiguration.getLongPressTimeout().toLong())
             }
@@ -605,6 +654,8 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
                 val wasScrolling = gestures.scrolling && !twoFingers
                 gestures.up(event.x, event.y)
                 if (wasScrolling) fling(event)
+                // In steps, the app is told when scrolling stops (a fling tells at its end).
+                if (wasScrolling && flinger.isFinished) endStepScroll()
                 endTwoFingers()
                 if (threeFingerTap && event.eventTime - threeFingerTime < THREE_FINGER_TAP_MS) onThreeFingerTap?.invoke()
                 threeFingerTap = false
@@ -635,7 +686,23 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
         postOnAnimation(flingStep)
     }
 
+    /**
+     * A scroll in steps ended: the app is told it stopped only [STEP_STOP_DELAY_MS] later. Told at
+     * once, toolkits that scroll on by themselves after a touchpad lifts (GTK 4) would glide on
+     * from the last steps' speed, past where the finger left the content. A new touch meanwhile
+     * takes the stop back.
+     */
+    private fun endStepScroll() {
+        if (!connection.scrollsInSteps) return
+        removeCallbacks(stepScrollStop)
+        postDelayed(stepScrollStop, STEP_STOP_DELAY_MS)
+    }
+
+    private val stepScrollStop = Runnable { connection.scrollEnd() }
+
     private fun stopFling() {
+        // A fling in steps cut short: the app is told the scroll stopped.
+        if (!flinger.isFinished) endStepScroll()
         flinger.forceFinished(true)
         removeCallbacks(flingStep)
     }
@@ -724,19 +791,16 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
     }
 
     override fun scroll(x: Float, y: Float, down: Int, right: Int) {
-        if (down != 0) {
-            startMeasuring()
-            scrollMeter.sent(down)
-            measureUntil = SystemClock.uptimeMillis() + SCROLL_SETTLE_MS
-            if (measuring && !ViewerConnection.scrollNotchMeasured && !probing && probesThisDrag < MAX_PROBES) {
-                probing = true
-                probesThisDrag++
-                gestures.pause()
-                postDelayed(endProbe, PROBE_MAX_MS)
-            }
+        measureDown.sent(down)
+        measureAcross.sent(right)
+        if (connection.scrollsInSteps) {
+            val (rx, ry) = remote(x, y)
+            return connection.scrollSteps(rx, ry, down, right)
         }
-        wheel(x, y, if (down > 0) WHEEL_DOWN else WHEEL_UP, kotlin.math.abs(down))
-        wheel(x, y, if (right > 0) WHEEL_RIGHT else WHEEL_LEFT, kotlin.math.abs(right))
+        // A diagonal drag's notches along its way, not all down and then all across.
+        for (vertical in TouchGestures.interleave(down, right)) {
+            wheel(x, y, if (vertical) (if (down > 0) WHEEL_DOWN else WHEEL_UP) else (if (right > 0) WHEEL_RIGHT else WHEEL_LEFT), 1)
+        }
     }
 
     private fun wheel(x: Float, y: Float, bit: Int, notches: Int) {
@@ -856,15 +920,16 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
         private const val MAX_ZOOM = 8f
         /** After the last notch, how long the content may still move (apps that scroll smoothly animate it). */
         private const val SCROLL_SETTLE_MS = 600L
+        /** Notches sent this long after the content last moved: it had reached its end. */
+        private const val EDGE_MS = 200L
+        /** A settled frame being updated is read again this much later. */
+        private const val PROFILE_RETRY_MS = 50L
+        /** Longer than GTK 4 looks back for a touchpad's speed when it lifts (150 ms). */
+        private const val STEP_STOP_DELAY_MS = 250L
         /** The keyboard has stopped moving when the covered height stays this long. */
         private const val COVER_SETTLE_MS = 150L
         /** The frame's way back to where it lay, once the keyboard has closed. */
         private const val PLACE_BACK_MS = 200L
-        /** The first notch's measurement ends once the content stood still this long, or after [PROBE_MAX_MS]. */
-        private const val PROBE_QUIET_MS = 120L
-        private const val PROBE_MAX_MS = 500L
-        /** A second try, after a notch whose move wasn't recognised. */
-        private const val MAX_PROBES = 2
         private const val RESIZE_DELAY_MS = 250L
         /** Three fingers down and up within this: a tap, not the start of a pinch. */
         private const val THREE_FINGER_TAP_MS = 400L

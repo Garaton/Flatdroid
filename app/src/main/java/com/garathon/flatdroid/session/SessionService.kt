@@ -16,15 +16,19 @@ import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.garathon.flatdroid.MainActivity
 import com.garathon.flatdroid.R
+import com.garathon.flatdroid.session.helpers.SessionScript
 import com.garathon.flatdroid.viewer.ViewerActivity
 import com.garathon.flatdroid.alpine.AlpineCommands
 import com.garathon.flatdroid.audio.MicStreamer
 import com.garathon.flatdroid.camera.AndroidCameras
-import com.garathon.flatdroid.flatpak.AppData
+import com.garathon.flatdroid.storage.AppData
+import com.garathon.flatdroid.launcher.AppEnding
+import com.garathon.flatdroid.launcher.ProotExit
+import com.garathon.flatdroid.flatpak.tasks.FlatpakTaskService
 import com.garathon.flatdroid.flatpak.InstalledApps
 import com.garathon.flatdroid.settings.HomeMode
 import com.garathon.flatdroid.setup.SetupController
-import com.garathon.flatdroid.storage.SavedSizes
+import com.garathon.flatdroid.storage.sizes.SavedSizes
 import com.garathon.flatdroid.storage.TempHomePrompt
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -86,7 +90,8 @@ class SessionService : Service() {
         }
         if (job?.isActive != true && appId != null && InstalledApps.isValidId(appId)) {
             microphoneType = mayRecord(appId)
-            cameraType = AppData.settings(this, appId).load().camera && AndroidCameras.hasPermission(this)
+            cameraType = AndroidCameras.hasPermission(this) &&
+                InstalledApps(this).context(appId)?.let { AppData.settings(this, appId).load().cameraAllowed(it) } == true
         }
         startInForeground(notification(SessionController.ui.value.state))
         if (job?.isActive == true) return START_NOT_STICKY
@@ -123,7 +128,14 @@ class SessionService : Service() {
                         launcher.prepareElectron(appId)
                     }
                     if (!launcher.run(appId, micAnswer)) return@runInterruptible
-                    message = getString(R.string.session_ended, label(appId))
+                    // A crash, a kill or an error exit is an error, not a plain close.
+                    message = when (val ending = launcher.ending) {
+                        is AppEnding.Crashed -> getString(R.string.session_crashed, label(appId), ProotExit.signalName(ending.signal))
+                        is AppEnding.Ended -> getString(R.string.session_signal_ended, label(appId), ProotExit.signalName(ending.signal))
+                        is AppEnding.Failed -> getString(R.string.session_exit_error, label(appId), ending.code)
+                        null -> getString(R.string.session_ended, label(appId))
+                    }
+                    failed = launcher.ending != null
                 }
             } catch (e: CancellationException) {
                 message = null
@@ -148,6 +160,8 @@ class SessionService : Service() {
                 // A question (an Electron offer, a files-changed report) stays up for the UI to answer.
                 val awaitingUi = SessionController.ui.value.state is SessionState.Question
                 if (!awaitingUi) SessionController.ended(message, failed)
+                // Tasks that waited for the app start now (while this service still runs in the foreground).
+                if (!awaitingUi) FlatpakTaskService.startNext(applicationContext)
                 stopSelf()
             }
         }
@@ -176,8 +190,7 @@ class SessionService : Service() {
      */
     private fun mayRecord(appId: String): Boolean {
         val settings = AppData.settings(this, appId).load()
-        return settings.microphone && MicStreamer.hasPermission(this) &&
-            settings.audioAllowed(InstalledApps(applicationContext).sockets(appId))
+        return MicStreamer.hasPermission(this) && settings.microphoneAllowed(InstalledApps(applicationContext).sockets(appId))
     }
 
     private fun startInForeground(notification: Notification) {
@@ -237,11 +250,13 @@ class SessionService : Service() {
             .setOnlyAlertOnce(true)
             .setGroup(CHANNEL_ID)
         val viewerIntent = (state as? SessionState.Running)?.let {
-            if (it.socket != null) Intent(this, ViewerActivity::class.java)
-            else Viewer.intent(this, it.password, SetupController.settings(this).load()?.vncViewer, username = it.username)
+            // An open viewer comes forward rather than a second one.
+            if (it.socket != null) Intent(this, ViewerActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+            else ExternalViewer.intent(this, it.password, SetupController.settings(this).load()?.vncViewer, username = it.username)
         }
         if (viewerIntent != null) {
-            val viewer = PendingIntent.getActivity(this, 1, viewerIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+            // Cancel, not update: an update keeps the old intent's flags (one from before an app update, say).
+            val viewer = PendingIntent.getActivity(this, 1, viewerIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_CANCEL_CURRENT)
             val label = if ((state as SessionState.Running).socket != null) R.string.session_open_app else R.string.session_open_viewer
             builder.addAction(0, getString(label), viewer)
         }

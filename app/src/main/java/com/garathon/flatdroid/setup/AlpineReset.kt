@@ -1,6 +1,9 @@
 package com.garathon.flatdroid.setup
 
-import com.garathon.flatdroid.util.writeTextAtomically
+import com.garathon.flatdroid.setup.rootfs.RootfsInstaller
+import com.garathon.flatdroid.setup.rootfs.TarFs
+import com.garathon.flatdroid.setup.rootfs.deleteTree
+import com.garathon.flatdroid.util.io.writeTextAtomically
 import java.io.File
 
 /** What a reset keeps besides Flatdroid's own setup state (which every reset clears). */

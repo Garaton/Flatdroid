@@ -12,7 +12,7 @@ import android.system.Os
 import android.system.OsConstants
 import android.system.StructPollfd
 import androidx.core.content.ContextCompat
-import com.garathon.flatdroid.util.DebugLog
+import com.garathon.flatdroid.util.debug.DebugLog
 import java.io.File
 import java.io.FileDescriptor
 

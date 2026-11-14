@@ -1,5 +1,6 @@
 package com.garathon.flatdroid.proot
 
+import com.garathon.flatdroid.proot.processes.HostSignals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue

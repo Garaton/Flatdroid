@@ -1,6 +1,8 @@
 package com.garathon.flatdroid.viewer
 
-import com.garathon.flatdroid.util.DebugLog
+import com.garathon.flatdroid.util.debug.DebugLog
+import com.garathon.flatdroid.viewer.frames.TileFrames
+import com.garathon.flatdroid.viewer.protocol.RfbClient
 import java.io.File
 import java.util.Locale
 import java.util.Properties

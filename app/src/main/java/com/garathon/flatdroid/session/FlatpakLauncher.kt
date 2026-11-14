@@ -13,38 +13,45 @@ import android.view.Display
 import android.view.Surface
 import com.garathon.flatdroid.R
 import com.garathon.flatdroid.alpine.AlpineEnvironment
-import com.garathon.flatdroid.alpine.ResolvConfRefresher
+import com.garathon.flatdroid.alpine.dns.ResolvConfRefresher
 import com.garathon.flatdroid.alpine.GuestFiles
 import com.garathon.flatdroid.audio.AudioPlayer
 import com.garathon.flatdroid.audio.MicStreamer
+import com.garathon.flatdroid.audio.MicrophoneSession
 import com.garathon.flatdroid.camera.AndroidCameras
 import com.garathon.flatdroid.camera.CameraScript
 import com.garathon.flatdroid.camera.CameraStreamer
-import com.garathon.flatdroid.flatpak.AndroidLinkFs
-import com.garathon.flatdroid.flatpak.AppData
-import com.garathon.flatdroid.flatpak.FileIntegrity
+import com.garathon.flatdroid.flatpak.integrity.AndroidLinkFs
+import com.garathon.flatdroid.session.helpers.PulseScript
+import com.garathon.flatdroid.session.helpers.SessionBus
+import com.garathon.flatdroid.session.helpers.SessionScript
+import com.garathon.flatdroid.session.helpers.WaylandVnc
+import com.garathon.flatdroid.storage.AppData
+import com.garathon.flatdroid.flatpak.integrity.FileIntegrity
 import com.garathon.flatdroid.flatpak.FlatpakInstallation
-import com.garathon.flatdroid.flatpak.IntegrityGuard
+import com.garathon.flatdroid.flatpak.integrity.IntegrityGuard
 import com.garathon.flatdroid.launcher.DesktopConfig
-import com.garathon.flatdroid.launcher.Electron
-import com.garathon.flatdroid.launcher.ElectronSwap
+import com.garathon.flatdroid.launcher.electron.Electron
+import com.garathon.flatdroid.launcher.electron.ElectronSwap
 import com.garathon.flatdroid.launcher.HostDirs
+import com.garathon.flatdroid.launcher.LdCache
 import com.garathon.flatdroid.launcher.LaunchOptions
 import com.garathon.flatdroid.launcher.LaunchPlan
 import com.garathon.flatdroid.launcher.LaunchPlanner
+import com.garathon.flatdroid.launcher.AppEnding
+import com.garathon.flatdroid.launcher.ProotExit
 import com.garathon.flatdroid.launcher.PlanResult
-import com.garathon.flatdroid.launcher.VncPassword
 import com.garathon.flatdroid.flatpak.InstalledApps
 import com.garathon.flatdroid.proot.AlpineBinds
 import com.garathon.flatdroid.proot.DevNodes
 import com.garathon.flatdroid.proot.Fdsec
 import com.garathon.flatdroid.proot.GuestPaths
-import com.garathon.flatdroid.proot.HelperProcesses
-import com.garathon.flatdroid.proot.LeftoverProcesses
+import com.garathon.flatdroid.proot.processes.HelperProcesses
+import com.garathon.flatdroid.proot.processes.LeftoverProcesses
 import com.garathon.flatdroid.proot.ProotCommand
 import com.garathon.flatdroid.proot.ProotProcess
 import com.garathon.flatdroid.proot.ProotRunner
-import com.garathon.flatdroid.setup.AndroidTarFs
+import com.garathon.flatdroid.setup.rootfs.AndroidTarFs
 import com.garathon.flatdroid.settings.AppSettings
 import com.garathon.flatdroid.settings.AudioOutputMode
 import com.garathon.flatdroid.settings.FlatpakTheme
@@ -53,25 +60,26 @@ import com.garathon.flatdroid.settings.Resampler
 import com.garathon.flatdroid.settings.SecuritySettings
 import com.garathon.flatdroid.settings.UserSettings
 import com.garathon.flatdroid.setup.SetupController
-import com.garathon.flatdroid.setup.deleteTree
+import com.garathon.flatdroid.setup.rootfs.deleteTree
 import com.garathon.flatdroid.storage.AppFiles
 import com.garathon.flatdroid.storage.HomeFolders
 import com.garathon.flatdroid.storage.SharedHome
-import com.garathon.flatdroid.storage.StorageTaskService
-import com.garathon.flatdroid.storage.StorageTasks
+import com.garathon.flatdroid.storage.tasks.StorageTaskService
+import com.garathon.flatdroid.storage.tasks.StorageTasks
 import com.garathon.flatdroid.storage.TempHomes
 import com.garathon.flatdroid.viewer.ViewerSize
-import com.garathon.flatdroid.util.readTextUpTo
-import com.garathon.flatdroid.util.httpDownload
-import com.garathon.flatdroid.util.sha256
-import com.garathon.flatdroid.util.writeAtomically
-import com.garathon.flatdroid.util.writeTextAtomically
+import com.garathon.flatdroid.util.io.readTextUpTo
+import com.garathon.flatdroid.util.io.httpDownload
+import com.garathon.flatdroid.util.io.sha256
+import com.garathon.flatdroid.util.io.writeAtomically
+import com.garathon.flatdroid.util.io.writeTextAtomically
 import java.io.File
 import java.io.IOException
 import java.util.TimeZone
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 /** A launch that can't go ahead; [message] is shown to the user. */
 class LaunchException(message: String) : IOException(message)
@@ -135,10 +143,18 @@ class FlatpakLauncher(private val context: Context) {
     }
 
     /**
+     * How the app the last [run] ran ended when not as it should: killed by a signal or with an
+     * exit code other than 0; null when it closed normally or was stopped.
+     */
+    var ending: AppEnding? = null
+        private set
+
+    /**
      * Launches [appId] and returns when it exits. Returns false without launching if the user
      * must first agree to an Electron swap (the offer is then in [SessionController]).
      */
     fun run(appId: String, micAnswer: Boolean? = null): Boolean {
+        ending = null
         SessionController.starting(appId, context.getString(R.string.session_reading_metadata), clearLog = true)
         // Every Flatpak could otherwise open Flatdroid's memory through /proc (same user).
         if (!FlatdroidApplication.nonDumpable) throw LaunchException(context.getString(R.string.launch_dumpable))
@@ -148,6 +164,11 @@ class FlatpakLauncher(private val context: Context) {
         val userSettings = SetupController.settings(context).load()
         val store = AppData.settings(context, appId)
         var settings = store.load()
+        // Android's storage as the home needs All files access; without it the app gets the shared home.
+        if (settings.homeMode == HomeMode.ANDROID && !SharedHome.broadAccess(context)) {
+            settings = settings.copy(homeModeChoice = HomeMode.SHARED)
+            SessionController.log("[flatdroid] All files access is off; the app gets the shared home instead of Android's storage")
+        }
         // A launch in Temporary Home mode replaces the temporary home, so not while it is exported.
         if (StorageTasks.busyWith(appId) || (settings.homeMode == HomeMode.TEMPORARY && StorageTasks.exportingTempHome(StorageTaskService.pendingTasks(context)))) {
             throw LaunchException(context.getString(R.string.launch_storage_busy))
@@ -176,29 +197,30 @@ class FlatpakLauncher(private val context: Context) {
 
         SessionController.starting(appId, context.getString(R.string.session_preparing_files))
         val home = prepareHome(appId, settings.homeMode)
+        // What is there before the launch is the user's, even when empty: the clean-up afterwards leaves it.
+        val existedBefore = mountPointChains(plan).filter { rel -> File(home, rel).let { it.exists() || AndroidTarFs.isSymlink(it) } }.toSet()
         // Before prepareDirs, which makes the mount points by what they are bound from.
         writeDesktopFiles(home, plan, userSettings)
-        writeTimeZone(plan, settings.sharesTimeZone)
+        writeTimeZone(plan, (userSettings?.security ?: SecuritySettings()).shareLocale)
         prepareDirs(appId, plan)
         val security = userSettings?.security ?: SecuritySettings()
         val password = if (plan.wayland) VncPassword.random(length = WaylandVnc.PASSWORD_LENGTH) else VncPassword.random()
         val audio = plan.binds.pulseSockets != null
-        if (settings.microphone && !MicStreamer.hasPermission(context)) {
-            // Android's permission was revoked since the microphone was turned on: off again, as
-            // when Android refuses it in the app's settings.
-            settings = settings.copy(microphone = false)
-            store.update { it.copy(microphone = false) }
-            SessionController.log("[flatdroid] Android's microphone permission was revoked; the app's microphone is off")
+        val appContext = plan.app.metadata.context
+        // On by setting or by default, and Android's permission given: the default isn't saved as off when it isn't.
+        var microphoneWanted = settings.microphoneAllowed(appContext.sockets)
+        if (microphoneWanted && !MicStreamer.hasPermission(context)) {
+            microphoneWanted = false
+            SessionController.log("[flatdroid] Android's microphone permission is off; the app's microphone is off")
         }
-        val microphone = audio && settings.microphone
-        if (settings.camera && !AndroidCameras.hasPermission(context)) {
-            // As for the microphone: Android's permission was revoked since the camera was turned on.
-            settings = settings.copy(camera = false)
-            store.update { it.copy(camera = false) }
-            SessionController.log("[flatdroid] Android's camera permission was revoked; the app's camera is off")
+        val microphone = audio && microphoneWanted
+        var cameraWanted = settings.cameraAllowed(appContext)
+        if (cameraWanted && !AndroidCameras.hasPermission(context)) {
+            cameraWanted = false
+            SessionController.log("[flatdroid] Android's camera permission is off; the app's camera is off")
         }
-        val cameras = if (settings.camera) AndroidCameras.list(context, settings.cameraResolution, settings.cameraFrameRate) else emptyList()
-        if (settings.camera && cameras.isEmpty()) SessionController.log("[flatdroid] the app's camera is on, but Android has no camera Flatdroid can use")
+        val cameras = if (cameraWanted) AndroidCameras.list(context, settings.cameraResolution, settings.cameraFrameRate) else emptyList()
+        if (cameraWanted && cameras.isEmpty()) SessionController.log("[flatdroid] the app's camera is on, but Android has no camera Flatdroid can use")
         // Upright for the app's display: a landscape display as the device held landscape, a
         // portrait one as held portrait (Flatdroid itself is in portrait at launch whatever the app).
         val externalViewer = userSettings?.externalViewer == true
@@ -244,6 +266,8 @@ class FlatpakLauncher(private val context: Context) {
             if (line == SessionScript.DISPLAY_READY) helpersStarted.countDown()
         }
         var app: ProotProcess? = null
+        // When the app first started running, for the time it was used.
+        var runningSince: Long? = null
         var player: AudioPlayer? = null
         var cameraHelpers: ProotProcess? = null
         val streamers = cameraNodes.indices.associate {
@@ -283,8 +307,13 @@ class FlatpakLauncher(private val context: Context) {
             }
             // The helpers run under proot, which keeps them dumpable: hide what runs now from the app.
             val hidden = if (security.hideHelperProcesses) HelperProcesses.procPaths(ProotRunner.runningPids()) else emptyList()
-            fun hideHelpers(plan: LaunchPlan) =
-                if (hidden.isEmpty()) plan else plan.copy(binds = plan.binds.copy(hiddenProc = hidden, emptyDir = emptyDir.path))
+            // /proc entries Android doesn't let apps read, where Flatdroid knows the real value (the kernel's version, say).
+            val procStandIns = env.realProcStandIns()
+            fun hideHelpers(plan: LaunchPlan) = plan.copy(
+                binds = plan.binds.copy(fakeProc = procStandIns).let { binds ->
+                    if (hidden.isEmpty()) binds else binds.copy(hiddenProc = hidden, emptyDir = emptyDir.path)
+                },
+            )
             plan = hideHelpers(plan)
             SessionController.log("[flatdroid] " + describeFilter(plan.filter, hidden.size))
             var triedNewerFlags = false
@@ -295,6 +324,8 @@ class FlatpakLauncher(private val context: Context) {
                 val gpuFailed = AtomicBoolean(false)
                 val kdeHostProcess = AtomicBoolean(false)
                 val killedBySignal = AtomicBoolean(false)
+                // The signal that ended the app itself (its process 1), from its proot's own report.
+                val appSignal = AtomicInteger(0)
                 // The app's own: a helper's fdsec refusing later (sound, say) doesn't make the app's exit a failure.
                 val appRefused = AtomicBoolean(false)
                 app = ProotRunner.start(
@@ -305,7 +336,16 @@ class FlatpakLauncher(private val context: Context) {
                     if (Electron.GPU_FAILURE in line) gpuFailed.set(true)
                     if (LaunchPlanner.KDE_HOST_PROCESS_WARNING in line) kdeHostProcess.set(true)
                     if (LaunchPlanner.PROOT_KILLED_BY_SIGNAL in line) killedBySignal.set(true)
+                    ProotExit.signalOf(line)?.let { appSignal.compareAndSet(0, it) }
                     SessionController.log(line)
+                }
+                // Hidden, the app goes quiet and then pauses, unless it continues while hidden; with an
+                // external viewer Flatdroid can't tell what is on screen.
+                if (!externalViewer && !settings.continueWhileHidden) app.pid?.let { HiddenPause.attach(it, player) }
+                if (runningSince == null) {
+                    runningSince = System.currentTimeMillis()
+                    // Counted once the app runs, so a launch that failed or was stopped while starting isn't.
+                    store.update { it.copy(launches = it.launches + 1) }
                 }
                 SessionController.running(
                     if (externalViewer) SessionState.Running(appId, password, username = WaylandVnc.USERNAME.takeIf { plan.wayland })
@@ -318,7 +358,10 @@ class FlatpakLauncher(private val context: Context) {
                     ),
                 )
                 val code = app.waitFor()
-                SessionController.log("[flatdroid] the app exited ($code)")
+                val signal = appSignal.get()
+                SessionController.log(
+                    if (signal != 0) "[flatdroid] the app was ended by ${ProotExit.signalName(signal)} ($signal)" else "[flatdroid] the app exited ($code)",
+                )
                 if (appRefused.get()) throw LaunchException(context.getString(R.string.launch_filter_refused))
                 if (plan.isElectron && !settings.newerElectronFlags && gpuFailed.get() && !triedNewerFlags) {
                     // Newer Electron: relaunch once with its extra flags, and keep them if they help.
@@ -356,10 +399,17 @@ class FlatpakLauncher(private val context: Context) {
                     SessionController.log("[flatdroid] the newer Electron flags didn't help; turned them off again")
                     throw LaunchException(context.getString(R.string.launch_newer_flags_failed, code))
                 }
+                // Here the app ended by itself (a Stop cancels the session before this). proot exits 0
+                // when the app was killed by a signal, so its report decides; otherwise the exit code does.
+                ending = ProotExit.ending(signal, code)
                 return true
             }
         } finally {
+            // The time the app ran, simply from its start to here: nothing is measured while it runs.
+            runningSince?.let { start -> store.update { it.copy(usedMillis = it.usedMillis + (System.currentTimeMillis() - start)) } }
             dns.stop()
+            // A paused app ignores the signals that end it: let it go on first.
+            HiddenPause.detach()
             app?.stop()
             player?.stop()
             mic?.stop()
@@ -373,31 +423,43 @@ class FlatpakLauncher(private val context: Context) {
             // proot leaves the private binds' mount points behind in the shared home, where the
             // user sees them (empty .ssh, .bashrc, .config and the rest). Remove the empty ones.
             // A private home gets them too when it shares hidden files (a temporary one goes anyway).
-            if (settings.homeMode == HomeMode.SHARED || (settings.shareHiddenFiles && settings.homeMode == HomeMode.PRIVATE)) {
-                cleanSharedHomeMountPoints(home, plan)
+            if (settings.homeMode == HomeMode.SHARED || settings.homeMode == HomeMode.ANDROID || (settings.shareHiddenFiles && settings.homeMode == HomeMode.PRIVATE)) {
+                cleanSharedHomeMountPoints(home, plan, existedBefore)
             }
         }
     }
 
     /**
-     * Removes the mount points a launch's private binds leave empty in [home] (each bind's path
-     * under [GuestPaths.HOME]), and the folders above one that are left empty, up to the home.
-     * Only an empty file or an empty folder goes, so a real file the user keeps under one of these
-     * names (a hand-written `.bashrc`), or an empty folder of their own elsewhere, stays.
+     * The home-relative mount points of the private binds under the home, deepest first, so parents
+     * are empty by their turn. Paths that would leave the home are left out.
      */
-    private fun cleanSharedHomeMountPoints(home: File, plan: LaunchPlan) {
+    private fun mountPoints(plan: LaunchPlan): List<String> {
         val prefix = GuestPaths.HOME + "/"
-        val points = (plan.binds.appDirs + plan.binds.privateFiles)
+        return (plan.binds.appDirs + plan.binds.privateFiles)
             .map { it.second }
             .filter { it.startsWith(prefix) }
             .map { it.removePrefix(prefix) }
             .filter { rel -> rel.split('/').none { it.isEmpty() || it == "." || it == ".." } }
             .distinct()
-            .sortedByDescending { rel -> rel.count { it == '/' } } // deepest first, so parents are empty by their turn
-        for (rel in points) {
-            // The mount point itself, then the folders proot made for it, up to the home.
-            var file: File? = File(home, rel)
-            while (file != null && file != home && deleteIfEmpty(file)) file = file.parentFile
+            .sortedByDescending { rel -> rel.count { it == '/' } }
+    }
+
+    /** The mount points and every folder between them and the home ([mountPoints]). */
+    private fun mountPointChains(plan: LaunchPlan): Set<String> =
+        mountPoints(plan).flatMap { rel -> generateSequence(rel) { it.substringBeforeLast('/', "").ifEmpty { null } }.toList() }.toSet()
+
+    /**
+     * proot leaves the private binds' mount points behind (empty files and folders) where the user
+     * sees them. Removes the empty ones it made: the mount point, then the folders made for it, up to
+     * the home; never one in [existedBefore] (there before the launch, so the user's). Only an empty
+     * file or folder goes, so a real file under one of these names (a hand-written `.bashrc`) stays.
+     */
+    private fun cleanSharedHomeMountPoints(home: File, plan: LaunchPlan, existedBefore: Set<String>) {
+        for (rel in mountPoints(plan)) {
+            var current: String? = rel
+            while (current != null && current !in existedBefore && deleteIfEmpty(File(home, current))) {
+                current = current.substringBeforeLast('/', "").ifEmpty { null }
+            }
         }
     }
 
@@ -430,7 +492,7 @@ class FlatpakLauncher(private val context: Context) {
                     val detail = if (total == 0) context.getString(R.string.session_listing_files, ref.name)
                         else context.getString(R.string.session_checking_files, ref.name, done, total)
                     if (checking.get() && !cancelled.get() && (done == total || done % 500 == 0))
-                        SessionController.starting(appId, detail, skippable = true)
+                        SessionController.starting(appId, detail, skippable = true, fraction = if (total > 0) done.toFloat() / total else null)
                 },
                 // Skip, or Stop (which interrupts this thread): either ends the walk and the hashing at once.
                 cancelled = { cancelled.get() || Thread.currentThread().isInterrupted },
@@ -559,6 +621,8 @@ class FlatpakLauncher(private val context: Context) {
         HomeMode.PRIVATE -> AppData.privateHome(context, appId).also { HomeFolders.create(it) }
         HomeMode.SHARED -> SharedHome.ensure(context)
             ?: throw LaunchException(context.getString(R.string.storage_shared_home_missing, SharedHome.display(SharedHome.dir(context))))
+        // Android's storage has its own folders already, so none are made.
+        HomeMode.ANDROID -> SharedHome.storageRoot()
     }
 
     /** Generated for every launch: `user-dirs.dirs` for [home], and the desktop settings ([DesktopConfig]). */
@@ -583,7 +647,7 @@ class FlatpakLauncher(private val context: Context) {
 
     /** [appId]'s launch with its [settings] and the [user]'s. */
     private fun plan(appId: String, settings: AppSettings, user: UserSettings?): PlanResult =
-        planner.plan(appId, hostDirs(appId, settings), options(appId, settings, user))
+        planner.plan(appId, hostDirs(appId, settings, user?.security?.androidFonts ?: SecuritySettings().androidFonts), options(appId, settings, user))
 
     private fun options(appId: String, settings: AppSettings, user: UserSettings?): LaunchOptions {
         val app = installation.app(appId)
@@ -599,15 +663,15 @@ class FlatpakLauncher(private val context: Context) {
             wholeDev = settings.wholeDev,
             flatpakInfo = !settings.withoutFlatpakInfo,
             darkTheme = isDarkTheme(user),
-            languageTags = if (settings.sharesLanguage) context.resources.configuration.locales.toLanguageTags().split(',').filter { it.isNotBlank() } else emptyList(),
+            languageTags = if (security.shareLocale) context.resources.configuration.locales.toLanguageTags().split(',').filter { it.isNotBlank() } else emptyList(),
             audio = settings.audioAllowed(app?.metadata?.context?.sockets.orEmpty()),
             network = settings.networkAllowed(app?.metadata?.context?.shared.orEmpty()),
-            extraSyscalls = security.extraSyscallFilter && !(developerOptions && settings.allowExtraSyscalls),
+            extraSyscalls = if (developerOptions) settings.blocksExtraSyscalls else security.extraSyscallFilter,
             limitDevices = security.limitDevices,
         )
     }
 
-    private fun hostDirs(appId: String, settings: AppSettings): HostDirs {
+    private fun hostDirs(appId: String, settings: AppSettings, androidFonts: Boolean): HostDirs {
         val temporary = settings.homeMode == HomeMode.TEMPORARY
         // In Temporary Home mode the app's settings and cache are new at every launch too.
         val appData = if (temporary) TempHomes.root(context) else File(AppData.root(context), appId)
@@ -620,7 +684,7 @@ class FlatpakLauncher(private val context: Context) {
         // own instead. The developer setting shares one set across the apps that opt in, in any home.
         val dotFiles = when {
             settings.shareHiddenFiles -> AppData.sharedDotfilesDir(context)
-            settings.homeMode != HomeMode.SHARED -> null
+            settings.homeMode != HomeMode.SHARED && settings.homeMode != HomeMode.ANDROID -> null
             else -> File(appData, AppFiles.DOT_FILES_DIR)
         }
         return HostDirs(
@@ -631,6 +695,7 @@ class FlatpakLauncher(private val context: Context) {
                 HomeMode.SHARED -> SharedHome.dir(context)
                 HomeMode.PRIVATE -> AppData.privateHome(context, appId)
                 HomeMode.TEMPORARY -> TempHomes.home(context)
+                HomeMode.ANDROID -> SharedHome.storageRoot()
             },
             appDirs = listOf(
                 File(appData, "config") to "$home/.config",
@@ -660,15 +725,17 @@ class FlatpakLauncher(private val context: Context) {
             waylandSockets = waylandDir,
             pulseSockets = pulseDir,
             fontDirs = launcher.fontDirs,
-            hostFonts = ANDROID_FONTS.takeIf { settings.usesAndroidFonts && it.isDirectory },
+            hostFonts = ANDROID_FONTS.takeIf { androidFonts && it.isDirectory },
             desktopConfig = desktopDir,
             userDirs = File(etcDir, USER_DIRS),
-            sdcard = SharedHome.storageRoot().takeIf { settings.sdcard && SharedHome.broadAccess(context) },
+            sdcard = SharedHome.storageRoot().takeIf { settings.sdcard && settings.homeMode != HomeMode.ANDROID && SharedHome.broadAccess(context) },
             sessionBus = busProxyDir,
             // Under the app's cache, so clearing caches drops it (fontconfig then regenerates it).
             runtimeCache = File(cache, RUNTIME_CACHE_DIR),
             runtimeDir = File(tmpBase, "run"),
             userId = Os.getuid(),
+            // Also under the app's cache: cleared with it, and only this app's own launches read it.
+            ldCache = File(cache, LD_CACHE_DIR),
         )
     }
 
@@ -715,6 +782,7 @@ class FlatpakLauncher(private val context: Context) {
         for ((host, guest) in plan.binds.extra) {
             if (guest in LaunchPlanner.RUNTIME_CACHE_DIRS) File(host).mkdirs()
         }
+        plan.ldCache?.let(::prepareLdCache)
         // Mount points for the further binds: in the root, or in the app's own directory they fall in.
         for ((host, guest) in plan.binds.extra) {
             if (guest == "/app" || guest.startsWith("/app/") || guest.startsWith("/usr/")) continue
@@ -723,6 +791,22 @@ class FlatpakLauncher(private val context: Context) {
             if (target.exists()) continue
             if (File(host).isDirectory) target.mkdirs() else target.apply { parentFile?.mkdirs() }.createNewFile()
         }
+    }
+
+    /**
+     * Keeps only [ld]'s directory under its base (older ones were for other commits). One to build
+     * gets the configuration and an empty cache file to bind at /etc/ld.so.cache, which `ldconfig`
+     * replaces. The app can write here, so links in the way are removed rather than followed.
+     */
+    private fun prepareLdCache(ld: LdCache) {
+        val base = ld.dir.parentFile!!
+        if (AndroidTarFs.isSymlink(base)) base.delete()
+        base.listFiles()?.filter { it.name != ld.dir.name }?.forEach { AndroidTarFs.deleteTree(it) }
+        if (!ld.generate) return
+        AndroidTarFs.deleteTree(ld.dir)
+        ld.dir.mkdirs()
+        ld.confFile.writeTextAtomically(ld.conf, durable = false)
+        ld.cache.createNewFile()
     }
 
     /**
@@ -921,5 +1005,7 @@ class FlatpakLauncher(private val context: Context) {
         const val MAX_ZONE_BYTES = 1L shl 16
         /** Hidden subdirectory of the app's cache holding the runtime-cache scratch overlays. */
         const val RUNTIME_CACHE_DIR = ".flatdroid-runtime"
+        const val LD_CACHE_DIR = ".flatdroid-ld"
     }
 }
+

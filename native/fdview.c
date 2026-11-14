@@ -2,7 +2,7 @@
  * The embedded viewer's frames: RFB pixels read from the socket straight into one frame in memory,
  * and each update's changed area copied from it into the next buffer of a surface's queue, which
  * Android's compositor shows as it is (placed and scaled by the compositor, nothing drawn by the
- * app). Called from viewer/NativeFrames.kt, on Android 10 and later only.
+ * app). Called from viewer/frames/NativeFrames.kt, on Android 10 and later only.
  */
 #include <android/hardware_buffer.h>
 #include <android/native_window_jni.h>
@@ -14,7 +14,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#define FN(name) Java_com_garathon_flatdroid_viewer_NativeFrames_##name
+#define FN(name) Java_com_garathon_flatdroid_viewer_frames_NativeFrames_##name
 #define BYTES_PER_PIXEL 4
 
 /* All of the connection's reading comes here (one reading thread): few system calls for many small rows. */
@@ -158,24 +158,36 @@ JNIEXPORT void JNICALL FN(moveRect)(JNIEnv *env, jclass cls, jlong handle, jint 
     }
 }
 
-/* As ScrollMeter.hashRows (the green of every fourth pixel, one hash per row and band). */
-JNIEXPORT void JNICALL FN(hashRows)(JNIEnv *env, jclass cls, jlong handle, jint bands, jintArray out) {
+/*
+ * As ScrollMeter.profile: for each row, each band of columns' summed green, row after row; or, with
+ * [columns], for each column, each band of rows' summed green, column after column.
+ */
+JNIEXPORT void JNICALL FN(profile)(JNIEnv *env, jclass cls, jlong handle, jint bands, jboolean columns, jintArray out) {
     (void)cls;
     struct frame *f = FRAME(handle);
-    jint *hashes = (*env)->GetIntArrayElements(env, out, NULL);
-    if (hashes == NULL) return;
+    jint *sums = (*env)->GetIntArrayElements(env, out, NULL);
+    if (sums == NULL) return;
     size_t pitch = (size_t)f->width * BYTES_PER_PIXEL;
-    for (jint band = 0; band < bands; band++) {
-        size_t from = (size_t)(f->width * band / bands) * BYTES_PER_PIXEL;
-        size_t to = (size_t)(f->width * (band + 1) / bands) * BYTES_PER_PIXEL;
+    if (columns) {
+        memset(sums, 0, (size_t)f->width * (size_t)bands * sizeof(jint));
         for (jint y = 0; y < f->height; y++) {
-            uint32_t h = 0x811c9dc5u;
+            const uint8_t *row = f->pixels + (size_t)y * pitch + 1;
+            jint *band = sums + (jint)((int64_t)y * bands / f->height);
+            for (jint x = 0; x < f->width; x++) band[x * bands] += row[(size_t)x * BYTES_PER_PIXEL];
+        }
+    } else {
+        for (jint y = 0; y < f->height; y++) {
             const uint8_t *row = f->pixels + (size_t)y * pitch;
-            for (size_t i = from + 1; i < to; i += 16) h = (h ^ row[i]) * 0x01000193u;
-            hashes[band * f->height + y] = (jint)h;
+            for (jint band = 0; band < bands; band++) {
+                size_t from = (size_t)(f->width * band / bands) * BYTES_PER_PIXEL;
+                size_t to = (size_t)(f->width * (band + 1) / bands) * BYTES_PER_PIXEL;
+                jint sum = 0;
+                for (size_t i = from + 1; i < to; i += BYTES_PER_PIXEL) sum += row[i];
+                sums[y * bands + band] = sum;
+            }
         }
     }
-    (*env)->ReleaseIntArrayElements(env, out, hashes, 0);
+    (*env)->ReleaseIntArrayElements(env, out, sums, 0);
 }
 
 /* Frames are shown through [surface] from now on (null: nowhere). False when it can't be used. */

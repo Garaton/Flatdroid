@@ -15,9 +15,10 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.garathon.flatdroid.MainActivity
 import com.garathon.flatdroid.R
+import com.garathon.flatdroid.util.DoneNotice
 import com.garathon.flatdroid.alpine.AlpineEnvironment
-import com.garathon.flatdroid.flatpak.AppData
-import com.garathon.flatdroid.storage.SavedSizes
+import com.garathon.flatdroid.storage.AppData
+import com.garathon.flatdroid.storage.sizes.SavedSizes
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -70,6 +71,7 @@ class SetupService : Service() {
                 val env = AlpineEnvironment.get(applicationContext)
                 val reset = SetupController.reset(applicationContext, env)
                 if (reset.isPending()) {
+                    SetupController.beginReset()
                     SetupController.reporter.progress(null, getString(R.string.reset_running))
                     runInterruptible { reset.finish() }
                     SetupController.cleared()
@@ -91,7 +93,8 @@ class SetupService : Service() {
                 SetupController.end()
                 val ui = SetupController.state.value
                 if (!resetOnly && (ui.isComplete || ui.failed != null)) {
-                    notifications.notify(RESULT_NOTIFICATION_ID, result(ui))
+                    val title = getString(if (ui.isComplete) R.string.setup_notification_done else R.string.setup_notification_failed)
+                    DoneNotice.post(applicationContext, DoneNotice.SETUP_ID, title, ui.error, failed = !ui.isComplete)
                 }
                 stopSelf()
             }
@@ -144,21 +147,6 @@ class SetupService : Service() {
         return builder.build()
     }
 
-    /** Dismissible summary left behind once the service has stopped. */
-    private fun result(ui: SetupUi): Notification {
-        createChannel()
-        val open = PendingIntent.getActivity(
-            this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE,
-        )
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(if (ui.isComplete) android.R.drawable.stat_sys_download_done else android.R.drawable.stat_notify_error)
-            .setContentTitle(getString(if (ui.isComplete) R.string.setup_notification_done else R.string.setup_notification_failed))
-            .setContentText(ui.error ?: "")
-            .setContentIntent(open)
-            .setAutoCancel(true)
-            .build()
-    }
-
     private fun createChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = getSystemService(NotificationManager::class.java)
@@ -171,7 +159,6 @@ class SetupService : Service() {
     companion object {
         private const val CHANNEL_ID = "setup"
         private const val NOTIFICATION_ID = 1
-        private const val RESULT_NOTIFICATION_ID = 2
         private const val WAKE_LOCK_TIMEOUT_MS = 2 * 60 * 60 * 1000L
 
         private const val ACTION_RESET = "com.garathon.flatdroid.action.RESET_ALPINE"
@@ -184,6 +171,7 @@ class SetupService : Service() {
         /** Requests a reset of the Alpine environment and carries it out; setup isn't started. */
         fun reset(context: Context, mode: ResetMode) {
             SetupController.reset(context).request(mode)
+            SetupController.beginReset()
             SetupController.refresh(context)
             ContextCompat.startForegroundService(
                 context, Intent(context, SetupService::class.java).setAction(ACTION_RESET),

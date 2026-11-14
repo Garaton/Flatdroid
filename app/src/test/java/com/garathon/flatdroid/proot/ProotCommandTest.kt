@@ -212,6 +212,18 @@ class ProotCommandTest {
         assertTrue("--bind=/files/appdata/org.xfce.mousepad/dotfiles/.bashrc:/home/user/.bashrc" in argv)
     }
 
+    @Test
+    fun procStandInsComeAfterProc() {
+        val binds = flatpakBinds.copy(fakeProc = mapOf("/proc/version" to "/files/alpine/generated/proc/version"))
+        val argv = ProotCommand.flatpak(paths, binds, emptyMap(), listOf("/app/bin/x"), Fdsec.Filter()).argv
+        assertTrue(argv.indexOf("--bind=/files/alpine/generated/proc/version:/proc/version") > argv.indexOf("--bind=/proc"))
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun procStandInsStayInProc() {
+        flatpakBinds.copy(fakeProc = mapOf("/etc/passwd" to "/files/alpine/generated/proc/version"))
+    }
+
     @Test(expected = IllegalArgumentException::class)
     fun onlyProcessEntriesCanBeHidden() {
         flatpakBinds.copy(hiddenProc = listOf("/proc/self"), emptyDir = "/cache/session/empty")

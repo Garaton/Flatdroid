@@ -1,7 +1,7 @@
 package com.garathon.flatdroid.alpine
 
 import android.content.Context
-import com.garathon.flatdroid.flatpak.FlatpakTasks
+import com.garathon.flatdroid.flatpak.tasks.FlatpakTasks
 import com.garathon.flatdroid.session.SessionController
 import com.garathon.flatdroid.setup.SetupController
 

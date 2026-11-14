@@ -2,7 +2,7 @@ package com.garathon.flatdroid.setup
 
 import androidx.annotation.StringRes
 import com.garathon.flatdroid.R
-import com.garathon.flatdroid.util.writeTextAtomically
+import com.garathon.flatdroid.util.io.writeTextAtomically
 import java.io.File
 import java.io.StringWriter
 import java.util.Properties

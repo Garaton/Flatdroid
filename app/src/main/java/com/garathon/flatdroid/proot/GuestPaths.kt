@@ -30,6 +30,9 @@ object GuestPaths {
     /** Flatdroid's desktop settings, last in a Flatpak's `XDG_CONFIG_DIRS` (see DesktopConfig). */
     const val XDG_CONFIG_DIR = "/run/flatdroid/xdg"
 
+    /** Where the launcher has `ldconfig` build an app's ld.so.cache ([com.garathon.flatdroid.launcher.LdCache]). */
+    const val LD_CACHE_DIR = "/run/flatdroid/ld"
+
     /** All of shared storage, when an app's setting asks for it. */
     const val SDCARD = "/sdcard"
 

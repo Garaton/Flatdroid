@@ -1,5 +1,6 @@
 package com.garathon.flatdroid.viewer
 
+import com.garathon.flatdroid.viewer.protocol.RfbClient
 import java.io.File
 
 /** Release builds: no measuring (debug builds have the real one). */

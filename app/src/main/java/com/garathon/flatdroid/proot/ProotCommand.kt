@@ -103,12 +103,14 @@ data class FlatpakBinds(
     val hiddenProc: List<String> = emptyList(),
     /** An empty directory, bound over each of [hiddenProc]. */
     val emptyDir: String? = null,
+    /** Stand-ins for /proc entries Android doesn't let apps read: guest path to host file (see [AlpineBinds.fakeProc]). */
+    val fakeProc: Map<String, String> = emptyMap(),
     /** Further binds, last: host to guest path (e.g. a swapped-in Electron over its app directory). */
     val extra: List<Pair<String, String>> = emptyList(),
 ) {
     init {
         val hosts = listOfNotNull(root, runtimeFiles, appFiles, tmp, shm, x11Sockets, pulseSockets, waylandSockets, home, emptyDir) +
-            etc.values + extensions.map { it.first } + appDirs.map { it.first } + privateFiles.map { it.first } + extra.map { it.first }
+            etc.values + extensions.map { it.first } + appDirs.map { it.first } + privateFiles.map { it.first } + extra.map { it.first } + fakeProc.values
         for (path in hosts) require(path.startsWith("/") && ':' !in path) { "Unusable host path: $path" }
         val guests = extensions.map { it.second } + appDirs.map { it.second } + privateFiles.map { it.second } + extra.map { it.second }
         for (path in guests) require(path.startsWith("/") && ':' !in path) { "Unusable guest path: $path" }
@@ -117,6 +119,7 @@ data class FlatpakBinds(
         require(sys.orEmpty().all { it.startsWith("/sys/") && ':' !in it && ".." !in it.split('/') }) { "Unusable /sys path: $sys" }
         require(hiddenProc.all { Regex("/proc/[0-9]+").matches(it) }) { "Unusable /proc path: $hiddenProc" }
         require(hiddenProc.isEmpty() || emptyDir != null) { "Hidden /proc entries need an empty directory" }
+        require(fakeProc.keys.all { it.startsWith("/proc/") && ':' !in it && ".." !in it.split('/') }) { "Unusable /proc path: ${fakeProc.keys}" }
     }
 }
 
@@ -274,6 +277,7 @@ object ProotCommand {
         if (binds.wholeDev) argv += "--bind=/dev" else for (path in binds.dev) argv += "--bind=$path"
         argv += "--bind=/proc"
         for (path in binds.hiddenProc) argv += "--bind=${binds.emptyDir}:$path"
+        for ((guest, host) in binds.fakeProc) argv += "--bind=$host:$guest"
         if (binds.sys == null) argv += "--bind=/sys" else for (path in binds.sys) argv += "--bind=$path"
         for ((guest, host) in AlpineBinds.FD_LINKS) argv += "--bind=$host:$guest"
         argv += "--bind=${binds.shm}:/dev/shm"

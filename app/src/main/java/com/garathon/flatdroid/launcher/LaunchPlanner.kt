@@ -3,12 +3,16 @@ package com.garathon.flatdroid.launcher
 import com.garathon.flatdroid.flatpak.Deployment
 import com.garathon.flatdroid.flatpak.FlatpakInstallation
 import com.garathon.flatdroid.flatpak.FlatpakRef
-import com.garathon.flatdroid.flatpak.L2s
+import com.garathon.flatdroid.launcher.electron.Electron
+import com.garathon.flatdroid.proot.L2s
+import com.garathon.flatdroid.flatpak.MountedExtension
 import com.garathon.flatdroid.proot.DevNodes
 import com.garathon.flatdroid.proot.Fdsec
 import com.garathon.flatdroid.proot.FlatpakBinds
 import com.garathon.flatdroid.proot.GuestPaths
 import java.io.File
+import java.security.MessageDigest
+import com.garathon.flatdroid.util.io.readTextUpTo
 
 /** Host directories for one launch of one app; see AppPaths for where they live. */
 data class HostDirs(
@@ -51,7 +55,24 @@ data class HostDirs(
      */
     val runtimeDir: File? = null,
     val userId: Int = 0,
+    /**
+     * Writable per-app base for the app's `/etc/ld.so.cache` ([LdCache]), one directory per set of
+     * deployments; null for none.
+     */
+    val ldCache: File? = null,
 )
+
+/**
+ * The app's `/etc/ld.so.cache`, as Flatpak builds one: the runtime's `ldconfig` run in the app's
+ * root over [conf] (the app's and the extensions' library directories), so lookups that read the
+ * cache rather than LD_LIBRARY_PATH (Python's `ctypes.util.find_library`, `ldconfig -p`) find the
+ * app's libraries. [dir] is named after the deployments' commits; when it has no cache yet
+ * ([generate]), the launch runs `ldconfig` before the app.
+ */
+data class LdCache(val dir: File, val conf: String, val generate: Boolean) {
+    val cache: File get() = File(dir, LaunchPlanner.LD_CACHE)
+    val confFile: File get() = File(dir, LaunchPlanner.LD_CONF)
+}
 
 /** Per-app choices that change a launch. */
 data class LaunchOptions(
@@ -63,7 +84,7 @@ data class LaunchOptions(
     /** An X11 session for an app that asks for both Wayland and X11 (its Force X11 setting); ignored for others. */
     val forceX11: Boolean = false,
     val environment: Map<String, String> = emptyMap(),
-    /** For an app asking for `devices=all`: the host's whole /dev, Binder included (the app's own setting). */
+    /** The host's whole /dev, Binder included, whatever the app asks for (the app's own setting). */
     val wholeDev: Boolean = false,
     /** The app gets PulseAudio's socket (see AppSettings.audioAllowed). */
     val audio: Boolean = true,
@@ -99,6 +120,8 @@ data class LaunchPlan(
     val wayland: Boolean = false,
     /** What fdsec refuses for this app. */
     val filter: Fdsec.Filter,
+    /** The app's ld.so.cache; null when there is none (no [HostDirs.ldCache], or no `ldconfig` in the runtime). */
+    val ldCache: LdCache? = null,
 )
 
 sealed interface PlanResult {
@@ -174,7 +197,11 @@ class LaunchPlanner(
         val scripts = launchScripts(app, commandPath)
         val electronBinary = scripts.firstNotNullOfOrNull(Electron::zypakTarget)
         val cobaltBrowser = if (electronBinary != null) null
-            else scripts.firstNotNullOfOrNull { Electron.cobaltTarget(it, appId) { path -> hostPath(app, path)?.isFile == true } }
+            else scripts.firstNotNullOfOrNull { script ->
+                Electron.cobaltTarget(script, appId, config = { hostPath(app, Electron.COBALT_CONFIG)?.takeIf { it.isFile }?.readTextUpTo() }) { path ->
+                    hostPath(app, path)?.isFile == true
+                }
+            }
         if (electronBinary != null) {
             isElectron = true
             val host = hostPath(app, electronBinary) ?: return PlanResult.NoCommand(appId)
@@ -208,6 +235,15 @@ class LaunchPlanner(
             if (binaryArch != null && binaryArch != arch) return PlanResult.WrongArchitecture(commandPath, binaryArch)
         }
         command = command + options.extraArgs
+
+        val ldCache = ldCache(dirs.ldCache, runtime, listOf(app, runtime) + extensions.map { it.second.deployment }, extensions)
+        if (ldCache != null) {
+            extraBinds += ldCache.cache.path to "/etc/$LD_CACHE"
+            if (ldCache.generate) {
+                extraBinds += ldCache.dir.path to GuestPaths.LD_CACHE_DIR
+                command = LD_CACHE_COMMAND + command
+            }
+        }
 
         val environment = LaunchEnvironment.build(
             appId = appId,
@@ -243,7 +279,7 @@ class LaunchPlanner(
             appDirs = dirs.appDirs.map { it.first.path to it.second },
             privateFiles = dirs.privateFiles.map { it.first.path to it.second },
             dev = DevNodes.forApp(devices, devExists, limited = options.limitDevices),
-            wholeDev = options.wholeDev && DevNodes.ALL in devices,
+            wholeDev = options.wholeDev,
             sys = if (options.limitDevices) DevNodes.LIMITED_SYS.filter(devExists) else null,
             extra = extraBinds,
         )
@@ -260,8 +296,27 @@ class LaunchPlanner(
                 isElectron = isElectron,
                 wayland = wayland,
                 filter = Fdsec.Filter(extraSyscalls = options.extraSyscalls, noInternet = !options.network),
+                ldCache = ldCache,
             )
         )
+    }
+
+    /**
+     * The app's [LdCache] under [base], or null without one or when the runtime has no `ldconfig`
+     * or `sh` to build it. Flatpak's order: the app's extensions, the app's own `/etc/ld.so.conf`,
+     * `/app/lib`, then the runtime's extensions; the runtime's own directories are `ldconfig`'s
+     * built-in ones.
+     */
+    private fun ldCache(base: File?, runtime: Deployment, deployments: List<Deployment>, extensions: List<Pair<String, MountedExtension>>): LdCache? {
+        if (base == null) return null
+        if (!File(runtime.files, "bin/ldconfig").exists() || !File(runtime.files, "bin/sh").exists()) return null
+        fun paths(under: String) = extensions.filter { it.first == under }.mapNotNull { (b, ext) -> ext.addLdPath?.let { "$b/${ext.guestPath}/$it" } }
+        val conf = (paths("/app") + listOf("include /app/etc/ld.so.conf", "/app/lib") + paths("/usr")).joinToString("\n", postfix = "\n")
+        val key = sha256((deployments.map { it.dir.name } + conf).joinToString("\n")).take(16)
+        val dir = File(base, key)
+        val cache = File(dir, LD_CACHE)
+        val ready = cache.isFile && readlink(cache) == null && cache.length() > 0
+        return LdCache(dir, conf, generate = !ready)
     }
 
     /**
@@ -308,6 +363,21 @@ class LaunchPlanner(
     }
 
     companion object {
+        const val LD_CACHE = "ld.so.cache"
+        const val LD_CONF = "ld.so.conf"
+
+        /**
+         * Runs before the app when its [LdCache] has to be built: the runtime's `ldconfig` writes the
+         * cache in [GuestPaths.LD_CACHE_DIR], which is already bound at /etc/ld.so.cache (it renames
+         * its new file into place, and proot's binds follow the path), then the app replaces the shell.
+         * `-X` leaves the libraries' links alone and `-i` skips the auxiliary cache.
+         */
+        val LD_CACHE_COMMAND = listOf(
+            "/usr/bin/sh", "-c",
+            "/usr/bin/ldconfig -X -i -f ${GuestPaths.LD_CACHE_DIR}/$LD_CONF -C ${GuestPaths.LD_CACHE_DIR}/$LD_CACHE; exec \"\$@\"",
+            "sh",
+        )
+
         const val GL_DEFAULT = "org.freedesktop.Platform.GL.default"
         const val RESOLV_CONF = "resolv.conf"
         /** The `/etc` files every launch binds Flatdroid's own over (the runtime's are never read). */
@@ -351,3 +421,6 @@ class LaunchPlanner(
         const val PROOT_KILLED_BY_SIGNAL = "terminated with signal"
     }
 }
+
+private fun sha256(text: String): String =
+    MessageDigest.getInstance("SHA-256").digest(text.toByteArray()).joinToString("") { "%02x".format(it) }

@@ -3,22 +3,25 @@ package com.garathon.flatdroid.alpine
 import android.annotation.SuppressLint
 import android.content.Context
 import android.os.SystemClock
+import android.system.ErrnoException
 import android.system.Os
+import com.garathon.flatdroid.alpine.dns.NetworkDns
+import com.garathon.flatdroid.alpine.dns.ResolvConfRefresher
 import com.garathon.flatdroid.proot.AlpineBinds
 import com.garathon.flatdroid.proot.DevNodes
 import com.garathon.flatdroid.proot.Fdsec
 import com.garathon.flatdroid.proot.Fdshm
 import com.garathon.flatdroid.proot.GuestPaths
 import com.garathon.flatdroid.proot.ProcessResult
-import com.garathon.flatdroid.proot.ProcessStopper
+import com.garathon.flatdroid.proot.processes.ProcessStopper
 import com.garathon.flatdroid.proot.ProotProcess
 import com.garathon.flatdroid.proot.ProotCommand
 import com.garathon.flatdroid.proot.ProotPaths
 import com.garathon.flatdroid.proot.ProotRunner
-import com.garathon.flatdroid.setup.AndroidTarFs
-import com.garathon.flatdroid.setup.RootfsInstaller
-import com.garathon.flatdroid.util.writeTextAtomically
-import com.garathon.flatdroid.util.readTextUpTo
+import com.garathon.flatdroid.setup.rootfs.AndroidTarFs
+import com.garathon.flatdroid.setup.rootfs.RootfsInstaller
+import com.garathon.flatdroid.util.io.writeTextAtomically
+import com.garathon.flatdroid.util.io.readTextUpTo
 import java.io.File
 import java.io.FileInputStream
 
@@ -121,23 +124,7 @@ class AlpineEnvironment private constructor(private val context: Context) {
         dir(generatedDir)
         val resolv = write("resolv.conf", resolvConf())
         val hosts = write("hosts", GuestFiles.hosts())
-
-        val uname = Os.uname()
-        val uptime = SystemClock.elapsedRealtime() / 1000
-        val proc = GuestFiles.fakeProc(
-            cpuCount = Runtime.getRuntime().availableProcessors(),
-            kernelRelease = uname.release,
-            kernelVersion = uname.version,
-            uptimeSeconds = uptime,
-            bootEpochSeconds = System.currentTimeMillis() / 1000 - uptime,
-        )
-        val fakeProc = linkedMapOf<String, String>()
-        dir(File(generatedDir, "proc"))
-        for ((guest, content) in proc) {
-            if (hostCanRead(guest)) continue
-            val name = guest.removePrefix("/proc/").replace('/', '_')
-            fakeProc[guest] = write("proc/$name", content).path
-        }
+        val fakeProc = writeFakeProc()
 
         val bwrap = write("bwrap", GuestFiles.BWRAP_STAND_IN).also { Os.chmod(it.path, 0x1ed) } // 0755
 
@@ -154,6 +141,51 @@ class AlpineEnvironment private constructor(private val context: Context) {
             dev = dev,
             extra = extra + (bwrap.path to GuestPaths.BWRAP_STAND_IN),
         )
+    }
+
+    /**
+     * The /proc stand-ins ([GuestFiles.fakeProc]) for the entries Android doesn't let Flatdroid read,
+     * written (or rewritten, for the current uptime) now: guest path to host file.
+     */
+    private fun writeFakeProc(): Map<String, String> {
+        val uname = Os.uname()
+        val uptime = SystemClock.elapsedRealtime() / 1000
+        val proc = GuestFiles.fakeProc(
+            cpuCount = Runtime.getRuntime().availableProcessors(),
+            kernelRelease = uname.release,
+            kernelVersion = uname.version,
+            uptimeSeconds = uptime,
+            bootEpochSeconds = System.currentTimeMillis() / 1000 - uptime,
+            capLastCap = capLastCap,
+        )
+        val fakeProc = linkedMapOf<String, String>()
+        dir(File(generatedDir, "proc"))
+        for ((guest, content) in proc) {
+            if (hostCanRead(guest)) continue
+            val name = guest.removePrefix("/proc/").replace('/', '_')
+            fakeProc[guest] = write("proc/$name", content).path
+        }
+        return fakeProc
+    }
+
+    /** The stand-ins that hold real values ([GuestFiles.REAL_PROC]), for a Flatpak's root: guest path to host file. */
+    fun realProcStandIns(): Map<String, String> = writeFakeProc().filterKeys { it in GuestFiles.REAL_PROC }
+
+    /**
+     * The kernel's last capability, as /proc/sys/kernel/cap_last_cap would say (Android doesn't let
+     * apps read it): the highest one the bounding set knows; a later one is EINVAL.
+     */
+    private val capLastCap: Int by lazy {
+        var last = -1
+        for (cap in 0..63) {
+            try {
+                Os.prctl(PR_CAPBSET_READ, cap.toLong(), 0L, 0L, 0L)
+                last = cap
+            } catch (_: ErrnoException) {
+                break
+            }
+        }
+        if (last > 0) last else GuestFiles.DEFAULT_CAP_LAST_CAP
     }
 
     /** A small file of the rootfs, or empty when it can't be read. */
@@ -176,6 +208,8 @@ class AlpineEnvironment private constructor(private val context: Context) {
     }
 
     companion object {
+        /** prctl's option to read the capability bounding set (linux/prctl.h). */
+        private const val PR_CAPBSET_READ = 23
         private val ARCH_BY_LIB_DIR = mapOf("arm64" to "aarch64", "x86_64" to "x86_64")
 
         // Holds the application context, which lives as long as the process.

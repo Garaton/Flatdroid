@@ -3,9 +3,20 @@ package com.garathon.flatdroid.viewer
 import android.net.LocalSocket
 import android.net.LocalSocketAddress
 import android.os.Handler
+import android.os.Build
 import android.os.Looper
 import com.garathon.flatdroid.session.SessionController
-import com.garathon.flatdroid.util.DebugLog
+import com.garathon.flatdroid.session.HiddenPause
+import com.garathon.flatdroid.util.debug.DebugLog
+import com.garathon.flatdroid.viewer.frames.FrameDrawer
+import com.garathon.flatdroid.viewer.frames.NativeFrames
+import com.garathon.flatdroid.viewer.frames.TileFrames
+import com.garathon.flatdroid.viewer.input.Keysyms
+import com.garathon.flatdroid.viewer.input.ScrollSpeed
+import com.garathon.flatdroid.viewer.protocol.Framebuffer
+import com.garathon.flatdroid.viewer.protocol.RfbClient
+import com.garathon.flatdroid.viewer.protocol.RfbListener
+import com.garathon.flatdroid.viewer.protocol.WaylandClient
 import java.io.EOFException
 import java.io.File
 import java.io.IOException
@@ -60,16 +71,21 @@ object ViewerConnection {
     /**
      * Connects to [socketPath] unless already connected there. In a Wayland session (a
      * [waylandSocket]) a [WaylandClient] there also carries Android's text, if [shareClipboard],
-     * and keeps the output at [outputRefresh] (per second; null to leave it). Main thread.
+     * and keeps the output at [outputRefresh] (per second; null to leave it). [appId]'s touch
+     * scroll speed as last measured ([ScrollSpeed]) is read from [cacheDir]. Main thread.
      */
     fun open(
         socketPath: String, cacheDir: File, waylandSocket: String? = null,
-        shareClipboard: Boolean = false, outputRefresh: Int? = null,
+        shareClipboard: Boolean = false, outputRefresh: Int? = null, appId: String? = null,
     ) {
         if (path == socketPath && client != null) return
         close()
         path = socketPath
         wayland = waylandSocket != null
+        speedsFile = File(cacheDir, SCROLL_SPEEDS)
+        speedKey = appId?.let { "$it.${if (wayland) "wayland" else "x11"}" }
+        speed = ScrollSpeed(speedKey?.let { speeds().getProperty(it) })
+        speedAcross = ScrollSpeed(speedKey?.let { speeds().getProperty("$it$ACROSS") })
         waylandClient = waylandSocket?.let { socket ->
             WaylandClient(socket, ::androidText.takeIf { shareClipboard }, outputRefresh?.let { it * 1000 }, cacheDir).apply { start() }
         }
@@ -84,7 +100,7 @@ object ViewerConnection {
         try {
             socket.connect(LocalSocketAddress(socketPath, LocalSocketAddress.Namespace.FILESYSTEM))
             val tileSize = ViewerDebug.tileSize(cacheDir)
-            native = if (tileSize == null) NativeFrames.open(socket) else null
+            native = if (tileSize == null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) NativeFrames.open(socket) else null
             frames = native ?: TileFrames(tileSize ?: TileFrames.SIZE)
             DebugLog.i("Viewer: drawing through ${frames?.javaClass?.simpleName}")
             val client = RfbClient(
@@ -151,7 +167,7 @@ object ViewerConnection {
             // viewer closes, the session stays.
             if (this.socket === socket) error = e.message ?: e.javaClass.simpleName
         }
-        native?.close()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) native?.close()
         main.post {
             if (this.socket === socket) {
                 DebugLog.i("Viewer: disconnected${error?.let { ": $it" }.orEmpty()}")
@@ -193,12 +209,14 @@ object ViewerConnection {
         if (this.sink !== sink) return
         this.sink = null
         shown = false
+        HiddenPause.viewerShown(false)
     }
 
     /** [sink] became visible or hidden; a newer viewer may already be the one attached. Main thread. */
     fun shown(sink: ViewerSink, visible: Boolean) {
         if (this.sink !== sink) return
         shown = visible
+        HiddenPause.viewerShown(visible)
         // Nobody sees the output while hidden: the apps needn't draw more than about once a second.
         client?.framebuffer?.let { fb -> waylandClient?.hidden(!visible, fb.width, fb.height) }
         if (visible) {
@@ -233,11 +251,6 @@ object ViewerConnection {
         inner[0] >= outer[0] && inner[1] >= outer[1] &&
             inner[0] + inner[2] <= outer[0] + outer[2] && inner[1] + inner[3] <= outer[1] + outer[3]
 
-    /** How many pixels of the framebuffer one wheel notch scrolls the app, as last measured ([ScrollMeter]). */
-    var scrollNotch = ScrollMeter.DEFAULT_NOTCH
-    /** [scrollNotch] was measured in this session (else a drag first measures one notch). */
-    var scrollNotchMeasured = false
-
     /** The last buttons sent: echoing a pointer move the server made keeps them as they are. */
     @Volatile private var buttons = 0
     /** Where the pointer is as far as the server knows. */
@@ -265,6 +278,84 @@ object ViewerConnection {
     }
 
     fun resize(width: Int, height: Int) = client?.let { c -> send { c.resize(width, height) } }
+
+    /** Touch scrolls go in small steps ([scrollSteps]): on Wayland, where the compositor offers a virtual pointer. */
+    val scrollsInSteps: Boolean get() = waylandClient?.canScroll == true
+
+    /**
+     * What a touch scroll unit typically moves, in framebuffer pixels: a step on Wayland
+     * ([WaylandClient.stepPixels]), else a wheel notch ([WHEEL_NOTCH]).
+     */
+    val typicalUnit: Float get() = waylandClient?.takeIf { it.canScroll }?.stepPixels ?: WHEEL_NOTCH
+
+    /**
+     * Framebuffer pixels of finger travel per touch scroll unit, down or [across]: the typical one
+     * at the app's measured speed. Sideways, until measured, the speed down: most apps scroll as
+     * far either way, while some scroll by a share of what they show, so less across a narrow window.
+     */
+    fun scrollUnit(across: Boolean): Float {
+        val share = if (across && speedAcross.known) speedAcross.share else speed.share
+        return typicalUnit * share
+    }
+
+    /** The app's speed down or [across] is still being learnt: the viewer measures drags ([scrollMeasured]). */
+    fun measuringScroll(across: Boolean): Boolean {
+        val speed = if (across) speedAcross else speed
+        // On Wayland only once the virtual pointer is there: until then the typical unit is a notch's.
+        if (!wayland || scrollsInSteps) client?.framebuffer?.let { speed.setup(if (across) it.width else it.height, typicalUnit) }
+        return speed.measuring
+    }
+
+    // The app's speed down and across, and where speeds are kept: by app and display.
+    private var speed = ScrollSpeed()
+    private var speedAcross = ScrollSpeed()
+    private var speedsFile: File? = null
+    private var speedKey: String? = null
+
+    /**
+     * A drag's measurement, down or [across]: one unit moved the content [pixels] (framebuffer
+     * pixels), or null when it gave no value. The speed is kept for the app's next session. What
+     * came of it, for the log.
+     */
+    fun scrollMeasured(across: Boolean, pixels: Float?): String {
+        val speed = if (across) speedAcross else speed
+        val result = speed.measured(pixels?.div(typicalUnit))
+        val file = speedsFile
+        val key = speedKey
+        if (pixels != null && file != null && key != null) {
+            val all = speeds()
+            all.setProperty(if (across) "$key$ACROSS" else key, speed.saved())
+            runCatching { file.outputStream().use { all.store(it, null) } }.onFailure { DebugLog.w("Viewer: scroll speeds not saved: $it") }
+        }
+        return result
+    }
+
+    private fun speeds() = java.util.Properties().apply {
+        runCatching { speedsFile?.takeIf { it.isFile }?.inputStream()?.use(::load) }
+    }
+
+    /** The file in the cache that keeps each app's scroll speed. */
+    private const val SCROLL_SPEEDS = "scroll-speeds.properties"
+    /** The key's ending for an app's speed across. */
+    private const val ACROSS = ".across"
+
+    /**
+     * What a wheel notch typically scrolls, in the app's pixels. Measured: a terminal about 45
+     * (three lines), GTK 3 about 100 in a 1000 pixel tall window (it grows with the window),
+     * browsers 115 to 120.
+     */
+    const val WHEEL_NOTCH = 100f
+
+    /** Scrolls [down] and [right] steps at ([x], [y]) ([WaylandClient.scroll]). */
+    fun scrollSteps(x: Int, y: Int, down: Int, right: Int) {
+        val fb = client?.framebuffer ?: return
+        waylandClient?.scroll(x, y, fb.width, fb.height, down, right)
+    }
+
+    /** A touch scroll in steps stopped. */
+    fun scrollEnd() {
+        waylandClient?.scrollEnd()
+    }
 
     /** Android's clipboard has new text: announced (also to a connection still being made); read only when an app pastes. */
     @Volatile private var clipboardOffered = false
@@ -304,8 +395,6 @@ object ViewerConnection {
         frames = null
         path = null
         region = null
-        scrollNotch = ScrollMeter.DEFAULT_NOTCH
-        scrollNotchMeasured = false
         clipboardOffered = false
         waylandClient?.close()
         waylandClient = null

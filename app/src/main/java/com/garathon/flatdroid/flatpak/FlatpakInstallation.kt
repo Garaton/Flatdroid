@@ -1,6 +1,6 @@
 package com.garathon.flatdroid.flatpak
 
-import com.garathon.flatdroid.util.readTextUpTo
+import com.garathon.flatdroid.util.io.readTextUpTo
 import java.io.File
 
 /** An installed app or runtime: its ref and deployed directory (with `files/` and `metadata`). */
@@ -53,6 +53,33 @@ class FlatpakInstallation(root: File, private val arch: String) {
      * under each (GL, codecs, locales, …). Used to baseline and to check files; a deployment's
      * `dir.name` is its OSTree commit, which changes on update, so each has its own baseline.
      */
+    /**
+     * The runtimes among [runtimeIds] (directory names under `runtime/`) that no installed app uses:
+     * not its runtime, and not an extension mounted under it or under the app, by the rules a launch uses.
+     */
+    fun unusedRuntimes(runtimeIds: Set<String>): Set<String> {
+        val used = appIds().flatMap { deploymentsFor(it) }.filter { it.kind == "runtime" }.map { it.ref.name }.toSet()
+        return runtimeIds - used
+    }
+
+    /**
+     * Installed runtime and extension branches (ID and branch) that no installed app's launch uses,
+     * by the rules a launch uses. Flatpak's `uninstall --unused` works per branch too, so when this
+     * is empty there is nothing for it to remove; anything uncertain counts as unused here (an app's
+     * other branches, say), so a mistake only means running it when it wasn't needed.
+     */
+    fun unusedRuntimeRefs(): List<FlatpakRef> {
+        val used = appIds().flatMap { deploymentsFor(it) }.filter { it.kind == "runtime" }.map { it.ref }.toSet()
+        return runtimeRefs().filter { it !in used }
+    }
+
+    /** Every installed runtime and extension branch for this architecture, sorted. */
+    fun runtimeRefs(): List<FlatpakRef> = File(root, "runtime").list().orEmpty().sorted().flatMap { name ->
+        File(root, "runtime/$name/$arch").list().orEmpty().sorted()
+            .map { branch -> FlatpakRef(name, arch, branch) }
+            .filter { runtime(it) != null }
+    }
+
     fun deploymentsFor(appId: String): List<Deployment> {
         val app = app(appId) ?: return emptyList()
         val runtimeRef = app.metadata.runtime ?: return listOf(app)
