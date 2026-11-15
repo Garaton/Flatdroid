@@ -142,7 +142,8 @@ class FlatpakTaskService : Service() {
                 withContext(NonCancellable) { runInterruptible { cleanUpAfter(task) } }
             } catch (e: Exception) {
                 error = e.message ?: e.toString()
-                runInterruptible { cleanUpAfter(task) }
+                // As after a cancel: a Cancel pressed now must not cut the clean-up short (the marker goes either way).
+                withContext(NonCancellable) { runInterruptible { cleanUpAfter(task) } }
             } finally {
                 dns.stop()
                 endEscaped()

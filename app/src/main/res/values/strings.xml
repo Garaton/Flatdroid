@@ -63,13 +63,13 @@
     <string name="app_settings_sdcard_needs_access">Needs All files access, which is in Flatdroid\'s settings under Storage.</string>
     <string name="app_settings_force_x11_unavailable">Only for apps that ask for both Wayland and X11.</string>
     <string name="settings_interface_theme">Flatdroid theme</string>
-    <string name="settings_interface_theme_hint">How Flatdroid themes its own UI. AMOLED is pure black background and save power on AMOLED screens.</string>
+    <string name="settings_interface_theme_hint">How Flatdroid themes its own UI. AMOLED has a pure black background, which saves power on AMOLED screens..</string>
     <string name="settings_theme_amoled">AMOLED</string>
     <string name="settings_mobile_data">Mobile data</string>
     <string name="settings_flathub_links">Flathub links</string>
     <string name="settings_flathub_links_allowed">Allowed</string>
     <string name="settings_flathub_links_not_allowed">Not allowed yet</string>
-    <string name="settings_flathub_links_hint">"Lets the Install button on flathub.org to open Flatdroid through a pop-up. When in the app you are then shown the app and asked if you want to install it.</string>
+    <string name="settings_flathub_links_hint">Lets the Install button on flathub.org to open Flatdroid through a pop-up. When in the app you are then shown the app and asked if you want to install it.</string>
     <string name="install_tip_links">Tap here to let Flathub\'s Install button open Flatdroid.</string>
     <string name="settings_flathub_links_open">Open Android\'s setting</string>
     <string name="settings_mobile_data_hint">What installs and updates do when the connection is metered.</string>
@@ -228,7 +228,7 @@
     <string name="home_sort_last_opened">Last opened</string>
     <string name="home_sort_name">Name</string>
     <string name="home_sort_most_used">Most used</string>
-    <string name="home_empty">No apps installed yet. Tap + and enter an app ID from Flathub.</string>
+    <string name="home_empty">No apps installed yet. Tap + to browse Flatpaks from Flathub.</string>
     <string name="home_no_match">No app matches.</string>
     <string name="home_last_opened">Last opened:</string>
     <string name="home_time_used">Time used:</string>
@@ -258,7 +258,7 @@
     <string name="browse_install_by_id">Install by app ID</string>
     <string name="browse_refresh">Refresh Flathub\'s catalog</string>
     <string name="browse_loading">Reading Flathub\'s catalog…</string>
-    <string name="browse_missing">Flathub\'s catalog isn\'t on this phone yet. Refresh to download it (about 10 MB).</string>
+    <string name="browse_missing">Flathub\'s catalog isn\'t on this phone yet, refresh to download it.</string>
     <string name="browse_failed">Flathub\'s catalog couldn\'t be read: %1$s</string>
     <string name="browse_installed">Installed</string>
     <string name="browse_installing">Installing</string>
@@ -466,7 +466,7 @@
     <string name="session_signal_ended">%1$s was ended by %2$s.</string>
     <string name="session_exit_error">%1$s closed with an error (exit code %2$d).</string>
     <string name="session_failed">Could not run the app: %1$s</string>
-    <string name="session_choose_viewer">Choose the VNC viewer under Settings → Viewer first.</string>
+    <string name="session_choose_viewer">The VNC viewer you chose isn't installed. Pick another under Display → Show apps in, or switch back to Flatdroid's viewer.</string>
     <string name="session_no_viewer">No VNC viewer is installed. Install one (such as AVNC) then connect to the address shown with the password.</string>
     <string name="session_log_title">App output</string>
     <string name="session_reading_metadata">Reading the app\'s metadata…</string>

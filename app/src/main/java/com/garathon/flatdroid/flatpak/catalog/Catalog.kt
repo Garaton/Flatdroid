@@ -12,6 +12,7 @@ import com.garathon.flatdroid.settings.MobileData
 import com.garathon.flatdroid.settings.mobileDataPolicy
 import com.garathon.flatdroid.util.debug.DebugLog
 import com.garathon.flatdroid.util.appScope
+import com.garathon.flatdroid.util.io.writeTextAtomically
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -216,8 +217,10 @@ object Catalog {
         try {
             val started = System.currentTimeMillis()
             val apps = FlathubClient.allApps()
-            listsFile(context).apply { parentFile?.mkdirs() }.writeText(
+            // Whole or not at all: a file cut short would stay until the next refresh.
+            listsFile(context).writeTextAtomically(
                 apps.joinToString("") { "${it.id}\t${it.installsLastMonth ?: ""}\t${it.addedAt ?: ""}\t${it.updatedAt ?: ""}\n" },
+                durable = false,
             )
             // Written by earlier versions: three lists of 250 apps.
             File(dir(context), "lists").delete()

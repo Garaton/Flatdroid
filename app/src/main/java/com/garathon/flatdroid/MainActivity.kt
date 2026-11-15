@@ -37,6 +37,7 @@ import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import com.garathon.flatdroid.alpine.AlpineEnvironment
 import com.garathon.flatdroid.alpine.GuestFiles
 import com.garathon.flatdroid.audio.MicStreamer
@@ -105,6 +106,7 @@ import com.garathon.flatdroid.ui.theme.FlatdroidTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.IOException
 
 class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
@@ -533,18 +535,29 @@ class MainActivity : ComponentActivity() {
                         onResetFlatdroidSettings = { store.delete(); go(target.parent ?: Screen.Home) },
                     ),
                     onSave = { new ->
-                        // Keep what the launcher manages: last opened, the Electron flags and /.flatpak-info.
-                        store.update { old ->
-                            new.copy(
-                                lastOpened = old.lastOpened,
-                                launches = old.launches,
-                                usedMillis = old.usedMillis,
-                                newerElectronFlags = old.newerElectronFlags,
-                                withoutFlatpakInfo = old.withoutFlatpakInfo,
-                                wholeDev = if (developerOptions) new.wholeDev else old.wholeDev,
-                            )
+                        // Written off the main thread; a failed write (storage full) keeps the screen open.
+                        lifecycleScope.launch {
+                            val failure = withContext(Dispatchers.IO) {
+                                try {
+                                    // Keep what the launcher manages: last opened, the Electron flags and /.flatpak-info.
+                                    store.update { old ->
+                                        new.copy(
+                                            lastOpened = old.lastOpened,
+                                            launches = old.launches,
+                                            usedMillis = old.usedMillis,
+                                            newerElectronFlags = old.newerElectronFlags,
+                                            withoutFlatpakInfo = old.withoutFlatpakInfo,
+                                            wholeDev = if (developerOptions) new.wholeDev else old.wholeDev,
+                                        )
+                                    }
+                                    null
+                                } catch (e: IOException) {
+                                    e
+                                }
+                            }
+                            if (failure == null) go(target.parent ?: Screen.Home)
+                            else Toast.makeText(this@MainActivity, getString(R.string.storage_failed, failure.message ?: failure.toString()), Toast.LENGTH_LONG).show()
                         }
-                        go(target.parent ?: Screen.Home)
                     },
                     onDiscard = { go(target.parent ?: Screen.Home) },
                     modifier = modifier,

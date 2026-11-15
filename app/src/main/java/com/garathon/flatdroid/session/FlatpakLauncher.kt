@@ -405,27 +405,40 @@ class FlatpakLauncher(private val context: Context) {
                 return true
             }
         } finally {
+            // Every step runs whatever the one before it did: a failed write or a Stop arriving now
+            // (an interrupt ends the first wait it meets) must not leave the app or the helpers running.
+            var interrupted = Thread.interrupted()
+            fun step(action: () -> Unit) {
+                try {
+                    action()
+                } catch (e: InterruptedException) {
+                    interrupted = true
+                } catch (e: Exception) {
+                    SessionController.log("[flatdroid] while ending the session: $e")
+                }
+            }
             // The time the app ran, simply from its start to here: nothing is measured while it runs.
-            runningSince?.let { start -> store.update { it.copy(usedMillis = it.usedMillis + (System.currentTimeMillis() - start)) } }
-            dns.stop()
+            step { runningSince?.let { start -> store.update { it.copy(usedMillis = it.usedMillis + (System.currentTimeMillis() - start)) } } }
+            step { dns.stop() }
             // A paused app ignores the signals that end it: let it go on first.
-            HiddenPause.detach()
-            app?.stop()
-            player?.stop()
-            mic?.stop()
+            step { HiddenPause.detach() }
+            step { app?.stop() }
+            step { player?.stop() }
+            step { mic?.stop() }
             // The helpers first, so a streamer still writing to its pipe fails instead of waiting.
-            cameraHelpers?.stop()
-            streamers.values.forEach { it.close() }
+            step { cameraHelpers?.stop() }
+            step { streamers.values.forEach { it.close() } }
             SessionController.onMicrophoneAnswer = null
             SessionController.onDisplayResized = null
-            helpers.stop()
-            endEscaped()
+            step { helpers.stop() }
+            step { endEscaped() }
             // proot leaves the private binds' mount points behind in the shared home, where the
             // user sees them (empty .ssh, .bashrc, .config and the rest). Remove the empty ones.
             // A private home gets them too when it shares hidden files (a temporary one goes anyway).
             if (settings.homeMode == HomeMode.SHARED || settings.homeMode == HomeMode.ANDROID || (settings.shareHiddenFiles && settings.homeMode == HomeMode.PRIVATE)) {
-                cleanSharedHomeMountPoints(home, plan, existedBefore)
+                step { cleanSharedHomeMountPoints(home, plan, existedBefore) }
             }
+            if (interrupted) Thread.currentThread().interrupt()
         }
     }
 

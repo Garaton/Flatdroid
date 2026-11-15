@@ -6,6 +6,7 @@ import com.garathon.flatdroid.launcher.electron.Electron
 import com.garathon.flatdroid.launcher.Executable
 import com.garathon.flatdroid.proot.DevNodes
 import com.garathon.flatdroid.settings.AppSettings
+import com.garathon.flatdroid.settings.AppSettingsStore
 import com.garathon.flatdroid.storage.AppData
 import com.garathon.flatdroid.util.io.readTextUpTo
 import java.io.File
@@ -61,7 +62,8 @@ class InstalledApps(private val context: Context) {
 
     fun list(): List<InstalledApp> = installation.appIds().mapNotNull { id ->
         val app = installation.app(id) ?: return@mapNotNull null
-        val settings = AppData.settings(context, id).load()
+        // Only its usage is read here, which follows no defaults: Flatdroid's settings aren't read again for each app.
+        val settings = AppSettingsStore(AppData.settingsFile(context, id)).load()
         InstalledApp(
             id = id,
             name = desktopName(app, id) ?: id,
@@ -149,7 +151,9 @@ class InstalledApps(private val context: Context) {
 
         /** A Flatpak app ID: at least two dot-separated parts of letters, digits, `_` and `-`. */
         fun isValidId(id: String): Boolean =
-            id.length <= 255 && Regex("[A-Za-z_][A-Za-z0-9_-]*(\\.[A-Za-z0-9_-]+)+").matches(id)
+            id.length <= 255 && ID.matches(id)
+
+        private val ID = Regex("[A-Za-z_][A-Za-z0-9_-]*(\\.[A-Za-z0-9_-]+)+")
 
         /** The app IDs in [text], separated by whitespace, each once; null if there are none or any isn't valid. */
         fun parseIds(text: String): List<String>? = splitIds(text).takeIf { ids -> ids.isNotEmpty() && ids.all(::isValidId) }

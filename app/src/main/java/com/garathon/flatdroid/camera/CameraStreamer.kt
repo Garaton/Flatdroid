@@ -136,7 +136,12 @@ class CameraStreamer(private val context: Context, private val camera: AndroidCa
                     val imageReader = ImageReader.newInstance(camera.width, camera.height, ImageFormat.YUV_420_888, 3)
                     reader = imageReader
                     imageReader.setOnImageAvailableListener({ onImage(it) }, handler)
-                    capture(manager, opened, imageReader)
+                    try {
+                        capture(manager, opened, imageReader)
+                    } catch (e: Exception) {
+                        // Taken back between opening and configuring: as when Android reports it.
+                        lost(opened, e.message ?: e.toString())
+                    }
                 }
 
                 override fun onDisconnected(opened: CameraDevice) = lost(opened, "Android took it back")
@@ -173,7 +178,11 @@ class CameraStreamer(private val context: Context, private val camera: AndroidCa
             override fun onConfigured(configured: CameraCaptureSession) {
                 if (device != opened) return configured.close()
                 session = configured
-                configured.setRepeatingRequest(request, if (BuildConfig.DEBUG) captured else null, handler)
+                try {
+                    configured.setRepeatingRequest(request, if (BuildConfig.DEBUG) captured else null, handler)
+                } catch (e: Exception) {
+                    lost(opened, e.message ?: e.toString())
+                }
             }
 
             override fun onConfigureFailed(configured: CameraCaptureSession) {

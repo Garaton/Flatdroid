@@ -71,7 +71,7 @@ class HomesProvider : DocumentsProvider() {
         val cursor = MatrixCursor(projection ?: DOCUMENT_COLUMNS)
         if (parentDocumentId == HomeDocuments.ROOT) {
             val apps = AppData.root(context).list().orEmpty()
-                .filter { InstalledApps.isValidId(it) && AppData.privateHome(context, it).isDirectory }.sorted()
+                .filter { id -> InstalledApps.isValidId(id) && AppData.privateHome(context, id).let { it.isDirectory && !AndroidTarFs.isSymlink(it) } }.sorted()
             for (appId in apps) addRow(cursor, appId, home(appId))
         } else {
             val (appId, _) = HomeDocuments.parse(parentDocumentId) ?: throw FileNotFoundException(parentDocumentId)
@@ -199,7 +199,8 @@ class HomesProvider : DocumentsProvider() {
     private fun fileOf(documentId: String): File {
         val (appId, path) = HomeDocuments.parse(documentId) ?: throw FileNotFoundException(documentId)
         val home = home(appId)
-        if (!home.isDirectory) throw FileNotFoundException(documentId)
+        // An app can put a link where its home was (the launcher removes it at the next launch): no home.
+        if (!home.isDirectory || AndroidTarFs.isSymlink(home)) throw FileNotFoundException(documentId)
         val homePath = home.canonicalPath
         if (path.isEmpty()) return File(homePath)
         val file = File(home, path)

@@ -45,7 +45,8 @@ object HomeZip {
             }
         }
         for (part in parts) {
-            if (!part.dir.isDirectory) continue
+            // An app can put a link where its folder was: followed, it would export another folder.
+            if (isLink(part.dir) || !part.dir.isDirectory) continue
             if (part.prefix.isNotEmpty()) entries += part.prefix to part.dir
             collect(part.dir, "", part)
         }

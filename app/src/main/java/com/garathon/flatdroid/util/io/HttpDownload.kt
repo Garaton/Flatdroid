@@ -63,5 +63,14 @@ fun sha256(file: File): String {
             digest.update(buf, 0, n)
         }
     }
-    return digest.digest().joinToString("") { "%02x".format(it) }
+    val bytes = digest.digest()
+    val hex = CharArray(bytes.size * 2)
+    for (i in bytes.indices) {
+        val b = bytes[i].toInt() and 0xff
+        hex[2 * i] = HEX[b ushr 4]
+        hex[2 * i + 1] = HEX[b and 0x0f]
+    }
+    return String(hex)
 }
+
+private val HEX = "0123456789abcdef".toCharArray()

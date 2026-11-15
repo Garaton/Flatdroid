@@ -16,14 +16,7 @@ import androidx.compose.ui.unit.dp
 import com.garathon.flatdroid.ui.theme.Spacing
 
 /**
- * Cards come in one of two looks, filled (a tinted surface) or outlined (a thin line, no fill).
- * Outlined to start with; the other stays until the two have been compared on the phone, and then
- * the one that loses is deleted.
- */
-private const val CARDS_FILLED = false
-
-/**
- * A group of settings: [content] in a card, with an optional [title] on top. [danger] colors the
+ * A group of settings: [content] in an outlined card, with an optional [title] on top. [danger] colors the
  * title and the outline as a warning. Every settings page is built from these.
  */
 @Composable
@@ -37,8 +30,8 @@ fun SettingsCard(
     Surface(
         modifier = modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.small,
-        color = if (CARDS_FILLED) colors.surfaceContainer else Color.Transparent,
-        border = if (CARDS_FILLED) null else BorderStroke(1.dp, if (danger) colors.error.copy(alpha = 0.6f) else colors.outlineVariant),
+        color = Color.Transparent,
+        border = BorderStroke(1.dp, if (danger) colors.error.copy(alpha = 0.6f) else colors.outlineVariant),
     ) {
         Column(Modifier.padding(Spacing.card), verticalArrangement = Arrangement.spacedBy(Spacing.row)) {
             title?.let { Text(it, style = sectionTitleStyle(), color = if (danger) colors.error else colors.primary) }
