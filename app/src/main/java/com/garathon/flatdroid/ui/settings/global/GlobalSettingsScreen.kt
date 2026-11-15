@@ -8,6 +8,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -81,6 +85,8 @@ class GlobalSettingsEnv(
     val storage: FlatdroidStorage?,
     val storageBusy: Boolean,
     val canReset: Boolean,
+    /** The app that runs or starts, if any: its own home and files can't be copied or replaced meanwhile. */
+    val runningAppId: String?,
     val canOpenTerminal: Boolean,
     val actions: GlobalStorageActions,
     val onReset: (ResetMode) -> Unit,
@@ -134,6 +140,7 @@ fun GlobalSettingsScreen(
     var baselineChoice by rememberSaveable { mutableStateOf(false) }
     var confirmDiscard by rememberSaveable { mutableStateOf(false) }
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val toSave = current.toSettings(env.deviceLanguages)
     fun requestDiscard() {
         if (env.applying) return
@@ -172,7 +179,12 @@ fun GlobalSettingsScreen(
                     // Turning the check on: its baselines were dropped when it was turned off (and installs or
                     // updates meanwhile recorded none), so ask how to record them.
                     val enablingCheck = toSave.security.checkFilesBeforeLaunch && !draft.saved.settings.security.checkFilesBeforeLaunch
-                    if (enablingCheck && !IntegrityGuard(context).allBaselined()) baselineChoice = true else onSave(toSave)
+                    if (!enablingCheck) return@SettingsTopBar onSave(toSave)
+                    // Walks every deployment's baseline: off the main thread.
+                    scope.launch {
+                        val all = withContext(Dispatchers.IO) { IntegrityGuard(context).allBaselined() }
+                        if (all) onSave(toSave) else baselineChoice = true
+                    }
                 },
                 onDiscard = ::requestDiscard,
             ) {
@@ -210,7 +222,7 @@ private fun GlobalSettingsScreenPreview() {
                     runtimes = 800L shl 20, apps = 200L shl 20, appData = 5L shl 20, privateHomes = 30L shl 20, cache = 3L shl 20,
                     other = 150L shl 20, unusedAppData = Unused(1, 1L shl 20), unusedHomes = Unused(0, 0), sharedDotfiles = 0,
                 ),
-                storageBusy = false, canReset = true, canOpenTerminal = true,
+                storageBusy = false, canReset = true, runningAppId = null, canOpenTerminal = true,
                 actions = GlobalStorageActions({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, { _, _ -> }, {}, { _, _, _ -> }, {}),
                 onReset = {}, onResetSettings = {}, onTerminal = {},
                 apps = emptyList(), taskText = null, hasCamera = true, cameraResolutions = emptyMap(),

@@ -5,8 +5,13 @@ import com.garathon.flatdroid.alpine.AlpineEnvironment
 import com.garathon.flatdroid.setup.rootfs.AndroidTarFs
 import com.garathon.flatdroid.storage.AppData
 import com.garathon.flatdroid.launcher.electron.ElectronSwap
+import com.garathon.flatdroid.settings.LiveSettings
+import com.garathon.flatdroid.settings.UserSettings
 import com.garathon.flatdroid.settings.UserSettingsStore
+import com.garathon.flatdroid.util.appScope
 import com.garathon.flatdroid.util.debug.DebugLog
+import com.garathon.flatdroid.util.io.LineBuffer
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -40,8 +45,22 @@ object SetupController {
     private val _state = MutableStateFlow(SetupUi())
     val state: StateFlow<SetupUi> = _state.asStateFlow()
 
+    // Like the session's and the tasks' logs: lines are added cheaply and the list reaches the state a few times a second.
+    private val logBuffer = LineBuffer(MAX_LOG_LINES, appScope)
+
+    init {
+        appScope.launch { logBuffer.lines.collect { lines -> _state.update { it.copy(log = lines) } } }
+    }
+
     fun store(context: Context) = SetupStateStore(File(context.filesDir, "setup.properties"))
     fun settings(context: Context) = UserSettingsStore(File(context.filesDir, SETTINGS_FILE))
+
+    /**
+     * Flatdroid's saved settings, from the live copy ([LiveSettings.user]) when there is one, so
+     * the main thread needn't read the file (null: none are saved yet). Anything that writes or
+     * deletes the file goes through [UserSettingsStore.save] or [UserSettingsStore.loadLive].
+     */
+    fun saved(context: Context): UserSettings? = LiveSettings.user.value ?: settings(context).load()
 
     fun reset(context: Context, env: AlpineEnvironment = AlpineEnvironment.get(context)) = AlpineReset(
         pendingFile = File(context.filesDir, "alpine/reset-pending"),
@@ -88,9 +107,10 @@ object SetupController {
         _state.update {
             if (it.running) it else {
                 started = true
-                it.copy(running = true, failed = null, error = null, fraction = null, detail = "", log = emptyList())
+                it.copy(running = true, failed = null, error = null, fraction = null, detail = "")
             }
         }
+        if (started) logBuffer.clear()
         return started
     }
 
@@ -111,7 +131,7 @@ object SetupController {
 
         override fun log(line: String) {
             DebugLog.i(line)
-            _state.update { it.copy(log = (it.log + line).takeLast(MAX_LOG_LINES)) }
+            logBuffer.add(line)
         }
 
         override fun stepFinished(step: SetupStep) =

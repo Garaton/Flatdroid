@@ -96,7 +96,14 @@ class FlatpakTaskService : Service() {
         }
         val task = intent?.let(::taskOf) ?: run { stopSelf(startId); return START_NOT_STICKY }
         // Android wants the notification for every foreground start, even one that isn't run.
-        startInForeground(notification(task))
+        if (!startInForeground(notification(task))) {
+            // Android 15's daily limit for this kind of service is used up: the task waits for Flatdroid to come to the front
+            // ([startNext] on resume), as when Android refuses a start from the background. A repair or baselines are asked again by themselves.
+            FlatpakTasks.abandon(task)
+            if (task != FlatpakTask.Repair && task != FlatpakTask.BaselineAll) FlatpakTasks.putBack(task)
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
         // start() claimed the task; anything else (a start for a task already launched) isn't run,
         // and the notification goes back to what runs.
         if (FlatpakTasks.ui.value.running != task || launched == task) {
@@ -109,9 +116,12 @@ class FlatpakTaskService : Service() {
         val previous = job
 
         wakeLock?.takeIf { it.isHeld }?.release()
-        wakeLock = getSystemService(PowerManager::class.java)
+        // Held for the whole task, which is several commands, and let go in its job's end; the service's
+        // end (Android's time limit, a stop) and the process's death drop it too.
+        val lock = getSystemService(PowerManager::class.java)
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Flatdroid:flatpak")
-            .apply { acquire(WAKE_LOCK_TIMEOUT_MS) }
+            .apply { acquire() }
+        wakeLock = lock
         // Installs are left out: an interrupted download is already safe (see cleanUpAfter); so is a
         // baseline, which changes no Flatpak files.
         val marker = AppData.taskMarker(applicationContext).takeIf {
@@ -126,12 +136,17 @@ class FlatpakTaskService : Service() {
         killed = false
         timedOut = false
         job = scope.launch {
-            previous?.join()
-            val following = followInNotification(task)
             var error: String? = null
-            // A download can outlast a switch between networks: keep Alpine's resolv.conf current.
-            val dns = ResolvConfRefresher(applicationContext, listOf(AlpineEnvironment.get(applicationContext).resolvConfFile)).apply { start() }
+            // False while the job waits for the previous one: a cancel then has nothing of its own to clean up.
+            var began = false
+            var following: Job? = null
+            var dns: ResolvConfRefresher? = null
             try {
+                previous?.join()
+                began = true
+                following = followInNotification(task)
+                // A download can outlast a switch between networks: keep Alpine's resolv.conf current.
+                dns = ResolvConfRefresher(applicationContext, listOf(AlpineEnvironment.get(applicationContext).resolvConfFile)).apply { start() }
                 // Before the task's file checks; see LeftoverProcesses.killEscaped.
                 endEscaped()
                 marker?.writeTextAtomically(task.toString())
@@ -142,26 +157,35 @@ class FlatpakTaskService : Service() {
                 baselineMarker?.delete()
             } catch (e: CancellationException) {
                 error = getString(if (timedOut) R.string.task_time_limit else R.string.task_cancelled)
-                withContext(NonCancellable) { runInterruptible { cleanUpAfter(task) } }
+                if (began) withContext(NonCancellable) { runInterruptible { cleanUpAfter(task) } }
             } catch (e: Exception) {
                 error = e.message ?: e.toString()
                 // As after a cancel: a Cancel pressed now must not cut the clean-up short (the marker goes either way).
-                withContext(NonCancellable) { runInterruptible { cleanUpAfter(task) } }
+                if (began) withContext(NonCancellable) { runInterruptible { cleanUpAfter(task) } }
             } finally {
-                dns.stop()
-                endEscaped()
-                marker?.delete()
-                if (task == FlatpakTask.RefreshCatalog) SavedSizes.changedShared(applicationContext) else SavedSizes.changedAll(applicationContext)
+                // Each step on its own: none of them may keep the task from ending (it would stay "running" until a restart).
+                // Only for a task that began: otherwise they would touch the previous task's marker and processes.
+                if (began) {
+                    runCatching { dns?.stop() }
+                    runCatching { endEscaped() }
+                    runCatching { marker?.delete() }
+                    runCatching {
+                        if (task == FlatpakTask.RefreshCatalog) SavedSizes.changedShared(applicationContext) else SavedSizes.changedAll(applicationContext)
+                    }
+                }
+                runCatching { if (lock.isHeld) lock.release() }
                 FlatpakTasks.log(error?.let { getString(R.string.task_log_failed, it) } ?: getString(R.string.task_log_done))
                 // Not after the end: it would post this task's notification over the next one's.
-                withContext(NonCancellable) { following.cancelAndJoin() }
+                withContext(NonCancellable) { following?.cancelAndJoin() }
                 // Before the end: once nothing runs, a new start must not look like a duplicate of this one.
                 launched = null
                 FlatpakTasks.end(task, error)
-                // What waited for this task starts now. Without a claimed task, the
+                // What waited for this task starts now, unless Android's limit ended it (the next would be refused
+                // too): Flatdroid starts it when it comes to the front. On the main thread, where a launch is also
+                // checked against tasks, so both claims can't pass their checks at once. Without a claimed task, the
                 // service stops by the newest start it was given: a cancel's, say. A start Android
                 // hasn't delivered yet is newer still, so it isn't stopped under that one.
-                startNext(applicationContext)
+                if (!timedOut) withContext(NonCancellable + Dispatchers.Main) { startNext(applicationContext) }
                 // A cancel is the user's own doing: not told again.
                 synchronized(results) { if (error != getString(R.string.task_cancelled)) results += task to error }
                 if (FlatpakTasks.ui.value.running == null) {
@@ -575,9 +599,16 @@ class FlatpakTaskService : Service() {
         remove.forEach { AndroidTarFs.deleteTree(it) }
     }
 
-    private fun startInForeground(notification: Notification) {
+    /** False when Android refuses it (from Android 15, the daily limit of this kind of service is used up; not tried on such a phone (verify)). */
+    private fun startInForeground(notification: Notification): Boolean {
         val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else 0
-        ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, type)
+        return try {
+            ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, type)
+            true
+        } catch (e: IllegalStateException) {
+            DebugLog.w("Foreground start refused: $e")
+            false
+        }
     }
 
     /**
@@ -642,7 +673,6 @@ class FlatpakTaskService : Service() {
         private const val ALPINE_TIMEOUT_SECONDS = 60 * 60L
         /** How flatpak reports repository data that is referenced but missing. */
         private val MISSING_REPO_DATA = Regex("No such metadata object|While trying to checkout|Opening content object|Failed to read commit")
-        private const val WAKE_LOCK_TIMEOUT_MS = TIMEOUT_SECONDS * 1000
 
         private const val EXTRA_TASK = "task"
         private const val EXTRA_APP_ID = "appId"

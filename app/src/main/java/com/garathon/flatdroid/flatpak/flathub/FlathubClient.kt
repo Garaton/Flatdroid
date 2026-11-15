@@ -9,6 +9,7 @@ import org.json.JSONObject
 import java.io.FileNotFoundException
 import java.io.IOException
 import java.net.HttpURLConnection
+import kotlin.concurrent.thread
 import java.net.URL
 
 /** What an app's install confirmation shows. Sizes are bytes, null when Flathub doesn't say. */
@@ -73,9 +74,12 @@ object FlathubClient {
     /** [id] must be a valid app ID (it goes into the address). */
     fun fetch(id: String): FlathubApp {
         require(InstalledApps.isValidId(id)) { "Not an app ID: $id" }
+        // Asked side by side: on a slow connection the two waits would add up. The name, summary and
+        // verification are nice to have; the summary's facts are what matter, and its failure is the failure.
+        var appstream: String? = null
+        val side = thread(name = "flathub-appstream", isDaemon = true) { appstream = runCatching { get("$API/appstream/$id", id) }.getOrNull() }
         val summary = get("$API/summary/$id", id)
-        // The name, summary and verification are nice to have; the summary's facts are what matter.
-        val appstream = runCatching { get("$API/appstream/$id", id) }.getOrNull()
+        side.join()
         return try {
             parse(id, summary, appstream)
         } catch (e: JSONException) {

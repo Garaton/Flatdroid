@@ -74,7 +74,8 @@ fun AppIcon(file: File?, modifier: Modifier = Modifier, decodePx: Int? = null) {
     }
     val image = bitmap
     // An icon that wasn't ready fades in the first time it is shown; one in memory, or shown before, is there at once.
-    val alpha = remember(file) { Animatable(if (image != null || file?.path in shownBefore) 1f else 0f) }
+    // (A null path can't be looked up in the concurrent set: it throws.)
+    val alpha = remember(file) { Animatable(if (image != null || (file != null && file.path in shownBefore)) 1f else 0f) }
     LaunchedEffect(image) {
         if (image != null) {
             file?.let { shownBefore += it.path }

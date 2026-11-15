@@ -116,7 +116,7 @@ fun SetupScreen(
             TextButton(onClick = { showLog = !showLog }) {
                 Text(stringResource(if (showLog) R.string.setup_hide_log else R.string.setup_show_log))
             }
-            FollowEnd(scroll, ui.log.size, showLog)
+            FollowEnd(scroll, ui.log, showLog)
             val logModifier = if (showLog) Modifier.height(OUTPUT_HEIGHT).verticalScroll(scroll) else Modifier
             Surface(Modifier.fillMaxWidth().animateContentSize(), shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.surfaceContainer) {
                 Box(modifier = Modifier.padding(8.dp).then(logModifier)) {

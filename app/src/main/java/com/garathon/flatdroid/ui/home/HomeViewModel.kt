@@ -22,7 +22,13 @@ import com.garathon.flatdroid.ui.home.FlatdroidStorage.Part
 import com.garathon.flatdroid.storage.sizes.SavedSizes
 import com.garathon.flatdroid.storage.sizes.StorageSizes
 import com.garathon.flatdroid.storage.tasks.StorageTasks
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
@@ -37,6 +43,9 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
 
+/** A launch on hold while the user answers a question. */
+data class PendingLaunch(val appId: String, val prepareElectron: Boolean)
+
 /** Installed apps for the home list; reloaded after Flatpak tasks, sessions and setup. */
 class HomeViewModel(app: Application) : AndroidViewModel(app) {
     private val _apps = MutableStateFlow<List<InstalledApp>?>(null)
@@ -46,8 +55,24 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     val apps: StateFlow<List<InstalledApp>?> = combine(_apps, uninstalling) { list, gone -> list?.filter { it.id !in gone } }
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
-    /** The user started an app from Flatdroid's window and hasn't left it: its viewer opens when it is up (not kept through rotation or in the background). */
-    @Volatile var autoOpen = false
+    /** The app the user started from Flatdroid's window and whose viewer hasn't opened yet: it opens once the app is up and the window is in front (kept through rotation). */
+    @Volatile var autoOpenApp: String? = null
+
+    /**
+     * What waits for an answer, kept here because the window is rebuilt by a rotation and the
+     * question or Android's permission dialog shouldn't be lost to it.
+     * An app to launch once the notification permission has been answered.
+     */
+    @Volatile var pendingLaunch: String? = null
+
+    /** Setup's first Start is waiting for the notification permission's answer. */
+    @Volatile var pendingSetup = false
+
+    /** A launch waiting for the microphone question. */
+    var microphoneQuestion by mutableStateOf<PendingLaunch?>(null)
+
+    /** An install or update waiting for the answer to the mobile data question. */
+    var meteredQuestion by mutableStateOf<FlatpakTask?>(null)
 
     private val _installLink = MutableStateFlow<String?>(null)
 
@@ -82,13 +107,22 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** The reload under way: a newer one replaces it, so a slow read from before a change can't overwrite a later one. */
+    private var reloadJob: Job? = null
+
     fun reload() {
-        viewModelScope.launch(Dispatchers.IO) {
-            _apps.value = try {
+        reloadJob?.cancel()
+        reloadJob = viewModelScope.launch(Dispatchers.IO) {
+            val list = try {
                 InstalledApps(getApplication()).list()
+            } catch (e: CancellationException) {
+                throw e
             } catch (_: Exception) {
-                emptyList()
+                null
             }
+            ensureActive()
+            // A failed read keeps the list there was (a half-deployed install must not read as "no apps").
+            if (list != null) _apps.value = list else if (_apps.value == null) _apps.value = emptyList()
             // The task is over: what is still installed (an uninstall that was cancelled) is listed again.
             val tasks = FlatpakTasks.ui.value
             if (tasks.running == null && tasks.generation > hiddenSince) uninstalling.value = emptySet()
@@ -125,25 +159,35 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
      * the apps, the cache, and last the runtimes and the rest, the slowest).
      */
     fun measureFlatdroid() {
-        viewModelScope.launch(Dispatchers.IO) {
-            val context = getApplication<Application>()
-            val installed = installedIds()
-            val ids = SavedSizes.appIds(context)
-            _flatdroidStorage.update { (it ?: lastKnownStorage(context, ids, installed)).copy(stale = Part.entries.toSet()) }
-            fun done(part: Part, change: (FlatdroidStorage) -> FlatdroidStorage) =
-                _flatdroidStorage.update { it?.let { s -> change(s).copy(stale = s.stale - part) } }
-            done(Part.SHARED_DOTFILES) { it.copy(sharedDotfiles = StorageSizes.of(AppData.sharedDotfilesDir(context))) }
-            // Not while a Flatpak task changes everything: the parts left keep their earlier sizes, marked.
-            val apps = ids.associateWith { SavedSizes.app(context, it) ?: return@launch }
-            done(Part.APPS) { it.withApps(apps, installed) }
-            // With the browser's index, which Clear all caches removes too.
-            done(Part.CACHE) { it.copy(cache = StorageSizes.of(context.cacheDir) + StorageSizes.of(Catalog.dir(context))) }
-            val shared = SavedSizes.shared(context) ?: return@launch
-            val runtimeSizes = SavedSizes.runtimes(context) ?: return@launch
-            val unusedRuntimes = unusedRuntimes(runtimeSizes.keys)
-            done(Part.SHARED) { it.copy(runtimes = shared.runtimes, other = shared.other, runtimeSizes = runtimeSizes, unusedRuntimes = unusedRuntimes) }
+        // One run at a time: a newer one replaces the run under way, which would mark parts fresh
+        // that the newer one is about to measure again (and walk the same folders twice).
+        synchronized(this) {
+            measureJob?.cancel()
+            measureJob = viewModelScope.launch(Dispatchers.IO) {
+                val context = getApplication<Application>()
+                val installed = installedIds()
+                val ids = SavedSizes.appIds(context)
+                _flatdroidStorage.update { (it ?: lastKnownStorage(context, ids, installed)).copy(stale = Part.entries.toSet()) }
+                fun done(part: Part, change: (FlatdroidStorage) -> FlatdroidStorage) {
+                    // The walks can't be interrupted: a run that was replaced meanwhile drops its result.
+                    ensureActive()
+                    _flatdroidStorage.update { it?.let { s -> change(s).copy(stale = s.stale - part) } }
+                }
+                done(Part.SHARED_DOTFILES) { it.copy(sharedDotfiles = StorageSizes.of(AppData.sharedDotfilesDir(context))) }
+                // Not while a Flatpak task changes everything: the parts left keep their earlier sizes, marked.
+                val apps = ids.associateWith { SavedSizes.app(context, it) ?: return@launch }
+                done(Part.APPS) { it.withApps(apps, installed) }
+                // With the browser's index, which Clear all caches removes too.
+                done(Part.CACHE) { it.copy(cache = StorageSizes.of(context.cacheDir) + StorageSizes.of(Catalog.dir(context))) }
+                val shared = SavedSizes.shared(context) ?: return@launch
+                val runtimeSizes = SavedSizes.runtimes(context) ?: return@launch
+                val unusedRuntimes = unusedRuntimes(runtimeSizes.keys)
+                done(Part.SHARED) { it.copy(runtimes = shared.runtimes, other = shared.other, runtimeSizes = runtimeSizes, unusedRuntimes = unusedRuntimes) }
+            }
         }
     }
+
+    private var measureJob: Job? = null
 
     /** The parts saved before (perhaps from before a change), for showing until measured again. */
     private fun lastKnownStorage(context: Application, ids: Set<String>, installed: Set<String>): FlatdroidStorage {

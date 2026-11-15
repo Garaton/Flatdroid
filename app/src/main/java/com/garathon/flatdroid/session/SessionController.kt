@@ -20,13 +20,13 @@ sealed interface SessionState {
     /**
      * The app runs. Flatdroid's own viewer connects to [socket] (a host path); with the external
      * viewer setting there is none, and a viewer connects to localhost:[SessionScript.VNC_PORT]
-     * with [password], and [username] when the session is Wayland ([WaylandVnc]). [wayland]: the
+     * with [password] (only then made), and [username] when the session is Wayland ([WaylandVnc]). [wayland]: the
      * display is labwc rather than Xvnc and Openbox. [followPercent]:
      * the screen is that share of the viewer's size and follows it (null: a fixed size).
      */
     data class Running(
         val appId: String,
-        val password: String,
+        val password: String? = null,
         val username: String? = null,
         val socket: String? = null,
         val wayland: Boolean = false,

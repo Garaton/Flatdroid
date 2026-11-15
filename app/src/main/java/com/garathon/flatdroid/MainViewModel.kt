@@ -16,6 +16,9 @@ import com.garathon.flatdroid.setup.rootfs.deleteTree
 import com.garathon.flatdroid.storage.sizes.SavedSizes
 import com.garathon.flatdroid.util.debug.DebugLog
 import com.garathon.flatdroid.util.io.LineBuffer
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
@@ -77,12 +80,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _settingsError.value = null
     }
 
+    /** What the screen does once settings are applied and saved. */
+    enum class AfterApply { HOME, REINSTALL_ALL, BASELINE_ALL }
+
     /**
-     * Applies [settings] in Alpine, then saves them and calls [onApplied] (on the main thread).
+     * Applied settings, one event each. An event and not a callback: applying outlives the window
+     * (a rotation rebuilds it), and the window that is there when it ends answers it.
+     */
+    private val _applied = Channel<AfterApply>(Channel.UNLIMITED)
+    val applied: Flow<AfterApply> = _applied.receiveAsFlow()
+
+    /**
+     * Applies [settings] in Alpine, then saves them and sends [after] to [applied].
      * Only commands that differ from the saved settings' run, and they run first, so settings whose
      * commands failed aren't saved and a second save tries them again.
      */
-    fun applySettings(settings: UserSettings, onApplied: () -> Unit) {
+    fun applySettings(settings: UserSettings, after: AfterApply) {
         if (_applying.value) return
         _applying.value = true
         _settingsError.value = null
@@ -109,7 +122,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 if (before?.security?.checkFilesBeforeLaunch == true && !settings.security.checkFilesBeforeLaunch) {
                     AndroidTarFs.deleteTree(AppData.integrityDir(app))
                 }
-                withContext(Dispatchers.Main) { onApplied() }
+                _applied.send(after)
             } catch (e: Exception) {
                 _settingsError.value = e.message ?: e.toString()
             } finally {
@@ -166,6 +179,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 end(text(R.string.terminal_cancelled))
                 throw e
             } catch (e: Exception) {
+                // Whatever went wrong, the command must not outlive the "running" flag (the session check relies on it) (verify: not forced).
+                proc?.let { withContext(NonCancellable) { runCatching { runInterruptible { it.stop() } } } }
                 end(text(R.string.terminal_error, e))
             } finally {
                 SavedSizes.changedAll(getApplication(), measureNow = false)

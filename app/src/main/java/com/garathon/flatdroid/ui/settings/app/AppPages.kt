@@ -22,6 +22,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -45,6 +46,7 @@ import com.garathon.flatdroid.settings.AppSettings
 import com.garathon.flatdroid.settings.HomeMode
 import com.garathon.flatdroid.settings.Resolution
 import com.garathon.flatdroid.ui.common.CheckboxRow
+import com.garathon.flatdroid.ui.settings.PermissionAsk
 import com.garathon.flatdroid.ui.settings.CameraRows
 import com.garathon.flatdroid.ui.settings.SettingsPageColumn
 import com.garathon.flatdroid.ui.settings.global.durationText
@@ -372,7 +374,7 @@ fun AppPermissionsPage(s: AppPageState) = SettingsPageColumn(R.string.app_page_p
                 if (!on || MicStreamer.hasPermission(context)) {
                     setMicrophone(on)
                 } else {
-                    s.env.onRequestMicrophone { granted -> if (granted) setMicrophone(true) else micRefused = true }
+                    s.env.onRequestMicrophone()
                 }
             },
             stringResource(R.string.app_settings_microphone),
@@ -397,7 +399,7 @@ fun AppPermissionsPage(s: AppPageState) = SettingsPageColumn(R.string.app_page_p
                 if (!on || AndroidCameras.hasPermission(context)) {
                     setCamera(on)
                 } else {
-                    s.env.onRequestCamera { granted -> if (granted) setCamera(true) else cameraRefused = true }
+                    s.env.onRequestCamera()
                 }
             },
             stringResource(R.string.app_settings_camera),
@@ -411,6 +413,17 @@ fun AppPermissionsPage(s: AppPageState) = SettingsPageColumn(R.string.app_page_p
             enabled = s.env.hasCamera,
             onReset = if (cameraSet != null && cameraSet != cameraDefault) ({ s.editSettings { copy(camera = null) } }) else null,
         )
+        // Android's answer, which may come to a window rebuilt by a rotation meanwhile.
+        val answer = s.env.permissionAnswer
+        LaunchedEffect(answer) {
+            if (answer != null) {
+                when (answer.ask) {
+                    PermissionAsk.MICROPHONE -> if (answer.granted) setMicrophone(true) else micRefused = true
+                    PermissionAsk.CAMERA -> if (answer.granted) setCamera(true) else cameraRefused = true
+                }
+                s.env.onPermissionHandled()
+            }
+        }
         SwitchRow(
             s.settings.sharesClipboard, { v -> s.editSettings { copy(clipboard = v.takeIf { it != defaults.clipboard }) } },
             stringResource(R.string.app_settings_clipboard),

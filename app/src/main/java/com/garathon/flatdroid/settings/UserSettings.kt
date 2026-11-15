@@ -183,11 +183,15 @@ data class UserSettings(
 }
 
 class UserSettingsStore(private val file: File) {
-    /** Reads [LiveSettings] (at start-up; [save] keeps them current). */
+    /**
+     * Reads [LiveSettings] from the file: at start-up, and again after a reset, which deletes the
+     * file. [save] keeps them current, so every other change of the file goes through one of the two.
+     */
     fun loadLive() {
         val settings = runCatching { load() }.getOrNull()
         LiveSettings.theme.value = settings?.theme ?: InterfaceTheme.SYSTEM
         LiveSettings.hideScreen.value = settings?.security?.hideScreen == true
+        LiveSettings.user.value = settings
     }
 
     /** The saved settings, or null when the user hasn't chosen any yet. */
@@ -292,6 +296,7 @@ class UserSettingsStore(private val file: File) {
         file.writeTextAtomically(StringWriter().also { props.store(it, null) }.toString())
         LiveSettings.theme.value = settings.theme
         LiveSettings.hideScreen.value = settings.security.hideScreen
+        LiveSettings.user.value = settings
     }
 
     private companion object {
@@ -332,8 +337,13 @@ class UserSettingsStore(private val file: File) {
     }
 }
 
-/** Settings every screen follows as soon as they are saved: Flatdroid's theme, hiding the screen. */
+/**
+ * Settings every screen follows as soon as they are saved: Flatdroid's theme, hiding the screen,
+ * and the saved settings as a whole ([user]), so the screens needn't read the file on the main thread.
+ */
 object LiveSettings {
     val theme = kotlinx.coroutines.flow.MutableStateFlow(InterfaceTheme.SYSTEM)
     val hideScreen = kotlinx.coroutines.flow.MutableStateFlow(false)
+    /** What [UserSettingsStore.load] returns for Flatdroid's settings file; null until loaded, and when none are saved yet. */
+    val user = kotlinx.coroutines.flow.MutableStateFlow<UserSettings?>(null)
 }

@@ -10,6 +10,7 @@ import com.garathon.flatdroid.flatpak.flathub.FlathubClient
 import com.garathon.flatdroid.flatpak.flathub.FlathubStats
 import com.garathon.flatdroid.settings.MobileData
 import com.garathon.flatdroid.settings.mobileDataPolicy
+import com.garathon.flatdroid.util.OnceAsked
 import com.garathon.flatdroid.util.debug.DebugLog
 import com.garathon.flatdroid.util.appScope
 import com.garathon.flatdroid.util.io.writeTextAtomically
@@ -20,7 +21,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.io.File
 import java.io.IOException
-import java.util.concurrent.ConcurrentHashMap
 import org.xmlpull.v1.XmlPullParser
 import java.util.zip.GZIPInputStream
 
@@ -88,8 +88,8 @@ object Catalog {
     val state: StateFlow<CatalogState> = _state.asStateFlow()
 
     /** Flathub's answers about single apps (sizes, permissions; installs), until the index is rebuilt. */
-    private val summaries = ConcurrentHashMap<String, FlathubApp>()
-    private val stats = ConcurrentHashMap<String, FlathubStats>()
+    private val summaries = OnceAsked<FlathubApp>()
+    private val stats = OnceAsked<FlathubStats>()
 
     private val lock = Any()
 
@@ -251,10 +251,10 @@ object Catalog {
     }
 
     /** [id]'s installs from Flathub, asked once until the index is rebuilt. Network work. */
-    fun stats(id: String): FlathubStats = stats[id] ?: FlathubClient.stats(id).also { stats[id] = it }
+    fun stats(id: String): FlathubStats = stats.get(id) { FlathubClient.stats(id) }
 
     /** [id]'s sizes and permissions from Flathub, asked once until the index is rebuilt. Network work. */
-    fun summary(id: String): FlathubApp = summaries[id] ?: FlathubClient.fetch(id).also { summaries[id] = it }
+    fun summary(id: String): FlathubApp = summaries.get(id) { FlathubClient.fetch(id) }
 
     /** The file of [icon] ([CatalogApp.icon]) in Flatpak's catalog, if it is there. */
     fun iconFile(context: Context, icon: String?): File? = icon?.let { File(iconsDir(context), it) }?.takeIf { it.isFile }

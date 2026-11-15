@@ -43,6 +43,8 @@ fun ExternalViewerDialog(session: SessionState.Running, onDismiss: () -> Unit) {
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
     var shown by rememberSaveable { mutableStateOf(false) }
+    // An external viewer's session always has one.
+    val password = session.password.orEmpty()
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.session_external_title)) },
@@ -54,7 +56,7 @@ fun ExternalViewerDialog(session: SessionState.Running, onDismiss: () -> Unit) {
                 Text(stringResource(R.string.session_password_label))
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                     Text(
-                        if (shown) session.password else "••••••••",
+                        if (shown) password else "••••••••",
                         fontFamily = FontFamily.Monospace,
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.weight(1f),
@@ -62,7 +64,7 @@ fun ExternalViewerDialog(session: SessionState.Running, onDismiss: () -> Unit) {
                     IconAction(if (shown) Icons.Filled.VisibilityOff else Icons.Filled.Visibility, R.string.session_show_password, { shown = !shown })
                     IconAction(
                         Icons.Filled.ContentCopy, R.string.session_copy_password,
-                        { scope.launch { clipboard.setClipEntry(ClipEntry(sensitiveText("VNC password", session.password))) } },
+                        { scope.launch { clipboard.setClipEntry(ClipEntry(sensitiveText("VNC password", password))) } },
                     )
                 }
             }

@@ -27,6 +27,7 @@ import com.garathon.flatdroid.settings.AppSettingsDraft
 import com.garathon.flatdroid.storage.sizes.AppStorage
 import com.garathon.flatdroid.ui.home.AppIcon
 import com.garathon.flatdroid.ui.settings.AppPage
+import com.garathon.flatdroid.ui.settings.PermissionAnswer
 import com.garathon.flatdroid.ui.settings.SettingsDraftModel
 import com.garathon.flatdroid.ui.settings.SettingsShell
 import com.garathon.flatdroid.ui.settings.SettingsTopBar
@@ -36,7 +37,7 @@ import com.garathon.flatdroid.ui.theme.FlatdroidTheme
 
 /**
  * Everything the pages read besides the draft. [onRequestMicrophone] asks Android for its
- * microphone permission and reports whether it was granted: the microphone turns on only with it,
+ * microphone permission and the answer comes back as [permissionAnswer]: the microphone turns on only with it,
  * so a notification can later allow it for a session, unless it is always allowed. The camera
  * likewise ([onRequestCamera]), when the device has one ([hasCamera]), at a frame rate its cameras
  * can run at and a size they give at that rate ([cameraResolutions], by rate; empty while still
@@ -57,8 +58,11 @@ class AppSettingsEnv(
     val showsWebContent: Boolean,
     val hasCamera: Boolean,
     val cameraResolutions: Map<Int, List<AndroidCameras.Resolution>>,
-    val onRequestMicrophone: (onResult: (Boolean) -> Unit) -> Unit,
-    val onRequestCamera: (onResult: (Boolean) -> Unit) -> Unit,
+    val onRequestMicrophone: () -> Unit,
+    val onRequestCamera: () -> Unit,
+    /** Android's answer to [onRequestMicrophone] or [onRequestCamera], until the page has applied it ([onPermissionHandled]). */
+    val permissionAnswer: PermissionAnswer?,
+    val onPermissionHandled: () -> Unit,
     val onUninstall: (deleteData: Boolean, keepRuntimes: Boolean) -> Unit,
     val sharedHome: String,
     val broadAccess: Boolean,
@@ -156,7 +160,7 @@ private fun AppSettingsScreenPreview() {
                 storage = AppStorage(9_000_000, 12_345_678, 4_096, 65_536), canChangeFiles = true, canUninstall = true,
                 developerOptions = true, showsWebContent = false, hasCamera = true,
                 cameraResolutions = mapOf(15 to listOf(AndroidCameras.Resolution(720)), 30 to listOf(AndroidCameras.Resolution(720))),
-                onRequestMicrophone = {}, onRequestCamera = {}, onUninstall = { _, _ -> },
+                onRequestMicrophone = {}, onRequestCamera = {}, permissionAnswer = null, onPermissionHandled = {}, onUninstall = { _, _ -> },
                 sharedHome = "Documents/Flatdroid", broadAccess = true, onStorage = {}, onOpenHome = {},
                 limitDevices = false, onResetFlatdroidSettings = {},
             ),

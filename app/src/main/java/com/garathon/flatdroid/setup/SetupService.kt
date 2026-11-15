@@ -45,7 +45,12 @@ class SetupService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startInForeground(notification(SetupController.state.value))
+        if (!startInForeground(notification(SetupController.state.value))) {
+            // Android 15's daily limit for this kind of service is used up: nothing started, and the user can start again.
+            SetupController.error(getString(R.string.setup_time_limit))
+            stopSelf()
+            return START_NOT_STICKY
+        }
         if (job?.isActive == true) return START_NOT_STICKY
         if (!SetupController.begin()) {
             stopSelf()
@@ -74,6 +79,8 @@ class SetupService : Service() {
                     SetupController.beginReset()
                     SetupController.reporter.progress(null, getString(R.string.reset_running))
                     runInterruptible { reset.finish() }
+                    // The reset deleted Flatdroid's settings file.
+                    SetupController.settings(applicationContext).loadLive()
                     SetupController.cleared()
                     SetupController.reporter.log(getString(R.string.reset_done))
                 }
@@ -115,12 +122,16 @@ class SetupService : Service() {
         super.onDestroy()
     }
 
-    private fun startInForeground(notification: Notification) {
+    /** False when Android refuses it (from Android 15, the daily limit of this kind of service is used up; not tried on such a phone (verify)). */
+    private fun startInForeground(notification: Notification): Boolean = try {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
+        true
+    } catch (e: IllegalStateException) {
+        false
     }
 
     private fun notification(ui: SetupUi): Notification {

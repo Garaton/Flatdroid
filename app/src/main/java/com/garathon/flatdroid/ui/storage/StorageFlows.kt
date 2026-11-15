@@ -21,6 +21,7 @@ import androidx.core.net.toUri
 import androidx.lifecycle.lifecycleScope
 import com.garathon.flatdroid.MainViewModel
 import com.garathon.flatdroid.R
+import com.garathon.flatdroid.session.SessionController
 import com.garathon.flatdroid.storage.AppData
 import com.garathon.flatdroid.flatpak.InstalledApps
 import com.garathon.flatdroid.settings.AppSettingsStore
@@ -99,9 +100,6 @@ class StorageFlows(
 
     /** What the zip being picked is for. */
     private var zipTarget: ZipTarget? = null
-
-    /** What follows a successful import of Flatdroid's settings. */
-    private var afterSettingsImport: (() -> Unit)? = null
 
     init {
         activity.savedStateRegistry.registerSavedStateProvider(SAVED_STATE) {
@@ -339,6 +337,7 @@ class StorageFlows(
 
     /** Opens [appId]'s app home in Android's Files app, through Flatdroid's documents provider. */
     fun openHomeInFiles(appId: String) {
+        if (runningApp(appId)) return
         val intent = Intent(Intent.ACTION_VIEW)
             .setDataAndType(DocumentsContract.buildDocumentUri(HomesProvider.AUTHORITY, appId), DocumentsContract.Document.MIME_TYPE_DIR)
         try {
@@ -350,6 +349,8 @@ class StorageFlows(
 
     /** An action from an app's Storage section; the ones that replace or delete files were confirmed. */
     fun storageAction(appId: String, action: StorageAction) {
+        // A running app can swap its files for links while they are copied: not for what reads them (the screens gate it too).
+        if (action in READS_FILES && runningApp(appId)) return
         when (action) {
             StorageAction.CLEAR_CACHE -> home.clearCache(appId)
             StorageAction.COPY_INTO_HOME -> importFiles(ImportTarget.Private(appId))
@@ -384,11 +385,8 @@ class StorageFlows(
     /** Confirmed: replaces the settings and other files of the apps in the picked zip. */
     fun importAllAppFiles() = pickZip(ZipTarget.AllAppFiles)
 
-    /** Picks a settings zip and applies it as Save does; [then] once applied. */
-    fun importFlatdroidSettings(then: () -> Unit) {
-        afterSettingsImport = then
-        pickZip(ZipTarget.FlatdroidSettings)
-    }
+    /** Picks a settings zip and applies it as Save does (the window then goes back to Home, as for Save). */
+    fun importFlatdroidSettings() = pickZip(ZipTarget.FlatdroidSettings)
 
     fun changeSharedHome() = withStorage(true) { folderPicker.launch(null) }
 
@@ -451,8 +449,6 @@ class StorageFlows(
      * nothing.
      */
     private fun applyFlatdroidSettings(uri: Uri) {
-        val then = afterSettingsImport
-        afterSettingsImport = null
         activity.lifecycleScope.launch {
             val imported = withContext(Dispatchers.IO) {
                 try {
@@ -496,7 +492,7 @@ class StorageFlows(
                     null
                 }
             }
-            if (imported != null) mainModel().applySettings(imported) { refresh(); then?.invoke() }
+            if (imported != null) mainModel().applySettings(imported, MainViewModel.AfterApply.HOME)
         }
     }
 
@@ -599,7 +595,17 @@ class StorageFlows(
         }
     }
 
+    /** Whether [appId] runs: then says so, and the caller does nothing (verify: not seen on a phone). */
+    private fun runningApp(appId: String): Boolean {
+        if (SessionController.ui.value.state.appIdOrNull != appId) return false
+        Toast.makeText(activity, R.string.storage_app_running, Toast.LENGTH_LONG).show()
+        return true
+    }
+
     private companion object {
+        /** The actions that read an app's files, which a running app could swap for links meanwhile. */
+        val READS_FILES = setOf(StorageAction.DOWNLOAD_FROM_HOME, StorageAction.EXPORT_HOME, StorageAction.EXPORT_SETTINGS)
+
         /** Download by path, before Android 10, needs the storage permission. */
         val LEGACY_DOWNLOAD = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
         const val KEY_EXPORT_QUESTION = "exportQuestion."

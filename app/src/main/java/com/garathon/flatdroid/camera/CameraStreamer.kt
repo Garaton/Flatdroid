@@ -186,7 +186,9 @@ class CameraStreamer(private val context: Context, private val camera: AndroidCa
             }
 
             override fun onConfigureFailed(configured: CameraCaptureSession) {
-                DebugLog.w("Camera ${camera.id}: the capture session couldn't be configured")
+                // Closed as when Android takes it back, so the camera (and its indicator) isn't held with no frames (verify: hard to time).
+                configured.close()
+                lost(opened, "the capture session couldn't be configured")
             }
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {

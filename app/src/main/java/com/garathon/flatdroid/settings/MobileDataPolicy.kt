@@ -10,5 +10,5 @@ import com.garathon.flatdroid.setup.SetupController
  */
 fun mobileDataPolicy(context: Context, setting: MobileData? = null): MobileData {
     val metered = context.getSystemService(ConnectivityManager::class.java)?.isActiveNetworkMetered == true
-    return if (metered) setting ?: SetupController.settings(context).load()?.mobileData ?: MobileData.ASK else MobileData.ALWAYS
+    return if (metered) setting ?: SetupController.saved(context)?.mobileData ?: MobileData.ASK else MobileData.ALWAYS
 }

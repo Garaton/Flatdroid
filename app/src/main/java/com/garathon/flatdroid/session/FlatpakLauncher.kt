@@ -205,7 +205,9 @@ class FlatpakLauncher(private val context: Context) {
         writeTimeZone(plan, (userSettings?.security ?: SecuritySettings()).shareLocale)
         prepareDirs(appId, plan)
         val security = userSettings?.security ?: SecuritySettings()
-        val password = if (plan.wayland) VncPassword.random(length = WaylandVnc.PASSWORD_LENGTH) else VncPassword.random()
+        val externalViewer = userSettings?.externalViewer == true
+        // Only an external viewer logs in: Flatdroid's own uses a private socket and no password.
+        val password = if (!externalViewer) null else if (plan.wayland) VncPassword.random(length = WaylandVnc.PASSWORD_LENGTH) else VncPassword.random()
         val audio = plan.binds.pulseSockets != null
         val appContext = plan.app.metadata.context
         // On by setting or by default, and Android's permission given: the default isn't saved as off when it isn't.
@@ -224,7 +226,6 @@ class FlatpakLauncher(private val context: Context) {
         if (cameraWanted && cameras.isEmpty()) SessionController.log("[flatdroid] the app's camera is on, but Android has no camera Flatdroid can use")
         // Upright for the app's display: a landscape display as the device held landscape, a
         // portrait one as held portrait (Flatdroid itself is in portrait at launch whatever the app).
-        val externalViewer = userSettings?.externalViewer == true
         // The screen starts at the size the viewer will show it in (Flatdroid's viewer then keeps it so).
         val (viewWidth, viewHeight) = ViewerSize.expected(context, bar = !externalViewer)
         val (screenWidth, screenHeight) = settings.size(viewWidth, viewHeight)
@@ -246,42 +247,49 @@ class FlatpakLauncher(private val context: Context) {
 
         SessionController.starting(appId, context.getString(R.string.session_starting_display))
         val frameRate = userSettings?.frameRate ?: UserSettings.DEFAULT_FRAME_RATE
-        val mic = if (!microphone) null else {
-            MicrophoneSession(context, appId, File(pulseDir, PulseScript.MIC_PIPE), micRate, settings.alwaysAllowMicrophone, micAnswer)
-        }
-        SessionController.onMicrophoneAnswer = mic?.let { it::answer }
         val resampler = userSettings?.resampler ?: Resampler.FAST
         // Any of the proots below: fdsec refused to start its command, so nothing ran in it.
         val filterRefused = AtomicBoolean(false)
         val helpersStarted = CountDownLatch(1)
-        val helpers = startHelpers(
-            SessionScript.command(
-                "${screenWidth}x$screenHeight", frameRate, audio, resampler, sessionBus = true,
-                camera = cameraNodes.isNotEmpty(), clipboard = settings.sharesClipboard, wayland = plan.wayland,
-                externalViewer = externalViewer, interfaceSize = settings.interfaceSize,
-            ),
-            audio,
-            Fdsec.Filter(extraSyscalls = security.extraSyscallFilter),
-        ) { line ->
-            if (Fdsec.refused(line)) filterRefused.set(true)
-            if (line == SessionScript.DISPLAY_READY) helpersStarted.countDown()
-        }
         var app: ProotProcess? = null
         // When the app first started running, for the time it was used.
         var runningSince: Long? = null
         var player: AudioPlayer? = null
         var cameraHelpers: ProotProcess? = null
-        val streamers = cameraNodes.indices.associate {
-            cameraNodes[it].name to CameraStreamer(context, cameras[it], File(cameraPipeDir, cameraNodes[it].name), cameraRotations[it])
-        }
-        // The app's display turned with the phone: the pictures turn with it, staying upright.
-        if (streamers.isNotEmpty()) SessionController.onDisplayResized = { width, height ->
-            val rotation = displayRotation(landscape = width > height)
-            cameraNodes.forEachIndexed { index, node -> streamers[node.name]?.turn(cameras[index].rotation(rotation)) }
-        }
-        // A network change during the session (Wi-Fi to mobile data, Private DNS) reaches the app's resolv.conf.
-        val dns = ResolvConfRefresher(context, listOf(File(etcDir, "resolv.conf"))).apply { start() }
+        // What each of these starts is stopped in the finally, whichever of the later ones fails.
+        var mic: MicrophoneSession? = null
+        var helpersProot: ProotProcess? = null
+        var dns: ResolvConfRefresher? = null
+        val streamers = LinkedHashMap<String, CameraStreamer>()
         try {
+            mic = if (!microphone) null else {
+                MicrophoneSession(context, appId, File(pulseDir, PulseScript.MIC_PIPE), micRate, settings.alwaysAllowMicrophone, micAnswer)
+            }
+            SessionController.onMicrophoneAnswer = mic?.let { it::answer }
+            val helpers = startHelpers(
+                SessionScript.command(
+                    "${screenWidth}x$screenHeight", frameRate, audio, resampler, sessionBus = true,
+                    camera = cameraNodes.isNotEmpty(), clipboard = settings.sharesClipboard, wayland = plan.wayland,
+                    externalViewer = externalViewer, interfaceSize = settings.interfaceSize,
+                ),
+                audio,
+                Fdsec.Filter(extraSyscalls = security.extraSyscallFilter),
+            ) { line ->
+                if (Fdsec.refused(line)) filterRefused.set(true)
+                if (line == SessionScript.DISPLAY_READY) helpersStarted.countDown()
+            }
+            helpersProot = helpers
+            for (index in cameraNodes.indices) {
+                streamers[cameraNodes[index].name] =
+                    CameraStreamer(context, cameras[index], File(cameraPipeDir, cameraNodes[index].name), cameraRotations[index])
+            }
+            // The app's display turned with the phone: the pictures turn with it, staying upright.
+            if (streamers.isNotEmpty()) SessionController.onDisplayResized = { width, height ->
+                val rotation = displayRotation(landscape = width > height)
+                cameraNodes.forEachIndexed { index, node -> streamers[node.name]?.turn(cameras[index].rotation(rotation)) }
+            }
+            // A network change during the session (Wi-Fi to mobile data, Private DNS) reaches the app's resolv.conf.
+            dns = ResolvConfRefresher(context, listOf(File(etcDir, "resolv.conf"))).apply { start() }
             try {
                 val display = if (plan.wayland) File(waylandDir, GuestPaths.WAYLAND_SOCKET) else File(x11Dir, SessionScript.X_SOCKET)
                 waitForFile(display, helpers, DISPLAY_TIMEOUT_MS, context.getString(R.string.launch_display_failed))
@@ -420,7 +428,7 @@ class FlatpakLauncher(private val context: Context) {
             }
             // The time the app ran, simply from its start to here: nothing is measured while it runs.
             step { runningSince?.let { start -> store.update { it.copy(usedMillis = it.usedMillis + (System.currentTimeMillis() - start)) } } }
-            step { dns.stop() }
+            step { dns?.stop() }
             // A paused app ignores the signals that end it: let it go on first.
             step { HiddenPause.detach() }
             step { app?.stop() }
@@ -431,7 +439,7 @@ class FlatpakLauncher(private val context: Context) {
             step { streamers.values.forEach { it.close() } }
             SessionController.onMicrophoneAnswer = null
             SessionController.onDisplayResized = null
-            step { helpers.stop() }
+            step { helpersProot?.stop() }
             step { endEscaped() }
             // proot leaves the private binds' mount points behind in the shared home, where the
             // user sees them (empty .ssh, .bashrc, .config and the rest). Remove the empty ones.
@@ -885,7 +893,7 @@ class FlatpakLauncher(private val context: Context) {
      * bus's configuration and proxy arguments ([busArgs]). Old sockets are removed.
      */
     private fun writeSessionFiles(
-        password: String, wayvncLogin: Boolean, titleBars: Boolean, darkDecorations: Boolean, pulseScript: String?,
+        password: String?, wayvncLogin: Boolean, titleBars: Boolean, darkDecorations: Boolean, pulseScript: String?,
         busArgs: List<String>, cameraNodes: List<CameraScript.Node>,
     ) {
         val launcher = AppData.launcherFiles(context)
@@ -898,13 +906,15 @@ class FlatpakLauncher(private val context: Context) {
         }
         // The compositor's XDG_RUNTIME_DIR: wlroots wants it private.
         Os.chmod(waylandDir.path, 0x1c0) // 0700
-        File(vncDir, "passwd").apply {
-            writeBytes(VncPassword.file(password))
-            Os.chmod(path, 0x180) // 0600
+        if (password != null) {
+            File(vncDir, "passwd").apply {
+                writeBytes(VncPassword.file(password))
+                Os.chmod(path, 0x180) // 0600
+            }
         }
         val wayvncConfig = File(vncDir, File(SessionScript.GUEST_WAYVNC_CONFIG).name)
         // Only an external viewer logs in; Flatdroid's own uses the private socket.
-        if (wayvncLogin) {
+        if (wayvncLogin && password != null) {
             wayvncConfig.writeText(WaylandVnc.config(password))
             Os.chmod(wayvncConfig.path, 0x180) // 0600
         }

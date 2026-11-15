@@ -20,6 +20,20 @@ class UserSettingsTest {
     }
 
     @Test
+    fun theLiveCopyFollowsTheFile() {
+        val store = UserSettingsStore(File(tmp.root, "settings.properties"))
+        // Nothing saved: not chosen yet.
+        store.loadLive()
+        assertNull(LiveSettings.user.value)
+        store.save(UserSettings("de;en", mobileData = MobileData.NEVER))
+        assertEquals(MobileData.NEVER, LiveSettings.user.value?.mobileData)
+        // The file deleted (a reset) and read again.
+        File(tmp.root, "settings.properties").delete()
+        store.loadLive()
+        assertNull(LiveSettings.user.value)
+    }
+
+    @Test
     fun roundTrips() {
         val store = UserSettingsStore(File(tmp.root, "settings.properties"))
         store.save(UserSettings("de;en"))

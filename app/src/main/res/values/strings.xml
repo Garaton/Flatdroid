@@ -263,6 +263,9 @@
     <string name="browse_installing">Installing</string>
     <string name="browse_queued">Waiting</string>
     <string name="browse_open">Open</string>
+    <string name="browse_starting">Starting…</string>
+    <string name="browse_show">Show app</string>
+    <string name="browse_busy">Busy</string>
     <string name="app_settings_continue_hidden">Continue while hidden</string>
     <string name="app_settings_continue_hidden_hint">When hidden the app, and its sound, continue running. This is useful for apps that download, call, play media, etc.</string>
     <string name="browse_queued_waiting">Waiting to install</string>
@@ -756,6 +759,8 @@
     <string name="settings_terminal_filter">Filter the terminal\'s commands</string>
     <string name="settings_terminal_during_session">Terminal while an app runs</string>
     <string name="settings_terminal_during_session_hint">Lets the terminal run commands while an app runs, and apps start while a command runs. A running app can take over those commands and run its own code in Alpine\'s proot, with everything Alpine reaches.</string>
+    <string name="app_running_settings">Stop the app to change its settings.</string>
+    <string name="storage_app_running">This app is running. Stop it first.</string>
     <string name="settings_app_running">These settings change Alpine, which can\'t happen while an app runs. Stop the app, then save again.</string>
     <string name="terminal_app_running">An app is running. Stop it first: a command run now could be taken over by the app (see the developer setting \"Terminal while an app runs\").</string>
     <string name="settings_terminal_filter_hint">Commands run behind Flatdroid\'s system call filter, as everything else in Alpine does. Off, tools such as strace and gdb work, and so does anything you run there that tries to leave proot.</string>

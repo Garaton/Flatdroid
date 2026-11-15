@@ -47,9 +47,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
@@ -79,7 +81,12 @@ class StorageTaskService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val record = intent?.let(::recordOf)
-        startInForeground(progressNotification(record?.task ?: StorageTasks.ui.value.running, null))
+        if (!startInForeground(progressNotification(record?.task ?: StorageTasks.ui.value.running, null))) {
+            // Android 15's daily limit for this kind of service is used up. The task stays recorded
+            // ([PendingTasks]), so Flatdroid offers to continue it when it is opened.
+            stopSelf()
+            return START_NOT_STICKY
+        }
         if (record == null) {
             if (StorageTasks.ui.value.running == null && StorageTasks.ui.value.queued.isEmpty()) stopSelf()
             return START_NOT_STICKY
@@ -113,9 +120,15 @@ class StorageTaskService : Service() {
             updateProgress(task, null)
             val result = try {
                 withContext(Dispatchers.IO) {
-                    forgetSizes(task, done = false)
-                    perform(record)
+                    // An interrupt, so a stop by Android's time limit ends the copy instead of leaving it running unseen (verify: not run).
+                    runInterruptible {
+                        forgetSizes(task, done = false)
+                        perform(record)
+                    }
                 }
+            } catch (e: CancellationException) {
+                // Stopped (the time limit, the service's end), not failed: the staging and the record stay for Continue.
+                throw e
             } catch (e: Exception) {
                 failed(task, e)
             } finally {
@@ -477,9 +490,15 @@ class StorageTaskService : Service() {
         getSystemService(NotificationManager::class.java).notify(PROGRESS_ID, progressNotification(task, fraction, title))
     }
 
-    private fun startInForeground(notification: Notification) {
+    /** False when Android refuses it (from Android 15, the daily limit of this kind of service is used up; not tried on such a phone (verify)). */
+    private fun startInForeground(notification: Notification): Boolean {
         val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else 0
-        ServiceCompat.startForeground(this, PROGRESS_ID, notification, type)
+        return try {
+            ServiceCompat.startForeground(this, PROGRESS_ID, notification, type)
+            true
+        } catch (e: IllegalStateException) {
+            false
+        }
     }
 
     private fun progressNotification(task: StorageTask?, fraction: Float?, known: String? = null): Notification {

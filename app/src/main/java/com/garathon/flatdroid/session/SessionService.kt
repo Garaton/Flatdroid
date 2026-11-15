@@ -166,7 +166,8 @@ class SessionService : Service() {
                 val awaitingUi = SessionController.ui.value.state is SessionState.Question
                 if (!awaitingUi) SessionController.ended(message, failed)
                 // Tasks that waited for the app start now (while this service still runs in the foreground).
-                if (!awaitingUi) FlatpakTaskService.startNext(applicationContext)
+                // On the main thread, where a launch is checked against tasks: both claims on one thread.
+                if (!awaitingUi) withContext(NonCancellable + Dispatchers.Main) { FlatpakTaskService.startNext(applicationContext) }
                 stopSelf()
             }
         }
@@ -253,7 +254,7 @@ class SessionService : Service() {
         val viewerIntent = (state as? SessionState.Running)?.let {
             // An open viewer comes forward rather than a second one.
             if (it.socket != null) Intent(this, ViewerActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
-            else ExternalViewer.intent(this, it.password, SetupController.settings(this).load()?.vncViewer, username = it.username)
+            else it.password?.let { password -> ExternalViewer.intent(this, password, SetupController.settings(this).load()?.vncViewer, username = it.username) }
         }
         if (viewerIntent != null) {
             // Cancel, not update: an update keeps the old intent's flags (one from before an app update, say).
