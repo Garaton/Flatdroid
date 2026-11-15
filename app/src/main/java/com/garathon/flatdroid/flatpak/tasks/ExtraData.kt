@@ -11,6 +11,7 @@ import com.garathon.flatdroid.proot.ProotCommand
 import com.garathon.flatdroid.proot.ProotRunner
 import com.garathon.flatdroid.setup.rootfs.AndroidTarFs
 import com.garathon.flatdroid.setup.rootfs.deleteTree
+import com.garathon.flatdroid.util.io.readTextUpTo
 import com.garathon.flatdroid.util.io.writeTextAtomically
 import java.io.File
 import java.io.IOException
@@ -72,7 +73,7 @@ class ExtraData(private val env: AlpineEnvironment, private val stateFile: File,
 
     private fun run(deployment: File, onLine: (String) -> Unit): Int {
         val name = deployment.path.removePrefix(env.flatpakDir.path + "/")
-        val metadata = runCatching { FlatpakMetadata.parse(File(deployment, "metadata").readText()) }.getOrNull() ?: run {
+        val metadata = runCatching { File(deployment, "metadata").readTextUpTo()?.let(FlatpakMetadata::parse) }.getOrNull() ?: run {
             onLine("[flatdroid] apply_extra for $name: its metadata can't be read")
             return -1
         }

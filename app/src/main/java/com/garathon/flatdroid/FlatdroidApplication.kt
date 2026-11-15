@@ -75,6 +75,7 @@ class FlatdroidApplication : Application() {
                 ),
                 fs = AndroidTarFs,
             ).clean()
+            SavedSizes.removeStale(this)
             for (file in removed) {
                 DebugLog.i("Removed leftover ${file.path}")
                 // An Electron swap counts in its app's size.

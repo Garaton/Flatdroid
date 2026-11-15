@@ -17,13 +17,10 @@ import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material.icons.filled.UploadFile
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -198,18 +195,17 @@ private enum class OverviewConfirm { APP_DATA, FLATDROID_SETTINGS }
 private fun PermissionChips(s: AppPageState) {
     val app = s.app
     val settings = s.settings
-    val defaults = settings.defaults
     val context = LocalContext.current
-    val network = settings.network ?: (defaults.permissionsFromMetadata && app.requestsNetwork)
-    val audio = settings.audio ?: (defaults.permissionsFromMetadata && app.requestsAudio)
+    val network = settings.networkOn(app.requestsNetwork)
+    val audio = settings.audioOn(app.requestsAudio)
     val files = settings.homeMode == HomeMode.SHARED || settings.homeMode == HomeMode.ANDROID || settings.sdcard
     val chips = buildList {
         if (app.requestsNetwork) add(stringResource(R.string.app_settings_network) to network)
         if (app.requestsAudio) add(stringResource(R.string.app_settings_audio) to audio)
         if (app.requestsAllDevices) add(stringResource(R.string.permission_all_devices) to (!s.env.limitDevices || settings.wholeDev))
         if (app.requestsFiles) add(stringResource(R.string.permission_files) to files)
-        if (audio && (settings.microphone ?: (defaults.permissionsFromMetadata && app.requestsAudio)) && MicStreamer.hasPermission(context)) add(stringResource(R.string.app_settings_microphone) to true)
-        if ((settings.camera ?: (defaults.permissionsFromMetadata && app.mayUseCamera)) && AndroidCameras.hasPermission(context)) add(stringResource(R.string.app_settings_camera) to true)
+        if (settings.microphoneOn(app.requestsAudio) && MicStreamer.hasPermission(context)) add(stringResource(R.string.app_settings_microphone) to true)
+        if (settings.cameraOn(app.mayUseCamera) && AndroidCameras.hasPermission(context)) add(stringResource(R.string.app_settings_camera) to true)
     }
     SettingsCard(title = stringResource(R.string.app_overview_asks)) {
         if (chips.isEmpty()) {
@@ -334,10 +330,10 @@ fun AppPermissionsPage(s: AppPageState) = SettingsPageColumn(R.string.app_page_p
     var micRefused by rememberSaveable { mutableStateOf(false) }
     var cameraRefused by rememberSaveable { mutableStateOf(false) }
     val fromMetadata = defaults.permissionsFromMetadata
-    val audioDefault = fromMetadata && app.requestsAudio
-    val networkDefault = fromMetadata && app.requestsNetwork
-    val audio = s.settings.audio ?: audioDefault
-    val network = s.settings.network ?: networkDefault
+    val audioDefault = s.settings.defaultOn(app.requestsAudio)
+    val networkDefault = s.settings.defaultOn(app.requestsNetwork)
+    val audio = s.settings.audioOn(app.requestsAudio)
+    val network = s.settings.networkOn(app.requestsNetwork)
 
     SettingsCard {
         SwitchRow(
@@ -365,7 +361,7 @@ fun AppPermissionsPage(s: AppPageState) = SettingsPageColumn(R.string.app_page_p
             onReset = if (s.settings.audio != null) ({ s.editSettings { copy(audio = null) } }) else null,
         )
         // On by default for an app that asks for sound, and for a hint that it uses a camera; both need Android's permission too.
-        val micDefault = fromMetadata && app.requestsAudio
+        val micDefault = audioDefault
         val micSet = s.settings.microphone
         val micOn = (micSet ?: micDefault) && MicStreamer.hasPermission(context)
         fun setMicrophone(on: Boolean) = s.editSettings { copy(microphone = on.takeIf { it != micDefault }) }
@@ -390,7 +386,7 @@ fun AppPermissionsPage(s: AppPageState) = SettingsPageColumn(R.string.app_page_p
             enabled = audio && micOn,
         )
 
-        val cameraDefault = fromMetadata && app.mayUseCamera
+        val cameraDefault = s.settings.defaultOn(app.mayUseCamera)
         val cameraSet = s.settings.camera
         val cameraOn = (cameraSet ?: cameraDefault) && AndroidCameras.hasPermission(context)
         fun setCamera(on: Boolean) = s.editSettings { copy(camera = on.takeIf { it != cameraDefault }) }
@@ -449,7 +445,7 @@ fun AppOverridesPage(s: AppPageState) = SettingsPageColumn(R.string.app_page_ove
             onReset = if (s.settings.blockExtraSyscalls != null) ({ s.editSettings { copy(blockExtraSyscalls = null) } }) else null,
         )
         // The camera's settings need the app's camera and one on the phone.
-        val cameraOn = s.settings.camera ?: (defaults.permissionsFromMetadata && s.app.mayUseCamera)
+        val cameraOn = s.settings.cameraOn(s.app.mayUseCamera)
         val cameraEnabled = cameraOn && s.env.hasCamera
         CameraRows(
             rate = s.settings.cameraFrameRate,
@@ -560,19 +556,14 @@ private fun SizeField(value: String, label: String, isError: Boolean, modifier: 
 internal fun UninstallDialog(name: String, onConfirm: (deleteData: Boolean, keepRuntimes: Boolean) -> Unit, onDismiss: () -> Unit) {
     var deleteData by rememberSaveable { mutableStateOf(false) }
     var keepRuntimes by rememberSaveable { mutableStateOf(false) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.uninstall_title, name)) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(stringResource(R.string.uninstall_text))
-                CheckboxRow(deleteData, { deleteData = it }, stringResource(R.string.uninstall_delete_data))
-                CheckboxRow(keepRuntimes, { keepRuntimes = it }, stringResource(R.string.uninstall_keep_runtimes))
-            }
-        },
-        confirmButton = {
-            Button(onClick = { onConfirm(deleteData, keepRuntimes) }) { Text(stringResource(R.string.uninstall_confirm), color = MaterialTheme.colorScheme.onPrimary) }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.reset_cancel)) } },
-    )
+    ConfirmDialog(
+        title = stringResource(R.string.uninstall_title, name),
+        text = stringResource(R.string.uninstall_text),
+        confirm = stringResource(R.string.uninstall_confirm),
+        onConfirm = { onConfirm(deleteData, keepRuntimes) },
+        onDismiss = onDismiss,
+    ) {
+        CheckboxRow(deleteData, { deleteData = it }, stringResource(R.string.uninstall_delete_data))
+        CheckboxRow(keepRuntimes, { keepRuntimes = it }, stringResource(R.string.uninstall_keep_runtimes))
+    }
 }

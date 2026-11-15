@@ -85,9 +85,10 @@ import java.util.concurrent.atomic.AtomicInteger
 class LaunchException(message: String) : IOException(message)
 
 /**
- * Runs one Flatpak session: a fresh Xvnc, Openbox and PulseAudio in Alpine, then the app in its
- * own root, with the audio player and, when the app may use it, the microphone. Blocking;
- * interrupting the thread stops the app and the helpers.
+ * Runs one Flatpak session: a fresh display (labwc and wayvnc, or Xvnc and Openbox for an app that
+ * only takes X11) and PulseAudio in Alpine, then the app in its own root, with the audio player
+ * and, when the app may use it, the microphone. Blocking; interrupting the thread stops the app
+ * and the helpers.
  */
 class FlatpakLauncher(private val context: Context) {
     private val env = AlpineEnvironment.get(context)
@@ -502,8 +503,10 @@ class FlatpakLauncher(private val context: Context) {
                 onProgress = { ref, done, total ->
                     // Throttled: a per-file UI emission would flood the flow over a large runtime.
                     // 0 of 0: the deployment's files are still being listed.
+                    // No counts in the text (the notification and the pinned row would show them cut off or stale): the dial has them, the log gets the total.
                     val detail = if (total == 0) context.getString(R.string.session_listing_files, ref.name)
-                        else context.getString(R.string.session_checking_files, ref.name, done, total)
+                        else context.getString(R.string.session_checking_files, ref.name)
+                    if (total > 0 && done == total && checking.get()) SessionController.log("[flatdroid] Checked $total files: ${ref.name}")
                     if (checking.get() && !cancelled.get() && (done == total || done % 500 == 0))
                         SessionController.starting(appId, detail, skippable = true, fraction = if (total > 0) done.toFloat() / total else null)
                 },

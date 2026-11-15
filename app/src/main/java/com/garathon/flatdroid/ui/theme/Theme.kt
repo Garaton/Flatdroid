@@ -1,6 +1,5 @@
 package com.garathon.flatdroid.ui.theme
 
-import android.app.Activity
 import android.app.ActivityManager
 import androidx.activity.compose.LocalActivity
 import androidx.compose.runtime.LaunchedEffect

@@ -4,13 +4,13 @@ import android.system.ErrnoException
 import android.system.Os
 import android.system.OsConstants
 import com.garathon.flatdroid.audio.AudioPlayer
+import com.garathon.flatdroid.proot.processes.ProcTable
 import com.garathon.flatdroid.util.debug.DebugLog
 import com.garathon.flatdroid.util.appScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import java.io.File
 
 /**
  * What a running app does while Flatdroid's viewer isn't on screen, unless the app's "Continue while
@@ -103,11 +103,6 @@ object HiddenPause {
         false
     }
 
-    /** The processes [tracer] traces, from `/proc/<pid>/status` (`TracerPid:`): the app's, however they were started. */
-    private fun tracedBy(tracer: Int): List<Int> = File("/proc").list().orEmpty().mapNotNull { name ->
-        val pid = name.toIntOrNull() ?: return@mapNotNull null
-        val status = runCatching { File("/proc/$name/status").readText() }.getOrNull() ?: return@mapNotNull null
-        val tracerPid = status.lineSequence().firstOrNull { it.startsWith("TracerPid:") }?.substringAfter(':')?.trim()?.toIntOrNull()
-        pid.takeIf { tracerPid == tracer }
-    }
+    /** The processes [tracer] traces (`TracerPid:` in `/proc/<pid>/status`): the app's, however they were started. */
+    private fun tracedBy(tracer: Int): List<Int> = ProcTable.read().filterValues { it.tracer == tracer }.keys.toList()
 }

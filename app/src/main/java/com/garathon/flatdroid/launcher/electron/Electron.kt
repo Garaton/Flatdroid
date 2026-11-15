@@ -64,7 +64,7 @@ object Electron {
     private fun commands(script: String): Sequence<List<String>> = script.lineSequence()
         .map { line -> line.substringBefore('#').trim() }
         .filter { it.isNotEmpty() }
-        .map { code -> code.split(Regex("\\s+")).map { it.trim('"', '\'') } }
+        .map { code -> code.split(WHITESPACE).map { it.trim('"', '\'') } }
 
     /** cobalt's configuration in the app: `[Application]` with `EntryPoint`, the browser it starts when not its default. */
     const val COBALT_CONFIG = "/app/etc/cobalt.ini"
@@ -78,7 +78,7 @@ object Electron {
      */
     fun cobaltTarget(script: String, appId: String, config: () -> String? = { null }, exists: (String) -> Boolean): String? {
         val usesCobalt = script.lineSequence().any { line ->
-            line.substringBefore('#').trim().split(Regex("\\s+")).map { it.trim('"', '\'') }
+            line.substringBefore('#').trim().split(WHITESPACE).map { it.trim('"', '\'') }
                 .any { it.substringAfterLast('/') == COBALT }
         }
         if (!usesCobalt) return null
@@ -139,8 +139,8 @@ object Electron {
 
     /** The SHA-256 for [file] in a release's SHASUMS256.txt (`<hex> *<name>` lines). */
     fun sha256(shasums: String, file: String): String? = shasums.lineSequence().firstNotNullOfOrNull { line ->
-        val parts = line.trim().split(Regex("\\s+"), limit = 2)
-        if (parts.size == 2 && parts[1].removePrefix("*") == file && Regex("[0-9a-fA-F]{64}").matches(parts[0])) {
+        val parts = line.trim().split(WHITESPACE, limit = 2)
+        if (parts.size == 2 && parts[1].removePrefix("*") == file && SHA256_HEX.matches(parts[0])) {
             parts[0].lowercase()
         } else {
             null
@@ -148,6 +148,8 @@ object Electron {
     }
 
     private const val MAX_VERSION_LENGTH = 16
+    private val WHITESPACE = Regex("\\s+")
+    private val SHA256_HEX = Regex("[0-9a-fA-F]{64}")
     private val VERSION = Regex("\\d+\\.\\d+\\.\\d+")
 
     private fun indexOf(haystack: ByteArray, needle: ByteArray, from: Int): Int {

@@ -73,6 +73,8 @@ class FlatpakTaskService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     /** A command of the running task had to be killed rather than ending on SIGINT. */
     @Volatile private var killed = false
+    /** Android ended the task by its time limit ([onTimeout]); it says so, since a cancel is otherwise the user's own doing. */
+    @Volatile private var timedOut = false
     /** The newest start this service was given (a task or a cancel): the service stops only by it. */
     @Volatile private var lastStartId = 0
     /** How the tasks ended since the queue last ran dry (task, error or null): told in one notification then. */
@@ -122,6 +124,7 @@ class FlatpakTaskService : Service() {
                 (task != FlatpakTask.Repair || it.exists())
         }
         killed = false
+        timedOut = false
         job = scope.launch {
             previous?.join()
             val following = followInNotification(task)
@@ -138,7 +141,7 @@ class FlatpakTaskService : Service() {
                 runInterruptible { performRelinking(task) }
                 baselineMarker?.delete()
             } catch (e: CancellationException) {
-                error = getString(R.string.task_cancelled)
+                error = getString(if (timedOut) R.string.task_time_limit else R.string.task_cancelled)
                 withContext(NonCancellable) { runInterruptible { cleanUpAfter(task) } }
             } catch (e: Exception) {
                 error = e.message ?: e.toString()
@@ -197,6 +200,7 @@ class FlatpakTaskService : Service() {
 
     /** Android 15 limits dataSync services to 6 hours a day. */
     override fun onTimeout(startId: Int, fgsType: Int) {
+        timedOut = true
         job?.cancel()
         stopSelf()
     }
@@ -372,6 +376,8 @@ class FlatpakTaskService : Service() {
         FlatpakTasks.newCommand(getString(R.string.task_reading_catalog))
         try {
             Catalog.refreshed(applicationContext, popular)
+        } catch (e: InterruptedException) {
+            throw e // a Cancel, not a failure of the catalog
         } catch (e: Exception) {
             FlatpakTasks.log(getString(R.string.task_catalog_failed, e.message ?: e.toString()))
         }
@@ -564,6 +570,7 @@ class FlatpakTaskService : Service() {
         if (deleteData) {
             remove += File(AppData.root(ctx), appId)
             AppData.settings(ctx, appId).delete()
+            SavedSizes.removed(ctx, appId)
         }
         remove.forEach { AndroidTarFs.deleteTree(it) }
     }
@@ -592,7 +599,7 @@ class FlatpakTaskService : Service() {
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setProgress(PROGRESS_MAX, fraction?.let { (it * PROGRESS_MAX).toInt() } ?: 0, fraction == null)
-            .addAction(0, getString(R.string.command_cancel), cancel)
+            .addAction(0, getString(R.string.cancel), cancel)
             .build()
     }
 

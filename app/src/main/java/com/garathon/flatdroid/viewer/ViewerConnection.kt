@@ -84,8 +84,9 @@ object ViewerConnection {
         wayland = waylandSocket != null
         speedsFile = File(cacheDir, SCROLL_SPEEDS)
         speedKey = appId?.let { "$it.${if (wayland) "wayland" else "x11"}" }
-        speed = ScrollSpeed(speedKey?.let { speeds().getProperty(it) })
-        speedAcross = ScrollSpeed(speedKey?.let { speeds().getProperty("$it$ACROSS") })
+        val saved = speedKey?.let { speeds() }
+        speed = ScrollSpeed(speedKey?.let { saved?.getProperty(it) })
+        speedAcross = ScrollSpeed(speedKey?.let { saved?.getProperty("$it$ACROSS") })
         waylandClient = waylandSocket?.let { socket ->
             WaylandClient(socket, ::androidText.takeIf { shareClipboard }, outputRefresh?.let { it * 1000 }, cacheDir).apply { start() }
         }

@@ -126,8 +126,8 @@ object LaunchEnvironment {
             val locale = java.util.Locale.forLanguageTag(tag)
             // Android still reports a few languages by their old codes; glibc uses the current ones.
             val language = LEGACY_LANGUAGES[locale.language] ?: locale.language
-            if (!Regex("[a-z]{2,3}").matches(language)) continue
-            val country = locale.country.takeIf { Regex("[A-Z]{2}").matches(it) }
+            if (!LANGUAGE.matches(language)) continue
+            val country = locale.country.takeIf { COUNTRY.matches(it) }
             val candidates = listOfNotNull(country?.let { "${language}_$it" }, "${language}_${language.uppercase()}") +
                 utf8.filter { it.startsWith("${language}_") }.sorted()
             candidates.firstOrNull { it in utf8 }?.let { return "$it.UTF-8" }
@@ -135,10 +135,13 @@ object LaunchEnvironment {
         return GENERIC_LOCALE
     }
 
+    private val LANGUAGE = Regex("[a-z]{2,3}")
+    private val COUNTRY = Regex("[A-Z]{2}")
+    private val NAME = Regex("[A-Za-z_][A-Za-z0-9_]*")
     private val LEGACY_LANGUAGES = mapOf("iw" to "he", "in" to "id", "ji" to "yi")
 
     /** A usable variable name; anything else could be read by `env` as an option or the command. */
-    fun isName(key: String) = Regex("[A-Za-z_][A-Za-z0-9_]*").matches(key)
+    fun isName(key: String) = NAME.matches(key)
 
     /** GNU triplet of a Flatpak architecture, as runtimes name their library directories. */
     fun triplet(arch: String) = "$arch-linux-gnu"

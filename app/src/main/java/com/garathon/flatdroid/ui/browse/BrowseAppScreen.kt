@@ -266,13 +266,13 @@ fun BrowseAppScreen(
                 }
                 InstallState.QUEUED -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(stringResource(R.string.browse_queued_waiting), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                    OutlinedButton(onClick = onUnqueue) { Text(stringResource(R.string.browse_queued_cancel)) }
+                    OutlinedButton(onClick = onUnqueue) { Text(stringResource(R.string.cancel)) }
                 }
                 InstallState.UNKNOWN -> Button(onClick = {}, enabled = false, shape = tallShape, modifier = Modifier.fillMaxWidth().then(tall)) {
-                    ButtonContent(Icons.Filled.Download, stringResource(R.string.install_confirm), large = landscape)
+                    ButtonContent(Icons.Filled.Download, stringResource(R.string.install), large = landscape)
                 }
                 InstallState.NOT_INSTALLED -> Button(onClick = onInstall, enabled = builtHere, shape = tallShape, modifier = Modifier.fillMaxWidth().then(tall)) {
-                    ButtonContent(Icons.Filled.Download, stringResource(R.string.install_confirm), large = landscape)
+                    ButtonContent(Icons.Filled.Download, stringResource(R.string.install), large = landscape)
                 }
             }
         }
@@ -291,7 +291,7 @@ fun BrowseAppScreen(
                         Text(name, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f, fill = false))
                         if (verified) {
                             Icon(
-                                Icons.Filled.Verified, contentDescription = stringResource(R.string.install_link_verified),
+                                Icons.Filled.Verified, contentDescription = stringResource(R.string.flathub_verified),
                                 tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 8.dp).size(22.dp),
                             )
                         }
@@ -320,9 +320,9 @@ fun BrowseAppScreen(
             when (val s = summary) {
                 Summary.Loading -> Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                    Text(stringResource(R.string.install_link_loading), style = MaterialTheme.typography.bodySmall)
+                    Text(stringResource(R.string.flathub_loading), style = MaterialTheme.typography.bodySmall)
                 }
-                Summary.NotFound -> Text(stringResource(R.string.install_link_not_found, appId), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp))
+                Summary.NotFound -> Text(stringResource(R.string.flathub_not_found, appId), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp))
                 Summary.MobileData -> Column(Modifier.padding(horizontal = 16.dp)) { Retry(stringResource(R.string.install_link_mobile_data)) { attempt++ } }
                 is Summary.Failed -> Column(Modifier.padding(horizontal = 16.dp)) {
                     Retry(if (s.code != null) stringResource(s.message, s.code) else stringResource(s.message)) { attempt++ }
@@ -491,7 +491,7 @@ fun BrowseAppPager(
     val titles = remember { mutableStateMapOf<String, String?>() }
     Column(modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 16.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.settings_back)) }
+            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back)) }
             Crossfade(pages.getOrNull(pager.currentPage)?.let { titles[it] }, label = "title") { title ->
                 if (title != null) Text(title, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 4.dp))
             }
@@ -537,7 +537,7 @@ private fun ScreenshotViewer(shots: List<Screenshot>, start: Int, onClose: () ->
 @Composable
 private fun Retry(text: String, onRetry: () -> Unit) {
     Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-    TextButton(onClick = onRetry, contentPadding = PaddingValues(0.dp)) { Text(stringResource(R.string.install_link_retry)) }
+    TextButton(onClick = onRetry, contentPadding = PaddingValues(0.dp)) { Text(stringResource(R.string.retry)) }
 }
 
 /** A button's icon and label; [large] for the tall buttons beside the header in landscape. */

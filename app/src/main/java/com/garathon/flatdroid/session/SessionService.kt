@@ -48,7 +48,7 @@ import kotlinx.coroutines.runInterruptible
 
 /**
  * Keeps one Flatpak session (display helpers and the app) running in the foreground, so Android
- * doesn't stop it while the user is in the VNC viewer. specialUse: dataSync is limited to 6 hours
+ * doesn't stop it while the user is in the viewer (Flatdroid's own, or an external VNC one). specialUse: dataSync is limited to 6 hours
  * a day on Android 15. With the microphone type too when the app may use the microphone: Android
  * lets a service record in the background only with that type, given while Flatdroid is in the
  * foreground (at launch, or when the user allows it in Flatdroid). The camera type likewise, at
@@ -89,9 +89,14 @@ class SessionService : Service() {
             }
         }
         if (job?.isActive != true && appId != null && InstalledApps.isValidId(appId)) {
-            microphoneType = mayRecord(appId)
-            cameraType = AndroidCameras.hasPermission(this) &&
-                InstalledApps(this).context(appId)?.let { AppData.settings(this, appId).load().cameraAllowed(it) } == true
+            // The service takes the microphone type at launch, while Flatdroid is in the foreground: the
+            // app's sound and microphone are on and Android's permission is granted. Android then lets the
+            // session record later from the background, once the user allows it in the notification; until
+            // then the type is held but the microphone isn't used. The camera type likewise.
+            val settings = AppData.settings(this, appId).load()
+            val appContext = InstalledApps(this).context(appId)
+            microphoneType = MicStreamer.hasPermission(this) && settings.microphoneAllowed(appContext?.sockets.orEmpty())
+            cameraType = AndroidCameras.hasPermission(this) && appContext?.let { settings.cameraAllowed(it) } == true
         }
         startInForeground(notification(SessionController.ui.value.state))
         if (job?.isActive == true) return START_NOT_STICKY
@@ -105,7 +110,7 @@ class SessionService : Service() {
         val micAnswer = if (intent.hasExtra(EXTRA_MIC_ANSWER)) intent.getBooleanExtra(EXTRA_MIC_ANSWER, false) else null
         val notifications = getSystemService(NotificationManager::class.java)
         val updates = scope.launch {
-            SessionController.ui.distinctUntilChangedBy { it.state::class to it.state.appIdOrNull }
+            SessionController.ui.distinctUntilChangedBy { Triple(it.state::class, it.state.appIdOrNull, stage(it.state)) }
                 .filter { it.state !is SessionState.Idle && it.state !is SessionState.Question }
                 .collect { notifications.notify(NOTIFICATION_ID, notification(it.state)) }
         }
@@ -180,18 +185,14 @@ class SessionService : Service() {
         getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_ID)
     }
 
-    private fun label(appId: String) = InstalledApps(applicationContext).name(appId) ?: appId
-
-    /**
-     * Whether [appId] may record, so the session takes the microphone type at launch, while
-     * Flatdroid is in the foreground: its sound and microphone are on, and Android's permission is
-     * granted. Android then lets the session record later from the background, once the user
-     * allows it in the notification; until then the type is held but the microphone isn't used.
-     */
-    private fun mayRecord(appId: String): Boolean {
-        val settings = AppData.settings(this, appId).load()
-        return MicStreamer.hasPermission(this) && settings.microphoneAllowed(InstalledApps(applicationContext).sockets(appId))
+    /** What the notification's text says: a new stage reaches it, an unchanged one (the file check's progress goes on) doesn't repost it. */
+    private fun stage(state: SessionState): String? = when (state) {
+        is SessionState.Starting -> state.detail
+        is SessionState.PreparingElectron -> state.detail
+        else -> null
     }
+
+    private fun label(appId: String) = InstalledApps(applicationContext).name(appId) ?: appId
 
     private fun startInForeground(notification: Notification) {
         var type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0

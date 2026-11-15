@@ -117,11 +117,13 @@ data class FlatpakBinds(
         for (name in etc.keys) require(name.isNotEmpty() && '/' !in name && ':' !in name && name != "..") { "Unusable /etc name: $name" }
         require(dev.all(DevNodes::isAllowed)) { "Unusable /dev path: $dev" }
         require(sys.orEmpty().all { it.startsWith("/sys/") && ':' !in it && ".." !in it.split('/') }) { "Unusable /sys path: $sys" }
-        require(hiddenProc.all { Regex("/proc/[0-9]+").matches(it) }) { "Unusable /proc path: $hiddenProc" }
+        require(hiddenProc.all { HIDDEN_PROC.matches(it) }) { "Unusable /proc path: $hiddenProc" }
         require(hiddenProc.isEmpty() || emptyDir != null) { "Hidden /proc entries need an empty directory" }
         require(fakeProc.keys.all { it.startsWith("/proc/") && ':' !in it && ".." !in it.split('/') }) { "Unusable /proc path: ${fakeProc.keys}" }
     }
 }
+
+private val HIDDEN_PROC = Regex("/proc/[0-9]+")
 
 /** A complete process description: argv and the whole environment (nothing is inherited). */
 data class ProotInvocation(val argv: List<String>, val env: Map<String, String>)
@@ -131,6 +133,7 @@ data class ProotInvocation(val argv: List<String>, val env: Map<String, String>)
  * The environment is complete, since the process starts from a cleared one.
  */
 object ProotCommand {
+    private val ENV_NAME = Regex("[A-Za-z_][A-Za-z0-9_]*")
     val GUEST_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
     /** `apply_extra` runs as Flatpak runs it: no network. */
@@ -257,7 +260,7 @@ object ProotCommand {
             "Guest command must start with an absolute path: $command"
         }
         require(command[0].none { it == '=' }) { "The command would be read as a variable: ${command[0]}" }
-        require(environment.keys.all { Regex("[A-Za-z_][A-Za-z0-9_]*").matches(it) }) { "Bad variable name in $environment" }
+        require(environment.keys.all { ENV_NAME.matches(it) }) { "Bad variable name in $environment" }
         val argv = mutableListOf(
             paths.proot,
             "--sysvipc",

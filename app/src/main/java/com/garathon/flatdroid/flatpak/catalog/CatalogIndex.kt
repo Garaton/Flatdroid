@@ -141,7 +141,7 @@ class CatalogIndex private constructor(
                 DataInputStream(BufferedInputStream(list.inputStream())).use { input ->
                     if (input.readInt() != FORMAT) return null
                     val version = input.readUTF()
-                    val count = input.readInt()
+                    val count = readCount(input, MAX_APPS)
                     val apps = ArrayList<CatalogApp>(count)
                     val offsets = HashMap<String, Long>(count * 2)
                     repeat(count) {
@@ -242,13 +242,15 @@ class CatalogIndex private constructor(
         private fun readList(input: DataInputStream): List<String> = List(readCount(input)) { readLong(input) }
 
         /** A count of things that follow, checked: a damaged file mustn't make a list of millions. */
-        private fun readCount(input: DataInputStream): Int {
+        private fun readCount(input: DataInputStream, max: Int = MAX_ITEMS): Int {
             val size = input.readInt()
-            if (size !in 0..MAX_ITEMS) throw IOException("Bad list length $size")
+            if (size !in 0..max) throw IOException("Bad list length $size")
             return size
         }
 
         private const val MAX_TEXT = 1 shl 20
         private const val MAX_ITEMS = 10_000
+        /** Far above any catalog (Flathub has a few thousand apps); only a damaged file reaches it. */
+        private const val MAX_APPS = 200_000
     }
 }

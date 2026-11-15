@@ -102,4 +102,21 @@ class SizeStoreTest {
         assertEquals(mapOf("app" to 3L, "home" to 4L), store.last("a.App", keys))
         assertEquals(setOf("a.App.sizes"), dir.list()!!.toSet())
     }
+
+    @Test
+    fun removedSizesLeaveNothingBehind() {
+        val dir = tmp.newFolder()
+        val store = SizeStore(dir)
+        store.get("a.App", keys) { mapOf("app" to 1L, "home" to 2L) }
+        store.forget("a.App")
+        // Set aside as the last sizes, for showing until new ones are in.
+        assertEquals(setOf("a.App.sizes.last"), dir.list()!!.toSet())
+        store.get("a.App", keys) { mapOf("app" to 3L, "home" to 4L) }
+        store.remove("a.App")
+        assertEquals(emptySet<String>(), dir.list()!!.toSet())
+        assertEquals(null, store.last("a.App", keys))
+        // A measurement that began before the removal isn't saved after it.
+        store.get("a.App", keys) { store.remove("a.App"); mapOf("app" to 5L, "home" to 6L) }
+        assertEquals(emptySet<String>(), dir.list()!!.toSet())
+    }
 }

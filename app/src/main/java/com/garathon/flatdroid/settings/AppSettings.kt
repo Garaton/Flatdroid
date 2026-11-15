@@ -173,20 +173,32 @@ data class AppSettings(
     val cameraFrameRate: Int get() = cameraFrameRateOverride ?: defaults.cameraFrameRate
 
     /** Whether the app gets sound: its own setting, else [defaults] and whether its metadata asks for PulseAudio. */
-    fun audioAllowed(sockets: List<String>): Boolean = audio ?: (defaults.permissionsFromMetadata && PULSEAUDIO_SOCKET in sockets)
+    fun audioAllowed(sockets: List<String>): Boolean = audioOn(PULSEAUDIO_SOCKET in sockets)
+
+    /**
+     * The four below take what the app's metadata asks for as a flag ([audioOn] and [microphoneOn]:
+     * PulseAudio's socket; [cameraOn]: [FlatpakContext.mayUseCamera]), so the launcher, the
+     * overview and the Permissions page can't work out a permission differently.
+     */
+    fun networkOn(requested: Boolean): Boolean = network ?: defaultOn(requested)
+
+    fun audioOn(requested: Boolean): Boolean = audio ?: defaultOn(requested)
+
+    fun microphoneOn(audioRequested: Boolean): Boolean = audioOn(audioRequested) && (microphone ?: defaultOn(audioRequested))
+
+    fun cameraOn(mayUse: Boolean): Boolean = camera ?: defaultOn(mayUse)
+
+    /** What a permission the user hasn't set follows: [defaults] and whether the metadata asks for it. */
+    fun defaultOn(requested: Boolean): Boolean = defaults.permissionsFromMetadata && requested
 
     /** Whether the app's microphone is on, whatever Android's permission: its own setting, else [defaults] and whether it asks for sound. */
-    fun microphoneAllowed(sockets: List<String>): Boolean = audioAllowed(sockets) && (microphone ?: microphoneDefault(sockets))
-
-    fun microphoneDefault(sockets: List<String>): Boolean = defaults.permissionsFromMetadata && PULSEAUDIO_SOCKET in sockets
+    fun microphoneAllowed(sockets: List<String>): Boolean = microphoneOn(PULSEAUDIO_SOCKET in sockets)
 
     /** Whether the app's camera is on, whatever Android's permission: its own setting, else [defaults] and the hint that it uses one. */
-    fun cameraAllowed(context: FlatpakContext): Boolean = camera ?: cameraDefault(context)
-
-    fun cameraDefault(context: FlatpakContext): Boolean = defaults.permissionsFromMetadata && context.mayUseCamera
+    fun cameraAllowed(context: FlatpakContext): Boolean = cameraOn(context.mayUseCamera)
 
     /** Whether the app gets the Internet: its own setting, else [defaults] and whether its metadata asks for the network. */
-    fun networkAllowed(shared: List<String>): Boolean = network ?: (defaults.permissionsFromMetadata && NETWORK in shared)
+    fun networkAllowed(shared: List<String>): Boolean = networkOn(NETWORK in shared)
 
     /** The screen's size at launch for a viewer of [viewWidth] x [viewHeight]. */
     fun size(viewWidth: Int, viewHeight: Int): Pair<Int, Int> =
@@ -378,7 +390,9 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
 
 /** [AppSettings.launchArgs] as the user edits it: arguments separated by whitespace, each taken as it is (no quoting). */
 object LaunchArgs {
-    fun parse(text: String): List<String> = text.split(Regex("\\s+")).filter { it.isNotEmpty() }
+    private val WHITESPACE = Regex("\\s+")
+
+    fun parse(text: String): List<String> = text.split(WHITESPACE).filter { it.isNotEmpty() }
 
     fun format(args: List<String>): String = args.joinToString(" ")
 }

@@ -72,6 +72,8 @@ class StorageTaskService : Service() {
     private var worker: Job? = null
     private var lastPercent = -1
     private var lastUpdate = 0L
+    /** The running task's title, made once when it starts: each progress update would read the app's metadata and desktop file again. */
+    @Volatile private var title: String? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -107,6 +109,7 @@ class StorageTaskService : Service() {
             StorageTasks.start(task)
             lastPercent = -1
             lastUpdate = 0L
+            title = describe(this, task)
             updateProgress(task, null)
             val result = try {
                 withContext(Dispatchers.IO) {
@@ -471,7 +474,7 @@ class StorageTaskService : Service() {
         if (percent == lastPercent || now - lastUpdate < PROGRESS_INTERVAL_MS) return
         lastPercent = percent
         lastUpdate = now
-        getSystemService(NotificationManager::class.java).notify(PROGRESS_ID, progressNotification(task, fraction))
+        getSystemService(NotificationManager::class.java).notify(PROGRESS_ID, progressNotification(task, fraction, title))
     }
 
     private fun startInForeground(notification: Notification) {
@@ -479,10 +482,10 @@ class StorageTaskService : Service() {
         ServiceCompat.startForeground(this, PROGRESS_ID, notification, type)
     }
 
-    private fun progressNotification(task: StorageTask?, fraction: Float?): Notification {
+    private fun progressNotification(task: StorageTask?, fraction: Float?, known: String? = null): Notification {
         createChannel(this)
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
-        val title = task?.let { describe(this, it) } ?: getString(R.string.storage_working)
+        val title = known ?: task?.let { describe(this, it) } ?: getString(R.string.storage_working)
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_download)
             .setContentTitle(title)

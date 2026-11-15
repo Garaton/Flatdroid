@@ -187,7 +187,7 @@
     <string name="settings_languages">Only download translations for my languages (%1$s)</string>
     <string name="settings_languages_hint">Flatpak skips translations for other languages when it installs and updates apps, saving space.</string>
     <string name="settings_save">Save</string>
-    <string name="settings_back">Back</string>
+    <string name="back">Back</string>
     <string name="settings_failed">Could not apply the settings: %1$s</string>
     <string name="settings_open">Settings</string>
     <string name="settings_section_danger">Danger zone</string>
@@ -203,7 +203,6 @@
     <string name="ready_command_label">Run a command in Alpine</string>
     <string name="ready_run">Run</string>
     <string name="ready_running">Running…</string>
-    <string name="command_cancel">Cancel</string>
 
     <string name="reset_button">Reset Flatdroid…</string>
     <string name="reset_title">Reset Flatdroid?</string>
@@ -215,7 +214,7 @@
     <string name="reset_remove_hint">Flatpaks and all runtimes are removed, however their data stays (settings, home, etc). Caches are cleared.</string>
     <string name="reset_wipe_hint">Everything in Flatdroid is wiped (Alpine, Flatpak apps and data), and you start from a clean slate. The only thing that remains the same is Flatdroid\'s own global settings.</string>
     <string name="reset_confirm">Reset</string>
-    <string name="reset_cancel">Cancel</string>
+    <string name="cancel">Cancel</string>
     <string name="reset_running">Deleting the files…</string>
     <string name="reset_screen_title">Resetting Flatdroid</string>
     <string name="reset_screen_note">This takes a moment. You choose your settings again after it.</string>
@@ -243,16 +242,16 @@
     <string name="install_not_an_id">Not an app ID: %1$s. An ID looks like org.xfce.mousepad.</string>
     <string name="install_already_installed">Installed already: %1$s.</string>
     <string name="install_unknown_id">Not on Flathub for this phone: %1$s. Check the ID, or refresh Flathub\'s catalog if the app is new.</string>
-    <string name="install_confirm">Install</string>
+    <string name="install">Install</string>
     <string name="install_link_title">Install %1$s?</string>
     <string name="install_link_waits">It installs once the running task or app has finished.</string>
-    <string name="install_link_loading">Asking Flathub…</string>
-    <string name="install_link_not_found">Flathub has no app with the ID %1$s.</string>
+    <string name="flathub_loading">Asking Flathub…</string>
+    <string name="flathub_not_found">Flathub has no app with the ID %1$s.</string>
     <string name="install_link_failed">Flathub can\'t be reached. Check the connection.</string>
     <string name="install_link_server_error">Flathub answered with an error (%1$d). Try again later.</string>
     <string name="install_link_bad_answer">Flathub\'s answer couldn\'t be read. Flatdroid may need an update.</string>
     <string name="install_link_mobile_data">Downloads on mobile data are off, so Flatdroid doesn\'t ask Flathub either. Connect to Wi-Fi and try again, or change it in Flatdroid\'s settings under Flatpak.</string>
-    <string name="install_link_verified">Verified on Flathub</string>
+    <string name="flathub_verified">Verified on Flathub</string>
     <string name="browse_title">Flathub</string>
     <string name="browse_search">Search Flathub</string>
     <string name="browse_install_by_id">Install by app ID</string>
@@ -267,7 +266,6 @@
     <string name="app_settings_continue_hidden">Continue while hidden</string>
     <string name="app_settings_continue_hidden_hint">When hidden the app, and its sound, continue running. This is useful for apps that download, call, play media, etc.</string>
     <string name="browse_queued_waiting">Waiting to install</string>
-    <string name="browse_queued_cancel">Cancel</string>
     <string name="browse_load_screenshots">Load screenshots on mobile data</string>
     <string name="browse_screenshots_mobile_data">Screenshots aren\'t loaded on mobile data, as set under Flatpak in Flatdroid\'s settings.</string>
     <string name="browse_filter_verified">Verified</string>
@@ -305,7 +303,7 @@
     <string name="browse_link_bugtracker">Report an issue</string>
     <string name="browse_link_source">Source code</string>
     <string name="browse_link_donation">Donate</string>
-    <string name="install_link_retry">Try again</string>
+    <string name="retry">Try again</string>
     <string name="install_link_app_size">App size: %1$s</string>
     <string name="install_link_runtimes">Runtimes:\n%1$s - %2$s</string>
     <string name="install_link_runtime_installed">installed</string>
@@ -364,6 +362,7 @@
     <string name="task_done">Done: %1$s</string>
     <string name="task_failed_title">Failed: %1$s</string>
     <string name="task_cancelled">cancelled</string>
+    <string name="task_time_limit">Stopped by Android\'s daily limit for background work. Open Flatdroid to continue.</string>
     <string name="task_log_title">Flatpak output</string>
     <string name="task_step">%1$s %2$d of %3$d: %4$s</string>
     <string name="task_step_deploying">%1$s %2$d of %3$d: %4$s. Unpacking, this may take a few minutes</string>
@@ -424,8 +423,8 @@
     <string name="settings_developer_options_hint">Shows extra settings that Flatdroid manages itself or that are risky for most users.</string>
 
     <string name="session_channel">Running app</string>
-    <string name="session_checking_files">Checking files: %1$s (%2$d/%3$d)</string>
-    <string name="session_listing_files">Checking files: listing %1$s</string>
+    <string name="session_checking_files">Checking: %1$s</string>
+    <string name="session_listing_files">Listing: %1$s</string>
     <string name="session_files_changed">Some files changed since this app was installed, so it was not started. Another app may have altered them. Reinstall restores the affected packages.</string>
     <string name="session_files_changed_item" tools:ignore="PluralsCandidate">• %1$s: %2$d changed, %3$d removed</string>
     <string name="session_reinstall">Reinstall</string>
@@ -466,7 +465,7 @@
     <string name="session_signal_ended">%1$s was ended by %2$s.</string>
     <string name="session_exit_error">%1$s closed with an error (exit code %2$d).</string>
     <string name="session_failed">Could not run the app: %1$s</string>
-    <string name="session_choose_viewer">The VNC viewer you chose isn't installed. Pick another under Display → Show apps in, or switch back to Flatdroid's viewer.</string>
+    <string name="session_choose_viewer">The VNC viewer you chose isn\'t installed. Pick another under Display → Show apps in, or switch back to Flatdroid\'s viewer.</string>
     <string name="session_no_viewer">No VNC viewer is installed. Install one (such as AVNC) then connect to the address shown with the password.</string>
     <string name="session_log_title">App output</string>
     <string name="session_reading_metadata">Reading the app\'s metadata…</string>
@@ -549,7 +548,6 @@
 
     <!-- Files and homes -->
     <string name="ok">OK</string>
-    <string name="home_import">Add files to the shared home</string>
     <string name="home_import_files">Add files to the shared home</string>
     <string name="settings_change_shared_home">Change shared home</string>
     <string name="settings_all_files_access">All files access</string>

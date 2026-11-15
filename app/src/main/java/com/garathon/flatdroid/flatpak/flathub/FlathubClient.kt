@@ -91,6 +91,8 @@ object FlathubClient {
         val apps = mutableListOf<CollectionApp>()
         var page = 1
         do {
+            // A Cancel waits for the page in flight, not for every page after it.
+            if (Thread.interrupted()) throw InterruptedException()
             val answer = get("$API/collection/popular?page=$page&per_page=$PAGE_SIZE", "popular")
             val parsed = try {
                 parseCollection(answer)

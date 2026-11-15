@@ -67,7 +67,7 @@ object NetworkDns {
                 runCatching { socket.send(DatagramPacket(query, query.size, InetSocketAddress(address, 53))) }
             }
             val reply = ByteArray(512)
-            val deadline = System.currentTimeMillis() + PROBE_MS
+            var deadline = System.currentTimeMillis() + PROBE_MS
             while (answered.size < addresses.size) {
                 val left = deadline - System.currentTimeMillis()
                 if (left <= 0) break
@@ -78,12 +78,18 @@ object NetworkDns {
                 } catch (_: SocketTimeoutException) {
                     break
                 }
-                if (packet.address in addresses && DnsProbe.answers(reply, packet.length, id)) answered += packet.address
+                if (packet.address in addresses && DnsProbe.answers(reply, packet.length, id) && answered.add(packet.address)) {
+                    // One silent address (no route, a dead server) shouldn't hold the rest back for the full wait.
+                    deadline = minOf(deadline, System.currentTimeMillis() + REST_MS)
+                }
             }
         }
         return addresses.filter { it in answered }.mapNotNull { it.hostAddress }
     }
 
     private const val PROBE_MS = 1000L
+
+    /** How long the other addresses get once one has answered (verify: a Private DNS name with an address the network can't reach). */
+    private const val REST_MS = 150L
     private const val CACHE_MS = 5 * 60 * 1000L
 }

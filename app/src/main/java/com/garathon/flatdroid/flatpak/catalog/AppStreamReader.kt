@@ -53,6 +53,8 @@ class AppStreamReader(languages: List<String>) {
     /** Calls [onEntry] for each app in the catalog [parser] reads (positioned at its start). */
     fun read(parser: XmlPullParser, onEntry: (CatalogEntry) -> Unit) {
         while (parser.next() != XmlPullParser.END_DOCUMENT) {
+            // A Cancel (an interrupt of the task's thread) stops the parse between apps.
+            if (Thread.interrupted()) throw InterruptedException()
             if (parser.eventType == XmlPullParser.START_TAG && parser.name == "component") {
                 val type = parser.getAttributeValue(null, "type")
                 if (type == "desktop-application" || type == "desktop") component(parser)?.let(onEntry) else skip(parser)

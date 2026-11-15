@@ -167,6 +167,29 @@ class AppSettingsTest {
     }
 
     @Test
+    fun theFlagVersionsAgreeWithTheListVersions() {
+        // The overview, the Permissions page and the launcher ask the same question in different shapes.
+        val hardened = AppSettings(defaults = AppDefaults(permissionsFromMetadata = false))
+        for (settings in listOf(AppSettings(), hardened, AppSettings(audio = false, network = true, microphone = true, camera = true))) {
+            for (asks in listOf(true, false)) {
+                assertEquals(settings.audioAllowed(if (asks) listOf("pulseaudio") else emptyList()), settings.audioOn(asks))
+                assertEquals(settings.networkAllowed(if (asks) listOf("network") else emptyList()), settings.networkOn(asks))
+                assertEquals(settings.microphoneAllowed(if (asks) listOf("pulseaudio") else emptyList()), settings.microphoneOn(asks))
+                assertEquals(settings.cameraAllowed(FlatpakContext(filesystems = if (asks) listOf("xdg-run/pipewire-0") else emptyList())), settings.cameraOn(asks))
+            }
+        }
+        assertTrue(AppSettings().defaultOn(true))
+        assertFalse(AppSettings().defaultOn(false))
+        assertFalse(hardened.defaultOn(true))
+    }
+
+    @Test
+    fun launchArgsSplitOnAnyWhitespace() {
+        assertEquals(listOf("--a", "b", "c"), LaunchArgs.parse("  --a \t b\n c "))
+        assertEquals(emptyList<String>(), LaunchArgs.parse("  "))
+    }
+
+    @Test
     fun microphoneAndCameraFollowTheMetadataUntilOverridden() {
         val sound = listOf("x11", "pulseaudio")
         val allDevices = FlatpakContext(devices = listOf("all"))

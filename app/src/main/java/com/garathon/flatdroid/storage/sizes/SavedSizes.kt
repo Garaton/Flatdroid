@@ -55,6 +55,21 @@ class SizeStore(private val dir: File, private val onMeasured: (name: String, mi
         setAside(file(name))
     }
 
+    /** [name]'s saved sizes and the ones a forget set aside, for good (the thing measured is gone). */
+    fun remove(name: String) = synchronized(this) {
+        generations[name] = (generations[name] ?: 0) + 1
+        file(name).delete()
+        lastFile(name).delete()
+    }
+
+    /** Deletes the files (sizes and last sizes) of every name not in [keep]: what a stop or a kill left of a thing that is gone. */
+    fun removeExcept(keep: Set<String>) = synchronized(this) {
+        for (file in dir.listFiles().orEmpty()) {
+            val name = file.name.removeSuffix(LAST).removeSuffix(SUFFIX)
+            if (name != file.name && name !in keep) file.delete()
+        }
+    }
+
     /** Every saved size, or with [keep], all but those. */
     fun forgetAll(keep: Set<String> = emptySet()) = synchronized(this) {
         allGeneration++
@@ -266,6 +281,11 @@ object SavedSizes {
         }
     }
 
+    /** After [appId]'s data is deleted: its saved sizes go, including the last ones kept for showing. */
+    fun removed(context: Context, appId: String) {
+        if (InstalledApps.isValidId(appId)) store(context).remove(appId)
+    }
+
     /** Before anything that changes [appId]'s files. */
     fun forget(context: Context, appId: String) {
         if (InstalledApps.isValidId(appId)) store(context).forget(appId)
@@ -314,6 +334,13 @@ object SavedSizes {
 
     /** At start: measures in the background whatever isn't saved (a stop cut its change or measurement short). */
     fun measureMissing(context: Context) = measureLater(context, appIds(context) + SHARED)
+
+    /**
+     * At start, with the other leftovers: the saved sizes of apps that are gone (a removal cut short
+     * by a stop or a kill) would stay for good. Only with Flatpak's installation in place, since
+     * without it every app would look gone.
+     */
+    fun removeStale(context: Context) = store(context).removeExcept(appIds(context) + SHARED + RUNTIMES)
 
     /** Apps Flatdroid has files for: installed, or with data or Flatdroid settings left. */
     fun appIds(context: Context): Set<String> {

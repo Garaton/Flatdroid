@@ -30,6 +30,7 @@ class ProotProcess internal constructor(
     private val signals: Signals,
     private val reader: Thread,
     private val writer: Thread?,
+    private val forget: (ProotProcess) -> Unit,
 ) {
     // Process.isAlive needs API 26; minSdk is 24.
     val isAlive: Boolean get() = !ProcessStopper.waitForExit(process, 0)
@@ -42,6 +43,7 @@ class ProotProcess internal constructor(
         val code = process.waitFor()
         reader.join(TimeUnit.SECONDS.toMillis(5))
         writer?.join(TimeUnit.SECONDS.toMillis(1))
+        forget(this)
         return code
     }
 
@@ -51,9 +53,12 @@ class ProotProcess internal constructor(
      * end on SIGINT (see ProcessStopper).
      */
     fun stop(interruptGraceMillis: Long = ProcessStopper.SHORT_GRACE_MS): Boolean {
-        if (!isAlive) return false
+        if (!isAlive) {
+            forget(this)
+            return false
+        }
         val pid = ProcessStopper.pidOf(process) ?: run { process.destroy(); return true }
-        return ProcessStopper(signals, interruptGraceMillis).stop(process, pid)
+        return ProcessStopper(signals, interruptGraceMillis).stop(process, pid).also { if (!isAlive) forget(this) }
     }
 
     /** Ctrl-C only: SIGINT to the processes under proot; whether they stop is up to them. */
@@ -114,7 +119,7 @@ object ProotRunner {
                 // The stream closed while the process was being stopped.
             }
         }
-        return ProotProcess(process, signals, reader, writer).also(started::add)
+        return ProotProcess(process, signals, reader, writer) { started.remove(it) }.also(started::add)
     }
 
     /** Every proot started and still running. */

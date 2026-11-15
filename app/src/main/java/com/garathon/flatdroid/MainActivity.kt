@@ -181,8 +181,6 @@ class MainActivity : ComponentActivity() {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
                     val setup by SetupController.state.collectAsState()
                     val modifier = Modifier.padding(innerPadding)
-                    val output by viewModel.output.collectAsState()
-                    val running by viewModel.running.collectAsState()
                     var screen by rememberSaveable(stateSaver = Screen.Saver) { mutableStateOf<Screen>(Screen.Home) }
                     // Screen 1: the user's settings, asked before setup (again after a reset, pre-filled);
                     // setup's last step applies them. Screen 2: setup, the same for everyone. Then the app.
@@ -214,14 +212,19 @@ class MainActivity : ComponentActivity() {
                                 onContinue = { SetupController.settings(this@MainActivity).save(it); startSetup() },
                                 modifier = modifier,
                             )
-                            AppStage.SETUP -> SetupScreen(
-                                ui = setup,
-                                onStart = ::startSetup,
-                                onReset = ::resetAlpine,
-                                modifier = modifier,
-                                // Once Alpine is extracted, commands can look into a failed setup.
-                                command = if (SetupStep.ROOTFS in setup.completed) CommandState(output, running, viewModel::run, viewModel::cancel) else null,
-                            )
+                            AppStage.SETUP -> {
+                                // Read here and not above: the command's output changes ten times a second, which would redraw the whole window.
+                                val output by viewModel.output.collectAsState()
+                                val running by viewModel.running.collectAsState()
+                                SetupScreen(
+                                    ui = setup,
+                                    onStart = ::startSetup,
+                                    onReset = ::resetAlpine,
+                                    modifier = modifier,
+                                    // Once Alpine is extracted, commands can look into a failed setup.
+                                    command = if (SetupStep.ROOTFS in setup.completed) CommandState(output, running, viewModel::run, viewModel::cancel) else null,
+                                )
+                            }
                             AppStage.MAIN -> Main(screen, { screen = it }, languages, modifier)
                             AppStage.RESETTING -> ResetScreen(setup.detail, modifier)
                         }
@@ -237,7 +240,6 @@ class MainActivity : ComponentActivity() {
     /** Everything after setup: home, Settings (with the terminal) and each app's settings. */
     @Composable
     private fun Main(screen: Screen, navigate: (Screen) -> Unit, languages: String, modifier: Modifier) {
-        val output by viewModel.output.collectAsState()
         val running by viewModel.running.collectAsState()
         val applying by viewModel.applying.collectAsState()
         val settingsError by viewModel.settingsError.collectAsState()
@@ -478,7 +480,11 @@ class MainActivity : ComponentActivity() {
                     modifier = modifier,
                 )
             }
-            Screen.Terminal -> TerminalScreen(output, running, viewModel::run, viewModel::cancel, onBack = { go(Screen.Settings(GlobalPage.DEVELOPER)) }, modifier = modifier)
+            Screen.Terminal -> {
+                // Read here and not in Main: the output changes ten times a second while a command runs.
+                val output by viewModel.output.collectAsState()
+                TerminalScreen(output, running, viewModel::run, viewModel::cancel, onBack = { go(Screen.Settings(GlobalPage.DEVELOPER)) }, modifier = modifier)
+            }
             is Screen.AppSettings -> {
                 val list = apps ?: return@AnimatedContent
                 val app = list.firstOrNull { it.id == target.appId }

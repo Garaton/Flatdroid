@@ -1,16 +1,11 @@
 package com.garathon.flatdroid.ui.dialogs
 
-import android.content.ClipData
-import android.os.PersistableBundle
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -18,11 +13,8 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -33,26 +25,17 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.ClipEntry
-import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import com.garathon.flatdroid.R
 import com.garathon.flatdroid.flatpak.flathub.FlathubLinkApproval
-import com.garathon.flatdroid.flatpak.tasks.FlatpakTask
-import com.garathon.flatdroid.flatpak.tasks.FlatpakTaskUi
 import com.garathon.flatdroid.flatpak.InstalledApps
-import com.garathon.flatdroid.session.SessionController
-import com.garathon.flatdroid.session.helpers.SessionScript
 import com.garathon.flatdroid.session.SessionState
-import com.garathon.flatdroid.session.SessionUi
-import com.garathon.flatdroid.session.ExternalViewer
 import com.garathon.flatdroid.ui.common.LogText
 import com.garathon.flatdroid.ui.common.rememberFlathubLinksAllowed
 import kotlinx.coroutines.launch
@@ -65,7 +48,7 @@ fun MobileDataDialog(onDownload: () -> Unit, onDismiss: () -> Unit) {
         title = { Text(stringResource(R.string.mobile_data_title)) },
         text = { Text(stringResource(R.string.mobile_data_text)) },
         confirmButton = { Button(onClick = onDownload) { Text(stringResource(R.string.mobile_data_download)) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.reset_cancel)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
     )
 }
 
@@ -138,8 +121,8 @@ fun InstallDialog(
                 )
             }
         },
-        confirmButton = { Button(onClick = submit, enabled = words.isNotEmpty() && problemText == null) { Text(stringResource(R.string.install_confirm)) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.reset_cancel)) } },
+        confirmButton = { Button(onClick = submit, enabled = words.isNotEmpty() && problemText == null) { Text(stringResource(R.string.install)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
     )
 }
 
@@ -163,7 +146,7 @@ fun ElectronDialog(offer: SessionState.ElectronOffer, appName: String, deviceArc
             if (offer.problem == null) Button(onClick = onAccept) { Text(stringResource(R.string.electron_download)) }
             else TextButton(onClick = onDismiss) { Text(stringResource(R.string.dismiss)) }
         },
-        dismissButton = { if (offer.problem == null) TextButton(onClick = onDismiss) { Text(stringResource(R.string.reset_cancel)) } },
+        dismissButton = { if (offer.problem == null) TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
     )
 }
 
@@ -175,7 +158,7 @@ fun FilesChangedDialog(state: SessionState.FilesChanged, appName: String, onRein
         title = { Text(stringResource(R.string.files_changed_title, appName)) },
         text = { SelectionContainer { Text(state.detail, style = MaterialTheme.typography.bodyMedium) } },
         confirmButton = { Button(onClick = onReinstall) { Text(stringResource(R.string.session_reinstall)) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.reset_cancel)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
     )
 }
 

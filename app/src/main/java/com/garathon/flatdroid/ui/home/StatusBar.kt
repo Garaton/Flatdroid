@@ -32,7 +32,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -213,7 +212,7 @@ private fun TaskAndSessionBar(
                     bar.onLog?.let { IconAction(Icons.Filled.Info, R.string.show_log, it, size = 36.dp) }
                     IconAction(
                         if (bar.running) Icons.Filled.Cancel else Icons.Filled.Close,
-                        if (bar.running) R.string.command_cancel else R.string.dismiss,
+                        if (bar.running) R.string.cancel else R.string.dismiss,
                         bar.onClose, enabled = bar.closeEnabled, size = 36.dp,
                     )
                 }
