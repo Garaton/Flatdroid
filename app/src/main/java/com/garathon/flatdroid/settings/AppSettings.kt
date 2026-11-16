@@ -30,6 +30,12 @@ enum class Resolution(val percent: Int?) {
     }
 }
 
+/**
+ * How GTK 4 and Qt Quick apps draw. [AUTOMATIC] is software unless the app's camera is on (its
+ * preview needs GL to keep up); [SOFTWARE] and [GL] are always that.
+ */
+enum class Rendering(val key: String) { AUTOMATIC("automatic"), SOFTWARE("software"), GL("gl") }
+
 /** What an app gets as its home. None of them isolates the app; they change what it can reach. */
 enum class HomeMode {
     /** The shared home (`Documents/Flatdroid` unless the user chose another folder). */
@@ -59,6 +65,8 @@ data class AppDefaults(
     val resolution: Resolution = DEFAULT_RESOLUTION,
     /** How large Wayland apps draw everything, for apps that don't choose their own ([AppSettings.INTERFACE_SIZES]). */
     val interfaceSize: Int = DEFAULT_INTERFACE_SIZE,
+    /** How GTK 4 and Qt Quick apps draw, for apps that don't choose their own. */
+    val rendering: Rendering = Rendering.AUTOMATIC,
 ) {
     companion object {
         val DEFAULT_RESOLUTION = Resolution.THREE_QUARTERS
@@ -154,6 +162,8 @@ data class AppSettings(
     val forceX11: Boolean = false,
     /** On Wayland, how large the app draws everything, in percent ([INTERFACE_SIZES]); X11 apps keep their size. Null follows [defaults] ([interfaceSize]). */
     val interfaceSizeChoice: Int? = null,
+    /** How GTK 4 and Qt Quick apps draw; null follows [defaults] ([rendering]). */
+    val renderingChoice: Rendering? = null,
     /** The user's choice of home; null follows [defaults] ([homeMode]). */
     val homeModeChoice: HomeMode? = null,
     /**
@@ -167,6 +177,7 @@ data class AppSettings(
     val homeMode: HomeMode get() = homeModeChoice ?: defaults.homeMode
     val resolution: Resolution get() = resolutionChoice ?: defaults.resolution
     val interfaceSize: Int get() = interfaceSizeChoice ?: defaults.interfaceSize
+    val rendering: Rendering get() = renderingChoice ?: defaults.rendering
     val sharesClipboard: Boolean get() = clipboard ?: defaults.clipboard
     val blocksExtraSyscalls: Boolean get() = blockExtraSyscalls ?: defaults.blockExtraSyscalls
     val cameraResolution: Int get() = cameraResolutionOverride ?: defaults.cameraResolution
@@ -289,6 +300,7 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
             forceX11 = props.getProperty(KEY_FORCE_X11) == "true",
             continueWhileHidden = props.getProperty(KEY_CONTINUE_HIDDEN) == "true",
             interfaceSizeChoice = props.getProperty(KEY_INTERFACE_SIZE)?.toIntOrNull()?.takeIf { it in AppSettings.INTERFACE_SIZES && it != appDefaults.interfaceSize },
+            renderingChoice = Rendering.entries.firstOrNull { it.key == props.getProperty(KEY_RENDERING) }?.takeIf { it != appDefaults.rendering },
             homeModeChoice = HomeMode.entries.firstOrNull { it.name.lowercase() == props.getProperty(KEY_HOME_MODE) },
             sdcard = props.getProperty(KEY_SDCARD) == "true",
             defaults = appDefaults,
@@ -321,6 +333,7 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
         if (settings.launchArgs.isNotEmpty()) props.setProperty(KEY_LAUNCH_ARGS, LaunchArgs.format(settings.launchArgs))
         if (settings.forceX11) props.setProperty(KEY_FORCE_X11, "true")
         settings.interfaceSizeChoice?.let { props.setProperty(KEY_INTERFACE_SIZE, it.toString()) }
+        settings.renderingChoice?.let { props.setProperty(KEY_RENDERING, it.key) }
         if (settings.continueWhileHidden) props.setProperty(KEY_CONTINUE_HIDDEN, "true")
         settings.homeModeChoice?.let { props.setProperty(KEY_HOME_MODE, it.name.lowercase()) }
         if (settings.sdcard) props.setProperty(KEY_SDCARD, "true")
@@ -372,6 +385,7 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
         private const val KEY_LAUNCH_ARGS = "launch.args"
         private const val KEY_FORCE_X11 = "display.x11"
         private const val KEY_INTERFACE_SIZE = "display.interfaceSize"
+        private const val KEY_RENDERING = "display.rendering"
         private const val KEY_CONTINUE_HIDDEN = "session.continueWhileHidden"
         private const val KEY_HOME_MODE = "home.mode"
         private const val KEY_SDCARD = "storage.sdcard"

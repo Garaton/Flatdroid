@@ -15,6 +15,11 @@ class DesktopConfigTest {
     }
 
     @Test
+    fun theCursorStopsBlinkingAfterThreeSeconds() {
+        assertTrue("gtk-cursor-blink-timeout=3\n" in DesktopConfig.gtkSettings(dark = false))
+    }
+
+    @Test
     fun kdeglobalsOnlyInDarkModeWithTheRuntimesScheme() {
         assertEquals("[General]\nColorScheme=BreezeDark\n", DesktopConfig.kdeglobals(true, "[General]\nColorScheme=BreezeDark\n"))
         assertNull(DesktopConfig.kdeglobals(false, "[General]\n"))

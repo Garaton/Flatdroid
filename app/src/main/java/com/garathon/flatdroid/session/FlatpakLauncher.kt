@@ -56,6 +56,7 @@ import com.garathon.flatdroid.settings.AppSettings
 import com.garathon.flatdroid.settings.AudioOutputMode
 import com.garathon.flatdroid.settings.FlatpakTheme
 import com.garathon.flatdroid.settings.HomeMode
+import com.garathon.flatdroid.settings.Rendering
 import com.garathon.flatdroid.settings.Resampler
 import com.garathon.flatdroid.settings.SecuritySettings
 import com.garathon.flatdroid.settings.UserSettings
@@ -697,6 +698,12 @@ class FlatpakLauncher(private val context: Context) {
             network = settings.networkAllowed(app?.metadata?.context?.shared.orEmpty()),
             extraSyscalls = if (developerOptions) settings.blocksExtraSyscalls else security.extraSyscallFilter,
             limitDevices = security.limitDevices,
+            softwareRendering = when (settings.rendering) {
+                Rendering.SOFTWARE -> true
+                Rendering.GL -> false
+                // A camera preview needs GL to keep up.
+                Rendering.AUTOMATIC -> !(app != null && settings.cameraAllowed(app.metadata.context) && AndroidCameras.hasPermission(context))
+            },
         )
     }
 

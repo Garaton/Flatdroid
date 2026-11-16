@@ -48,6 +48,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import com.garathon.flatdroid.R
+import com.garathon.flatdroid.settings.Rendering
 
 /**
  * Whether developer options are on, for the rows below: a row marked `developer` shows nothing
@@ -282,3 +283,11 @@ fun DeveloperMark(size: Dp = 20.dp, enabled: Boolean = true) {
         modifier = Modifier.size(size),
     )
 }
+
+/** The Rendering setting's choices as the user reads them. */
+@Composable
+fun renderingNames(): Map<Rendering, String> = mapOf(
+    Rendering.AUTOMATIC to stringResource(R.string.app_settings_rendering_automatic),
+    Rendering.SOFTWARE to stringResource(R.string.app_settings_rendering_software),
+    Rendering.GL to stringResource(R.string.app_settings_rendering_gl),
+)

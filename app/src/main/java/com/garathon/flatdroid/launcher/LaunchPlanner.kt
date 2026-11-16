@@ -100,6 +100,8 @@ data class LaunchOptions(
     val darkTheme: Boolean = false,
     /** The device's languages (BCP 47) for the app's locale; empty gives the generic C.UTF-8. */
     val languageTags: List<String> = emptyList(),
+    /** GTK 4 and Qt Quick draw on the CPU instead of through GL ([com.garathon.flatdroid.settings.Rendering]). */
+    val softwareRendering: Boolean = true,
 )
 
 /** Everything needed to start an app: its proot binds, environment and command, and its root's layout. */
@@ -261,6 +263,7 @@ class LaunchPlanner(
             runtimeDir = runtimeDir ?: "/tmp",
             flatpakContainer = options.flatpakInfo,
             wayland = wayland,
+            softwareRendering = options.softwareRendering,
         )
         val devices = app.metadata.context.devices
         val binds = FlatpakBinds(

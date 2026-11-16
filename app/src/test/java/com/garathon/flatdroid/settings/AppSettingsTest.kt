@@ -121,6 +121,21 @@ class AppSettingsTest {
     }
 
     @Test
+    fun renderingFollowsTheDefaultUntilChosen() {
+        assertEquals(Rendering.AUTOMATIC, AppSettings().rendering)
+        val defaults = AppDefaults(rendering = Rendering.SOFTWARE)
+        val file = File(tmp.root, "rendering.properties")
+        val store = AppSettingsStore(file, defaults)
+        store.save(AppSettings(defaults = defaults))
+        assertEquals(Rendering.SOFTWARE, store.load().rendering)
+        store.save(AppSettings(defaults = defaults, renderingChoice = Rendering.GL))
+        assertEquals(Rendering.GL, store.load().rendering)
+        // An own choice that equals a new default is read as following it.
+        assertEquals(Rendering.GL, AppSettingsStore(file, AppDefaults(rendering = Rendering.AUTOMATIC)).load().rendering)
+        assertEquals(null, AppSettingsStore(file, AppDefaults(rendering = Rendering.GL)).load().renderingChoice)
+    }
+
+    @Test
     fun environmentTextIsOneNameValuePerLine() {
         assertEquals(
             mapOf("VLC_PLUGIN_PATH" to "/app/lib/vlc/plugins", "A" to "x=y z", "EMPTY" to ""),

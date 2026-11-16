@@ -42,6 +42,7 @@ import com.garathon.flatdroid.settings.FlatpakTheme
 import com.garathon.flatdroid.settings.HomeMode
 import com.garathon.flatdroid.settings.InterfaceTheme
 import com.garathon.flatdroid.settings.MobileData
+import com.garathon.flatdroid.settings.Rendering
 import com.garathon.flatdroid.settings.UsageStats
 import com.garathon.flatdroid.settings.UserSettings
 import com.garathon.flatdroid.ui.settings.CameraRows
@@ -57,6 +58,7 @@ import com.garathon.flatdroid.ui.common.FlatdroidIcon
 import com.garathon.flatdroid.ui.dialogs.ResetDialog
 import com.garathon.flatdroid.ui.common.SettingsCard
 import com.garathon.flatdroid.ui.common.SwitchRow
+import com.garathon.flatdroid.ui.common.renderingNames
 import com.garathon.flatdroid.ui.common.TextRow
 import com.garathon.flatdroid.ui.common.rememberFlathubLinksAllowed
 import com.garathon.flatdroid.ui.theme.Spacing
@@ -217,6 +219,15 @@ fun GlobalDefaultsPage(s: GlobalPageState) = SettingsPageColumn(R.string.setting
             label = { percentLabel.format(it) },
             title = stringResource(R.string.app_settings_interface_size),
             hint = stringResource(R.string.app_settings_interface_size_hint) + appliesToDefault,
+        )
+        val renderingNames = renderingNames()
+        DropdownRow(
+            selected = s.settings.appRendering,
+            options = Rendering.entries,
+            onSelect = { v -> s.editSettings { copy(appRendering = v) } },
+            label = { renderingNames.getValue(it) },
+            title = stringResource(R.string.app_settings_rendering),
+            hint = stringResource(R.string.app_settings_rendering_hint) + appliesToDefault,
         )
     }
 }

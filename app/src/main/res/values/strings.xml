@@ -543,6 +543,11 @@
     <string name="app_settings_environment_hint">One NAME=value per line, added to the app\'s environment over Flatdroid\'s own. Lines starting with # are skipped.</string>
     <string name="app_settings_launch_args">Launch arguments</string>
     <string name="app_settings_interface_size">Interface size</string>
+    <string name="app_settings_rendering">Rendering</string>
+    <string name="app_settings_rendering_automatic">Automatic</string>
+    <string name="app_settings_rendering_software">Software</string>
+    <string name="app_settings_rendering_gl">OpenGL</string>
+    <string name="app_settings_rendering_hint">How GTK 4 and Qt Quick apps draw. Software needs less memory and processor time. OpenGL is for apps with 3D or effects. Automatic uses OpenGL only while the app\'s camera is on.</string>
     <string name="app_settings_interface_size_hint">Draws the app\'s text and controls larger or smaller.</string>
     <string name="app_settings_force_x11">Force X11</string>
     <string name="app_settings_force_x11_hint">Runs the app on X11 instead of Wayland, using more CPU. Try X11 if the app misbehaves.</string>

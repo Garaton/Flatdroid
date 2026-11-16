@@ -40,6 +40,23 @@ class LaunchEnvironmentTest {
     }
 
     @Test
+    fun softwareRenderingSetsGtkAndQtQuickToTheCpuAndAnOverrideStillWins() {
+        val gl = LaunchEnvironment.build("org.xfce.mousepad", "aarch64-linux-gnu", emptyMap(), glDefault = null)
+        assertEquals("gl", gl["GSK_RENDERER"])
+        assertFalse("QT_QUICK_BACKEND" in gl)
+        val software = LaunchEnvironment.build("org.xfce.mousepad", "aarch64-linux-gnu", emptyMap(), glDefault = null, softwareRendering = true)
+        assertEquals("cairo", software["GSK_RENDERER"])
+        assertEquals("software", software["QT_QUICK_BACKEND"])
+        // The metadata's variables and the app's own overrides come after.
+        val metadata = LaunchEnvironment.build("org.xfce.mousepad", "aarch64-linux-gnu", mapOf("QT_QUICK_BACKEND" to "x"), glDefault = null, softwareRendering = true)
+        assertEquals("x", metadata["QT_QUICK_BACKEND"])
+        val overridden = LaunchEnvironment.build(
+            "org.xfce.mousepad", "aarch64-linux-gnu", emptyMap(), glDefault = null, softwareRendering = true, overrides = mapOf("GSK_RENDERER" to "ngl"),
+        )
+        assertEquals("ngl", overridden["GSK_RENDERER"])
+    }
+
+    @Test
     fun metadataLdPathComesFirstAndGlAddsItsVariables() {
         val env = LaunchEnvironment.build(
             "org.supertuxproject.SuperTux", "aarch64-linux-gnu",

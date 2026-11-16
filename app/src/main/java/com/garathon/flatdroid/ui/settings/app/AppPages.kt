@@ -44,6 +44,7 @@ import com.garathon.flatdroid.camera.AndroidCameras
 import com.garathon.flatdroid.flatpak.AppDetails
 import com.garathon.flatdroid.settings.AppSettings
 import com.garathon.flatdroid.settings.HomeMode
+import com.garathon.flatdroid.settings.Rendering
 import com.garathon.flatdroid.settings.Resolution
 import com.garathon.flatdroid.ui.common.CheckboxRow
 import com.garathon.flatdroid.ui.settings.PermissionAsk
@@ -57,6 +58,7 @@ import com.garathon.flatdroid.ui.common.IconAction
 import com.garathon.flatdroid.ui.common.SettingsCard
 import com.garathon.flatdroid.ui.storage.StorageAction
 import com.garathon.flatdroid.ui.common.SwitchRow
+import com.garathon.flatdroid.ui.common.renderingNames
 import com.garathon.flatdroid.ui.common.TextRow
 import com.garathon.flatdroid.ui.home.AppIcon
 import com.garathon.flatdroid.ui.storage.StorageBar
@@ -313,6 +315,15 @@ fun AppDisplayPage(s: AppPageState) = SettingsPageColumn(R.string.app_page_displ
                 enabled = !s.settings.forceX11
             )
         }
+        val renderingNames = renderingNames()
+        DropdownRow(
+            selected = s.settings.rendering,
+            options = Rendering.entries,
+            onSelect = { v -> s.editSettings { copy(renderingChoice = v.takeIf { it != defaults.rendering }) } },
+            label = { renderingNames.getValue(it) },
+            title = stringResource(R.string.app_settings_rendering),
+            hint = stringResource(R.string.app_settings_rendering_hint),
+        )
         // Only for apps that ask for Wayland as well as X11.
         if (app.waylandAndX11) {
             SwitchRow(

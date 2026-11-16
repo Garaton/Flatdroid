@@ -45,6 +45,7 @@ class UserSettingsTest {
             uncappedFrameRate = true, installGpuRuntimes = true, customAudioLatencyMs = 30,
             lowLatencyAudio = true, highQualityAudio = true, sharedHome = "/storage/emulated/0/Download/Home", theme = InterfaceTheme.AMOLED,
             externalViewer = true, mobileData = MobileData.NEVER, appTime = AppTime.LAST_OPENED, cameraResolution = 480, cameraFrameRate = 15,
+            appRendering = Rendering.GL,
         )
         store.save(all)
         assertEquals(all, store.load())
@@ -92,6 +93,8 @@ class UserSettingsTest {
         // Performant doesn't filter the rarely used system calls, so an app starts without blocking them.
         assertFalse(defaults.blockExtraSyscalls)
         assertTrue(UserSettings("en").appDefaults.blockExtraSyscalls)
+        assertEquals(Rendering.AUTOMATIC, UserSettings("en").appDefaults.rendering)
+        assertEquals(Rendering.SOFTWARE, UserSettings("en", appRendering = Rendering.SOFTWARE).appDefaults.rendering)
     }
 
     @Test

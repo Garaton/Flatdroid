@@ -36,6 +36,8 @@ object LaunchEnvironment {
         flatpakContainer: Boolean = false,
         /** The session is Wayland: the toolkits are pointed at it instead of X11. */
         wayland: Boolean = false,
+        /** GTK 4 and Qt Quick draw on the CPU instead of through GL ([Rendering]). */
+        softwareRendering: Boolean = false,
     ): LinkedHashMap<String, String> {
         val varApp = "${GuestPaths.HOME}/.var/app/$appId"
         val env = linkedMapOf(
@@ -60,8 +62,9 @@ object LaunchEnvironment {
             // GTK4 uses portals because of /.flatpak-info, and can't save without them otherwise.
             "GDK_DEBUG" to "no-portals",
             "GDK_BACKEND" to "x11",
-            // GTK4's GL renderer in software (Mesa): camera video much smoother than cairo, which
-            // let frames pile up and froze; needs nothing from Xvnc (no GLX).
+            // GTK4's GL renderer runs in software (Mesa) and keeps a camera preview smooth, where
+            // cairo lets frames pile up; it needs nothing from Xvnc (no GLX). Cairo needs less
+            // memory and processor time for everything else (see softwareRendering below).
             "GSK_RENDERER" to "gl",
             // New glycin; old glycin is turned off by /.flatpak-info.
             "GLYCIN_DISABLE_SANDBOX" to "i-know-the-risks",
@@ -86,6 +89,12 @@ object LaunchEnvironment {
             env["GDK_BACKEND"] = "wayland"
             env["QT_QPA_PLATFORM"] = "wayland"
             env["SDL_VIDEODRIVER"] = "wayland"
+        }
+        // Qt Quick has the same choice: its software backend leaves out shader effects, Qt Quick 3D
+        // and GL items, and costs a fraction of the processor time of Mesa's.
+        if (softwareRendering) {
+            env["GSK_RENDERER"] = "cairo"
+            env["QT_QUICK_BACKEND"] = "software"
         }
         // libadwaita follows only the settings portal, or this (portals are off).
         if (flatpakContainer) env["container"] = "flatpak"

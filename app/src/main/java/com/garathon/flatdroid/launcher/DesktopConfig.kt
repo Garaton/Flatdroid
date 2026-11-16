@@ -10,6 +10,8 @@ object DesktopConfig {
     fun gtkSettings(dark: Boolean): String =
         "[Settings]\n" +
             "gtk-decoration-layout=menu:maximize,close\n" +
+            // A blinking cursor keeps the toolkit drawing; it stops after 3 seconds, as on a desktop that is left alone.
+            "gtk-cursor-blink-timeout=3\n" +
             "gtk-application-prefer-dark-theme=${if (dark) 1 else 0}\n"
 
     /**
