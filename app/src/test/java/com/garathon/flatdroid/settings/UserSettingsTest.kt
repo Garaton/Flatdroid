@@ -45,7 +45,7 @@ class UserSettingsTest {
             uncappedFrameRate = true, installGpuRuntimes = true, customAudioLatencyMs = 30,
             lowLatencyAudio = true, highQualityAudio = true, sharedHome = "/storage/emulated/0/Download/Home", theme = InterfaceTheme.AMOLED,
             externalViewer = true, mobileData = MobileData.NEVER, appTime = AppTime.LAST_OPENED, cameraResolution = 480, cameraFrameRate = 15,
-            appRendering = Rendering.GL,
+            appRendering = Rendering.GL, reduceMotion = true,
         )
         store.save(all)
         assertEquals(all, store.load())
@@ -95,6 +95,15 @@ class UserSettingsTest {
         assertTrue(UserSettings("en").appDefaults.blockExtraSyscalls)
         assertEquals(Rendering.AUTOMATIC, UserSettings("en").appDefaults.rendering)
         assertEquals(Rendering.SOFTWARE, UserSettings("en", appRendering = Rendering.SOFTWARE).appDefaults.rendering)
+    }
+
+    @Test
+    fun reduceMotionIsOffAndNotPartOfASecurityLevel() {
+        assertFalse(UserSettings("en").reduceMotion)
+        val store = UserSettingsStore(File(tmp.root, "motion.properties"))
+        store.save(UserSettings("en", reduceMotion = true, security = SecurityLevel.HARDENED.settings))
+        assertTrue(store.load()!!.reduceMotion)
+        assertEquals(SecurityLevel.HARDENED, store.load()!!.securityLevel)
     }
 
     @Test

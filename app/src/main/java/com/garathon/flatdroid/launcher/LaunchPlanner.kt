@@ -102,6 +102,8 @@ data class LaunchOptions(
     val languageTags: List<String> = emptyList(),
     /** GTK 4 and Qt Quick draw on the CPU instead of through GL ([com.garathon.flatdroid.settings.Rendering]). */
     val softwareRendering: Boolean = true,
+    /** Electron and Chromium apps are told to reduce motion ([Electron.REDUCED_MOTION]). */
+    val reduceMotion: Boolean = false,
 )
 
 /** Everything needed to start an app: its proot binds, environment and command, and its root's layout. */
@@ -226,12 +228,12 @@ class LaunchPlanner(
                 }
                 extraBinds += swap.path to appDir
             }
-            command = listOf(electronBinary) + Electron.flags(options.newerElectronFlags, wayland)
+            command = listOf(electronBinary) + Electron.flags(options.newerElectronFlags, wayland, options.reduceMotion)
         } else if (cobaltBrowser != null) {
             isElectron = true
             val binaryArch = (hostPath(app, cobaltBrowser)?.let(Executable::of) as? Executable.Elf)?.arch
             if (binaryArch != null && binaryArch != arch) return PlanResult.WrongArchitecture(cobaltBrowser, binaryArch)
-            command = listOf(cobaltBrowser) + Electron.flags(options.newerElectronFlags, wayland)
+            command = listOf(cobaltBrowser) + Electron.flags(options.newerElectronFlags, wayland, options.reduceMotion)
         } else {
             val binaryArch = (hostPath(app, commandPath)?.let(Executable::of) as? Executable.Elf)?.arch
             if (binaryArch != null && binaryArch != arch) return PlanResult.WrongArchitecture(commandPath, binaryArch)

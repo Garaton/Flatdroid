@@ -20,6 +20,12 @@ class DesktopConfigTest {
     }
 
     @Test
+    fun reducingMotionTurnsGtkAnimationsOff() {
+        assertTrue("gtk-enable-animations" !in DesktopConfig.gtkSettings(dark = false))
+        assertTrue("gtk-enable-animations=0\n" in DesktopConfig.gtkSettings(dark = false, reduceMotion = true))
+    }
+
+    @Test
     fun kdeglobalsOnlyInDarkModeWithTheRuntimesScheme() {
         assertEquals("[General]\nColorScheme=BreezeDark\n", DesktopConfig.kdeglobals(true, "[General]\nColorScheme=BreezeDark\n"))
         assertNull(DesktopConfig.kdeglobals(false, "[General]\n"))

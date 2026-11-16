@@ -21,14 +21,16 @@ object Electron {
     val NEWER_FLAGS = listOf("--no-zygote", "--disable-gpu-sandbox", "--in-process-gpu")
     const val OZONE_X11 = "--ozone-platform=x11"
     const val OZONE_WAYLAND = "--ozone-platform=wayland"
+    /** Chromium's switch for pages that follow `prefers-reduced-motion`. */
+    const val REDUCED_MOTION = "--force-prefers-reduced-motion"
 
     /**
      * The flags for a launch. On Wayland the session is named, as an Electron that defaults to X11
      * finds none there; X11 is named only for newer Electron ([NEWER_FLAGS]), which needs it.
      */
-    fun flags(newer: Boolean, wayland: Boolean): List<String> =
+    fun flags(newer: Boolean, wayland: Boolean, reduceMotion: Boolean = false): List<String> =
         BASE_FLAGS + (if (newer) NEWER_FLAGS else emptyList()) +
-            listOfNotNull(if (wayland) OZONE_WAYLAND else OZONE_X11.takeIf { newer })
+            listOfNotNull(if (wayland) OZONE_WAYLAND else OZONE_X11.takeIf { newer }, REDUCED_MOTION.takeIf { reduceMotion })
 
     /** The log line that triggers a relaunch with [NEWER_FLAGS]. */
     const val GPU_FAILURE = "GPU process isn't usable"

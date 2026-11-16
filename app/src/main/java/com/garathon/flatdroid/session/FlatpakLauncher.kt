@@ -661,7 +661,7 @@ class FlatpakLauncher(private val context: Context) {
         val dark = isDarkTheme(user)
         AndroidTarFs.deleteTree(desktopDir)
         for (gtk in listOf("gtk-3.0", "gtk-4.0")) {
-            File(desktopDir, "$gtk/settings.ini").apply { parentFile!!.mkdirs() }.writeTextAtomically(DesktopConfig.gtkSettings(dark), durable = false)
+            File(desktopDir, "$gtk/settings.ini").apply { parentFile!!.mkdirs() }.writeTextAtomically(DesktopConfig.gtkSettings(dark, user?.reduceMotion == true), durable = false)
         }
         // Only KDE runtimes have it.
         val darkScheme = File(plan.runtime.files, DesktopConfig.BREEZE_DARK).takeIf { dark && it.isFile }?.let { runCatching { it.readTextUpTo() }.getOrNull() }
@@ -698,6 +698,7 @@ class FlatpakLauncher(private val context: Context) {
             network = settings.networkAllowed(app?.metadata?.context?.shared.orEmpty()),
             extraSyscalls = if (developerOptions) settings.blocksExtraSyscalls else security.extraSyscallFilter,
             limitDevices = security.limitDevices,
+            reduceMotion = user?.reduceMotion == true,
             softwareRendering = when (settings.rendering) {
                 Rendering.SOFTWARE -> true
                 Rendering.GL -> false

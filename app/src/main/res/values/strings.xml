@@ -543,6 +543,8 @@
     <string name="app_settings_environment_hint">One NAME=value per line, added to the app\'s environment over Flatdroid\'s own. Lines starting with # are skipped.</string>
     <string name="app_settings_launch_args">Launch arguments</string>
     <string name="app_settings_interface_size">Interface size</string>
+    <string name="settings_reduce_motion">Reduce motion</string>
+    <string name="settings_reduce_motion_hint">Turns off animations in apps that follow it.</string>
     <string name="app_settings_rendering">Rendering</string>
     <string name="app_settings_rendering_automatic">Automatic</string>
     <string name="app_settings_rendering_software">Software</string>

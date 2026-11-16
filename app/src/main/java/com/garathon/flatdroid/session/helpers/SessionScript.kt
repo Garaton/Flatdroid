@@ -126,8 +126,11 @@ object SessionScript {
         |  rm -f ${SessionBus.GUEST_DAEMON_DIR}/${SessionBus.SOCKET} ${SessionBus.GUEST_PROXY_DIR}/${SessionBus.SOCKET}
         |  $NO_INTERNET /usr/bin/dbus-daemon --config-file=${SessionBus.GUEST_CONFIG} --nofork --nopidfile --nosyslog &
         |fi
+        |# PulseAudio shares memory with the app through memfd: an app that writes many small blocks costs
+        |# less than through the socket, whose every call proot traces. Where the kernel has no memfd it
+        |# falls back on POSIX shared memory, and on a normal pool when that fails too (verify).
         |if [ "${'$'}sound" = on ]; then
-        |  $NO_INTERNET /usr/bin/pulseaudio -n --use-pid-file=no --daemonize=no --exit-idle-time=-1 --disable-shm=yes \
+        |  $NO_INTERNET /usr/bin/pulseaudio -n --use-pid-file=no --daemonize=no --exit-idle-time=-1 --disable-shm=no --enable-memfd=yes \
         |    --disallow-module-loading --disallow-exit --resample-method="${'$'}resampler" -F $GUEST_PULSE_SCRIPT &
         |fi
         |

@@ -249,6 +249,11 @@ fun GlobalDisplayPage(s: GlobalPageState) = SettingsPageColumn(R.string.settings
             hint = stringResource(R.string.settings_theme_hint),
         )
 
+        SwitchRow(
+            s.settings.reduceMotion, { v -> s.editSettings { copy(reduceMotion = v) } },
+            stringResource(R.string.settings_reduce_motion), stringResource(R.string.settings_reduce_motion_hint),
+        )
+
         val noViewer = stringResource(R.string.settings_viewer_none)
         val ownViewer = stringResource(R.string.settings_viewer_flatdroid)
         // Only the saved choice can be missing: the list holds installed viewers.

@@ -275,6 +275,8 @@ class LaunchPlannerTest {
         assertEquals(Electron.BASE_FLAGS, Electron.flags(newer = false, wayland = false))
         assertEquals(Electron.BASE_FLAGS + Electron.OZONE_WAYLAND, Electron.flags(newer = false, wayland = true))
         assertEquals(Electron.BASE_FLAGS + Electron.NEWER_FLAGS + Electron.OZONE_WAYLAND, Electron.flags(newer = true, wayland = true))
+        assertEquals(Electron.BASE_FLAGS + Electron.OZONE_WAYLAND + Electron.REDUCED_MOTION, Electron.flags(newer = false, wayland = true, reduceMotion = true))
+        assertEquals(Electron.BASE_FLAGS + Electron.REDUCED_MOTION, Electron.flags(newer = false, wayland = false, reduceMotion = true))
     }
 
     @Test
