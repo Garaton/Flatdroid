@@ -634,6 +634,7 @@ class MainActivity : ComponentActivity() {
                         index = catalogIndex,
                         catalogLoading = catalog is CatalogState.Loading || catalog is CatalogState.Idle,
                         arch = remember { AlpineEnvironment.get(this@MainActivity).arch },
+                        listedVerified = id in ((catalog as? CatalogState.Ready)?.lists?.verified ?: emptySet()),
                         installState = when {
                             id in installingIds -> InstallState.INSTALLING
                             id in task.queuedInstalls -> InstallState.QUEUED

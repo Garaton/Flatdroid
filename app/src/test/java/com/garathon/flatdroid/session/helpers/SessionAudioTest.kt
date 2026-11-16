@@ -50,9 +50,16 @@ class SessionAudioTest {
         assertTrue("/usr/bin/labwc -C /run/flatdroid/vnc/labwc -S" in text)
         // The output refreshes at the frame rate sent, unless uncapped.
         assertTrue("[ \"${'$'}frame_rate\" -le 240 ] && mode=\"${'$'}geometry@${'$'}{frame_rate}Hz\"" in text)
-        // Flatdroid's viewer: a Unix socket, no login, no network; an external viewer: the port and the login.
-        assertTrue(text.lines().any { it.trim().startsWith("guard=\"") && it.endsWith(" --no-inet --\" listen=\"-u /run/flatdroid/vnc/vnc.sock\"") })
-        assertTrue("guard= listen=\"-C /run/flatdroid/vnc/wayvnc.conf 127.0.0.1 ${'$'}port\"" in text)
+        // labwc always runs behind a filter without Internet sockets, whatever the viewer: it parses what the app sends.
+        val lines = text.lines().map { it.trim() }
+        val labwc = lines.filter { "/usr/bin/labwc" in it }
+        assertEquals(2, labwc.size)
+        assertTrue(labwc.all { " --no-inet -- /usr/bin/labwc" in it })
+        // Flatdroid's viewer: wayvnc starts under labwc, on a Unix socket, with no login.
+        assertTrue("-f ${'$'}frame_rate -u /run/flatdroid/vnc/vnc.sock" in text)
+        // An external viewer: wayvnc listens on the port with the login, so the script starts it (after the output's mode is set), unfiltered.
+        assertTrue(lines.any { it.startsWith("/usr/bin/wayvnc -S") && "-C /run/flatdroid/vnc/wayvnc.conf 127.0.0.1 ${'$'}port" in it })
+        assertTrue(lines.any { it.startsWith("/usr/bin/wlr-randr ") })
     }
 
     @Test

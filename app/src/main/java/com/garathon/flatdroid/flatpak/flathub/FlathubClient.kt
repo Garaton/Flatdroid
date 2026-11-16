@@ -39,7 +39,7 @@ data class FlathubApp(
  * An app of Flathub's list, with its installs of the last month and when it was added to Flathub
  * and last updated there (seconds since the epoch); each null when not given.
  */
-data class CollectionApp(val id: String, val installsLastMonth: Long?, val addedAt: Long? = null, val updatedAt: Long? = null)
+data class CollectionApp(val id: String, val installsLastMonth: Long?, val addedAt: Long? = null, val updatedAt: Long? = null, val verified: Boolean = false)
 
 /** One page of a Flathub list, and how many pages it has. */
 data class CollectionPage(val apps: List<CollectionApp>, val pages: Int)
@@ -111,7 +111,7 @@ object FlathubClient {
 
     /**
      * The apps of a collection answer (`hits[].app_id`, `installs_last_month`, `added_at`,
-     * `updated_at`), valid IDs only, each once, and its page count (`totalPages`).
+     * `updated_at`, `verification_verified`), valid IDs only, each once, and its page count (`totalPages`).
      */
     fun parseCollection(json: String): CollectionPage {
         val answer = JSONObject(json)
@@ -119,7 +119,7 @@ object FlathubClient {
         val apps = (0 until hits.length()).mapNotNull { i ->
             val hit = hits.optJSONObject(i) ?: return@mapNotNull null
             val id = hit.optString("app_id").takeIf(InstalledApps::isValidId) ?: return@mapNotNull null
-            CollectionApp(id, hit.longOrNull("installs_last_month"), hit.longOrNull("added_at"), hit.longOrNull("updated_at"))
+            CollectionApp(id, hit.longOrNull("installs_last_month"), hit.longOrNull("added_at"), hit.longOrNull("updated_at"), hit.optBoolean("verification_verified"))
         }.distinctBy { it.id }
         return CollectionPage(apps, answer.optInt("totalPages", 1))
     }

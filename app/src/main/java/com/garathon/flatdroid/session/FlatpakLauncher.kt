@@ -61,6 +61,8 @@ import com.garathon.flatdroid.settings.SecuritySettings
 import com.garathon.flatdroid.settings.UserSettings
 import com.garathon.flatdroid.setup.SetupController
 import com.garathon.flatdroid.setup.rootfs.deleteTree
+import com.garathon.flatdroid.setup.rootfs.hasLinkBelow
+import com.garathon.flatdroid.setup.rootfs.makeDirsBelow
 import com.garathon.flatdroid.storage.AppFiles
 import com.garathon.flatdroid.storage.HomeFolders
 import com.garathon.flatdroid.storage.SharedHome
@@ -478,6 +480,8 @@ class FlatpakLauncher(private val context: Context) {
      */
     private fun cleanSharedHomeMountPoints(home: File, plan: LaunchPlan, existedBefore: Set<String>) {
         for (rel in mountPoints(plan)) {
+            // Not below a link the app left in the home: that would remove an empty file or folder where it leads.
+            if (AndroidTarFs.hasLinkBelow(home, rel.substringBeforeLast('/', ""))) continue
             var current: String? = rel
             while (current != null && current !in existedBefore && deleteIfEmpty(File(home, current))) {
                 current = current.substringBeforeLast('/', "").ifEmpty { null }
@@ -798,7 +802,8 @@ class FlatpakLauncher(private val context: Context) {
         // Flatpak makes the app's XDG directories before it starts; some apps write into them
         // without making them first.
         plan.binds.appDirs.firstOrNull { it.second == "${GuestPaths.HOME}/.var/app/$appId" }?.let { (host, _) ->
-            for (dir in listOf("config", "data", ".local/state")) File(host, dir).mkdirs()
+            // A link the app left in its own folder is removed first: made through it, they would land wherever it leads.
+            for (dir in listOf("config", "data", ".local/state")) AndroidTarFs.makeDirsBelow(File(host), dir)
         }
         // Writable scratch for the runtime caches shadowed over the deployment (their guest paths
         // are under /usr, so the loop below skips making mount points for them — the runtime already
@@ -811,7 +816,13 @@ class FlatpakLauncher(private val context: Context) {
         for ((host, guest) in plan.binds.extra) {
             if (guest == "/app" || guest.startsWith("/app/") || guest.startsWith("/usr/")) continue
             val owner = plan.binds.appDirs.filter { guest.startsWith(it.second + "/") }.maxByOrNull { it.second.length }
-            val target = if (owner != null) File(owner.first, guest.removePrefix(owner.second + "/")) else File(root, guest.removePrefix("/"))
+            val rel = guest.removePrefix(if (owner != null) owner.second + "/" else "/")
+            val target = File(owner?.first ?: root.path, rel)
+            // The app's own folder can hold a link it made: removed, not followed. The root is Flatdroid's alone.
+            if (owner != null) {
+                AndroidTarFs.makeDirsBelow(File(owner.first), rel.substringBeforeLast('/', ""))
+                if (AndroidTarFs.isSymlink(target)) target.delete()
+            }
             if (target.exists()) continue
             if (File(host).isDirectory) target.mkdirs() else target.apply { parentFile?.mkdirs() }.createNewFile()
         }

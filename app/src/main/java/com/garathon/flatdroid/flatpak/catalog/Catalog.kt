@@ -47,10 +47,13 @@ data class FlathubLists(
     val added: Map<String, Int> = emptyMap(),
     val updated: Map<String, Int> = emptyMap(),
     val installs: Map<String, Long> = emptyMap(),
+    /** The apps Flathub says are verified (their developer's website or account): its answer, not the catalog's, which an installed app can rewrite. */
+    val verified: Set<String> = emptySet(),
 ) {
     companion object {
         /**
-         * Catalog's saved lines (`<app ID>\t<installs>\t<added>\t<updated>`, in Popular's order):
+         * Catalog's saved lines (`<app ID>\t<installs>\t<added>\t<updated>\t<verified>`, in Popular's
+         * order; the last, "1" or "0", is missing from an older file, which reads as not verified):
          * an app's first line counts; one without a date goes after those with one.
          */
         fun parse(lines: List<String>): FlathubLists {
@@ -58,18 +61,20 @@ data class FlathubLists(
             val installs = HashMap<String, Long>()
             val added = HashMap<String, Long>()
             val updated = HashMap<String, Long>()
+            val verified = HashSet<String>()
             for (line in lines) {
                 val parts = line.split('\t')
-                if (parts.size != 4 || parts[0] in popular) continue
+                if ((parts.size != 4 && parts.size != 5) || parts[0] in popular) continue
                 val id = parts[0]
                 popular[id] = popular.size
                 parts[1].toLongOrNull()?.let { installs[id] = it }
                 added[id] = parts[2].toLongOrNull() ?: Long.MIN_VALUE
                 updated[id] = parts[3].toLongOrNull() ?: Long.MIN_VALUE
+                if (parts.size == 5 && parts[4] == "1") verified += id
             }
             // Newest first; the same date keeps Popular's order (a stable sort).
             fun ranks(dates: Map<String, Long>) = popular.keys.sortedByDescending { dates.getValue(it) }.withIndex().associate { it.value to it.index }
-            return FlathubLists(popular, ranks(added), ranks(updated), installs)
+            return FlathubLists(popular, ranks(added), ranks(updated), installs, verified)
         }
     }
 }
@@ -208,7 +213,7 @@ object Catalog {
     }
 
     /**
-     * Every Flathub app's installs and dates, saved as `<app ID>\t<installs>\t<added>\t<updated>`
+     * Every Flathub app's installs, dates and verification, saved as `<app ID>\t<installs>\t<added>\t<updated>\t<verified>`
      * lines in Popular's order; not on mobile data when downloads there are off. The browser's state
      * changes only when they differ, so an unchanged answer doesn't reorder the list.
      */
@@ -219,7 +224,7 @@ object Catalog {
             val apps = FlathubClient.allApps()
             // Whole or not at all: a file cut short would stay until the next refresh.
             listsFile(context).writeTextAtomically(
-                apps.joinToString("") { "${it.id}\t${it.installsLastMonth ?: ""}\t${it.addedAt ?: ""}\t${it.updatedAt ?: ""}\n" },
+                apps.joinToString("") { "${it.id}\t${it.installsLastMonth ?: ""}\t${it.addedAt ?: ""}\t${it.updatedAt ?: ""}\t${if (it.verified) "1" else "0"}\n" },
                 durable = false,
             )
             // Written by earlier versions: three lists of 250 apps.

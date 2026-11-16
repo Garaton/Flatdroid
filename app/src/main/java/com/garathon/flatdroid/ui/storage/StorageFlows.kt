@@ -24,7 +24,6 @@ import com.garathon.flatdroid.R
 import com.garathon.flatdroid.session.SessionController
 import com.garathon.flatdroid.storage.AppData
 import com.garathon.flatdroid.flatpak.InstalledApps
-import com.garathon.flatdroid.settings.AppSettingsStore
 import com.garathon.flatdroid.settings.HomeMode
 import com.garathon.flatdroid.settings.UserSettingsStore
 import com.garathon.flatdroid.setup.SetupController
@@ -42,6 +41,7 @@ import com.garathon.flatdroid.storage.tasks.StorageTasks
 import com.garathon.flatdroid.storage.TempHomePrompt
 import com.garathon.flatdroid.storage.TempHomes
 import com.garathon.flatdroid.ui.home.HomeViewModel
+import com.garathon.flatdroid.util.io.writeAtomically
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -446,7 +446,9 @@ class StorageFlows(
     /**
      * Replaces Flatdroid's settings and every app's launcher settings with a zip's, then applies
      * them as Save does (running their commands in Alpine). A zip without valid settings changes
-     * nothing.
+     * nothing, and neither does one whose commands fail: the app files are worked out here, and
+     * written by [MainViewModel.applySettings] once the commands have run (its scope outlives a
+     * rotation, this one doesn't).
      */
     private fun applyFlatdroidSettings(uri: Uri) {
         activity.lifecycleScope.launch {
@@ -459,32 +461,18 @@ class StorageFlows(
                         ?: throw IOException(activity.getString(R.string.storage_settings_invalid))
                     val appDir = AppData.settingsDir(activity)
                     val local = HashMap<String, ByteArray>()
-                    // They count in each app's settings size.
                     appDir.listFiles().orEmpty().forEach { file ->
-                        SettingsBackup.appId(file.name)?.let {
-                            SavedSizes.forget(activity, it)
-                            runCatching { file.readBytes() }.onSuccess { bytes -> local[file.name] = bytes }
-                            file.delete()
-                            SavedSizes.changed(activity, it)
+                        if (SettingsBackup.appId(file.name) != null) runCatching { file.readBytes() }.onSuccess { local[file.name] = it }
+                    }
+                    val appFiles = SettingsBackup.appSettingsToWrite(files, local)
+                    val write = {
+                        for ((fileName, bytes) in appFiles) {
+                            File(appDir, fileName).writeAtomically { it.write(bytes) }
+                            // They count in each app's settings size.
+                            SettingsBackup.appId(fileName)?.let { SavedSizes.changed(activity.applicationContext, it) }
                         }
                     }
-                    for ((name, bytes) in files) {
-                        if (name.startsWith(SettingsBackup.APP_SETTINGS)) {
-                            val fileName = name.removePrefix(SettingsBackup.APP_SETTINGS)
-                            File(appDir, fileName).apply { parentFile?.mkdirs() }.writeBytes(AppSettingsStore.imported(bytes, local[fileName]))
-                            SettingsBackup.appId(fileName)?.let { SavedSizes.changed(activity, it) }
-                        }
-                    }
-                    // The viewer stays this device's choice: it gets every session's VNC password. So do
-                    // the security level and the terminal's settings, which decide how far apps reach.
-                    val device = SetupController.settings(activity).load()
-                    settings.copy(
-                        vncViewer = device?.vncViewer,
-                        externalViewer = device?.externalViewer ?: false,
-                        security = device?.security ?: settings.security,
-                        terminalFilter = device?.terminalFilter ?: settings.terminalFilter,
-                        terminalDuringSession = device?.terminalDuringSession ?: false,
-                    )
+                    SettingsBackup.keepingDevice(settings, SetupController.saved(activity)) to write
                 } catch (e: Exception) {
                     withContext(Dispatchers.Main) {
                         Toast.makeText(activity, activity.getString(R.string.storage_failed, e.message ?: e.toString()), Toast.LENGTH_LONG).show()
@@ -492,7 +480,7 @@ class StorageFlows(
                     null
                 }
             }
-            if (imported != null) mainModel().applySettings(imported, MainViewModel.AfterApply.HOME)
+            if (imported != null) mainModel().applySettings(imported.first, MainViewModel.AfterApply.HOME, imported.second)
         }
     }
 

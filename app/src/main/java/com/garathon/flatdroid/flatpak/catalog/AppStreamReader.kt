@@ -1,6 +1,7 @@
 package com.garathon.flatdroid.flatpak.catalog
 
 import com.garathon.flatdroid.flatpak.InstalledApps
+import com.garathon.flatdroid.flatpak.flathub.FlathubHosts
 import org.xmlpull.v1.XmlPullParser
 
 /**
@@ -76,7 +77,6 @@ class AppStreamReader(languages: List<String>) {
         var iconSize = 0
         var branch: String? = null
         var runtime: String? = null
-        var verified = false
         var license: String? = null
         val urls = mutableListOf<Pair<String, String>>()
         val screenshots = mutableListOf<Screenshot>()
@@ -120,11 +120,6 @@ class AppStreamReader(languages: List<String>) {
                     if (link.startsWith("https://") || link.startsWith("http://")) urls += kind to link
                 }
                 "screenshots" -> children(parser, "screenshot") { screenshot(it)?.let(screenshots::add) }
-                "custom" -> children(parser, "value") {
-                    val key = it.getAttributeValue(null, "key")
-                    val value = text(it).trim()
-                    if (key == VERIFIED && value.equals("true", ignoreCase = true)) verified = true
-                }
                 else -> skip(parser)
             }
         }
@@ -134,7 +129,6 @@ class AppStreamReader(languages: List<String>) {
             name = name.value?.takeIf { it.isNotEmpty() } ?: appId,
             summary = summary.value.orEmpty(),
             developer = developer ?: developerName,
-            verified = verified,
             categories = categories.distinct(),
             keywords = (defaultKeywords + keywords.value.orEmpty()).filter { it.isNotEmpty() }.distinct(),
             icon = icon,
@@ -169,7 +163,8 @@ class AppStreamReader(languages: List<String>) {
                     val type = parser.getAttributeValue(null, "type")
                     val width = parser.getAttributeValue(null, "width")?.toIntOrNull() ?: 0
                     val link = text(parser).trim()
-                    if (link.startsWith("https://")) {
+                    // Only Flathub's own hosts (the catalog is untrusted, see FlathubHosts): another address is left out.
+                    if (FlathubHosts.allows(link)) {
                         if (type == "source") sources.putIfAbsent(rank, link) else thumbnails += Triple(rank, width, link)
                     }
                 }
@@ -242,7 +237,6 @@ class AppStreamReader(languages: List<String>) {
 
     companion object {
         private const val XML_NS = "http://www.w3.org/XML/1998/namespace"
-        private const val VERIFIED = "flathub::verification::verified"
         /** Screenshots are shown about a phone's width: the smallest thumbnail at least this wide. */
         private const val SCREENSHOT_WIDTH = 600
         private val WHITESPACE = Regex("\\s+")

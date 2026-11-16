@@ -706,6 +706,7 @@
     <string name="storage_importing_all_settings">Importing app data</string>
     <string name="storage_all_homes_zip">Flatdroid app homes %1$s.zip</string>
     <string name="storage_all_settings_zip">Flatdroid Flatpak settings %1$s.zip</string>
+    <string name="storage_folder_is_link">A folder of %1$s was replaced by a link. Launch the app once to fix it.</string>
     <string name="storage_no_private_homes">No app has a home.</string>
     <string name="storage_no_app_settings">No app has settings or app data.</string>
     <string name="storage_no_apps_in_zip">The zip has no app folders (named by app ID).</string>

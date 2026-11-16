@@ -161,7 +161,7 @@ class StorageTaskService : Service() {
                 ImportTarget.Shared -> sharedHome()
                 is ImportTarget.Private -> privateHome(target.appId)
             }
-            val dir = HomeFolders.importDir(home)
+            val dir = HomeFolders.importDir(home, AndroidTarFs::isSymlink)
             val result = copyIn(record, uris, dir, home.takeIf { task.target == ImportTarget.Shared })
             getString(R.string.storage_imported_title) to listOfNotNull(
                 result.copied.takeIf { it > 0 || result.adopted + result.present == 0 }
@@ -185,19 +185,20 @@ class StorageTaskService : Service() {
         }
         is StorageTask.ExportTempHome -> {
             val home = TempHomes.home(this)
-            if (TempHomes.owner(this) != task.appId || !home.isDirectory) throw IOException(getString(R.string.storage_temp_home_gone))
-            val saved = zipOut(task, uris, listOf(HomeZip.Part(home, exclude = HomeZip.SETTINGS_DIRS)))
+            // A link in the home's place is refused by zipOut, which also removes the file the user picked.
+            if (TempHomes.owner(this) != task.appId || !(home.isDirectory || AndroidTarFs.isSymlink(home))) throw IOException(getString(R.string.storage_temp_home_gone))
+            val saved = zipOut(task, uris, listOf(HomeZip.Part(home, exclude = HomeZip.SETTINGS_DIRS)), task.appId)
             TempHomes.delete(this)
             getString(R.string.storage_exported_title) to getString(R.string.storage_exported, saved)
         }
         is StorageTask.ExportHome -> {
             val home = AppData.privateHome(this, task.appId)
-            if (!home.isDirectory) throw IOException(getString(R.string.storage_no_private_home, label(task.appId)))
-            val saved = zipOut(task, uris, listOf(HomeZip.Part(home, exclude = HomeZip.SETTINGS_DIRS)))
+            if (!(home.isDirectory || AndroidTarFs.isSymlink(home))) throw IOException(getString(R.string.storage_no_private_home, label(task.appId)))
+            val saved = zipOut(task, uris, listOf(HomeZip.Part(home, exclude = HomeZip.SETTINGS_DIRS)), task.appId)
             getString(R.string.storage_exported_title) to getString(R.string.storage_exported, saved)
         }
         is StorageTask.ExportAppFiles -> {
-            val saved = zipOut(task, uris, AppFiles.parts(appData(task.appId), task.appId))
+            val saved = zipOut(task, uris, AppFiles.parts(appData(task.appId), task.appId), task.appId)
             getString(R.string.storage_exported_title) to getString(R.string.storage_exported, saved)
         }
         StorageTask.ExportAllHomes -> {
@@ -334,7 +335,16 @@ class StorageTaskService : Service() {
     private fun sharedHome(): File = SharedHome.ensure(this)
         ?: throw IOException(getString(R.string.storage_shared_home_missing, SharedHome.display(SharedHome.dir(this))))
 
-    private fun privateHome(appId: String): File = AppData.privateHome(this, appId).also { HomeFolders.create(it) }
+    /** The app's home, made when it has none. A link where the home should be (an app can leave one) is removed, as the launcher does: files must not land where it leads. */
+    private fun privateHome(appId: String): File = AppData.privateHome(this, appId).also {
+        if (AndroidTarFs.isSymlink(it)) AndroidTarFs.deleteTree(it)
+        HomeFolders.create(it)
+    }
+
+    /** An export of a folder that is a link now would be empty ([HomeZip] leaves it out, whatever it leads to). */
+    private fun refuseLinks(appId: String, vararg dirs: File) {
+        if (dirs.any { AndroidTarFs.isSymlink(it) }) throw IOException(getString(R.string.storage_folder_is_link, label(appId)))
+    }
 
     private fun appData(appId: String) = File(AppData.root(this), appId)
 
@@ -353,9 +363,14 @@ class StorageTaskService : Service() {
 
     private fun open(uri: Uri): InputStream = contentResolver.openInputStream(uri) ?: throw IOException(getString(R.string.storage_unreadable))
 
-    /** [parts] zipped, to the file the user chose in the "save as" picker ([uris]) or into Download. */
-    private fun zipOut(task: StorageTask, uris: List<Uri>, parts: List<HomeZip.Part>): String =
+    /**
+     * [parts] zipped, to the file the user chose in the "save as" picker ([uris]) or into Download.
+     * With [ofApp] (one app's export), a part that is a link is refused: it would be left out and
+     * the zip would be empty. Inside the write, so the picked file goes with the failure.
+     */
+    private fun zipOut(task: StorageTask, uris: List<Uri>, parts: List<HomeZip.Part>, ofApp: String? = null): String =
         saveExport(exportName(this, task), uris.firstOrNull()) { out ->
+            if (ofApp != null) refuseLinks(ofApp, *parts.map { it.dir }.toTypedArray())
             HomeZip.write(parts, out, AndroidTarFs::isSymlink) { done, total -> updateProgress(task, if (total > 0) done.toFloat() / total else null) }
         }
 

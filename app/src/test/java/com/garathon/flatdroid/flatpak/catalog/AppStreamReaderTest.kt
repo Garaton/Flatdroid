@@ -89,7 +89,6 @@ class AppStreamReaderTest {
         assertEquals("Maps", maps.app.name)
         assertEquals("Find places around the world", maps.app.summary)
         assertEquals("The GNOME Project", maps.app.developer)
-        assertTrue(maps.app.verified)
         assertEquals("org.gnome.Platform/49", maps.app.runtime)
         assertEquals(listOf("Utility"), maps.app.categories)
         assertEquals("128x128/org.gnome.Maps.png", maps.app.icon)
@@ -116,7 +115,6 @@ class AppStreamReaderTest {
 
         val old = entries[1].app
         assertEquals("Someone", old.developer)
-        assertFalse(old.verified)
         assertNull(old.icon)
     }
 
@@ -152,6 +150,26 @@ class AppStreamReaderTest {
         assertNull(again.details("org.example.Missing"))
         // Nothing half-written is left beside it.
         assertFalse(java.io.File(dir.parentFile, "index.new").exists())
+    }
+
+    @Test
+    fun onlyFlathubsOwnPicturesAreKept() {
+        fun screenshot(vararg images: Pair<String, String>) =
+            "<screenshot>" + images.joinToString("") { (type, url) -> "<image type=\"$type\" width=\"624\">$url</image>" } + "</screenshot>"
+        val xml = """<components><component type="desktop-application"><id>org.example.Pics</id><name>Pics</name>
+            <screenshots>""" +
+            // The thumbnail is elsewhere (a rewritten catalog), so the source on Flathub's host is what is left.
+            screenshot("thumbnail" to "https://raw.githubusercontent.com/x/y/a.png", "source" to "https://dl.flathub.org/s/a_orig.png") +
+            screenshot("thumbnail" to "https://example.com/b.png") +
+            screenshot("thumbnail" to "https://dl.flathub.org/s/c.png") +
+            "</screenshots></component></components>"
+        val parser = KXmlParser().apply { setInput(xml.byteInputStream(), "UTF-8") }
+        val entries = mutableListOf<CatalogEntry>()
+        AppStreamReader(listOf("en")).read(parser) { entries += it }
+        assertEquals(
+            listOf("https://dl.flathub.org/s/a_orig.png", "https://dl.flathub.org/s/c.png"),
+            entries.single().details.screenshots.map { it.image },
+        )
     }
 
     @Test

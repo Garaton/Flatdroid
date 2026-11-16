@@ -1,6 +1,8 @@
 package com.garathon.flatdroid.storage.backup
 
 import com.garathon.flatdroid.flatpak.InstalledApps
+import com.garathon.flatdroid.settings.AppSettingsStore
+import com.garathon.flatdroid.settings.UserSettings
 import com.garathon.flatdroid.util.io.copyWithProgress
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -58,6 +60,42 @@ object SettingsBackup {
         if (SETTINGS !in files) throw IOException("Not a Flatdroid settings export: no $SETTINGS")
         return files
     }
+
+    /**
+     * The app-settings files an import writes, by file name, all worked out before any is written (a
+     * file in the zip that can't be read then fails the import with nothing changed). [files] is
+     * [read]'s result and [local] this device's app-settings files by name. A file in the zip keeps
+     * this device's reach-widening keys ([AppSettingsStore.imported]). An app the zip has no file
+     * for keeps them too, and nothing else: an import that doesn't name an app must not turn off
+     * a network or camera restriction, or a private home, that the user set.
+     */
+    fun appSettingsToWrite(files: Map<String, ByteArray>, local: Map<String, ByteArray>): Map<String, ByteArray> {
+        val result = linkedMapOf<String, ByteArray>()
+        for ((name, bytes) in files) {
+            if (!name.startsWith(APP_SETTINGS)) continue
+            val fileName = name.removePrefix(APP_SETTINGS)
+            result[fileName] = AppSettingsStore.imported(bytes, local[fileName])
+        }
+        for ((fileName, bytes) in local) {
+            if (fileName !in result) result[fileName] = AppSettingsStore.imported(ByteArray(0), bytes)
+        }
+        return result
+    }
+
+    /**
+     * An imported [settings] with what stays this device's: the viewer (it gets every session's
+     * VNC password), the security level and the terminal's settings (they decide how far apps
+     * reach), and the Flatpak languages (a zip's value would go to Flatpak as it is). Without
+     * saved settings of its own ([device] null) the zip's are kept.
+     */
+    fun keepingDevice(settings: UserSettings, device: UserSettings?): UserSettings = settings.copy(
+        vncViewer = device?.vncViewer,
+        externalViewer = device?.externalViewer ?: false,
+        security = device?.security ?: settings.security,
+        terminalFilter = device?.terminalFilter ?: settings.terminalFilter,
+        terminalDuringSession = device?.terminalDuringSession ?: false,
+        flatpakLanguages = device?.flatpakLanguages ?: settings.flatpakLanguages,
+    )
 
     /** The app ID of an app-settings file name, or null for any other name. */
     fun appId(fileName: String): String? =

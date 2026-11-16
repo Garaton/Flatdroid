@@ -11,6 +11,7 @@ import coil3.fetch.Fetcher
 import coil3.fetch.SourceFetchResult
 import coil3.memory.MemoryCache
 import coil3.request.Options
+import com.garathon.flatdroid.flatpak.flathub.FlathubHosts
 import com.garathon.flatdroid.settings.MobileData
 import com.garathon.flatdroid.settings.mobileDataPolicy
 import kotlinx.coroutines.runInterruptible
@@ -80,6 +81,8 @@ object CatalogImages {
     /** Loads an https picture into Coil's disk cache, then decodes from there. */
     private class HttpsFetcher(private val url: String, private val options: Options, private val loader: ImageLoader) : Fetcher {
         override suspend fun fetch(): FetchResult {
+            // The second lock, for an index made before AppStreamReader left other hosts out.
+            if (!FlathubHosts.allows(url)) throw IOException("Not a Flathub address")
             val cache = loader.diskCache
             cache?.openSnapshot(url)?.let { snapshot ->
                 return SourceFetchResult(ImageSource(snapshot.data, cache.fileSystem, diskCacheKey = url, closeable = snapshot), null, DataSource.DISK)

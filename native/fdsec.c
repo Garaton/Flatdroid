@@ -5,12 +5,15 @@
  *   fdsec [--extra] [--no-inet] [--no-connect] [--] /absolute/command args...
  *
  * Always blocked: io_uring and openat2 (ENOSYS, so programs fall back to what proot
- * translates), open_by_handle_at, name_to_handle_at, pidfd_getfd, bpf, perf_event_open,
+ * translates), fanotify_init, fanotify_mark and quotactl (ENOSYS: their paths aren't translated
+ * either), open_by_handle_at, name_to_handle_at, pidfd_getfd, bpf, perf_event_open,
  * userfaultfd, ptrace and process_vm_readv/writev (EPERM); statmount, listmount, the *xattrat
  * calls, file_getattr and file_setattr, and every system call numbered above open_tree_attr
  * (ENOSYS): they take paths proot doesn't translate (its table ends at open_tree_attr), so they
  * would reach the host's files directly; later ones fail closed until proot knows them. System
- * calls of other ABIs (i386 and x32 on x86_64, AArch32 on aarch64) get ENOSYS.
+ * calls of other ABIs (i386 and x32 on x86_64, AArch32 on aarch64) get ENOSYS. socket takes
+ * only AF_UNIX, AF_NETLINK, AF_INET and AF_INET6 (the families Flatpak allows), any other
+ * family fails with EAFNOSUPPORT: some (AF_SMC, AF_VSOCK, AF_PACKET) reach beyond the device.
  *   --extra    also pidfd_open, process_madvise, kcmp, keyctl, add_key, request_key (ENOSYS)
  *   --no-inet  socket(AF_INET or AF_INET6) fails with EACCES; Unix and netlink sockets stay
  *   --no-connect  connect fails with EACCES, for a server that only accepts connections
@@ -64,8 +67,10 @@
 /* The highest system call proot translates (open_tree_attr); everything above gets ENOSYS. */
 #define LAST_KNOWN_NR 467
 
+#define AF_UNIX 1
 #define AF_INET 2
 #define AF_INET6 10
+#define AF_NETLINK 16
 #define CHECK_WHICH 0x66647365 /* "fdse" */
 #define CHECK_ERRNO ENOTRECOVERABLE
 #define EXIT_REFUSED 125
@@ -172,7 +177,12 @@ static const struct rule ALWAYS[] = {
 	{ __NR_process_vm_readv, EPERM }, { __NR_process_vm_writev, EPERM },
 	{ __NR_statmount, ENOSYS }, { __NR_listmount, ENOSYS },
 	{ __NR_setxattrat, ENOSYS }, { __NR_getxattrat, ENOSYS }, { __NR_listxattrat, ENOSYS }, { __NR_removexattrat, ENOSYS },
+	/* Paths that proot's enter.c doesn't translate (like the *xattrat calls above). */
+	{ __NR_fanotify_init, ENOSYS }, { __NR_fanotify_mark, ENOSYS }, { __NR_quotactl, ENOSYS },
 };
+
+/* The socket families that stay open; --no-inet drops the last two. */
+static const int FAMILIES[] = { AF_UNIX, AF_NETLINK, AF_INET, AF_INET6 };
 
 static const struct rule EXTRA[] = {
 	{ __NR_pidfd_open, ENOSYS }, { __NR_process_madvise, ENOSYS }, { __NR_kcmp, ENOSYS },
@@ -183,8 +193,10 @@ static const struct rule EXTRA[] = {
  * future rule would overflow the stack array. */
 #define MAX_FILTER 96
 /* base (arch check, nr load) + x32 guard + newer-than-proot guard + ALWAYS + EXTRA + the
- * no_connect and no_inet blocks + the check rule. */
-_Static_assert(5 + 2 + 2 + 2 * (sizeof ALWAYS / sizeof *ALWAYS) + 2 * (sizeof EXTRA / sizeof *EXTRA) + 2 + 7 + 5 <= MAX_FILTER,
+ * no_connect block + the socket block (test, argument load, two EACCES rules for --no-inet, the
+ * families, EAFNOSUPPORT) + the check rule. */
+_Static_assert(5 + 2 + 2 + 2 * (sizeof ALWAYS / sizeof *ALWAYS) + 2 * (sizeof EXTRA / sizeof *EXTRA) + 2
+                   + (2 + 4 + 2 * (sizeof FAMILIES / sizeof *FAMILIES) + 1) + 5 <= MAX_FILTER,
                "fdsec filter would overflow MAX_FILTER");
 #define LOAD(field) BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, field))
 /* The low 32 bits of argument i (seccomp_data is little-endian on both architectures). */
@@ -220,16 +232,23 @@ static unsigned build(struct sock_filter *f, int extra, int no_inet, int no_conn
 		f[n++] = (struct sock_filter)IF_EQUAL(__NR_connect, 1);
 		f[n++] = (struct sock_filter)RETURN(SECCOMP_RET_ERRNO | EACCES);
 	}
+	/* socket: only the allowed families (without the two Internet ones for --no-inet, which
+	 * fail with EACCES), the rest EAFNOSUPPORT. The argument load clobbers the accumulator, so
+	 * every path out of this block returns. */
+	unsigned open = (unsigned)(sizeof FAMILIES / sizeof *FAMILIES) - (no_inet ? 2 : 0);
+	f[n++] = (struct sock_filter)IF_EQUAL(__NR_socket, 1 + (no_inet ? 4 : 0) + 2 * open + 1);
+	f[n++] = (struct sock_filter)LOAD_ARG(0);
 	if (no_inet) {
-		f[n++] = (struct sock_filter)IF_EQUAL(__NR_socket, 6);
-		f[n++] = (struct sock_filter)LOAD_ARG(0);
 		f[n++] = (struct sock_filter)IF_EQUAL(AF_INET, 1);
 		f[n++] = (struct sock_filter)RETURN(SECCOMP_RET_ERRNO | EACCES);
 		f[n++] = (struct sock_filter)IF_EQUAL(AF_INET6, 1);
 		f[n++] = (struct sock_filter)RETURN(SECCOMP_RET_ERRNO | EACCES);
-		/* Another socket: the accumulator holds the argument now, so allow it here. */
+	}
+	for (unsigned i = 0; i < open; i++) {
+		f[n++] = (struct sock_filter)IF_EQUAL(FAMILIES[i], 1);
 		f[n++] = (struct sock_filter)RETURN(SECCOMP_RET_ALLOW);
 	}
+	f[n++] = (struct sock_filter)RETURN(SECCOMP_RET_ERRNO | EAFNOSUPPORT);
 	/* The check rule, last; getpriority is otherwise allowed. */
 	f[n++] = (struct sock_filter)IF_EQUAL(__NR_getpriority, 3);
 	f[n++] = (struct sock_filter)LOAD_ARG(0);

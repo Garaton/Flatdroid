@@ -161,6 +161,8 @@ fun BrowseAppScreen(
     /** The index is being read or built (after a change, or Android's Clear cache): the page says so meanwhile. */
     catalogLoading: Boolean,
     arch: String,
+    /** Flathub's saved lists say the app is verified: shown until the page's own answer comes. */
+    listedVerified: Boolean,
     installState: InstallState,
     mobileDataBlocked: () -> Boolean,
     /** What the mobile data setting says now ([MobileData.ALWAYS] when the connection isn't metered). */
@@ -216,7 +218,8 @@ fun BrowseAppScreen(
     // The catalog only has apps built for this phone; one it doesn't have is checked with Flathub's answer.
     val builtHere = app != null || found?.builtFor(arch) == true
     val name = app?.name ?: found?.name ?: appId
-    val verified = app?.verified ?: found?.verified ?: false
+    // Flathub's answer, not the catalog's, which an installed app can rewrite: the page's own, else the saved lists'.
+    val verified = found?.verified ?: listedVerified
 
     val scroll = rememberScrollState()
     // The header's name is in view: the top bar has none, so it isn't shown twice.

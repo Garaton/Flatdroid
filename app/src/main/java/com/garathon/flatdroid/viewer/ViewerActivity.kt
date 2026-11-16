@@ -140,6 +140,7 @@ class ViewerActivity : ComponentActivity() {
             finish()
             return
         }
+        shareClipboard = session.shareClipboard
         WindowCompat.setDecorFitsSystemWindows(window, false)
         WindowInsetsControllerCompat(window, window.decorView).apply {
             hide(WindowInsetsCompat.Type.systemBars())
@@ -149,9 +150,12 @@ class ViewerActivity : ComponentActivity() {
         followHideScreen()
         view = ViewerView(this, ViewerConnection).apply {
             followPercent = session.followPercent
-            // Wayland has no server option for it: the app's copies stop here.
-            if (session.shareClipboard) onClipboard = ::copiedInApp
-            onClipboardRequested = ::androidClipboardText
+            // Wayland has no server option for it: the app's copies stop here. Android's text
+            // reaches the app only with the setting too, whatever the display server would do.
+            if (session.shareClipboard) {
+                onClipboard = ::copiedInApp
+                onClipboardRequested = ::androidClipboardText
+            }
             // A keyboard pasting what is on Android's clipboard: the app pastes it itself, at once.
             onLongText = { text ->
                 if (session.shareClipboard && androidClipboardText() == text) keys.chord(Keysyms.PASTE)
@@ -441,6 +445,8 @@ class ViewerActivity : ComponentActivity() {
     // ---- Clipboard: the app's copies go to Android's; Android's text goes to the app only when it pastes.
 
     private val clipboard by lazy { getSystemService(ClipboardManager::class.java) }
+    /** The session shares the clipboard ([SessionState.Running.shareClipboard]). */
+    private var shareClipboard = false
     private val clipChanged = ClipboardManager.OnPrimaryClipChangedListener { offerClipboard() }
     /** When the clip the app copied was put on Android's clipboard: not offered back to it. */
     private var ownClip = NO_CLIP
@@ -455,6 +461,7 @@ class ViewerActivity : ComponentActivity() {
 
     /** Tells the app there is new text on Android's clipboard, without reading it. */
     private fun offerClipboard() {
+        if (!shareClipboard) return
         val description = clipboard.primaryClipDescription ?: return
         if (!description.hasMimeType("text/*")) return
         val made = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) description.timestamp else NO_CLIP

@@ -93,9 +93,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /**
      * Applies [settings] in Alpine, then saves them and sends [after] to [applied].
      * Only commands that differ from the saved settings' run, and they run first, so settings whose
-     * commands failed aren't saved and a second save tries them again.
+     * commands failed aren't saved and a second save tries them again. [alsoWrite] (the settings
+     * import's app files) runs on the same thread after they are saved, so nothing of it is
+     * written when a command fails, and a rotation can't cut it off.
      */
-    fun applySettings(settings: UserSettings, after: AfterApply) {
+    fun applySettings(settings: UserSettings, after: AfterApply, alsoWrite: (() -> Unit)? = null) {
         if (_applying.value) return
         _applying.value = true
         _settingsError.value = null
@@ -117,6 +119,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 }
                 SetupController.settings(app).save(settings)
+                alsoWrite?.invoke()
                 // Off, the file check's baselines aren't kept up (installs and updates record none), so
                 // they are dropped; turning it on again asks how to record them.
                 if (before?.security?.checkFilesBeforeLaunch == true && !settings.security.checkFilesBeforeLaunch) {

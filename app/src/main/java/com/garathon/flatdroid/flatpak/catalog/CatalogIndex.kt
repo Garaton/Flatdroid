@@ -68,7 +68,7 @@ class CatalogIndex private constructor(
         const val DETAILS = "details"
         const val SEARCH = "search"
         /** 3: each app once (format 1 could hold an app twice, once per branch), its runtime, and [SEARCH]. */
-        private const val FORMAT = 3
+        private const val FORMAT = 4
         private const val STABLE = "stable"
 
         /**
@@ -169,7 +169,6 @@ class CatalogIndex private constructor(
             writeLong(out, app.name)
             writeLong(out, app.summary)
             writeOptional(out, app.developer)
-            out.writeBoolean(app.verified)
             writeList(out, app.categories)
             writeList(out, app.keywords)
             writeOptional(out, app.icon)
@@ -181,7 +180,6 @@ class CatalogIndex private constructor(
             name = readLong(input),
             summary = readLong(input),
             developer = readOptional(input),
-            verified = input.readBoolean(),
             categories = readList(input),
             keywords = readList(input),
             icon = readOptional(input),

@@ -6,7 +6,9 @@ package com.garathon.flatdroid.proot
  * command, which inherits the filter and can't remove it. When the filter isn't in effect it
  * executes nothing and prints a line starting with [REFUSED_PREFIX].
  *
- * The filter narrows what a process can reach from inside proot; it doesn't make proot a sandbox.
+ * Its fixed list also lets `socket` open only Unix, netlink and Internet sockets (the families
+ * Flatpak allows). The filter narrows what a process can reach from inside proot; it doesn't make
+ * proot a sandbox.
  */
 object Fdsec {
     const val LIBRARY = "libfdsec.so"

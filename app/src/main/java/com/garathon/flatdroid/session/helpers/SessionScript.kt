@@ -88,9 +88,9 @@ object SessionScript {
      * nothing here starts a process during the session, which the app could see and take over.
      * The session bus's proxy reads its arguments from a file ([SessionBus.proxyArgs]), so none
      * pass through the shell.
-     * The whole script runs behind fdsec's filter; every helper but Xvnc, which serves the VNC
-     * port, also runs behind a second one without Internet sockets, so exploiting one from the
-     * app gives no network the app may not have.
+     * The whole script runs behind fdsec's filter; every helper but Xvnc and, with an external
+     * viewer, wayvnc, which serve the VNC port, also runs behind a second one without Internet
+     * sockets, so exploiting one from the app gives no network the app may not have.
      */
     val TEXT = """
         |#!/bin/sh
@@ -129,17 +129,26 @@ object SessionScript {
         |  rm -f ${GuestPaths.WAYLAND_DIR}/* $GUEST_VNC_DIR/wayvncctl
         |  mode=${'$'}geometry
         |  [ "${'$'}frame_rate" -le $MAX_OUTPUT_REFRESH ] && mode="${'$'}geometry@${'$'}{frame_rate}Hz"
+        |  wl_mode="--output HEADLESS-1 --custom-mode ${'$'}mode --scale ${'$'}scale"
         |  if [ "${'$'}external" = on ]; then
-        |    guard= listen="-C $GUEST_WAYVNC_CONFIG 127.0.0.1 ${'$'}port"
+        |    # wayvnc has to listen on TCP, so it can't run behind the second filter, but the compositor,
+        |    # which parses everything the app sends, does. wayvnc starts here, once the output has its mode.
+        |    LD_PRELOAD=${Fdshm.ALPINE_PATH} XDG_RUNTIME_DIR=${GuestPaths.WAYLAND_DIR} WLR_BACKENDS=headless WLR_RENDERER=pixman \
+        |      WLR_LIBINPUT_NO_DEVICES=1 WLR_HEADLESS_OUTPUTS=1 $NO_INTERNET /usr/bin/labwc -C $GUEST_LABWC_DIR &
+        |    display=${'$'}!
+        |    wait_socket ${GuestPaths.WAYLAND_DIR}/${GuestPaths.WAYLAND_SOCKET} "the Wayland compositor"
+        |    LD_PRELOAD=${Fdshm.ALPINE_PATH} XDG_RUNTIME_DIR=${GuestPaths.WAYLAND_DIR} WAYLAND_DISPLAY=${GuestPaths.WAYLAND_SOCKET} \
+        |      /usr/bin/wlr-randr ${'$'}wl_mode
+        |    LD_PRELOAD=${Fdshm.ALPINE_PATH} XDG_RUNTIME_DIR=${GuestPaths.WAYLAND_DIR} WAYLAND_DISPLAY=${GuestPaths.WAYLAND_SOCKET} \
+        |      /usr/bin/wayvnc -S $GUEST_VNC_DIR/wayvncctl -f ${'$'}frame_rate -C $GUEST_WAYVNC_CONFIG 127.0.0.1 ${'$'}port &
         |  else
-        |    guard="$NO_INTERNET" listen="-u $GUEST_VNC_DIR/$VNC_SOCKET"
+        |    # labwc starts wayvnc itself, once its own socket is there, behind the same second filter.
+        |    LD_PRELOAD=${Fdshm.ALPINE_PATH} XDG_RUNTIME_DIR=${GuestPaths.WAYLAND_DIR} WLR_BACKENDS=headless WLR_RENDERER=pixman \
+        |      WLR_LIBINPUT_NO_DEVICES=1 WLR_HEADLESS_OUTPUTS=1 $NO_INTERNET /usr/bin/labwc -C $GUEST_LABWC_DIR -S \
+        |      "/bin/sh -c '/usr/bin/wlr-randr ${'$'}wl_mode; exec /usr/bin/wayvnc -S $GUEST_VNC_DIR/wayvncctl -f ${'$'}frame_rate -u $GUEST_VNC_DIR/$VNC_SOCKET'" &
+        |    display=${'$'}!
+        |    wait_socket ${GuestPaths.WAYLAND_DIR}/${GuestPaths.WAYLAND_SOCKET} "the Wayland compositor"
         |  fi
-        |  LD_PRELOAD=${Fdshm.ALPINE_PATH} XDG_RUNTIME_DIR=${GuestPaths.WAYLAND_DIR} WLR_BACKENDS=headless WLR_RENDERER=pixman \
-        |    WLR_LIBINPUT_NO_DEVICES=1 WLR_HEADLESS_OUTPUTS=1 ${'$'}guard /usr/bin/labwc -C $GUEST_LABWC_DIR -S \
-        |    "/bin/sh -c '/usr/bin/wlr-randr --output HEADLESS-1 --custom-mode ${'$'}mode --scale ${'$'}scale; exec /usr/bin/wayvnc -S $GUEST_VNC_DIR/wayvncctl -f ${'$'}frame_rate ${'$'}listen'" &
-        |  display=${'$'}!
-        |  wait_socket ${GuestPaths.WAYLAND_DIR}/${GuestPaths.WAYLAND_SOCKET} "the Wayland compositor"
-        |  # labwc starts wayvnc itself, once its own socket is there.
         |  wait_socket $GUEST_VNC_DIR/wayvncctl wayvnc
         |else
         |  if [ "${'$'}external" = on ]; then

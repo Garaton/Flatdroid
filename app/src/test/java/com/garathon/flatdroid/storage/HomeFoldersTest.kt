@@ -7,6 +7,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
+import java.nio.file.Files
 
 class HomeFoldersTest {
     @get:Rule val tmp = TemporaryFolder()
@@ -34,9 +35,18 @@ class HomeFoldersTest {
     @Test
     fun importsGoToDownloadsWhileItExists() {
         val home = tmp.newFolder("home")
-        assertEquals(home, HomeFolders.importDir(home))
+        val isLink = { f: File -> Files.isSymbolicLink(f.toPath()) }
+        assertEquals(home, HomeFolders.importDir(home, isLink))
         File(home, "Downloads").mkdir()
-        assertEquals(File(home, "Downloads"), HomeFolders.importDir(home))
+        assertEquals(File(home, "Downloads"), HomeFolders.importDir(home, isLink))
+    }
+
+    @Test
+    fun importsDontGoThroughADownloadsLink() {
+        val home = tmp.newFolder("home")
+        val elsewhere = tmp.newFolder("elsewhere")
+        Files.createSymbolicLink(File(home, "Downloads").toPath(), elsewhere.toPath())
+        assertEquals(home, HomeFolders.importDir(home) { Files.isSymbolicLink(it.toPath()) })
     }
 
     @Test

@@ -223,7 +223,7 @@ fun BrowseScreen(
                                     in installed -> R.string.browse_installed
                                     else -> null
                                 }
-                                BrowseRow(app, remember(app.icon) { app.icon?.let { File(iconsDir, it) } }, iconPx, label, state.lists.installs[app.id]) { onOpenApp(app.id) }
+                                BrowseRow(app, remember(app.icon) { app.icon?.let { File(iconsDir, it) } }, iconPx, label, state.lists.installs[app.id], app.id in state.lists.verified) { onOpenApp(app.id) }
                                 HorizontalDivider()
                             }
                         }
@@ -280,7 +280,7 @@ private fun Message(text: String, action: String, onAction: () -> Unit, enabled:
  * summary, and at the right its installs of the last month when Flathub's lists give them.
  */
 @Composable
-private fun BrowseRow(app: CatalogApp, icon: File?, iconPx: Int, label: Int?, installs: Long?, onClick: () -> Unit) {
+private fun BrowseRow(app: CatalogApp, icon: File?, iconPx: Int, label: Int?, installs: Long?, verified: Boolean, onClick: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().height(72.dp).clickable(onClick = onClick).padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -291,7 +291,7 @@ private fun BrowseRow(app: CatalogApp, icon: File?, iconPx: Int, label: Int?, in
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(app.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-                if (app.verified) {
+                if (verified) {
                     Icon(
                         Icons.Filled.Verified, contentDescription = stringResource(R.string.flathub_verified),
                         tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 4.dp).size(16.dp),
