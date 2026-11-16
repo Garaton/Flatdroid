@@ -112,12 +112,16 @@ object WaylandWire {
  *   its own and scrolls as a touchpad does (axis source finger), in steps of [SCROLL_STEP] of the
  *   app's pixels, [scrollEnd] when the scroll stops. What a step does is up to the app (GTK 4 moves
  *   about twice its pixels, a terminal by the line); the viewer starts from [stepPixels] and learns each app's own.
+ * - **How many windows are open:** the compositor's list of toplevels (`ext_foreign_toplevel_list_v1`)
+ *   is followed, and [onWindows] gets the count once the windows already there were listed, then at
+ *   each change. Windows are counted, not seen: one minimised or off screen counts.
  */
 class WaylandClient(
     private val socketPath: String,
     private val text: (() -> String?)?,
     private val refresh: Int?,
     private val keymapDir: File,
+    private val onWindows: ((Int) -> Unit)? = null,
 ) {
     private val socket = LocalSocket()
     private val sender: ExecutorService = Executors.newSingleThreadExecutor()
@@ -170,6 +174,14 @@ class WaylandClient(
     @Volatile private var outputScale = 1f
     /** The keymap's keysyms: each on the key code of its index + 1. */
     private var mapped = emptyList<Int>()
+
+    private var toplevelsName = 0
+    private var toplevels = 0
+    private var toplevelsSync = 0
+    /** The compositor's handles of the windows now open. */
+    private val windows = HashSet<Int>()
+    /** The windows that were there at the start have been listed: [onWindows] now follows every change. */
+    private var windowsKnown = false
 
     fun start() {
         Thread({ run() }, "wayland-client").apply { isDaemon = true }.start()
@@ -334,6 +346,7 @@ class WaylandClient(
                     type == OUTPUT_MANAGER -> outputName = name
                     type == KEYBOARD_MANAGER -> keyboardName = name
                     type == POINTER_MANAGER -> pointerName = name
+                    type == TOPLEVEL_LIST -> toplevelsName = name
                     type in CLIPBOARD_MANAGERS && (clipboardName == 0 || type == CLIPBOARD_MANAGERS[0]) -> {
                         clipboardName = name
                         clipboardInterface = type
@@ -341,6 +354,20 @@ class WaylandClient(
                 }
             }
             event.target == syncCallback -> bind()
+            event.target == toplevelsSync && toplevelsSync != 0 -> {
+                windowsKnown = true
+                reportWindows()
+            }
+            event.target == toplevels && toplevels != 0 && event.opcode == TOPLEVEL_LIST_TOPLEVEL -> {
+                val handle = event.int()
+                if (windows.size < MAX_WINDOWS) windows += handle
+                if (windowsKnown) reportWindows()
+            }
+            event.target in windows && event.opcode == TOPLEVEL_CLOSED -> {
+                windows -= event.target
+                send(WaylandWire.message(event.target, TOPLEVEL_DESTROY))
+                if (windowsKnown) reportWindows()
+            }
             event.target == device && event.opcode == DEVICE_DATA_OFFER -> offers += event.int()
             event.target == device && (event.opcode == DEVICE_SELECTION || event.opcode == DEVICE_PRIMARY_SELECTION) -> {
                 offers.forEach { send(WaylandWire.message(it, OFFER_DESTROY)) }
@@ -366,6 +393,11 @@ class WaylandClient(
                 applyMode()
             }
         }
+    }
+
+    private fun reportWindows() {
+        DebugLog.i("Wayland client: ${windows.size} windows")
+        onWindows?.invoke(windows.size)
     }
 
     private fun bind() {
@@ -394,6 +426,13 @@ class WaylandClient(
             pointers = id()
             bind(pointerName, POINTER_MANAGER, pointers)
             canScroll = true
+        }
+        if (onWindows != null && toplevelsName != 0) {
+            toplevels = id()
+            bind(toplevelsName, TOPLEVEL_LIST, toplevels)
+            // The windows already open come first, then this answer: the count is known from there.
+            toplevelsSync = id()
+            send(WaylandWire.message(DISPLAY, DISPLAY_SYNC, toplevelsSync))
         }
         if (pending) {
             pending = false
@@ -475,6 +514,8 @@ class WaylandClient(
         /** Key codes the keymap can hold; a full one starts again. */
         const val MAX_KEYS = 240
         const val MAX_ATTEMPTS = 3
+        /** More windows than this are not counted: far past what any app needs, and a misbehaving one's. */
+        const val MAX_WINDOWS = 4096
         /** The output's refresh while hidden, in mHz. */
         const val HIDDEN_REFRESH = 1000
         const val DISPLAY = 1
@@ -487,6 +528,7 @@ class WaylandClient(
         const val OUTPUT_MANAGER = "zwlr_output_manager_v1"
         const val KEYBOARD_MANAGER = "zwp_virtual_keyboard_manager_v1"
         const val POINTER_MANAGER = "zwlr_virtual_pointer_manager_v1"
+        const val TOPLEVEL_LIST = "ext_foreign_toplevel_list_v1"
 
         const val DISPLAY_SYNC = 0
         const val DISPLAY_GET_REGISTRY = 1
@@ -527,5 +569,8 @@ class WaylandClient(
         const val AXIS_VERTICAL = 0
         const val AXIS_HORIZONTAL = 1
         const val AXIS_SOURCE_FINGER = 1
+        const val TOPLEVEL_LIST_TOPLEVEL = 0
+        const val TOPLEVEL_CLOSED = 0
+        const val TOPLEVEL_DESTROY = 0
     }
 }

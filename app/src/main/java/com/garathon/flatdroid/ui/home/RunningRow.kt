@@ -84,6 +84,7 @@ fun RunningRow(
                         is SessionState.Starting -> state.detail
                         is SessionState.PreparingElectron -> state.detail
                         is SessionState.Stopping -> stringResource(R.string.session_stopping_short)
+                        is SessionState.Running -> if (state.opening) stringResource(R.string.session_opening) else appId
                         else -> appId
                     },
                     style = MaterialTheme.typography.bodySmall,

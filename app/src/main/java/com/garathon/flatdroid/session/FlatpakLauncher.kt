@@ -350,9 +350,10 @@ class FlatpakLauncher(private val context: Context) {
                     ProotExit.signalOf(line)?.let { appSignal.compareAndSet(0, it) }
                     SessionController.log(line)
                 }
-                // Hidden, the app goes quiet and then pauses, unless it continues while hidden; with an
-                // external viewer Flatdroid can't tell what is on screen.
-                if (!externalViewer && !settings.continueWhileHidden) app.pid?.let { HiddenPause.attach(it, player) }
+                // Hidden, the app goes quiet and then pauses, unless it continues while hidden, and with no
+                // window it is paused whatever it continues; with an external viewer Flatdroid can't tell
+                // what is on screen or open.
+                if (!externalViewer) app.pid?.let { HiddenPause.attach(it, player, pauseWhenHidden = !settings.continueWhileHidden) }
                 if (runningSince == null) {
                     runningSince = System.currentTimeMillis()
                     // Counted once the app runs, so a launch that failed or was stopped while starting isn't.

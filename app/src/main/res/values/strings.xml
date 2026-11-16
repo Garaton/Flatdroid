@@ -402,7 +402,7 @@
     <string name="log_top">Top</string>
     <string name="log_bottom">Bottom</string>
     <string name="settings_viewer">Show apps in</string>
-    <string name="settings_viewer_hint">The chosen VNC viewer for interacting with Flatpaks. Flatdroid\'s viewer is recommended due to its better security, resource usage, and compatibility with Flatdroid\'s features. However, external VNC viewer apps are supported.</string>
+    <string name="settings_viewer_hint">The chosen VNC viewer for interacting with Flatpaks. Flatdroid\'s viewer is recommended due to its better security, resource usage, and compatibility with Flatdroid\'s features. However, external VNC viewer apps are supported. An app with no window open is paused only in Flatdroid\'s viewer, and only on Wayland.</string>
     <string name="settings_viewer_flatdroid">Flatdroid\'s viewer</string>
     <string name="settings_viewer_external_warning">WARNING: The display is reachable on localhost:%1$d of this phone, so any app can try to connect. While Flatdroid\'s viewer uses an unreachable private socket.</string>
     <string name="settings_viewer_none">None chosen</string>
@@ -442,7 +442,15 @@
     <string name="mic_allow">Allow</string>
     <string name="mic_deny">Deny</string>
     <string name="session_starting">Starting…</string>
+    <string name="session_opening">Opening…</string>
+    <string name="viewer_opening">Opening %1$s…</string>
     <string name="session_stopping_short">Stopping…</string>
+    <string name="no_window_channel">Apps without a window</string>
+    <string name="no_window_title">%1$s has no window open</string>
+    <string name="no_window_never_title">%1$s didn\'t open a window</string>
+    <string name="no_window_notification">It was paused. Open Flatdroid to resume or stop it</string>
+    <string name="no_window_card">No window is open. %1$s may still be running in the background. It was paused.</string>
+    <string name="no_window_resume">Resume</string>
     <string name="session_notification_viewer">Running. Open the app to see it.</string>
     <string name="viewer_back">Back to the app list</string>
     <string name="viewer_keyboard">Keyboard</string>

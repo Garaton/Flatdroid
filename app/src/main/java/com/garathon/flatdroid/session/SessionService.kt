@@ -36,6 +36,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.SupervisorJob
@@ -82,6 +83,10 @@ class SessionService : Service() {
                 SessionController.answerMicrophone(false)
                 return START_NOT_STICKY
             }
+            ACTION_RESUME_NO_WINDOW -> {
+                HiddenPause.resumeNoWindow()
+                return START_NOT_STICKY
+            }
             ACTION_LAUNCH, ACTION_PREPARE_ELECTRON -> Unit
             else -> {
                 stopSelf()
@@ -120,6 +125,18 @@ class SessionService : Service() {
                 else notifications.notify(MIC_NOTIFICATION_ID, micNotification(request))
             }
         }
+        // The question about an app with no window goes to a notification only while Flatdroid's viewer, which asks itself, isn't on screen.
+        val noWindowAsks = scope.launch {
+            combine(
+                SessionController.ui.map { (it.state as? SessionState.Running)?.takeIf { running -> running.noWindow }?.let { running -> running.appId to running.noWindowNeverOpened } },
+                SessionController.viewerVisible,
+            ) { asked, visible -> asked.takeUnless { visible } }
+                .distinctUntilChanged()
+                .collect { asked ->
+                    if (asked == null) notifications.cancel(NO_WINDOW_NOTIFICATION_ID)
+                    else notifications.notify(NO_WINDOW_NOTIFICATION_ID, noWindowNotification(asked.first, asked.second))
+                }
+        }
         job = scope.launch {
             var message: String? = null
             var failed = false
@@ -154,8 +171,10 @@ class SessionService : Service() {
                 withContext(NonCancellable) {
                     updates.cancelAndJoin()
                     micRequests.cancelAndJoin()
+                    noWindowAsks.cancelAndJoin()
                 }
                 notifications.cancel(MIC_NOTIFICATION_ID)
+                notifications.cancel(NO_WINDOW_NOTIFICATION_ID)
                 removeNotification()
                 SavedSizes.changed(applicationContext, appId)
                 // Before the session counts as ended, so Flatdroid's window doesn't ask as well.
@@ -230,6 +249,33 @@ class SessionService : Service() {
             .build()
     }
 
+    /** Asks what to do with an app that was paused for having no window open, answered in the notification: Resume or Stop. */
+    private fun noWindowNotification(appId: String, neverOpened: Boolean): Notification {
+        // High importance: it pops up, as the microphone's question does, since the app is waiting on the answer.
+        createChannel(NO_WINDOW_CHANNEL_ID, R.string.no_window_channel, NotificationManager.IMPORTANCE_HIGH)
+        val open = PendingIntent.getActivity(
+            this, 5, Intent(this, ViewerActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT), PendingIntent.FLAG_IMMUTABLE,
+        )
+        val resume = PendingIntent.getService(
+            this, 6, Intent(this, SessionService::class.java).setAction(ACTION_RESUME_NO_WINDOW), PendingIntent.FLAG_IMMUTABLE,
+        )
+        val stop = PendingIntent.getService(
+            this, 2, Intent(this, SessionService::class.java).setAction(ACTION_STOP), PendingIntent.FLAG_IMMUTABLE,
+        )
+        return NotificationCompat.Builder(this, NO_WINDOW_CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_media_pause)
+            .setContentTitle(getString(if (neverOpened) R.string.no_window_never_title else R.string.no_window_title, label(appId)))
+            .setContentText(getString(R.string.no_window_notification))
+            .setContentIntent(open)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setOnlyAlertOnce(true)
+            // Its own group, so Android doesn't bundle it with the session's and hide its buttons.
+            .setGroup(NO_WINDOW_CHANNEL_ID)
+            .addAction(0, getString(R.string.no_window_resume), resume)
+            .addAction(0, getString(R.string.session_stop), stop)
+            .build()
+    }
+
     private fun notification(state: SessionState): Notification {
         createChannel(CHANNEL_ID, R.string.session_channel, NotificationManager.IMPORTANCE_LOW)
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
@@ -281,6 +327,8 @@ class SessionService : Service() {
         private const val NOTIFICATION_ID = 10
         private const val MIC_CHANNEL_ID = "permissions"
         private const val MIC_NOTIFICATION_ID = 11
+        private const val NO_WINDOW_CHANNEL_ID = "no_window_alert"
+        private const val NO_WINDOW_NOTIFICATION_ID = 12
         private const val EXTRA_APP_ID = "appId"
         private const val EXTRA_MIC_ANSWER = "micAnswer"
         private const val ACTION_LAUNCH = "com.garathon.flatdroid.action.LAUNCH"
@@ -288,6 +336,7 @@ class SessionService : Service() {
         private const val ACTION_STOP = "com.garathon.flatdroid.action.STOP"
         private const val ACTION_ALLOW_MICROPHONE = "com.garathon.flatdroid.action.ALLOW_MICROPHONE"
         private const val ACTION_DENY_MICROPHONE = "com.garathon.flatdroid.action.DENY_MICROPHONE"
+        private const val ACTION_RESUME_NO_WINDOW = "com.garathon.flatdroid.action.RESUME_NO_WINDOW"
 
         /** [micAnswer]: the microphone's answer for the session, when asked before the launch. */
         fun launch(context: Context, appId: String, micAnswer: Boolean? = null) = start(context, ACTION_LAUNCH, appId, micAnswer)

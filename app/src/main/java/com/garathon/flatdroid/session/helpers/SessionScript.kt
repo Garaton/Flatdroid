@@ -120,6 +120,17 @@ object SessionScript {
         |  done
         |}
         |
+        |# The session bus and PulseAudio need nothing from the display: they start first and come up
+        |# while it does. Flatdroid waits for their sockets only after the display is there.
+        |if [ "${'$'}session_bus" = on ]; then
+        |  rm -f ${SessionBus.GUEST_DAEMON_DIR}/${SessionBus.SOCKET} ${SessionBus.GUEST_PROXY_DIR}/${SessionBus.SOCKET}
+        |  $NO_INTERNET /usr/bin/dbus-daemon --config-file=${SessionBus.GUEST_CONFIG} --nofork --nopidfile --nosyslog &
+        |fi
+        |if [ "${'$'}sound" = on ]; then
+        |  $NO_INTERNET /usr/bin/pulseaudio -n --use-pid-file=no --daemonize=no --exit-idle-time=-1 --disable-shm=yes \
+        |    --disallow-module-loading --disallow-exit --resample-method="${'$'}resampler" -F $GUEST_PULSE_SCRIPT &
+        |fi
+        |
         |if [ "${'$'}wayland" = on ]; then
         |  # labwc (headless, drawn in software) with wayvnc as a client, on the viewer's socket (or
         |  # the VNC port for an external viewer). Their buffers come from fdshm (Android has no
@@ -168,8 +179,6 @@ object SessionScript {
         |  DISPLAY=:1 $NO_INTERNET /usr/bin/openbox &
         |fi
         |if [ "${'$'}session_bus" = on ]; then
-        |  rm -f ${SessionBus.GUEST_DAEMON_DIR}/${SessionBus.SOCKET} ${SessionBus.GUEST_PROXY_DIR}/${SessionBus.SOCKET}
-        |  $NO_INTERNET /usr/bin/dbus-daemon --config-file=${SessionBus.GUEST_CONFIG} --nofork --nopidfile --nosyslog &
         |  i=0
         |  while [ ! -S ${SessionBus.GUEST_DAEMON_DIR}/${SessionBus.SOCKET} ] && [ "${'$'}i" -le 100 ]; do
         |    i=${'$'}((i + 1))
@@ -185,10 +194,6 @@ object SessionScript {
         |  else
         |    echo "flatdroid: the session bus did not start"
         |  fi
-        |fi
-        |if [ "${'$'}sound" = on ]; then
-        |  $NO_INTERNET /usr/bin/pulseaudio -n --use-pid-file=no --daemonize=no --exit-idle-time=-1 --disable-shm=yes \
-        |    --disallow-module-loading --disallow-exit --resample-method="${'$'}resampler" -F $GUEST_PULSE_SCRIPT &
         |fi
         |echo "$DISPLAY_READY"
         |wait "${'$'}display"

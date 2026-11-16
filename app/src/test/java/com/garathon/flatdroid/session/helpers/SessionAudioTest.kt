@@ -113,6 +113,22 @@ class SessionAudioTest {
     }
 
     @Test
+    fun theBusAndPulseAudioStartBeforeTheDisplayAndTheirSocketsAreWaitedForAfterIt() {
+        val lines = SessionScript.TEXT.lines().map { it.trim() }
+        val bus = lines.indexOfFirst { "/usr/bin/dbus-daemon" in it }
+        val pulse = lines.indexOfFirst { "/usr/bin/pulseaudio " in it }
+        val labwc = lines.indexOfFirst { "/usr/bin/labwc" in it }
+        val xvnc = lines.indexOfFirst { "Xvnc :1" in it }
+        val proxy = lines.indexOfFirst { "/usr/bin/xdg-dbus-proxy" in it }
+        val ready = lines.indexOfFirst { it.startsWith("echo \"flatdroid: display ready") }
+        assertTrue(bus in 0 until labwc && bus < xvnc && pulse in 0 until labwc && pulse < xvnc)
+        // The proxy needs the daemon's socket: started after the display, not in front of it.
+        assertTrue(proxy > xvnc && proxy > labwc && proxy < ready)
+        // Nothing in front of the display waits: the only sleep is in wait_socket's own definition.
+        assertEquals(1, lines.subList(0, minOf(labwc, xvnc)).count { it.startsWith("sleep ") })
+    }
+
+    @Test
     fun everyHelperRunsWithoutInternetSockets() {
         val lines = SessionScript.TEXT.lines().map { it.trim() }
         for (helper in listOf("openbox", "dbus-daemon", "xdg-dbus-proxy", "pipewire", "pulseaudio")) {

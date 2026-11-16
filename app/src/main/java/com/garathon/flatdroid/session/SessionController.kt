@@ -36,6 +36,12 @@ sealed interface SessionState {
         val shareClipboard: Boolean = true,
         /** What the Wayland output refreshes at, per second; null to leave it. */
         val outputRefresh: Int? = null,
+        /** No window is open and the app was paused for it ([HiddenPause.windows]): the user may let it go on or stop it. */
+        val noWindow: Boolean = false,
+        /** [noWindow], and no window was ever open: the app never started one. */
+        val noWindowNeverOpened: Boolean = false,
+        /** The app is still opening its first window (known only where the windows are counted, once the viewer connected). */
+        val opening: Boolean = false,
     ) : SessionState
     data class Stopping(val appId: String) : SessionState
     /**
@@ -103,6 +109,28 @@ object SessionController {
     fun skipFileCheck() { onSkipFileCheck?.invoke() }
 
     fun running(state: SessionState.Running) = _ui.update { it.copy(state = state) }
+
+    /** The running app was paused for having no window ([on]), or goes on again. */
+    fun noWindow(on: Boolean, neverOpened: Boolean = false) = _ui.update {
+        val state = it.state as? SessionState.Running
+        val never = on && neverOpened
+        if (state == null || state.noWindow == on && state.noWindowNeverOpened == never) it
+        else it.copy(state = state.copy(noWindow = on, noWindowNeverOpened = never, opening = state.opening && !on))
+    }
+
+    /** The app has no window yet and never had one ([on]), or has one now. */
+    fun opening(on: Boolean) = _ui.update {
+        val state = it.state as? SessionState.Running
+        if (state == null || state.opening == on) it else it.copy(state = state.copy(opening = on))
+    }
+
+    private val _viewerVisible = MutableStateFlow(false)
+    /** Flatdroid's viewer is on screen: the question about a window-less app is asked there, else in a notification. */
+    val viewerVisible: StateFlow<Boolean> = _viewerVisible.asStateFlow()
+
+    fun viewerVisible(visible: Boolean) {
+        _viewerVisible.value = visible
+    }
 
     fun stopping(appId: String) {
         ViewerConnection.closeOnMain()
