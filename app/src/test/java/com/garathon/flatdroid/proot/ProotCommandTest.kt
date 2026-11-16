@@ -130,7 +130,16 @@ class ProotCommandTest {
         val argv = ProotCommand.flatpak(paths, flatpakBinds.copy(wholeDev = true), emptyMap(), listOf("/app/bin/x"), Fdsec.Filter()).argv
         assertTrue("--bind=/dev" in argv)
         assertTrue("--bind=/dev/null" !in argv)
+        // The whole /dev has no links of the root's own: the host's are bound over it.
         assertTrue("--bind=/proc/self/fd:/dev/fd" in argv)
+        assertTrue(ProotCommand.flatpak(paths, flatpakBinds, emptyMap(), listOf("/app/bin/x"), Fdsec.Filter()).argv.none { it.startsWith("--bind=/proc/self/fd") })
+    }
+
+    @Test
+    fun noX11SocketsInAWaylandSession() {
+        val argv = ProotCommand.flatpak(paths, flatpakBinds.copy(x11Sockets = null, waylandSockets = "/cache/session/wayland"), emptyMap(), listOf("/app/bin/x"), Fdsec.Filter()).argv
+        assertTrue(argv.none { it.endsWith(":/tmp/.X11-unix") })
+        assertTrue("--bind=/cache/session/wayland:/run/flatdroid/wayland" in argv)
     }
 
     @Test
@@ -172,8 +181,6 @@ class ProotCommandTest {
                 "--bind=/files/launcher/etc/passwd:/etc/passwd",
                 "--bind=/fp/runtime/GL.default/files:/usr/lib/aarch64-linux-gnu/GL/default",
                 "--bind=/dev/null", "--bind=/dev/dri", "--bind=/proc", "--bind=/sys",
-                "--bind=/proc/self/fd:/dev/fd", "--bind=/proc/self/fd/0:/dev/stdin",
-                "--bind=/proc/self/fd/1:/dev/stdout", "--bind=/proc/self/fd/2:/dev/stderr",
                 "--bind=/cache/apptmp/org.xfce.mousepad/shm:/dev/shm",
                 "--bind=/cache/apptmp/org.xfce.mousepad/tmp:/tmp",
                 "--bind=/cache/session/x11:/tmp/.X11-unix",

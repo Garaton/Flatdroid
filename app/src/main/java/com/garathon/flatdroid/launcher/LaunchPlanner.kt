@@ -20,12 +20,13 @@ data class HostDirs(
     val tmp: File,
     val shm: File,
     val home: File,
-    /** The app's own private directories, over parts of the home and at Flatpak's /var ones: host to guest path. */
+    /** The app's own private directories, over parts of the home: host to guest path. */
     val appDirs: List<Pair<File, String>>,
     /** The app's own single files over the home's ([FlatpakBinds.privateFiles]): host to guest path. */
     val privateFiles: List<Pair<File, String>> = emptyList(),
     /** Generated /etc files: name to host file. */
     val etc: Map<String, File>,
+    /** Xvnc's socket directory, bound only for apps in an X11 session. */
     val x11Sockets: File,
     /** The Wayland compositor's socket directory, bound only for apps in a Wayland session. */
     val waylandSockets: File? = null,
@@ -277,7 +278,7 @@ class LaunchPlanner(
             extensions = extensions.map { (base, ext) -> ext.deployment.files.path to "$base/${ext.guestPath}" },
             tmp = dirs.tmp.path,
             shm = dirs.shm.path,
-            x11Sockets = dirs.x11Sockets.path,
+            x11Sockets = dirs.x11Sockets.path.takeIf { !wayland },
             waylandSockets = dirs.waylandSockets?.path?.takeIf { wayland },
             pulseSockets = dirs.pulseSockets?.takeIf { options.audio }?.path,
             home = dirs.home.path,

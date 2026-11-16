@@ -157,6 +157,9 @@ class FlatpakTaskService : Service() {
                 baselineMarker?.delete()
             } catch (e: CancellationException) {
                 error = getString(if (timedOut) R.string.task_time_limit else R.string.task_cancelled)
+                // The user's Cancel: the baselines this task didn't record aren't started again at its
+                // end (each app's is recorded when it next starts). Android's time limit keeps them pending.
+                if (began && !timedOut && baselineMarker?.delete() == true) FlatpakTasks.log(getString(R.string.task_log_baselines_at_launch))
                 if (began) withContext(NonCancellable) { runInterruptible { cleanUpAfter(task) } }
             } catch (e: Exception) {
                 error = e.message ?: e.toString()
@@ -246,7 +249,10 @@ class FlatpakTaskService : Service() {
         if (pending.isEmpty()) return
         FlatpakTasks.newCommand(getString(R.string.task_extra_data))
         val guard = IntegrityGuard(applicationContext).takeIf { checkFilesOn(this) }
-        val failedApp = extraData.applyAll(FlatpakTasks::output) { guard?.recordDeployment(it) }.firstOrNull { it.isApp && it.exitCode != 0 }
+        val failedApp = extraData.applyAll(FlatpakTasks::output) {
+            SavedSizes.forgetDeployment(applicationContext, it)
+            guard?.recordDeployment(it)
+        }.firstOrNull { it.isApp && it.exitCode != 0 }
         if (failedApp != null) {
             throw IOException(getString(R.string.task_extra_data_failed, failedApp.deployment.parentFile!!.parentFile!!.parentFile!!.name, failedApp.exitCode))
         }
@@ -417,17 +423,27 @@ class FlatpakTaskService : Service() {
         val guard = IntegrityGuard(applicationContext)
         // Shared across apps so a runtime or extension several apps use is hashed once, not per app.
         val baselinedCommits = mutableSetOf<String>()
+        // The bar never goes back: each deployment starts its files from 0, and a new command clears
+        // the bar, so it keeps what was reached until this deployment gets past it.
+        var reached = 0f
         for ((index, id) in appIds.withIndex()) {
             guard.recordBaseline(
                 id,
                 baselinedCommits = baselinedCommits,
                 skip = skip,
-                onStart = { FlatpakTasks.newCommand(getString(R.string.task_recording_baseline)) },
+                onStart = {
+                    FlatpakTasks.newCommand(getString(R.string.task_recording_baseline))
+                    reached = maxOf(reached, index.toFloat() / appIds.size)
+                    FlatpakTasks.progress(reached)
+                },
             ) { ref, done, total ->
                 if (done == total || done % 1000 == 0) {
                     FlatpakTasks.log(getString(R.string.task_baseline_progress, ref.name, done, total))
                     // Across the apps: this one's files are a share of all of them.
-                    if (total > 0) FlatpakTasks.progress((index + done.toFloat() / total) / appIds.size)
+                    if (total > 0) {
+                        reached = maxOf(reached, (index + done.toFloat() / total) / appIds.size)
+                        FlatpakTasks.progress(reached)
+                    }
                 }
             }
         }
@@ -752,8 +768,8 @@ class FlatpakTaskService : Service() {
         }
 
         /**
-         * File baselines a task didn't get to record (it was cancelled, failed or Flatdroid was
-         * killed): recorded before the queue goes on, unless a Repair runs first (it records them
+         * File baselines a task didn't get to record (it failed, hit Android's time limit or Flatdroid
+         * was killed; a Cancel drops them): recorded before the queue goes on, unless a Repair runs first (it records them
          * itself). With the file check off, the marker just goes.
          */
         private fun baselinesNeeded(context: Context): Boolean {

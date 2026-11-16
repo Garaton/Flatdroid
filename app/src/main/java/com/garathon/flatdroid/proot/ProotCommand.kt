@@ -58,7 +58,10 @@ data class AlpineBinds(
     }
 
     companion object {
-        /** Guest /dev entries and the /proc/self/fd paths that stand in for them; always bound. */
+        /**
+         * Guest /dev entries and the /proc/self/fd paths that stand in for them: bound in Alpine and
+         * over a whole /dev, links in an app's own /dev otherwise ([com.garathon.flatdroid.launcher.RootLayout]).
+         */
         val FD_LINKS = linkedMapOf(
             "/dev/fd" to "/proc/self/fd",
             "/dev/stdin" to "/proc/self/fd/0",
@@ -83,12 +86,12 @@ data class FlatpakBinds(
     /** Private /tmp and /dev/shm. */
     val tmp: String,
     val shm: String,
-    /** Xvnc's socket directory ([GuestPaths.X11_DIR]) and PulseAudio's ([GuestPaths.PULSE_DIR]; null without sound). */
-    val x11Sockets: String,
+    /** Xvnc's socket directory ([GuestPaths.X11_DIR]; null in a Wayland session) and PulseAudio's ([GuestPaths.PULSE_DIR]; null without sound). */
+    val x11Sockets: String?,
     val pulseSockets: String?,
     /** The Wayland compositor's socket directory ([GuestPaths.WAYLAND_DIR]); null when the session is X11. */
     val waylandSockets: String? = null,
-    /** [GuestPaths.HOME], then the app's own private directories over parts of it and at /var/…: host to guest path. */
+    /** [GuestPaths.HOME], then the app's own private directories over parts of it: host to guest path. */
     val home: String,
     val appDirs: List<Pair<String, String>> = emptyList(),
     /** Single files of the app's own, bound like [appDirs] (host to guest path). */
@@ -282,10 +285,11 @@ object ProotCommand {
         for (path in binds.hiddenProc) argv += "--bind=${binds.emptyDir}:$path"
         for ((guest, host) in binds.fakeProc) argv += "--bind=$host:$guest"
         if (binds.sys == null) argv += "--bind=/sys" else for (path in binds.sys) argv += "--bind=$path"
-        for ((guest, host) in AlpineBinds.FD_LINKS) argv += "--bind=$host:$guest"
+        // Links in the root's own /dev otherwise.
+        if (binds.wholeDev) for ((guest, host) in AlpineBinds.FD_LINKS) argv += "--bind=$host:$guest"
         argv += "--bind=${binds.shm}:/dev/shm"
         argv += "--bind=${binds.tmp}:/tmp"
-        argv += "--bind=${binds.x11Sockets}:${GuestPaths.X11_DIR}"
+        binds.x11Sockets?.let { argv += "--bind=$it:${GuestPaths.X11_DIR}" }
         binds.pulseSockets?.let { argv += "--bind=$it:${GuestPaths.PULSE_DIR}" }
         binds.waylandSockets?.let { argv += "--bind=$it:${GuestPaths.WAYLAND_DIR}" }
         argv += "--bind=${binds.home}:${GuestPaths.HOME}"

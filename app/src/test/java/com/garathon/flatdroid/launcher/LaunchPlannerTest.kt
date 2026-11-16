@@ -188,6 +188,8 @@ class LaunchPlannerTest {
             val app = plan("org.example.App" + sockets.length, sockets)
             assertTrue(sockets, app.wayland)
             assertEquals(wayland.path, app.binds.waylandSockets)
+            // No X server runs in a Wayland session.
+            assertEquals(null, app.binds.x11Sockets)
             assertEquals("/run/flatdroid/wayland/wayland-0", app.environment["WAYLAND_DISPLAY"])
             assertEquals(null, app.environment["DISPLAY"])
         }
@@ -195,6 +197,7 @@ class LaunchPlannerTest {
         val forced = plan("org.example.Forced", "x11;wayland;", force = true)
         assertFalse(forced.wayland)
         assertEquals(null, forced.binds.waylandSockets)
+        assertTrue(forced.binds.x11Sockets!!.endsWith("/x11"))
         assertEquals(":1", forced.environment["DISPLAY"])
         // An app that takes only Wayland keeps it: the setting is ignored.
         assertTrue(plan("org.example.WaylandOnly", "wayland;", force = true).wayland)

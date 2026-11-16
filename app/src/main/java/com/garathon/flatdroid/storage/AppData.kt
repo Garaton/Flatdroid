@@ -77,7 +77,7 @@ object AppData {
 
     /**
      * Written by a task that ends by recording file baselines (with the file check on) and removed
-     * once it finished: still there at start, the baselines are recorded then (FlatpakTask.BaselineAll).
+     * once it finished (or the user cancelled it): still there at start, the baselines are recorded then (FlatpakTask.BaselineAll).
      */
     fun baselineMarker(context: Context): File = File(context.filesDir.canonicalFile, "file-check-baselines-pending")
 

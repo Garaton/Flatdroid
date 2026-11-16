@@ -394,6 +394,7 @@
         <item quantity="one">(repaired %1$d file link that a stopped command had left pointing at nothing)</item>
         <item quantity="other">(repaired %1$d file links that a stopped command had left pointing at nothing)</item>
     </plurals>
+    <string name="task_log_baselines_at_launch">Baselines not recorded yet are recorded when each app next starts.</string>
     <string name="task_log_retrying">Trying again after the repair</string>
     <plurals name="task_log_removed_broken">
         <item quantity="one">(removed %1$d file whose content was gone)</item>

@@ -41,6 +41,7 @@ import com.garathon.flatdroid.launcher.LaunchPlanner
 import com.garathon.flatdroid.launcher.AppEnding
 import com.garathon.flatdroid.launcher.ProotExit
 import com.garathon.flatdroid.launcher.PlanResult
+import com.garathon.flatdroid.launcher.RootLayout
 import com.garathon.flatdroid.flatpak.InstalledApps
 import com.garathon.flatdroid.proot.AlpineBinds
 import com.garathon.flatdroid.proot.DevNodes
@@ -740,12 +741,8 @@ class FlatpakLauncher(private val context: Context) {
                 File(appData, "pki") to "$home/.pki",
                 File(appData, "var") to varApp,
                 cache to "$home/.cache",
+                // Flatpak's /var/config and the rest are links into these (RootLayout).
                 cache to "$varApp/cache",
-                // Where Flatpak also binds them; apps' own launch scripts use these paths.
-                File(appData, "var/config") to "/var/config",
-                File(appData, "var/data") to "/var/data",
-                cache to "/var/cache",
-                File(cache, "tmp") to "/var/tmp",
             ) + dotFiles?.let { dir -> AppFiles.PRIVATE_DOT_DIRS.map { File(dir, it) to "$home/$it" } }.orEmpty(),
             privateFiles = dotFiles?.let { dir -> AppFiles.PRIVATE_DOT_FILES.map { File(dir, it) to "$home/$it" } }.orEmpty(),
             // These /etc files are overridden at launch, so the integrity check leaves the
@@ -786,8 +783,9 @@ class FlatpakLauncher(private val context: Context) {
         for ((_, guest) in plan.binds.appDirs) {
             if (!guest.startsWith(GuestPaths.HOME + "/")) File(root, guest.removePrefix("/")).mkdirs()
         }
-        if (!plan.binds.wholeDev) DevNodes.createMountPoints(root, plan.binds.dev + AlpineBinds.FD_LINKS.keys)
-        for (name in plan.usrLinks) Os.symlink("usr/$name", File(root, name).path)
+        if (!plan.binds.wholeDev) DevNodes.createMountPoints(root, plan.binds.dev)
+        val links = RootLayout.links(appId, plan.usrLinks, plan.binds.wholeDev)
+        for ((path, target) in links) Os.symlink(target, File(root, path).apply { parentFile!!.mkdirs() }.path)
         plan.flatpakInfo?.let { File(root, ".flatpak-info").writeText(it) }
         File(root, Fdsec.APP_PATH.removePrefix("/")).apply { parentFile!!.mkdirs() }.createNewFile()
 
@@ -795,9 +793,6 @@ class FlatpakLauncher(private val context: Context) {
         File(plan.binds.tmp).mkdirs()
         File(plan.binds.shm).mkdirs()
         prepareRuntimeDir(appId, plan)
-        // As in Flatpak's roots.
-        File(root, "var").mkdirs()
-        Os.symlink("../run", File(root, "var/run").path)
         // The app can write these, so it can replace one with a link (see checkBindSources).
         for (dir in listOf(File(plan.binds.home)) + plan.binds.appDirs.map { File(it.first) }) {
             if (AndroidTarFs.isSymlink(dir)) dir.delete()
@@ -813,6 +808,11 @@ class FlatpakLauncher(private val context: Context) {
         plan.binds.appDirs.firstOrNull { it.second == "${GuestPaths.HOME}/.var/app/$appId" }?.let { (host, _) ->
             // A link the app left in its own folder is removed first: made through it, they would land wherever it leads.
             for (dir in listOf("config", "data", ".local/state")) AndroidTarFs.makeDirsBelow(File(host), dir)
+        }
+        // What the root's links lead to in the app's own directories (/var/tmp's folder in its cache, say).
+        for (target in links.values) {
+            val owner = plan.binds.appDirs.filter { target.startsWith(it.second + "/") }.maxByOrNull { it.second.length } ?: continue
+            AndroidTarFs.makeDirsBelow(File(owner.first), target.removePrefix(owner.second + "/"))
         }
         // Writable scratch for the runtime caches shadowed over the deployment (their guest paths
         // are under /usr, so the loop below skips making mount points for them — the runtime already

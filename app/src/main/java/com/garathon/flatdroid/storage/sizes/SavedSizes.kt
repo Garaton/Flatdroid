@@ -150,6 +150,9 @@ object SavedSizes {
     private const val RUNTIMES = "runtimes"
     /** In [RUNTIMES]' file, beside each runtime's size: all of them, shared files once (no Flatpak ID starts with a dot). */
     private const val RUNTIMES_ONCE = ".once"
+    /** [ListedSizes] names. */
+    private const val LISTED_L2S = "l2s"
+    private const val LISTED_OBJECTS = "objects"
     private val APP_KEYS = setOf("app", "flatpak", "home", "settings")
     private val SHARED_KEYS = setOf("runtimes", "other")
 
@@ -189,8 +192,20 @@ object SavedSizes {
     private val stop = { changingAll.get() > 0 }
 
     private fun store(context: Context): SizeStore =
-        store ?: synchronized(this) { store ?: SizeStore(File(context.filesDir, "storage-sizes")) { name, millis -> DebugLog.i("Measured $name in $millis ms") }
+        store ?: synchronized(this) { store ?: SizeStore(sizesDir(context)) { name, millis -> DebugLog.i("Measured $name in $millis ms") }
             .also { store = it } }
+
+    private fun sizesDir(context: Context) = File(context.filesDir, "storage-sizes")
+
+    /** Each deployment's size, saved by commit, so a Flatpak task's measuring walks only the deployments it added. */
+    private fun deployments(context: Context) = DeploymentSizes(File(sizesDir(context), "deployments"))
+
+    /** What [StorageSizes.following] counts a deployment as: its saved size, or walked now and saved. */
+    private fun deploymentSize(context: Context, l2s: File): (File) -> DeploymentSize = { dir ->
+        val fingerprint = StorageSizes.fingerprint(dir)
+        if (fingerprint == null) StorageSizes.deployment(dir, l2s, stop)
+        else deployments(context).get(dir.name, fingerprint, keep = { !stop() }) { StorageSizes.deployment(dir, l2s, stop) }
+    }
 
     /** [appId]'s sizes as last saved, perhaps from before a change; null when never measured. Never measures. */
     fun lastApp(context: Context, appId: String): App? =
@@ -209,7 +224,7 @@ object SavedSizes {
             store(context).get(appId, APP_KEYS) {
                 val env = AlpineEnvironment.get(context)
                 val l2s = File(env.paths().l2sDir)
-                val flatpak = StorageSizes.following(flatpakFiles(env, appId), l2s, stop)
+                val flatpak = StorageSizes.following(flatpakFiles(env, appId), l2s, stop, deploymentSize(context, l2s))
                 mapOf(
                     "app" to flatpak + StorageSizes.of(File(AppData.electronDir(context), appId), stop),
                     "flatpak" to flatpak,
@@ -237,10 +252,45 @@ object SavedSizes {
                 AppData.root(context), AppData.electronDir(context), AppData.settingsDir(context), File(context.filesDir, "storage-sizes"), Catalog.dir(context),
             )
                 .map { it.canonicalPath }
-            val files = context.filesDir.canonicalFile.listFiles().orEmpty().filter { it.canonicalPath !in perApp }.sumOf { StorageSizes.of(it, stop) }
+            val files = measuredFiles(context, env, perApp)
             mapOf("runtimes" to runtimes, "other" to (files - runtimes - appFiles).coerceAtLeast(0))
         } } ?: return null
         return Shared(sizes.getValue("runtimes"), sizes.getValue("other"))
+    }
+
+    /**
+     * Everything Flatdroid keeps outside the cache but [perApp], as `du` counts it. The parts a
+     * Flatpak task leaves as they were aren't walked again: deployments come from their saved sizes
+     * ([deploymentSize]), link2symlink's store and Flatpak's repository objects (named by their
+     * content) from their [ListedSizes]. How long each part took goes to the log.
+     */
+    private fun measuredFiles(context: Context, env: AlpineEnvironment, perApp: List<String>): Long {
+        val l2s = File(env.paths().l2sDir).canonicalFile
+        val flatpak = env.flatpakDir.canonicalFile
+        val objects = File(flatpak, "repo/objects")
+        val kinds = setOf(File(flatpak, "app").path, File(flatpak, "runtime").path)
+        val listed = ListedSizes(File(sizesDir(context), "listed"))
+        val deployment = deploymentSize(context, l2s)
+        val millis = LongArray(3)
+        fun <T> timed(part: Int, measure: () -> T): T {
+            val started = System.nanoTime()
+            return measure().also { millis[part] += (System.nanoTime() - started) / 1_000_000 }
+        }
+        val started = System.nanoTime()
+        val instead = { entry: File ->
+            when {
+                entry.path == l2s.path -> timed(0) { StorageSizes.listed(listed, LISTED_L2S, entry, stop) }
+                entry.path == objects.path -> timed(1) { StorageSizes.listed(listed, LISTED_OBJECTS, entry, stop) }
+                // `<kind>/<ID>/<arch>/<branch>/<commit>`
+                DeploymentSizes.COMMIT.matches(entry.name) && entry.parentFile?.parentFile?.parentFile?.parentFile?.path in kinds ->
+                    timed(2) { deployment(entry).own }
+                else -> null
+            }
+        }
+        val total = context.filesDir.canonicalFile.listFiles().orEmpty().filter { it.canonicalPath !in perApp }.sumOf { StorageSizes.of(it, stop, instead) }
+        val all = (System.nanoTime() - started) / 1_000_000
+        DebugLog.i("Measured files: link2symlink's store ${millis[0]} ms, repository objects ${millis[1]} ms, deployments ${millis[2]} ms, the rest ${all - millis.sum()} ms")
+        return total
     }
 
     /**
@@ -257,7 +307,9 @@ object SavedSizes {
         val l2s = File(env.paths().l2sDir)
         val dirs = runtimeDirs(env)
         store(context).get(RUNTIMES, dirs.map { it.name }.toSet() + RUNTIMES_ONCE) {
-            val (each, once) = StorageSizes.followingEach(dirs, l2s, stop)
+            // After every Flatpak task (it is part of the shared size): the sizes of removed deployments go.
+            removeGoneDeployments(context, env)
+            val (each, once) = StorageSizes.followingEach(dirs, l2s, stop, deploymentSize(context, l2s))
             dirs.map { it.name }.zip(each).toMap() + (RUNTIMES_ONCE to once)
         }
     }
@@ -340,7 +392,27 @@ object SavedSizes {
      * by a stop or a kill) would stay for good. Only with Flatpak's installation in place, since
      * without it every app would look gone.
      */
-    fun removeStale(context: Context) = store(context).removeExcept(appIds(context) + SHARED + RUNTIMES)
+    fun removeStale(context: Context) {
+        store(context).removeExcept(appIds(context) + SHARED + RUNTIMES)
+        removeGoneDeployments(context, AlpineEnvironment.get(context))
+    }
+
+    /** The saved sizes of deployments that are gone. Not while a change is under way: it may be deploying one. */
+    private fun removeGoneDeployments(context: Context, env: AlpineEnvironment) {
+        if (stop()) return
+        val commits = listOf("app", "runtime").flatMapTo(HashSet()) { kind ->
+            File(env.flatpakDir, kind).listFiles().orEmpty().flatMap { id ->
+                id.listFiles().orEmpty().flatMap { arch -> arch.listFiles().orEmpty().flatMap { branch -> branch.list().orEmpty().toList() } }
+            }
+        }
+        deployments(context).removeExcept(commits)
+    }
+
+    /**
+     * After a script added files to the deployment in [dir] (extra data): its saved size goes. Its
+     * directory keeps its [StorageSizes.fingerprint], so the change wouldn't be seen otherwise.
+     */
+    fun forgetDeployment(context: Context, dir: File) = deployments(context).forget(dir.name)
 
     /** Apps Flatdroid has files for: installed, or with data or Flatdroid settings left. */
     fun appIds(context: Context): Set<String> {
