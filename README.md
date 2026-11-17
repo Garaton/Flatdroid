@@ -189,7 +189,7 @@ In case you want to modify the Alpine environment yourself, if this is to check 
 
 ## Building
 
-- Requirements: Android SDK platform-tools, platforms;android-35, build-tools 35, NDK 30, JDK 21, CMake 3.22.1, make, git, curl, gawk, readelf.
+- Requirements: Android SDK platform-tools, platforms;android-37, build-tools 36, NDK 30, JDK 21, CMake 3.22.1, make, git, curl, gawk, readelf.
 - Clone the repository: `git clone https://github.com/Garaton/Flatdroid.git`.
 - Build: In the base directory: `./gradlew assemble[architecture]["Release" or "Debug"]`.
   - ex: `./gradlew assembleArm64Debug`
