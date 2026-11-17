@@ -117,7 +117,7 @@ class FlatpakLauncher(private val context: Context) {
 
     fun electronSwap(appId: String) = ElectronSwap(
         dir = File(AppData.electronDir(context), appId),
-        workDir = env.workDir,
+        cacheDir = env.cacheDir,
         arch = arch,
         allowedSources = listOf(env.flatpakDir, File(env.paths().l2sDir)),
         fs = AndroidTarFs,
@@ -245,7 +245,7 @@ class FlatpakLauncher(private val context: Context) {
             busArgs = SessionBus.proxyArgs(appId, plan.app.metadata.sessionBusPolicy, camera = cameraNodes.isNotEmpty()),
             cameraNodes = cameraNodes,
         )
-        // After both, which create the directories it checks: they live in the cache, which Android may
+        // After both, which create the directories it checks: they live in the work folder, which a start of Flatdroid empties, or in the cache, which Android may
         // clear at any time, and a fresh install has none yet.
         checkBindSources(plan)
 
@@ -275,6 +275,7 @@ class FlatpakLauncher(private val context: Context) {
                     "${screenWidth}x$screenHeight", frameRate, audio, resampler, sessionBus = true,
                     camera = cameraNodes.isNotEmpty(), clipboard = settings.sharesClipboard, wayland = plan.wayland,
                     externalViewer = externalViewer, interfaceSize = settings.interfaceSize,
+                    memfd = SessionScript.kernelHasMemfd(Os.uname().release),
                 ),
                 audio,
                 Fdsec.Filter(extraSyscalls = security.extraSyscallFilter),

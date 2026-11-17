@@ -451,6 +451,8 @@ class StorageFlows(
      * rotation, this one doesn't).
      */
     private fun applyFlatdroidSettings(uri: Uri) {
+        // The write below outlives this window (a rotation): it must hold the application, not the activity.
+        val appContext = activity.applicationContext
         activity.lifecycleScope.launch {
             val imported = withContext(Dispatchers.IO) {
                 try {
@@ -465,11 +467,13 @@ class StorageFlows(
                         if (SettingsBackup.appId(file.name) != null) runCatching { file.readBytes() }.onSuccess { local[file.name] = it }
                     }
                     val appFiles = SettingsBackup.appSettingsToWrite(files, local)
+                    // Not the activity: the model keeps this until Alpine's commands finish, a rotation or more.
+                    val appContext = activity.applicationContext
                     val write = {
                         for ((fileName, bytes) in appFiles) {
                             File(appDir, fileName).writeAtomically { it.write(bytes) }
                             // They count in each app's settings size.
-                            SettingsBackup.appId(fileName)?.let { SavedSizes.changed(activity.applicationContext, it) }
+                            SettingsBackup.appId(fileName)?.let { SavedSizes.changed(appContext, it) }
                         }
                     }
                     SettingsBackup.keepingDevice(settings, SetupController.saved(activity)) to write

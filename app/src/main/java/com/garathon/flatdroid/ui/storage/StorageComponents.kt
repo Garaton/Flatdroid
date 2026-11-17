@@ -39,8 +39,11 @@ import com.garathon.flatdroid.ui.list.ScrollToTopOnNewOrder
 import com.garathon.flatdroid.ui.list.ListSpec
 import com.garathon.flatdroid.ui.list.rememberListQuery
 
-/** One part of the size bar. A null [bytes] isn't measured yet. */
-class StorageSegment(@StringRes val label: Int, val bytes: Long?, val color: Color)
+/**
+ * One part of the size bar. A null [bytes] isn't measured yet. Held sideways the legend has a
+ * column for each [column] used, in its order.
+ */
+class StorageSegment(@StringRes val label: Int, val bytes: Long?, val color: Color, val column: Int = 0)
 
 /** A bar of the parts of a total, and a legend with each part's size. */
 @Composable
@@ -67,11 +70,11 @@ fun StorageBar(segments: List<StorageSegment>, modifier: Modifier = Modifier) {
                 }
             }
         }
-        // Held sideways the legend is two columns: the Flatpaks' parts (the first, second and last) and then what each app keeps.
-        if (LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE && segments.size == 6) {
+        // Held sideways the legend has a column for each [StorageSegment.column] used, each in the segments' order.
+        val columns = segments.groupBy { it.column }.toSortedMap().values
+        if (LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE && columns.size > 1) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-                Legend(listOf(segments[0], segments[1], segments[5]), Modifier.weight(1f))
-                Legend(listOf(segments[2], segments[3], segments[4]), Modifier.weight(1f))
+                for (column in columns) Legend(column, Modifier.weight(1f))
             }
         } else {
             Legend(segments, Modifier.fillMaxWidth())

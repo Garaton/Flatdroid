@@ -190,7 +190,7 @@ class AppSettingsTest {
                 assertEquals(settings.audioAllowed(if (asks) listOf("pulseaudio") else emptyList()), settings.audioOn(asks))
                 assertEquals(settings.networkAllowed(if (asks) listOf("network") else emptyList()), settings.networkOn(asks))
                 assertEquals(settings.microphoneAllowed(if (asks) listOf("pulseaudio") else emptyList()), settings.microphoneOn(asks))
-                assertEquals(settings.cameraAllowed(FlatpakContext(filesystems = if (asks) listOf("xdg-run/pipewire-0") else emptyList())), settings.cameraOn(asks))
+                assertEquals(settings.cameraAllowed(FlatpakContext(filesystems = if (asks) listOf("xdg-pictures/Camera:create") else emptyList())), settings.cameraOn(asks))
             }
         }
         assertTrue(AppSettings().defaultOn(true))
@@ -208,7 +208,7 @@ class AppSettingsTest {
     fun microphoneAndCameraFollowTheMetadataUntilOverridden() {
         val sound = listOf("x11", "pulseaudio")
         val allDevices = FlatpakContext(devices = listOf("all"))
-        val camera = FlatpakContext(filesystems = listOf("xdg-run/pipewire-0:ro"))
+        val camera = FlatpakContext(filesystems = listOf("xdg-pictures/Camera:create"))
         val plain = FlatpakContext(sockets = sound, devices = listOf("dri"))
         // By default: the microphone for an app that asks for sound, the camera for a hint that it uses one.
         val unset = AppSettings()

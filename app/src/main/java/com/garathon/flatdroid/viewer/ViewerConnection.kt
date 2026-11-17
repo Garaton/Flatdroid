@@ -89,7 +89,7 @@ object ViewerConnection {
         speed = ScrollSpeed(speedKey?.let { saved?.getProperty(it) })
         speedAcross = ScrollSpeed(speedKey?.let { saved?.getProperty("$it$ACROSS") })
         waylandClient = waylandSocket?.let { socket ->
-            // The windows are counted for an app that HiddenPause was attached to (not "Continue while hidden").
+            // The windows are counted for the app HiddenPause was attached to (every app, not only those that pause while hidden).
             WaylandClient(
                 socket, ::androidText.takeIf { shareClipboard }, outputRefresh?.let { it * 1000 }, cacheDir,
                 onWindows = HiddenPause::windows.takeIf { HiddenPause.attached },
@@ -217,7 +217,6 @@ object ViewerConnection {
         this.sink = null
         shown = false
         SessionController.viewerVisible(false)
-        HiddenPause.viewerShown(false)
     }
 
     /** [sink] became visible or hidden; a newer viewer may already be the one attached. Main thread. */
@@ -225,7 +224,6 @@ object ViewerConnection {
         if (this.sink !== sink) return
         shown = visible
         SessionController.viewerVisible(visible)
-        HiddenPause.viewerShown(visible)
         // Nobody sees the output while hidden: the apps needn't draw more than about once a second.
         client?.framebuffer?.let { fb -> waylandClient?.hidden(!visible, fb.width, fb.height) }
         if (visible) {

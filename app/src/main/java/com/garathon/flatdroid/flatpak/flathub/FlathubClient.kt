@@ -26,8 +26,8 @@ data class FlathubApp(
     val runtimeSize: Long?,
     val runtimeRef: FlatpakRef?,
     val permissions: Set<Permission>,
-    /** Flathub verified that the app comes from who it says (its developer's website or account). */
-    val verified: Boolean = false,
+    /** Flathub verified that the app comes from who it says (its developer's website or account); null when its AppStream answer didn't come. */
+    val verified: Boolean? = null,
 ) {
     /** What an app asks for that Flatdroid shows, as it does for installed apps. */
     enum class Permission { NETWORK, SOUND, ALL_DEVICES, FILES }
@@ -165,7 +165,7 @@ object FlathubClient {
                 if (filesystems.any { it.substringBefore(':') in setOf("home", "host", "host-os") }) add(FlathubApp.Permission.FILES)
             },
             // A JSON true, or "true" as AppStream's own custom values are strings.
-            verified = appstream?.optJSONObject("metadata")?.optBoolean(VERIFIED) == true,
+            verified = appstream?.let { it.optJSONObject("metadata")?.optBoolean(VERIFIED) == true },
         )
     }
 

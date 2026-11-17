@@ -8,6 +8,7 @@ import com.garathon.flatdroid.proot.DevNodes
 import com.garathon.flatdroid.settings.AppSettings
 import com.garathon.flatdroid.settings.AppSettingsStore
 import com.garathon.flatdroid.storage.AppData
+import com.garathon.flatdroid.util.WHITESPACE
 import com.garathon.flatdroid.util.io.readTextUpTo
 import java.io.File
 import java.util.Locale
@@ -153,7 +154,6 @@ class InstalledApps(private val context: Context) {
         fun isValidId(id: String): Boolean =
             id.length <= 255 && ID.matches(id)
 
-        private val WHITESPACE = Regex("\\s+")
         private val ID = Regex("[A-Za-z_][A-Za-z0-9_-]*(\\.[A-Za-z0-9_-]+)+")
 
         /** The app IDs in [text], separated by whitespace, each once; null if there are none or any isn't valid. */

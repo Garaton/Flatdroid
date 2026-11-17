@@ -1,6 +1,7 @@
 package com.garathon.flatdroid.launcher
 
 import com.garathon.flatdroid.proot.GuestPaths
+import com.garathon.flatdroid.util.ENV_NAME
 
 /**
  * The environment every Flatpak starts with. One set serves all apps: the toolkit variables are
@@ -37,7 +38,7 @@ object LaunchEnvironment {
         /** The session is Wayland: the toolkits are pointed at it instead of X11. */
         wayland: Boolean = false,
         /** GTK 4 and Qt Quick draw on the CPU instead of through GL ([Rendering]). */
-        softwareRendering: Boolean = false,
+        softwareRendering: Boolean = true,
     ): LinkedHashMap<String, String> {
         val varApp = "${GuestPaths.HOME}/.var/app/$appId"
         val env = linkedMapOf(
@@ -146,11 +147,10 @@ object LaunchEnvironment {
 
     private val LANGUAGE = Regex("[a-z]{2,3}")
     private val COUNTRY = Regex("[A-Z]{2}")
-    private val NAME = Regex("[A-Za-z_][A-Za-z0-9_]*")
     private val LEGACY_LANGUAGES = mapOf("iw" to "he", "in" to "id", "ji" to "yi")
 
     /** A usable variable name; anything else could be read by `env` as an option or the command. */
-    fun isName(key: String) = NAME.matches(key)
+    fun isName(key: String) = ENV_NAME.matches(key)
 
     /** GNU triplet of a Flatpak architecture, as runtimes name their library directories. */
     fun triplet(arch: String) = "$arch-linux-gnu"

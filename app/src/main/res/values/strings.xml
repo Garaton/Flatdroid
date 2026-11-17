@@ -63,7 +63,7 @@
     <string name="app_settings_sdcard_needs_access">Needs All files access, which is in Flatdroid\'s settings under Storage.</string>
     <string name="app_settings_force_x11_unavailable">Only for apps that ask for both Wayland and X11.</string>
     <string name="settings_interface_theme">Flatdroid theme</string>
-    <string name="settings_interface_theme_hint">How Flatdroid themes its own UI. AMOLED has a pure black background, which saves power on AMOLED screens..</string>
+    <string name="settings_interface_theme_hint">How Flatdroid themes its own UI. AMOLED has a pure black background, which saves power on AMOLED screens.</string>
     <string name="settings_theme_amoled">AMOLED</string>
     <string name="settings_mobile_data">Mobile data</string>
     <string name="settings_flathub_links">Flathub links</string>
@@ -551,8 +551,8 @@
     <string name="app_settings_rendering_automatic">Automatic</string>
     <string name="app_settings_rendering_software">Software</string>
     <string name="app_settings_rendering_gl">OpenGL</string>
-    <string name="app_settings_rendering_hint">How GTK 4 and Qt Quick apps draw. Software needs less memory and processor time. OpenGL is for apps with 3D or effects. Automatic uses OpenGL only while the app\'s camera is on.</string>
-    <string name="app_settings_interface_size_hint">Draws the app\'s text and controls larger or smaller. Older apps run better at 100% or 200%</string>
+    <string name="app_settings_rendering_hint">How GTK 4 and Qt Quick apps draw. Software needs less memory and CPU, but sacrifices compatability, and performs worse with cameras. Automatic turns on OpenGL when camera permissions are on.</string>
+    <string name="app_settings_interface_size_hint">Draws the app\'s text and controls larger or smaller. Older apps run better at 100% or 200%.</string>
     <string name="app_settings_force_x11">Force X11</string>
     <string name="app_settings_force_x11_hint">Runs the app on X11 instead of Wayland, using more CPU. Try X11 if the app misbehaves.</string>
     <string name="app_settings_launch_args_hint">Added after the app\'s own command, separated by spaces. Each is passed as it is: no quoting.</string>

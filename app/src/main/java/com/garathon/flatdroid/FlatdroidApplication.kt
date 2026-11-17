@@ -66,10 +66,10 @@ class FlatdroidApplication : Application() {
     }
 
     /**
-     * Temporary files an earlier run's commands left in the work folder (the guest's /tmp, proot's,
-     * downloads, extra data being unpacked): moved aside at once, before anything of this run can
-     * start a command, and deleted in the background. The temporary home and an import's staging
-     * stay: the user is still asked about them.
+     * Temporary files an earlier run's commands and apps left in the work folder (the guest's /tmp,
+     * proot's, the apps' roots and private /tmp, the session's sockets): moved aside at once, before
+     * anything of this run can start a command, and deleted in the background. The temporary home
+     * and an import's staging stay: the user is still asked about them.
      */
     private fun setAsideLeftoverWork(): File {
         val env = AlpineEnvironment.get(this)
@@ -91,7 +91,7 @@ class FlatdroidApplication : Application() {
                 installation = FlatpakInstallation(env.flatpakDir, env.arch),
                 electronDir = AppData.electronDir(this),
                 perAppCacheDirs = listOf(
-                    AppData.cacheRoot(this), AppData.rootsDir(this), AppData.appTmpDir(this), File(env.workDir, ElectronSwap.BUILD_DIR),
+                    AppData.cacheRoot(this), AppData.rootsDir(this), AppData.appTmpDir(this), File(env.cacheDir, ElectronSwap.BUILD_DIR),
                 ),
                 fs = AndroidTarFs,
             ).clean()

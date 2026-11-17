@@ -8,12 +8,12 @@ import org.junit.Test
 
 class NoWindowWaitTest {
     @Test
-    fun anAppThatHadAWindowIsPausedFiveSecondsAfterTheLastOneClosed() {
+    fun anAppThatHadAWindowIsPausedTenSecondsAfterTheLastOneClosed() {
         val wait = NoWindowWait(startedAt = 0)
         assertNull(wait.windows(1, now = 20_000))
-        assertEquals(30_000L, wait.windows(0, now = 25_000))
+        assertEquals(35_000L, wait.windows(0, now = 25_000))
         // The same answer again changes nothing: the wait counts from the close.
-        assertEquals(30_000L, wait.windows(0, now = 27_000))
+        assertEquals(35_000L, wait.windows(0, now = 27_000))
         assertTrue(wait.empty)
         assertTrue(wait.opened)
     }
@@ -23,14 +23,14 @@ class NoWindowWaitTest {
         val wait = NoWindowWait(startedAt = 0)
         wait.windows(1, 1_000)
         wait.windows(0, 2_000)
-        assertEquals(17_000L, wait.resumed(now = 7_000)) // 5 s doubled
-        assertEquals(10_000L, wait.waitMs)
+        assertEquals(27_000L, wait.resumed(now = 7_000)) // 10 s doubled
+        assertEquals(20_000L, wait.waitMs)
         assertNull(wait.windows(2, 8_000))
         assertFalse(wait.empty)
-        assertEquals(5_000L, wait.waitMs)
+        assertEquals(10_000L, wait.waitMs)
         // One of two closing isn't none.
         assertNull(wait.windows(1, 9_000))
-        assertEquals(15_000L, wait.windows(0, 10_000))
+        assertEquals(20_000L, wait.windows(0, 10_000))
     }
 
     @Test
@@ -39,7 +39,7 @@ class NoWindowWaitTest {
         wait.windows(1, 0)
         wait.windows(0, 0)
         val waits = (1..10).map { wait.resumed(now = 0); wait.waitMs }
-        assertEquals(listOf(10_000L, 20_000L, 40_000L, 80_000L, 160_000L), waits.take(5))
+        assertEquals(listOf(20_000L, 40_000L, 80_000L, 160_000L, 300_000L), waits.take(5))
         assertTrue(waits.drop(5).all { it == 300_000L })
     }
 
@@ -54,5 +54,41 @@ class NoWindowWaitTest {
         assertEquals(370_000L, wait.resumed(now = 130_000))
         assertEquals(670_000L, wait.resumed(now = 370_000))
         assertEquals(300_000L, wait.waitMs)
+    }
+
+    @Test
+    fun timeStoppedForAnotherReasonDoesntCount() {
+        val wait = NoWindowWait(startedAt = 0)
+        assertNull(wait.deadline) // nothing is known before the first count
+        assertEquals(120_000L, wait.windows(0, now = 1_000))
+        assertEquals(120_000L, wait.deadline)
+        // Stopped from 30 s to 200 s: the two minutes run on from where they were.
+        wait.suspended(from = 30_000, until = 200_000)
+        assertEquals(290_000L, wait.deadline)
+        wait.windows(1, 210_000)
+        assertNull(wait.deadline)
+    }
+
+    @Test
+    fun aResumeInsideTheStopCountsFromTheEndOfIt() {
+        val wait = NoWindowWait(startedAt = 0)
+        wait.windows(1, 0)
+        wait.windows(0, 1_000)
+        wait.resumed(now = 60_000) // doubled: 20 s from the resume
+        wait.suspended(from = 40_000, until = 100_000)
+        assertEquals(120_000L, wait.deadline)
+    }
+
+    @Test
+    fun anAppWhoseWindowsNobodyCountsGetsItsFirstWindowTimeBeforeAHiddenPause() {
+        val wait = NoWindowWait(startedAt = 1_000)
+        assertEquals(120_000L, wait.firstWindowLeft(now = 1_000))
+        assertEquals(31_000L, wait.firstWindowLeft(now = 90_000))
+        assertEquals(0L, wait.firstWindowLeft(now = 200_000))
+        // Counted: the wait for a window decides, not this.
+        wait.windows(0, now = 2_000)
+        assertEquals(0L, wait.firstWindowLeft(now = 3_000))
+        val opened = NoWindowWait(startedAt = 0).apply { windows(1, 0) }
+        assertEquals(0L, opened.firstWindowLeft(now = 1_000))
     }
 }

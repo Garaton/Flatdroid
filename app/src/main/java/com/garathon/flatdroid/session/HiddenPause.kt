@@ -22,7 +22,10 @@ import kotlinx.coroutines.launch
  *
  * A second reason to pause, for every app: no window is open ([windows], [NoWindowWait]). That
  * pause holds whether the viewer is on screen or not, until the user lets the app go on
- * ([resumeNoWindow]) or stops it, and the viewer coming back doesn't undo it.
+ * ([resumeNoWindow]) or stops it, and the viewer coming back doesn't undo it. An app with no
+ * window open is never paused for being hidden: this reason, which asks the user, decides, so an app
+ * that hasn't opened its first window yet keeps running until the question comes (two minutes). Where
+ * nobody counts the windows (the viewer never connected), that time passes before the hidden pause.
  *
  * The pause is two signals: SIGSTOP to the app's proot first, then to every process it traces. A
  * traced process that gets a signal waits for its tracer, which, stopped, can't let it go (SIGSTOP
@@ -41,6 +44,8 @@ object HiddenPause {
     private var stopped = false
     /** The viewer has been hidden for [GRACE_MS]. */
     private var hiddenStop = false
+    /** When [hiddenStop] began, on [SystemClock.elapsedRealtime]'s clock. */
+    private var hiddenStopAt = 0L
     /** No window was open for the wait: the user is asked ([SessionState.Running.noWindow]). */
     private var noWindowStop = false
     private var waiting: Job? = null
@@ -89,7 +94,12 @@ object HiddenPause {
         if (visible) {
             waiting?.cancel()
             waiting = null
-            hiddenStop = false
+            if (hiddenStop) {
+                // The no-window wait didn't run while the app was stopped for being hidden: it goes on from here.
+                hiddenStop = false
+                now.wait.suspended(hiddenStopAt, SystemClock.elapsedRealtime())
+                arm(now, now.wait.deadline)
+            }
             settle(now)
         } else {
             hidden()
@@ -103,6 +113,7 @@ object HiddenPause {
     @Synchronized
     fun windows(count: Int) {
         val now = session ?: return
+        val wasEmpty = now.wait.empty
         val deadline = now.wait.windows(count, SystemClock.elapsedRealtime())
         SessionController.opening(now.wait.empty && !now.wait.opened && !noWindowStop)
         if (count > 0 && noWindowStop) {
@@ -111,12 +122,21 @@ object HiddenPause {
             SessionController.noWindow(false)
             settle(now)
         }
+        // A window opened while the viewer is hidden: the app has something to pause now, so its grace starts.
+        if (wasEmpty && count > 0 && !shown && !hiddenStop) hidden()
         arm(now, deadline)
     }
 
-    /** The user chose to let the app go on with no window: the next pause waits twice as long. */
-    @Synchronized
+    /**
+     * The user chose to let the app go on with no window: the next pause waits twice as long. From the
+     * main thread (a button): the signals and the process table go on the shared threads.
+     */
     fun resumeNoWindow() {
+        appScope.launch(Dispatchers.Default) { resume() }
+    }
+
+    @Synchronized
+    private fun resume() {
         val now = session ?: return
         if (!noWindowStop) return
         noWindowStop = false
@@ -134,7 +154,8 @@ object HiddenPause {
         windowWait = appScope.launch(Dispatchers.Default) {
             delay((deadline - SystemClock.elapsedRealtime()).coerceAtLeast(0))
             synchronized(this@HiddenPause) {
-                if (session !== now || noWindowStop || !now.wait.empty) return@synchronized
+                // Stopped for being hidden: the wait goes on when the viewer is back ([viewerShown]).
+                if (session !== now || noWindowStop || hiddenStop || !now.wait.empty) return@synchronized
                 if (!stop(now)) return@synchronized
                 noWindowStop = true
                 settle(now)
@@ -151,8 +172,18 @@ object HiddenPause {
         waiting?.cancel()
         waiting = appScope.launch(Dispatchers.Default) {
             delay(GRACE_MS)
+            // An app nobody counts the windows of (the viewer never connected) keeps running until its
+            // first-window time is over: a slow start has no window for long, and stopping it stalls it.
+            now.wait.firstWindowLeft(SystemClock.elapsedRealtime()).takeIf { it > 0 }?.let { delay(it) }
             synchronized(this@HiddenPause) {
-                if (session === now && !shown && !hiddenStop && stop(now)) hiddenStop = true
+                if (session !== now || shown || hiddenStop) return@synchronized
+                // Windows counted and none open: the wait for a window decides (it asks the user, who can let the app
+                // go on). Stopping it here as well would hide that question, and Resume would change nothing.
+                if (now.wait.known && now.wait.empty) return@synchronized
+                if (stop(now)) {
+                    hiddenStop = true
+                    hiddenStopAt = SystemClock.elapsedRealtime()
+                }
             }
         }
     }

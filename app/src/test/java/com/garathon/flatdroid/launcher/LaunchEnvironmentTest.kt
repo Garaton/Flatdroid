@@ -21,7 +21,10 @@ class LaunchEnvironmentTest {
         assertFalse("LIBGL_ALWAYS_SOFTWARE" in env)
         // Flutter apps draw in software: GTK3 gets no GL context from Xvnc.
         assertEquals("software", env["FLUTTER_LINUX_RENDERER"])
-        assertEquals(30, env.size)
+        // Software rendering is the default: Qt Quick gets its backend, GTK 4 cairo.
+        assertEquals("software", env["QT_QUICK_BACKEND"])
+        assertEquals("cairo", env["GSK_RENDERER"])
+        assertEquals(31, env.size)
     }
 
     @Test
@@ -41,7 +44,7 @@ class LaunchEnvironmentTest {
 
     @Test
     fun softwareRenderingSetsGtkAndQtQuickToTheCpuAndAnOverrideStillWins() {
-        val gl = LaunchEnvironment.build("org.xfce.mousepad", "aarch64-linux-gnu", emptyMap(), glDefault = null)
+        val gl = LaunchEnvironment.build("org.xfce.mousepad", "aarch64-linux-gnu", emptyMap(), glDefault = null, softwareRendering = false)
         assertEquals("gl", gl["GSK_RENDERER"])
         assertFalse("QT_QUICK_BACKEND" in gl)
         val software = LaunchEnvironment.build("org.xfce.mousepad", "aarch64-linux-gnu", emptyMap(), glDefault = null, softwareRendering = true)

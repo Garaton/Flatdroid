@@ -67,7 +67,7 @@ class CatalogIndex private constructor(
         const val LIST = "list"
         const val DETAILS = "details"
         const val SEARCH = "search"
-        /** 3: each app once (format 1 could hold an app twice, once per branch), its runtime, and [SEARCH]. */
+        /** 3: each app once (format 1 could hold an app twice, once per branch), its runtime, and [SEARCH]. 4: no verified flag (Flathub's lists say). */
         private const val FORMAT = 4
         private const val STABLE = "stable"
 

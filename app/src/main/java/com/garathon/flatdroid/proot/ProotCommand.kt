@@ -1,5 +1,6 @@
 package com.garathon.flatdroid.proot
 
+import com.garathon.flatdroid.util.ENV_NAME
 /** Host paths proot needs. All must be absolute. */
 data class ProotPaths(
     /** nativeLibraryDir/libproot.so */
@@ -136,7 +137,6 @@ data class ProotInvocation(val argv: List<String>, val env: Map<String, String>)
  * The environment is complete, since the process starts from a cleared one.
  */
 object ProotCommand {
-    private val ENV_NAME = Regex("[A-Za-z_][A-Za-z0-9_]*")
     val GUEST_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
     /** `apply_extra` runs as Flatpak runs it: no network. */

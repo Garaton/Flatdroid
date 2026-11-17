@@ -31,8 +31,9 @@ import java.io.FileInputStream
  * and running commands in it.
  *
  * Persistent: `files/alpine/rootfs` and `files/alpine/generated` (config bound into the guest).
- * Temporary, in the work folder ([AppData.workDir]): the guest's /tmp and /dev/shm, proot's own
- * temporary files, the rootfs and package downloads.
+ * Temporary, in the work folder ([AppData.workDir]): the guest's /tmp and /dev/shm and proot's own
+ * temporary files, which a running command or app can't do without. In cache: the rootfs and
+ * package downloads and extra data, which a task or setup that loses them can run again.
  */
 class AlpineEnvironment private constructor(private val context: Context) {
     // Fully resolved paths only. Android hands out /data/user/0/<package>, which on some devices
@@ -50,13 +51,13 @@ class AlpineEnvironment private constructor(private val context: Context) {
     private val tmpAlpine = File(workDir, "alpine")
     /** proot's own temporary files. */
     private val prootTmp = File(workDir, "proot-tmp")
-    /** apk's downloads during setup and Alpine's updates, deleted once installed. */
-    val apkCacheDir = File(workDir, "apk-cache")
-    /** Where extra data is unpacked (`flatpak.tasks.ExtraData`). */
-    val extraDataDir = File(workDir, "extra-data")
+    /** apk's downloads during setup and Alpine's updates, deleted once installed (in cache: a lost download is made again). */
+    val apkCacheDir = File(cacheDir, "apk-cache")
+    /** Where extra data is unpacked (`flatpak.tasks.ExtraData`); in cache, since a task that loses it runs again. */
+    val extraDataDir = File(cacheDir, "extra-data")
     private val libDir = File(context.applicationInfo.nativeLibraryDir).canonicalFile
 
-    val installer = RootfsInstaller(alpineDir, workDir, AndroidTarFs)
+    val installer = RootfsInstaller(alpineDir, cacheDir, AndroidTarFs)
 
     /** Alpine/Flathub architecture of the installed native libraries (lib/arm64 or lib/x86_64). */
     val arch: String = ARCH_BY_LIB_DIR[libDir.name] ?: error("Unsupported ABI directory: $libDir")
@@ -66,10 +67,14 @@ class AlpineEnvironment private constructor(private val context: Context) {
     /** Everything temporary that belongs to Alpine: guest /tmp and /dev/shm, proot's files, downloads. */
     fun temporaryFiles(): List<File> =
         listOf(tmpAlpine, prootTmp, apkCacheDir, extraDataDir) +
-            (workDir.listFiles { f -> f.name.startsWith("alpine-minirootfs-") }?.toList() ?: emptyList())
+            (cacheDir.listFiles { f -> f.name.startsWith("alpine-minirootfs-") }?.toList() ?: emptyList())
 
-    /** What no command of a new run of Flatdroid's process can be using yet: the guest's /tmp and /dev/shm, proot's files, apk's downloads, extra data. */
-    fun leftoverFiles(): List<File> = listOf(tmpAlpine, prootTmp, apkCacheDir, extraDataDir)
+    /**
+     * What no command or app of a new run of Flatdroid's process can be using yet, and Android can't
+     * reclaim: the guest's /tmp and /dev/shm, proot's files, and the last session's roots, private /tmp and sockets.
+     */
+    fun leftoverFiles(): List<File> =
+        listOf(tmpAlpine, prootTmp, AppData.rootsDir(context), AppData.appTmpDir(context), AppData.sessionDir(context))
 
     /**
      * Runs [command] in Alpine as fake root. Generated files are refreshed first, since the

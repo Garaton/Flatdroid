@@ -95,12 +95,17 @@ class FlatpakMetadataTest {
     }
 
     @Test
-    fun aCameraHintIsAllDevicesOrThePipewireSocket() {
+    fun aCameraHintIsTheCameraFolders() {
         assertFalse(FlatpakContext(devices = listOf("all")).mayUseCamera) // To maybe be changed if we decide different behavior in the future
-        assertTrue(FlatpakContext(filesystems = listOf("xdg-run/pipewire-0:ro")).mayUseCamera)
-        assertTrue(FlatpakContext(filesystems = listOf("xdg-run/pipewire-0")).mayUseCamera)
-        assertFalse(FlatpakContext(devices = listOf("dri"), filesystems = listOf("home", "xdg-run/pipewire-0-manager")).mayUseCamera)
+        // The PipeWire socket isn't one: apps that open /dev/video* themselves ask for it too.
+        assertFalse(FlatpakContext(filesystems = listOf("xdg-run/pipewire-0:ro")).mayUseCamera)
+        assertFalse(FlatpakContext(devices = listOf("dri"), filesystems = listOf("home", "xdg-run/pipewire-0")).mayUseCamera)
         assertFalse(FlatpakContext(sockets = listOf("pulseaudio")).mayUseCamera)
+        // A camera app that needs no socket saves to the Camera folders (GNOME's Camera app does).
+        assertTrue(FlatpakContext(devices = listOf("dri"), filesystems = listOf("xdg-pictures/Camera:create", "xdg-videos/Camera:create")).mayUseCamera)
+        assertTrue(FlatpakContext(filesystems = listOf("xdg-videos/Camera/")).mayUseCamera)
+        // Not every app saving pictures or videos.
+        assertFalse(FlatpakContext(filesystems = listOf("xdg-pictures", "xdg-videos:rw", "xdg-pictures/Cameras")).mayUseCamera)
     }
 
     @Test

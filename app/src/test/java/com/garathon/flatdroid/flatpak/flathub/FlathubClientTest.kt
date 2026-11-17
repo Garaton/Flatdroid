@@ -38,18 +38,19 @@ class FlathubClientTest {
         assertEquals(setOf(FlathubApp.Permission.FILES), app.permissions)
         assertTrue(app.builtFor("aarch64"))
         assertFalse(app.builtFor("riscv64"))
-        assertFalse(app.verified)
+        assertEquals(false, app.verified)
     }
 
     @Test
     fun theVerificationComesFromTheAppstreamAnswer() {
         val verified = """{"name":"Mousepad","metadata":{"flathub::verification::verified":true,"flathub::verification::website":"xfce.org"}}"""
-        assertTrue(FlathubClient.parse("org.xfce.mousepad", mousepadSummary, verified).verified)
+        assertEquals(true, FlathubClient.parse("org.xfce.mousepad", mousepadSummary, verified).verified)
         val asText = """{"name":"Mousepad","metadata":{"flathub::verification::verified":"true"}}"""
-        assertTrue(FlathubClient.parse("org.xfce.mousepad", mousepadSummary, asText).verified)
+        assertEquals(true, FlathubClient.parse("org.xfce.mousepad", mousepadSummary, asText).verified)
         val no = """{"name":"Mousepad","metadata":{"flathub::verification::verified":false}}"""
-        assertFalse(FlathubClient.parse("org.xfce.mousepad", mousepadSummary, no).verified)
-        assertFalse(FlathubClient.parse("org.xfce.mousepad", mousepadSummary, null).verified)
+        assertEquals(false, FlathubClient.parse("org.xfce.mousepad", mousepadSummary, no).verified)
+        // No answer is not a no: the page then keeps what the saved lists say.
+        assertNull(FlathubClient.parse("org.xfce.mousepad", mousepadSummary, null).verified)
     }
 
     @Test

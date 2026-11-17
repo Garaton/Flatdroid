@@ -3,6 +3,7 @@ package com.garathon.flatdroid.flatpak.catalog
 import com.garathon.flatdroid.flatpak.InstalledApps
 import com.garathon.flatdroid.flatpak.flathub.FlathubHosts
 import org.xmlpull.v1.XmlPullParser
+import com.garathon.flatdroid.util.WHITESPACE
 
 /**
  * One app as [AppStreamReader] reads it: the list's part and the page's part. [branch] is its
@@ -239,6 +240,5 @@ class AppStreamReader(languages: List<String>) {
         private const val XML_NS = "http://www.w3.org/XML/1998/namespace"
         /** Screenshots are shown about a phone's width: the smallest thumbnail at least this wide. */
         private const val SCREENSHOT_WIDTH = 600
-        private val WHITESPACE = Regex("\\s+")
     }
 }

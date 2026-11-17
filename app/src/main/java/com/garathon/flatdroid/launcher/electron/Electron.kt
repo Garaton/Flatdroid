@@ -3,6 +3,7 @@ package com.garathon.flatdroid.launcher.electron
 import com.garathon.flatdroid.flatpak.Keyfile
 import java.io.File
 import java.io.InputStream
+import com.garathon.flatdroid.util.WHITESPACE
 
 /**
  * Electron apps on Flathub start through zypak (a Chromium sandbox helper that needs Flatpak's
@@ -150,7 +151,6 @@ object Electron {
     }
 
     private const val MAX_VERSION_LENGTH = 16
-    private val WHITESPACE = Regex("\\s+")
     private val SHA256_HEX = Regex("[0-9a-fA-F]{64}")
     private val VERSION = Regex("\\d+\\.\\d+\\.\\d+")
 

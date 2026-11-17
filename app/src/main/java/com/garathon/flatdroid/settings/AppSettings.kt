@@ -3,6 +3,7 @@ package com.garathon.flatdroid.settings
 import com.garathon.flatdroid.camera.AndroidCameras
 import com.garathon.flatdroid.flatpak.FlatpakContext
 import com.garathon.flatdroid.launcher.LaunchEnvironment
+import com.garathon.flatdroid.util.WHITESPACE
 import com.garathon.flatdroid.util.io.writeTextAtomically
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -405,8 +406,6 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
 
 /** [AppSettings.launchArgs] as the user edits it: arguments separated by whitespace, each taken as it is (no quoting). */
 object LaunchArgs {
-    private val WHITESPACE = Regex("\\s+")
-
     fun parse(text: String): List<String> = text.split(WHITESPACE).filter { it.isNotEmpty() }
 
     fun format(args: List<String>): String = args.joinToString(" ")

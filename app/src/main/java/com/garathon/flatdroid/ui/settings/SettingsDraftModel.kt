@@ -47,8 +47,11 @@ class SettingsDraftModel : ViewModel() {
         if (app?.appId != appId) app = AppEntry(appId, Draft(AppSettingsDraft.of(saved)))
     }
 
+    /** Also forgets a permission question still open: its answer, when it comes, is for a page that is gone. */
     fun clear() {
         global = null
         app = null
+        asking = null
+        permissionAnswer = null
     }
 }

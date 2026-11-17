@@ -7,13 +7,11 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
-import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import android.os.StatFs
 import androidx.core.app.NotificationCompat
-import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.garathon.flatdroid.MainActivity
 import com.garathon.flatdroid.R
@@ -43,6 +41,7 @@ import com.garathon.flatdroid.storage.sizes.SavedSizes
 import com.garathon.flatdroid.storage.TempHomes
 import com.garathon.flatdroid.util.debug.DebugLog
 import com.garathon.flatdroid.util.DoneNotice
+import com.garathon.flatdroid.util.startDataSyncForeground
 import com.garathon.flatdroid.util.io.writeTextAtomically
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -155,7 +154,10 @@ class FlatpakTaskService : Service() {
                 marker?.writeTextAtomically(task.toString())
                 baselineMarker?.writeTextAtomically(task.toString())
                 // A catalog refresh changes only Flatpak's catalog: the apps' and runtimes' sizes stay.
-                if (task != FlatpakTask.RefreshCatalog) SavedSizes.forgetAll(applicationContext)
+                if (task != FlatpakTask.RefreshCatalog) {
+                    SavedSizes.flatpakChangeBegan(applicationContext)
+                    SavedSizes.forgetAll(applicationContext)
+                }
                 runInterruptible { performRelinking(task) }
                 baselineMarker?.delete()
             } catch (e: CancellationException) {
@@ -175,6 +177,7 @@ class FlatpakTaskService : Service() {
                     runCatching { dns?.stop() }
                     runCatching { endEscaped() }
                     runCatching { marker?.delete() }
+                    runCatching { if (task != FlatpakTask.RefreshCatalog) SavedSizes.flatpakChangeEnded(applicationContext, finished = error == null) }
                     runCatching {
                         if (task == FlatpakTask.RefreshCatalog) SavedSizes.changedShared(applicationContext) else SavedSizes.changedAll(applicationContext)
                     }
@@ -451,8 +454,14 @@ class FlatpakTaskService : Service() {
         // Shared across apps so a runtime or extension several apps use is hashed once, not per app.
         val baselinedCommits = mutableSetOf<String>()
         // The bar never goes back: each deployment starts its files from 0, and a new command clears
-        // the bar, so it keeps what was reached until this deployment gets past it.
+        // the bar, so it keeps what was reached until this deployment gets past it. Deployments are
+        // walked on several threads, so the comparison and the post to the bar go together.
         var reached = 0f
+        val reachedLock = Any()
+        fun reach(fraction: Float) = synchronized(reachedLock) {
+            reached = maxOf(reached, fraction)
+            FlatpakTasks.progress(reached)
+        }
         for ((index, id) in appIds.withIndex()) {
             guard.recordBaseline(
                 id,
@@ -460,17 +469,13 @@ class FlatpakTaskService : Service() {
                 skip = skip,
                 onStart = {
                     FlatpakTasks.newCommand(getString(R.string.task_recording_baseline))
-                    reached = maxOf(reached, index.toFloat() / appIds.size)
-                    FlatpakTasks.progress(reached)
+                    reach(index.toFloat() / appIds.size)
                 },
             ) { ref, done, total ->
                 if (done == total || done % 1000 == 0) {
                     FlatpakTasks.log(getString(R.string.task_baseline_progress, ref.name, done, total))
                     // Across the apps: this one's files are a share of all of them.
-                    if (total > 0) {
-                        reached = maxOf(reached, (index + done.toFloat() / total) / appIds.size)
-                        FlatpakTasks.progress(reached)
-                    }
+                    if (total > 0) reach((index + done.toFloat() / total) / appIds.size)
                 }
             }
         }
@@ -631,7 +636,7 @@ class FlatpakTaskService : Service() {
         val ctx = applicationContext
         val remove = mutableListOf(
             File(AppData.cacheRoot(ctx), appId), File(AppData.rootsDir(ctx), appId), File(AppData.appTmpDir(ctx), appId),
-            File(AppData.electronDir(ctx), appId), File(AlpineEnvironment.get(ctx).workDir, "${ElectronSwap.BUILD_DIR}/$appId"),
+            File(AppData.electronDir(ctx), appId), File(AlpineEnvironment.get(ctx).cacheDir, "${ElectronSwap.BUILD_DIR}/$appId"),
         )
         if (TempHomes.owner(ctx) == appId) TempHomes.delete(ctx)
         if (deleteData) {
@@ -642,17 +647,7 @@ class FlatpakTaskService : Service() {
         remove.forEach { AndroidTarFs.deleteTree(it) }
     }
 
-    /** False when Android refuses it (from Android 15, the daily limit of this kind of service is used up; not tried on such a phone (verify)). */
-    private fun startInForeground(notification: Notification): Boolean {
-        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else 0
-        return try {
-            ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, type)
-            true
-        } catch (e: IllegalStateException) {
-            DebugLog.w("Foreground start refused: $e")
-            false
-        }
-    }
+    private fun startInForeground(notification: Notification): Boolean = startDataSyncForeground(NOTIFICATION_ID, notification)
 
     /**
      * The task's notification: its name (or what it does now, [FlatpakTaskUi.phase]), the step or

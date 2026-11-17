@@ -48,13 +48,26 @@ object SessionScript {
     fun command(
         geometry: String, frameRate: Int, sound: Boolean, resampler: Resampler, sessionBus: Boolean,
         camera: Boolean = false, clipboard: Boolean = true, wayland: Boolean = false, externalViewer: Boolean = false,
-        interfaceSize: Int = 100,
+        interfaceSize: Int = 100, memfd: Boolean = true,
     ): List<String> =
         listOf(
             "/bin/sh", GUEST_SCRIPT, geometry, VNC_PORT.toString(), frameRate.toString(),
             onOff(sound), resampler.pulseName, onOff(sessionBus), onOff(sessionBus && camera),
             onOff(clipboard), onOff(wayland), onOff(externalViewer), scale(interfaceSize),
+            onOff(memfd),
         )
+
+    /**
+     * Whether a kernel of this [release] ("4.19.191-g1234", say) has `memfd_create` (3.17 and later).
+     * Without it PulseAudio would share memory through POSIX shared memory, which the app and the
+     * helpers can't reach in each other's roots, so it runs without shared memory then. Unreadable: true (verify).
+     */
+    fun kernelHasMemfd(release: String): Boolean {
+        val numbers = Regex("^(\\d+)\\.(\\d+)").find(release)?.groupValues ?: return true
+        val major = numbers[1].toInt()
+        val minor = numbers[2].toInt()
+        return major > 3 || major == 3 && minor >= 17
+    }
 
     /** A percent as the output's scale ("1.5" for 150). */
     fun scale(percent: Int): String = "${percent / 100}.${(percent % 100).toString().padStart(2, '0')}"
@@ -73,7 +86,7 @@ object SessionScript {
      * starts only then), PulseAudio's resample method, "on" for the session bus, "on" for PipeWire, "on" when the clipboard is shared ([command]
      * builds them; off adds `-AcceptCutText=0 -SendCutText=0` to Xvnc), "on" for a Wayland session (labwc and wayvnc instead of
      * Xvnc and Openbox), "on" for an external viewer (the TCP port and login; else the viewer's Unix
-     * socket), and the Wayland output's scale ([scale]); title bars come from Openbox's and labwc's configurations. Exits when the display does; Flatdroid ends the session by stopping this proot.
+     * socket), the Wayland output's scale ([scale]), and "on" when PulseAudio may share memory through memfd ([kernelHasMemfd]); title bars come from Openbox's and labwc's configurations. Exits when the display does; Flatdroid ends the session by stopping this proot.
      * `-extension GLX` turns GLX off in Alpine's Xvnc, which has it (apps use EGL). `-nolisten local` drops the abstract socket
      * `@/tmp/.X11-unix/X1`: proot doesn't translate abstract names, so it would be open to other
      * users of the device, with no authentication; clients use the socket file in private storage
@@ -105,6 +118,7 @@ object SessionScript {
         |wayland=$9
         |external=${'$'}{10}
         |scale=${'$'}{11}
+        |memfd=${'$'}{12}
         |clipboard_args=
         |[ "${'$'}clipboard" = on ] || clipboard_args="-AcceptCutText=0 -SendCutText=0"
         |rm -f /tmp/.X1-lock ${GuestPaths.X11_DIR}/$X_SOCKET ${GuestPaths.PULSE_DIR}/* $GUEST_VNC_DIR/$VNC_SOCKET
@@ -128,9 +142,11 @@ object SessionScript {
         |fi
         |# PulseAudio shares memory with the app through memfd: an app that writes many small blocks costs
         |# less than through the socket, whose every call proot traces. Where the kernel has no memfd it
-        |# falls back on POSIX shared memory, and on a normal pool when that fails too (verify).
+        |# shares nothing: the POSIX fallback needs one /dev/shm for the app and the helpers, which they don't have.
         |if [ "${'$'}sound" = on ]; then
-        |  $NO_INTERNET /usr/bin/pulseaudio -n --use-pid-file=no --daemonize=no --exit-idle-time=-1 --disable-shm=no --enable-memfd=yes \
+        |  shm_args="--disable-shm=no --enable-memfd=yes"
+        |  [ "${'$'}memfd" = on ] || shm_args="--disable-shm=yes"
+        |  $NO_INTERNET /usr/bin/pulseaudio -n --use-pid-file=no --daemonize=no --exit-idle-time=-1 ${'$'}shm_args \
         |    --disallow-module-loading --disallow-exit --resample-method="${'$'}resampler" -F $GUEST_PULSE_SCRIPT &
         |fi
         |

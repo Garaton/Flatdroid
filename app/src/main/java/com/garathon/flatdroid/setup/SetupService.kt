@@ -7,7 +7,6 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
-import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
@@ -16,6 +15,7 @@ import androidx.core.content.ContextCompat
 import com.garathon.flatdroid.MainActivity
 import com.garathon.flatdroid.R
 import com.garathon.flatdroid.util.DoneNotice
+import com.garathon.flatdroid.util.startDataSyncForeground
 import com.garathon.flatdroid.alpine.AlpineEnvironment
 import com.garathon.flatdroid.storage.AppData
 import com.garathon.flatdroid.storage.sizes.SavedSizes
@@ -122,17 +122,7 @@ class SetupService : Service() {
         super.onDestroy()
     }
 
-    /** False when Android refuses it (from Android 15, the daily limit of this kind of service is used up; not tried on such a phone (verify)). */
-    private fun startInForeground(notification: Notification): Boolean = try {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
-        }
-        true
-    } catch (e: IllegalStateException) {
-        false
-    }
+    private fun startInForeground(notification: Notification): Boolean = startDataSyncForeground(NOTIFICATION_ID, notification)
 
     private fun notification(ui: SetupUi): Notification {
         createChannel()

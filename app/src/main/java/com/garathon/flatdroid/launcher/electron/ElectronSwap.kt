@@ -23,8 +23,8 @@ import java.util.zip.ZipInputStream
  */
 class ElectronSwap(
     private val dir: File,
-    /** Where the swap is built and Electron downloaded ([com.garathon.flatdroid.storage.AppData.workDir]). */
-    private val workDir: File,
+    /** Where the swap is built and Electron downloaded (the cache: a preparation that loses them runs again). */
+    private val cacheDir: File,
     private val arch: String,
     /**
      * Where the app's resources may resolve to: the Flatpak installation and link2symlink's
@@ -37,7 +37,7 @@ class ElectronSwap(
     private val sha256: (File) -> String,
 ) {
     /** Where the swap is built, apart from the prepared ones, so a half-built one is never taken for one. */
-    private val work get() = File(workDir, "$BUILD_DIR/${dir.name}")
+    private val work get() = File(cacheDir, "$BUILD_DIR/${dir.name}")
 
     /** The prepared directory, if it was made for this deployment of the app. */
     fun preparedFor(app: Deployment): File? = dir.takeIf { isPreparedFor(it, app, fs) }
@@ -54,7 +54,7 @@ class ElectronSwap(
         val version = needed.version ?: throw IOException("The app's Electron version could not be read")
         if (needed.hasNativeModules) throw IOException("The app has native modules built for ${needed.binaryArch}; another Electron can't load them")
         val zipName = Electron.zipName(version, arch)
-        val downloads = File(workDir, "$DOWNLOAD_PREFIX$version").apply { mkdirs() }
+        val downloads = File(cacheDir, "$DOWNLOAD_PREFIX$version").apply { mkdirs() }
 
         onProgress(Step.CHECKSUMS, zipName, null)
         val sums = File(downloads, "SHASUMS256.txt")
@@ -158,15 +158,15 @@ class ElectronSwap(
         private const val MARKER = ".flatdroid-electron"
         /** Electron's Linux zips are 60–120 MiB. */
         private const val MAX_ZIP_BYTES = 256L shl 20
-        /** Under the work folder: swaps being built, one directory per app. */
+        /** Under the cache: swaps being built, one directory per app. */
         const val BUILD_DIR = "electron-build"
         private const val DOWNLOAD_PREFIX = "electron-"
         /** The marker is in a directory bound into the app's root, so the app can write it. */
         private const val MAX_MARKER_BYTES = 4096L
 
-        /** In [workDir]: swaps being built and downloads a cancelled preparation left (`electron-<version>`). */
-        fun temporaryFiles(workDir: File): List<File> =
-            (listOf(File(workDir, BUILD_DIR)) + (workDir.listFiles { f -> f.name.startsWith(DOWNLOAD_PREFIX) }?.toList() ?: emptyList())).distinct()
+        /** In [cacheDir]: swaps being built and downloads a cancelled preparation left (`electron-<version>`). */
+        fun temporaryFiles(cacheDir: File): List<File> =
+            (listOf(File(cacheDir, BUILD_DIR)) + (cacheDir.listFiles { f -> f.name.startsWith(DOWNLOAD_PREFIX) }?.toList() ?: emptyList())).distinct()
 
         /** Whether [dir] is a swap made for this deployment of the app (and a directory, not a link). */
         fun isPreparedFor(dir: File, app: Deployment, fs: TarFs): Boolean {

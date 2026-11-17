@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateOf
@@ -111,7 +112,6 @@ import com.garathon.flatdroid.ui.home.PendingLaunch
 import com.garathon.flatdroid.ui.settings.PermissionAnswer
 import com.garathon.flatdroid.ui.settings.PermissionAsk
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.IOException
@@ -274,6 +274,9 @@ class MainActivity : ComponentActivity() {
         LaunchedEffect(upSession, inFront == Lifecycle.State.RESUMED) {
             if (upSession != null && upSession.appId == home.autoOpenApp && inFront == Lifecycle.State.RESUMED) openViewer(upSession)
         }
+        // The viewer opened some other way (the notification's Open app): this window has nothing left to open.
+        val viewerOpen by SessionController.viewerVisible.collectAsState()
+        LaunchedEffect(viewerOpen) { if (viewerOpen) home.autoOpenApp = null }
         var wasBusy by remember { mutableStateOf(false) }
         LaunchedEffect(sessionBusy) {
             if (sessionBusy) wasBusy = true else if (wasBusy) { wasBusy = false; home.autoOpenApp = null }
@@ -296,14 +299,10 @@ class MainActivity : ComponentActivity() {
             }
             navigate(target)
         }
-        // The drafts go once the settings screens are left and have slid out (they are drawn until then).
+        // The drafts go once the settings screens are left and no longer drawn (they stay while one slides out).
         val inSettings = screen.inSettings()
-        LaunchedEffect(inSettings) {
-            if (!inSettings) {
-                delay(SLIDE_OUT_MS)
-                drafts.clear()
-            }
-        }
+        val settingsInUse by rememberUpdatedState(inSettings)
+        val settingsDrawn = remember { intArrayOf(0) }
         // Settings that were applied: the window that is there now answers, not the one that asked.
         val currentGo by rememberUpdatedState(go)
         LaunchedEffect(Unit) {
@@ -369,6 +368,28 @@ class MainActivity : ComponentActivity() {
             }
             null -> Unit
         }
+        // The questions a launch stops to ask: on whichever screen the launch began (Home's list or an app's page in the browser).
+        (session.state as? SessionState.ElectronOffer)?.let { offer ->
+            ElectronDialog(
+                offer, nameOf(offer.appId), remember { AlpineEnvironment.get(this@MainActivity).arch },
+                onAccept = { SessionController.ended(null); continueLaunch(PendingLaunch(offer.appId, prepareElectron = true)) },
+                onDismiss = { SessionController.ended(null) },
+            )
+        }
+        (session.state as? SessionState.FilesChanged)?.let { changed ->
+            FilesChangedDialog(
+                changed, nameOf(changed.appId),
+                onReinstall = { SessionController.ended(null); startDownload(FlatpakTask.Reinstall(changed.appId)) },
+                onDismiss = { SessionController.ended(null) },
+            )
+        }
+        home.microphoneQuestion?.let { pending ->
+            MicrophoneLaunchDialog(
+                nameOf(pending.appId),
+                onAnswer = { allow -> home.microphoneQuestion = null; start(pending, allow) },
+                onDismiss = { home.microphoneQuestion = null },
+            )
+        }
         home.meteredQuestion?.let { task ->
             MobileDataDialog(
                 onDownload = { home.meteredQuestion = null; startTask(task) },
@@ -430,6 +451,10 @@ class MainActivity : ComponentActivity() {
             },
             label = "screen",
         ) { target ->
+        if (target.inSettings()) DisposableEffect(Unit) {
+            settingsDrawn[0]++
+            onDispose { if (--settingsDrawn[0] == 0 && !settingsInUse) drafts.clear() }
+        }
         when (target) {
             is Screen.Settings -> {
                 val draft = drafts.global
@@ -676,27 +701,6 @@ class MainActivity : ComponentActivity() {
                 }
             }
             Screen.Home -> {
-                (session.state as? SessionState.ElectronOffer)?.let { offer ->
-                    ElectronDialog(
-                        offer, nameOf(offer.appId), remember { AlpineEnvironment.get(this@MainActivity).arch },
-                        onAccept = { SessionController.ended(null); continueLaunch(PendingLaunch(offer.appId, prepareElectron = true)) },
-                        onDismiss = { SessionController.ended(null) },
-                    )
-                }
-                (session.state as? SessionState.FilesChanged)?.let { changed ->
-                    FilesChangedDialog(
-                        changed, nameOf(changed.appId),
-                        onReinstall = { SessionController.ended(null); startDownload(FlatpakTask.Reinstall(changed.appId)) },
-                        onDismiss = { SessionController.ended(null) },
-                    )
-                }
-                home.microphoneQuestion?.let { pending ->
-                    MicrophoneLaunchDialog(
-                        nameOf(pending.appId),
-                        onAnswer = { allow -> home.microphoneQuestion = null; start(pending, allow) },
-                        onDismiss = { home.microphoneQuestion = null },
-                    )
-                }
                 HomeScreen(
                     apps = apps,
                     session = session,
@@ -848,9 +852,6 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         private const val EXTRA_INSTALL = "com.garathon.flatdroid.INSTALL"
-
-        /** A little over the slide between screens (300 ms): the old screen is gone when its draft is. */
-        private const val SLIDE_OUT_MS = 400L
 
         private fun isLauncherIntent(intent: Intent?) = intent?.action == Intent.ACTION_MAIN && intent.hasCategory(Intent.CATEGORY_LAUNCHER)
 

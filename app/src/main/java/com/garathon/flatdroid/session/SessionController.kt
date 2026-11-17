@@ -128,8 +128,10 @@ object SessionController {
     /** Flatdroid's viewer is on screen: the question about a window-less app is asked there, else in a notification. */
     val viewerVisible: StateFlow<Boolean> = _viewerVisible.asStateFlow()
 
+    /** The one place that says whether the viewer is on screen: the flow above and [HiddenPause] follow it. Main thread. */
     fun viewerVisible(visible: Boolean) {
         _viewerVisible.value = visible
+        HiddenPause.viewerShown(visible)
     }
 
     fun stopping(appId: String) {

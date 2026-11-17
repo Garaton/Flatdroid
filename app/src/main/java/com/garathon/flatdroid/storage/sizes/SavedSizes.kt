@@ -153,6 +153,8 @@ object SavedSizes {
     /** [ListedSizes] names. */
     private const val LISTED_L2S = "l2s"
     private const val LISTED_OBJECTS = "objects"
+    private const val LISTED_RUNNING = "listed-running"
+    private const val LISTED_UNSURE = "listed-unsure"
     private val APP_KEYS = setOf("app", "flatpak", "home", "settings")
     private val SHARED_KEYS = setOf("runtimes", "other")
 
@@ -359,6 +361,34 @@ object SavedSizes {
     fun forgetAll(context: Context) {
         changingAll.incrementAndGet()
         store(context).forgetAll()
+    }
+
+    /**
+     * A Flatpak task that changes the repository begins. [ListedSizes] keeps a name's size for good,
+     * but deploying turns a repository object into a link (link2symlink), so what a task that stopped
+     * part-way left measured isn't right any more. A mark file says a task is under way; one still
+     * there at the next begin means that task never finished (it survives a kill), and the
+     * sizes [ListedSizes] kept are doubted until a task [flatpakChangeEnded] finished.
+     */
+    fun flatpakChangeBegan(context: Context) {
+        runCatching {
+            val dir = sizesDir(context).apply { mkdirs() }
+            val running = File(dir, LISTED_RUNNING)
+            if (running.exists()) File(dir, LISTED_UNSURE).createNewFile()
+            running.createNewFile()
+        }
+    }
+
+    /** The Flatpak task ended. If it [finished] after one that hadn't, what [ListedSizes] kept is measured afresh. */
+    fun flatpakChangeEnded(context: Context, finished: Boolean) {
+        if (!finished) return
+        val dir = sizesDir(context)
+        val unsure = File(dir, LISTED_UNSURE)
+        if (unsure.exists()) {
+            File(dir, "listed").deleteRecursively()
+            unsure.delete()
+        }
+        File(dir, LISTED_RUNNING).delete()
     }
 
     /** After [appId]'s files changed: forgotten, and measured again in the background. */

@@ -45,7 +45,7 @@ class AlpineSetup(
         reporter.log("Downloading $url")
         val source = DownloadRootfsSource(
             version, sha256, url,
-            cacheFile = File(env.workDir, "alpine-minirootfs-$version-$arch.tar.gz"),
+            cacheFile = File(env.cacheDir, "alpine-minirootfs-$version-$arch.tar.gz"),
         ) { done, total ->
             val fraction = if (total > 0) done.toFloat() / total else null
             reporter.progress(fraction, context.getString(R.string.setup_progress_mib, mib(done), if (total > 0) mib(total) else "?"))
@@ -65,9 +65,9 @@ class AlpineSetup(
         requireFiles(listOf("sbin/apk", "bin/busybox"))
     }
 
-    /** Setup's downloads and installs all go to this app's internal storage. */
+    /** Setup's downloads and installs all go to this app's internal storage (files and cache). */
     private fun requireSpace(bytes: Long) {
-        val free = StatFs(env.workDir.apply { mkdirs() }.path).availableBytes
+        val free = StatFs(env.cacheDir.path).availableBytes
         if (free < bytes) {
             throw IOException(context.getString(R.string.setup_error_space, free shr 20, bytes shr 20))
         }

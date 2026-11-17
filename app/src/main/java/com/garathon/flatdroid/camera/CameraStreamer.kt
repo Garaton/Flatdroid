@@ -67,6 +67,8 @@ class CameraStreamer(private val context: Context, private val camera: AndroidCa
     private var opening = false
     private var order: Nv21.Order? = null
     private var users = 0
+    /** The camera opened but couldn't be set up: closing it makes Android report it available, which isn't a reason to try again. */
+    private var failedSetup = false
     /**
      * Debug builds only: frames written, frames Android's camera captured (more means each
      * frame's work is the limit), and each step's time per frame.
@@ -104,6 +106,7 @@ class CameraStreamer(private val context: Context, private val camera: AndroidCa
     fun setUsers(count: Int) = handler.post {
         if (closed || count == users) return@post
         users = count
+        failedSetup = false
         if (count > 0) start() else stopCamera()
     }
 
@@ -140,7 +143,7 @@ class CameraStreamer(private val context: Context, private val camera: AndroidCa
                         capture(manager, opened, imageReader)
                     } catch (e: Exception) {
                         // Taken back between opening and configuring: as when Android reports it.
-                        lost(opened, e.message ?: e.toString())
+                        lost(opened, e.message ?: e.toString(), setupFailed = true)
                     }
                 }
 
@@ -158,15 +161,19 @@ class CameraStreamer(private val context: Context, private val camera: AndroidCa
 
     /** After Android took the camera away or couldn't open it, while an app is still linked. */
     private fun retry() {
-        if (!closed && users > 0) start()
+        if (!closed && users > 0 && !failedSetup) start()
     }
 
-    /** Android closed [opened], or couldn't open it: the app keeps the last frame until it opens again. */
-    private fun lost(opened: CameraDevice, why: String) {
+    /**
+     * Android closed [opened], or couldn't open it: the app keeps the last frame until it opens again.
+     * After a [setupFailed] the camera stays shut until the app links again, since the same setup would fail again.
+     */
+    private fun lost(opened: CameraDevice, why: String, setupFailed: Boolean = false) {
         opening = false
+        if (setupFailed) failedSetup = true
         opened.close()
         if (device == opened) stopCamera()
-        DebugLog.w("Camera ${camera.id}: $why; tried again once Android reports a camera available")
+        DebugLog.w("Camera ${camera.id}: $why; " + if (setupFailed) "tried again when the app links again" else "tried again once Android reports a camera available")
     }
 
     private fun capture(manager: CameraManager, opened: CameraDevice, imageReader: ImageReader) {
@@ -181,14 +188,14 @@ class CameraStreamer(private val context: Context, private val camera: AndroidCa
                 try {
                     configured.setRepeatingRequest(request, if (BuildConfig.DEBUG) captured else null, handler)
                 } catch (e: Exception) {
-                    lost(opened, e.message ?: e.toString())
+                    lost(opened, e.message ?: e.toString(), setupFailed = true)
                 }
             }
 
             override fun onConfigureFailed(configured: CameraCaptureSession) {
                 // Closed as when Android takes it back, so the camera (and its indicator) isn't held with no frames (verify: hard to time).
                 configured.close()
-                lost(opened, "the capture session couldn't be configured")
+                lost(opened, "the capture session couldn't be configured", setupFailed = true)
             }
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {

@@ -28,7 +28,7 @@ class SessionAudioTest {
     @Test
     fun helpersGetSoundAndResampler() {
         assertEquals(
-            listOf("/bin/sh", SessionScript.GUEST_SCRIPT, "1000x1400", "14400", "30", "on", "speex-float-0", "on", "on", "on", "off", "off", "1.00"),
+            listOf("/bin/sh", SessionScript.GUEST_SCRIPT, "1000x1400", "14400", "30", "on", "speex-float-0", "on", "on", "on", "off", "off", "1.00", "on"),
             SessionScript.command("1000x1400", 30, sound = true, Resampler.FAST, sessionBus = true, camera = true),
         )
         assertEquals(
@@ -36,6 +36,19 @@ class SessionAudioTest {
             listOf("off", "speex-float-1", "off", "off"),
             SessionScript.command("1000x1400", 30, sound = false, Resampler.STANDARD, sessionBus = false, camera = true).subList(5, 9),
         )
+    }
+
+    @Test
+    fun pulseAudioSharesMemoryOnlyWhereTheKernelHasMemfd() {
+        assertTrue(SessionScript.kernelHasMemfd("4.19.191-g1234"))
+        assertTrue(SessionScript.kernelHasMemfd("3.18.71"))
+        assertTrue(SessionScript.kernelHasMemfd("3.17.0"))
+        assertTrue(SessionScript.kernelHasMemfd("6.1.0-android14"))
+        assertTrue(!SessionScript.kernelHasMemfd("3.10.0+"))
+        assertTrue(!SessionScript.kernelHasMemfd("2.6.32"))
+        assertTrue(SessionScript.kernelHasMemfd("unreadable"))
+        assertEquals("off", SessionScript.command("1000x1400", 30, sound = true, Resampler.FAST, sessionBus = true, memfd = false)[13])
+        assertTrue("memfd=${'$'}{12}" in SessionScript.TEXT.lines().map { it.trim() })
     }
 
     @Test

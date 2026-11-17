@@ -174,9 +174,10 @@ fun GlobalStoragePage(s: GlobalPageState) = SettingsPageColumn(R.string.settings
             listOf(
                 StorageSegment(R.string.storage_part_runtimes, storage?.runtimes, colors[0]),
                 StorageSegment(R.string.storage_part_apps, storage?.apps, colors[1]),
-                StorageSegment(R.string.storage_part_app_data, storage?.appData, colors[2]),
-                StorageSegment(R.string.storage_part_homes, storage?.privateHomes, colors[3]),
-                StorageSegment(R.string.storage_part_cache, storage?.cache, colors[4]),
+                // The second column (held sideways) is what each app keeps; the first, the Flatpaks' parts.
+                StorageSegment(R.string.storage_part_app_data, storage?.appData, colors[2], column = 1),
+                StorageSegment(R.string.storage_part_homes, storage?.privateHomes, colors[3], column = 1),
+                StorageSegment(R.string.storage_part_cache, storage?.cache, colors[4], column = 1),
                 StorageSegment(R.string.storage_part_other, storage?.other, colors[5]),
             ),
         )

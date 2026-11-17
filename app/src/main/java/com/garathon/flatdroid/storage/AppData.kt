@@ -65,9 +65,11 @@ object AppData {
     fun electronDir(context: Context): File = File(context.filesDir.canonicalFile, "electron")
 
     /**
-     * Temporary files a running task or session uses. Not in the cache: Android empties that when
-     * storage runs low, also while its files are in use. Each user deletes its own, and a start
-     * empties what isn't kept across runs (`FlatdroidApplication`).
+     * Temporary files that a running session or storage task can't do without, or that hold the
+     * user's files until they are answered for. Only those: Android empties the cache when storage
+     * runs low, also while its files are in use, so whatever a run can start again after losing
+     * stays in the cache. Each user deletes its own, and a start sets aside what isn't kept
+     * across runs (`FlatdroidApplication`).
      */
     fun workDir(context: Context): File = File(context.noBackupFilesDir.canonicalFile, "work")
 
