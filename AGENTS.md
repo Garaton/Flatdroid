@@ -23,7 +23,6 @@ Android app (`com.garathon.flatdroid`, Kotlin, GPL-3.0-or-later) that installs F
 
 - Host: JDK 21 (`JAVA_HOME` set), Android SDK (`ANDROID_HOME`): platform-tools, `platforms;android-35`, build-tools 35.0.0, NDK 30.0.16248370, CMake 3.22.1.
 - App: targetSdk 35+, minSdk 24. ABIs: arm64-v8a and x86_64 only. Native libraries packaged with `useLegacyPackaging = true`, 16 KB page aligned.
-- Test device: moto g power 5G (2024), aarch64, Android 15, 4 KB pages, no user namespaces, over `adb`. Waydroid for x86_64, over `adb`.
 
 ## Commands
 

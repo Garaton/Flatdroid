@@ -217,7 +217,7 @@
     <string name="cancel">Cancel</string>
     <string name="reset_running">Deleting the files…</string>
     <string name="reset_screen_title">Resetting Flatdroid</string>
-    <string name="reset_screen_note">This takes a moment. You choose your settings again after it.</string>
+    <string name="reset_screen_note">This may take a moment.</string>
     <string name="reset_done">Flatdroid reset; start setup to install it again.</string>
     <string name="settings_section_tools">Tools</string>
 
@@ -375,7 +375,7 @@
     <string name="task_alpine_failed">Alpine\'s packages weren\'t updated (%1$s); updating the apps anyway</string>
     <string name="task_low_storage">Only %1$d MiB of storage is free, and Flatpak needs at least %2$d MiB. Free up some space and try again.</string>
     <string name="task_extra_data">Unpacking extra data</string>
-    <string name="task_extra_data_failed">%1$s couldn\'t unpack its extra data (exit %2$d); reinstalling may help.</string>
+    <string name="task_extra_data_failed">%1$s couldn\'t unpack its extra data (exit %2$d). Reinstalling may help.</string>
     <string name="task_cleaning_up">Cleaning up Flatpak\'s storage</string>
     <string name="task_cancelling">Cancelling… (letting Flatpak stop cleanly)</string>
     <string name="task_timed_out">Timed out</string>
