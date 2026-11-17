@@ -158,7 +158,7 @@ class RfbClientTest {
     @Test
     fun screensPastTheLimitAreRefused() {
         val (client, _) = client { handshake(width = RfbClient.MAX_SCREEN + 1, height = 2) }
-        assertRefused("screen too large (8193x2)") { client.connect() }
+        assertRefused("screen too large (${RfbClient.MAX_SCREEN + 1}x2)") { client.connect() }
     }
 
     @Test
@@ -193,6 +193,25 @@ class RfbClientTest {
         assertEquals(listOf("done"), recorder.events) // same size: no new framebuffer
         client.resize(8, 6)
         assertArrayEquals(Rfb.setDesktopSize(8, 6, 0x1234), sent.toByteArray().copyOfRange(before, sent.size()))
+    }
+
+    @Test
+    fun aRequestPassedOnChangesNothingUntilTheServerSaysItsSize() {
+        fun DataOutputStream.extended(reason: Int, status: Int, w: Int, h: Int) {
+            rect(reason, status, w, h, Rfb.EXTENDED_DESKTOP_SIZE)
+            writeByte(1); write(ByteArray(3))
+            writeInt(0); writeShort(0); writeShort(0); writeShort(w); writeShort(h); writeInt(0)
+        }
+        val (client, _) = client {
+            handshake()
+            update({ extended(reason = 1, status = 4, w = 6, h = 8) }) // passed on to the compositor
+            update({ extended(reason = 1, status = 1, w = 6, h = 8) }) // refused
+            update({ extended(reason = 0, status = 0, w = 6, h = 8) }) // the server's own change
+        }
+        client.connect()
+        val recorder = Recorder()
+        repeat(3) { client.readMessage(recorder) }
+        assertEquals(listOf("done", "done", "resized 6x8", "done"), recorder.events)
     }
 
     @Test

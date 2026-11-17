@@ -10,7 +10,7 @@ kotlin = "2.4.21"
 composeBom = "2026.09.00"
 androidsvg = "1.4"
 coil = "3.3.0"
-orgJson = "20240303"
+orgJson = "20260814"
 kxml2 = "2.3.0"
 
 [libraries]

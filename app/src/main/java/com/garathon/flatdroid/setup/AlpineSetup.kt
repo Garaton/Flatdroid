@@ -45,7 +45,7 @@ class AlpineSetup(
         reporter.log("Downloading $url")
         val source = DownloadRootfsSource(
             version, sha256, url,
-            cacheFile = File(env.cacheDir, "alpine-minirootfs-$version-$arch.tar.gz"),
+            cacheFile = File(env.workDir, "alpine-minirootfs-$version-$arch.tar.gz"),
         ) { done, total ->
             val fraction = if (total > 0) done.toFloat() / total else null
             reporter.progress(fraction, context.getString(R.string.setup_progress_mib, mib(done), if (total > 0) mib(total) else "?"))
@@ -65,9 +65,9 @@ class AlpineSetup(
         requireFiles(listOf("sbin/apk", "bin/busybox"))
     }
 
-    /** Setup's downloads and installs all go to this app's internal storage (files and cache). */
+    /** Setup's downloads and installs all go to this app's internal storage. */
     private fun requireSpace(bytes: Long) {
-        val free = StatFs(env.cacheDir.path).availableBytes
+        val free = StatFs(env.workDir.apply { mkdirs() }.path).availableBytes
         if (free < bytes) {
             throw IOException(context.getString(R.string.setup_error_space, free shr 20, bytes shr 20))
         }
@@ -76,7 +76,7 @@ class AlpineSetup(
     private fun packages(reporter: SetupReporter) {
         // A retry after a partial install needs less; only check while packages are missing.
         if (run(listOf("/sbin/apk", "info", "-e") + PACKAGES, reporter).exitCode != 0) requireSpace(PACKAGES_BYTES)
-        val cache = File(env.cacheDir, "apk-cache").apply { mkdirs() }
+        val cache = env.apkCacheDir.apply { mkdirs() }
         // Upgrade the minirootfs's own packages first: `apk add` alone only upgrades what the new
         // packages require, so base packages would miss fixes released after the minirootfs.
         reporter.progress(null, context.getString(R.string.setup_progress_upgrade))

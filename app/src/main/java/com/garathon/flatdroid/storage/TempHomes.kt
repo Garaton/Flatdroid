@@ -7,14 +7,14 @@ import com.garathon.flatdroid.setup.rootfs.deleteTree
 import java.io.File
 
 /**
- * The temporary home: one `cache/temphome/`, since one app runs at a time. It holds the app's
+ * The temporary home: one `temphome/` in the work folder ([AppData.workDir]), since one app runs at a time. It holds the app's
  * home, its settings directories and its cache for one launch, and is deleted and made again at
  * every launch in Temporary Home mode, whatever was left. When the app closes, the user is asked
  * whether to export the home (a zip in Download), and it is deleted either way (TempHomePrompt).
  */
 object TempHomes {
     /** Also the base of the app's settings directories in this mode. */
-    fun root(context: Context): File = File(context.cacheDir.canonicalFile, "temphome")
+    fun root(context: Context): File = File(AppData.workDir(context), "temphome")
 
     fun home(context: Context): File = File(root(context), "home")
 

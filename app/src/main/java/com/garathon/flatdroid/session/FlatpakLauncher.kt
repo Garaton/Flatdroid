@@ -117,7 +117,7 @@ class FlatpakLauncher(private val context: Context) {
 
     fun electronSwap(appId: String) = ElectronSwap(
         dir = File(AppData.electronDir(context), appId),
-        cacheDir = env.cacheDir,
+        workDir = env.workDir,
         arch = arch,
         allowedSources = listOf(env.flatpakDir, File(env.paths().l2sDir)),
         fs = AndroidTarFs,
@@ -434,10 +434,12 @@ class FlatpakLauncher(private val context: Context) {
             // The time the app ran, simply from its start to here: nothing is measured while it runs.
             step { runningSince?.let { start -> store.update { it.copy(usedMillis = it.usedMillis + (System.currentTimeMillis() - start)) } } }
             step { dns?.stop() }
+            // The sound first: a paused app is let go on below, and what it plays while it ends
+            // would be heard though it was muted.
+            step { player?.stop() }
             // A paused app ignores the signals that end it: let it go on first.
             step { HiddenPause.detach() }
             step { app?.stop() }
-            step { player?.stop() }
             step { mic?.stop() }
             // The helpers first, so a streamer still writing to its pipe fails instead of waiting.
             step { cameraHelpers?.stop() }

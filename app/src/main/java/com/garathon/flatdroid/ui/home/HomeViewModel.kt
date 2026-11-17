@@ -178,7 +178,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
                 val apps = ids.associateWith { SavedSizes.app(context, it) ?: return@launch }
                 done(Part.APPS) { it.withApps(apps, installed) }
                 // With the browser's index, which Clear all caches removes too.
-                done(Part.CACHE) { it.copy(cache = StorageSizes.of(context.cacheDir) + StorageSizes.of(Catalog.dir(context))) }
+                done(Part.CACHE) { it.copy(cache = StorageSizes.of(context.cacheDir) + StorageSizes.of(AppData.workDir(context)) + StorageSizes.of(Catalog.dir(context))) }
                 val shared = SavedSizes.shared(context) ?: return@launch
                 val runtimeSizes = SavedSizes.runtimes(context) ?: return@launch
                 val unusedRuntimes = unusedRuntimes(runtimeSizes.keys)

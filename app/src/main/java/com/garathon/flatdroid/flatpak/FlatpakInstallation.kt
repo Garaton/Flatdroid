@@ -49,11 +49,6 @@ class FlatpakInstallation(root: File, private val arch: String) {
     fun runtime(ref: FlatpakRef): Deployment? = deployment("runtime", ref)
 
     /**
-     * The deployments a launch of [appId] uses: the app, its runtime, and the extensions mounted
-     * under each (GL, codecs, locales, …). Used to baseline and to check files; a deployment's
-     * `dir.name` is its OSTree commit, which changes on update, so each has its own baseline.
-     */
-    /**
      * The runtimes among [runtimeIds] (directory names under `runtime/`) that no installed app uses:
      * not its runtime, and not an extension mounted under it or under the app, by the rules a launch uses.
      */
@@ -80,6 +75,11 @@ class FlatpakInstallation(root: File, private val arch: String) {
             .filter { runtime(it) != null }
     }
 
+    /**
+     * The deployments a launch of [appId] uses: the app, its runtime, and the extensions mounted
+     * under each (GL, codecs, locales, …). Used to baseline and to check files; a deployment's
+     * `dir.name` is its OSTree commit, which changes on update, so each has its own baseline.
+     */
     fun deploymentsFor(appId: String): List<Deployment> {
         val app = app(appId) ?: return emptyList()
         val runtimeRef = app.metadata.runtime ?: return listOf(app)

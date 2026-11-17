@@ -17,10 +17,6 @@ sealed interface FlatpakTask {
     /** Installs [appIds] (one or more) from Flathub in one transaction, so shared runtimes download once. */
     data class Install(val appIds: List<String>) : FlatpakTask
     data object UpdateAll : FlatpakTask
-    /**
-     * [deleteData] also removes the app's private settings, data and home; [keepRuntimes] leaves
-     * runtimes nothing uses any more for the next update to remove.
-     */
     /** Uninstalls [apps], each with its own choices; the queue keeps every waiting uninstall in one. */
     data class Uninstall(val apps: List<UninstallApp>) : FlatpakTask {
         constructor(appId: String, deleteData: Boolean, keepRuntimes: Boolean = false) : this(listOf(UninstallApp(appId, deleteData, keepRuntimes)))
@@ -65,6 +61,8 @@ data class FlatpakTaskUi(
     val generation: Int = 0,
     /** Tasks waiting for the running task or app, first in first out ([TaskQueue]). */
     val queue: List<FlatpakTask> = emptyList(),
+    /** A catalog refresh joined the running or waiting update ([TaskQueue.joinsUpdate]): the update refreshes the catalog at its end. */
+    val catalogWithUpdate: Boolean = false,
 ) {
     /**
      * How far the running task is, for a progress bar: Flatpak's percent of the current step, or
@@ -87,7 +85,11 @@ data class FlatpakTaskUi(
     val queuedInstalls: Set<String> get() = queue.flatMapTo(LinkedHashSet()) { (it as? FlatpakTask.Install)?.appIds.orEmpty() }
 }
 
-/** One app of an [FlatpakTask.Uninstall], with the user's choices for it. */
+/**
+ * One app of an [FlatpakTask.Uninstall], with the user's choices for it. [deleteData] also removes
+ * the app's private settings, data and home; [keepRuntimes] leaves runtimes nothing uses any more
+ * for the next update to remove.
+ */
 data class UninstallApp(val appId: String, val deleteData: Boolean, val keepRuntimes: Boolean = false)
 
 /**
@@ -99,6 +101,13 @@ data class UninstallApp(val appId: String, val deleteData: Boolean, val keepRunt
  * waits drops that uninstall (the app stays as it is).
  */
 object TaskQueue {
+    /**
+     * A catalog refresh asked while an update runs or waits isn't queued: the update refreshes the
+     * catalog at its end instead, so it doesn't wait for the whole update and then a task of its own.
+     */
+    fun joinsUpdate(queue: List<FlatpakTask>, task: FlatpakTask, running: FlatpakTask?): Boolean =
+        task == FlatpakTask.RefreshCatalog && (running == FlatpakTask.UpdateAll || FlatpakTask.UpdateAll in queue)
+
     fun add(queue: List<FlatpakTask>, task: FlatpakTask, running: FlatpakTask?): List<FlatpakTask> = when (task) {
         is FlatpakTask.Install -> addInstall(queue, task.appIds, running)
         is FlatpakTask.Uninstall -> addUninstall(queue, task.apps, running)
@@ -209,11 +218,25 @@ object FlatpakTasks {
     internal fun end(task: FlatpakTask, error: String?) =
         _ui.update { it.copy(running = null, step = null, phase = null, progress = null, cancelling = false, finished = task, error = error, generation = it.generation + 1) }
 
-    /** Queues [task] behind what runs ([TaskQueue.add]). */
-    internal fun enqueue(task: FlatpakTask) = _ui.update { it.copy(queue = TaskQueue.add(it.queue, task, it.running)) }
+    /** Queues [task] behind what runs ([TaskQueue.add]), or lets the update do it ([TaskQueue.joinsUpdate]). */
+    internal fun enqueue(task: FlatpakTask) = _ui.update {
+        if (TaskQueue.joinsUpdate(it.queue, task, it.running)) it.copy(catalogWithUpdate = true)
+        else it.copy(queue = TaskQueue.add(it.queue, task, it.running))
+    }
 
-    /** Takes [task] out of the queue. */
-    fun unqueue(task: FlatpakTask) = _ui.update { it.copy(queue = it.queue - task) }
+    /** Whether a catalog refresh joined the update; it is taken by whoever asks first ([enqueue]). */
+    internal fun takeCatalogWithUpdate(): Boolean {
+        var taken = false
+        _ui.update { taken = it.catalogWithUpdate; it.copy(catalogWithUpdate = false) }
+        return taken
+    }
+
+    /** Takes [task] out of the queue; a waiting update hands a refresh that joined it back to the queue. */
+    fun unqueue(task: FlatpakTask) = _ui.update {
+        val handBack = task == FlatpakTask.UpdateAll && it.catalogWithUpdate && it.running != FlatpakTask.UpdateAll
+        if (handBack) it.copy(queue = it.queue.map { t -> if (t == task) FlatpakTask.RefreshCatalog else t }, catalogWithUpdate = false)
+        else it.copy(queue = it.queue - task)
+    }
 
     /** Takes [appId] out of the waiting installs. */
     fun unqueueInstall(appId: String) = _ui.update { it.copy(queue = TaskQueue.withoutInstall(it.queue, appId)) }
@@ -229,7 +252,7 @@ object FlatpakTasks {
         )
     }
 
-    fun clearQueue() = _ui.update { it.copy(queue = emptyList()) }
+    fun clearQueue() = _ui.update { it.copy(queue = emptyList(), catalogWithUpdate = false) }
 
     /** The next waiting task, taken out of the queue; null when none waits. */
     internal fun takeNext(): FlatpakTask? {

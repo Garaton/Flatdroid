@@ -603,7 +603,7 @@ class MainActivity : ComponentActivity() {
                     queued = task.queuedInstalls,
                     installing = installingIds,
                     // A refresh waits in the queue like any task; off while one runs or waits.
-                    canRefresh = task.running != FlatpakTask.RefreshCatalog && FlatpakTask.RefreshCatalog !in task.queue,
+                    canRefresh = task.running != FlatpakTask.RefreshCatalog && FlatpakTask.RefreshCatalog !in task.queue && !task.catalogWithUpdate,
                     onBack = { go(Screen.Home) },
                     onOpenApp = { go(Screen.BrowseApp(it)) },
                     onRefresh = { startDownload(FlatpakTask.RefreshCatalog) },

@@ -373,6 +373,7 @@
     <string name="task_removing_unused">Removing unused runtimes</string>
     <string name="task_updating_alpine">Updating Alpine\'s packages</string>
     <string name="task_alpine_failed">Alpine\'s packages weren\'t updated (%1$s); updating the apps anyway</string>
+    <string name="task_low_storage">Only %1$d MiB of storage is free, and Flatpak needs at least %2$d MiB. Free up some space and try again.</string>
     <string name="task_extra_data">Unpacking extra data</string>
     <string name="task_extra_data_failed">%1$s couldn\'t unpack its extra data (exit %2$d); reinstalling may help.</string>
     <string name="task_cleaning_up">Cleaning up Flatpak\'s storage</string>
@@ -551,7 +552,7 @@
     <string name="app_settings_rendering_software">Software</string>
     <string name="app_settings_rendering_gl">OpenGL</string>
     <string name="app_settings_rendering_hint">How GTK 4 and Qt Quick apps draw. Software needs less memory and processor time. OpenGL is for apps with 3D or effects. Automatic uses OpenGL only while the app\'s camera is on.</string>
-    <string name="app_settings_interface_size_hint">Draws the app\'s text and controls larger or smaller.</string>
+    <string name="app_settings_interface_size_hint">Draws the app\'s text and controls larger or smaller. Older apps run better at 100% or 200%</string>
     <string name="app_settings_force_x11">Force X11</string>
     <string name="app_settings_force_x11_hint">Runs the app on X11 instead of Wayland, using more CPU. Try X11 if the app misbehaves.</string>
     <string name="app_settings_launch_args_hint">Added after the app\'s own command, separated by spaces. Each is passed as it is: no quoting.</string>

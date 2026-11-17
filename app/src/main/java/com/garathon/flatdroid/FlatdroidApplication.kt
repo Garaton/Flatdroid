@@ -13,6 +13,7 @@ import com.garathon.flatdroid.launcher.electron.ElectronSwap
 import com.garathon.flatdroid.launcher.Leftovers
 import com.garathon.flatdroid.proot.processes.LeftoverProcesses
 import com.garathon.flatdroid.setup.rootfs.AndroidTarFs
+import com.garathon.flatdroid.setup.rootfs.deleteTree
 import com.garathon.flatdroid.setup.SetupController
 import com.garathon.flatdroid.storage.sizes.SavedSizes
 import com.garathon.flatdroid.util.debug.DebugLog
@@ -55,11 +56,30 @@ class FlatdroidApplication : Application() {
         // Before anything of this run starts: every process of Flatdroid's that is running now is left over.
         val killed = LeftoverProcesses.kill()
         if (killed > 0) DebugLog.i("Ended $killed processes left by an earlier run")
+        val trash = setAsideLeftoverWork()
         appScope.launch(Dispatchers.IO) {
+            AndroidTarFs.deleteTree(trash)
             CatalogImages.clearAtStart(this@FlatdroidApplication)
             cleanLeftoverFiles()
             SavedSizes.measureMissing(this@FlatdroidApplication)
         }
+    }
+
+    /**
+     * Temporary files an earlier run's commands left in the work folder (the guest's /tmp, proot's,
+     * downloads, extra data being unpacked): moved aside at once, before anything of this run can
+     * start a command, and deleted in the background. The temporary home and an import's staging
+     * stay: the user is still asked about them.
+     */
+    private fun setAsideLeftoverWork(): File {
+        val env = AlpineEnvironment.get(this)
+        val trash = File(env.workDir, "trash")
+        for ((i, file) in env.leftoverFiles().withIndex()) {
+            if (!file.exists() && !AndroidTarFs.isSymlink(file)) continue
+            trash.mkdirs()
+            if (!file.renameTo(File(trash, "${System.nanoTime()}-$i"))) DebugLog.w("Could not set aside ${file.path}")
+        }
+        return trash
     }
 
     private fun cleanLeftoverFiles() {
@@ -71,7 +91,7 @@ class FlatdroidApplication : Application() {
                 installation = FlatpakInstallation(env.flatpakDir, env.arch),
                 electronDir = AppData.electronDir(this),
                 perAppCacheDirs = listOf(
-                    AppData.cacheRoot(this), AppData.rootsDir(this), AppData.appTmpDir(this), File(env.cacheDir, ElectronSwap.BUILD_DIR),
+                    AppData.cacheRoot(this), AppData.rootsDir(this), AppData.appTmpDir(this), File(env.workDir, ElectronSwap.BUILD_DIR),
                 ),
                 fs = AndroidTarFs,
             ).clean()

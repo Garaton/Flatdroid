@@ -64,9 +64,16 @@ object AppData {
     /** Electron builds prepared for apps that ship another architecture's (`files/electron/<ID>`). */
     fun electronDir(context: Context): File = File(context.filesDir.canonicalFile, "electron")
 
-    /** Rebuilt for every launch, so they live in the cache: each app's root and private /tmp. */
-    fun rootsDir(context: Context): File = File(context.cacheDir.canonicalFile, "roots")
-    fun appTmpDir(context: Context): File = File(context.cacheDir.canonicalFile, "apptmp")
+    /**
+     * Temporary files a running task or session uses. Not in the cache: Android empties that when
+     * storage runs low, also while its files are in use. Each user deletes its own, and a start
+     * empties what isn't kept across runs (`FlatdroidApplication`).
+     */
+    fun workDir(context: Context): File = File(context.noBackupFilesDir.canonicalFile, "work")
+
+    /** Rebuilt for every launch: each app's root and private /tmp. */
+    fun rootsDir(context: Context): File = File(workDir(context), "roots")
+    fun appTmpDir(context: Context): File = File(workDir(context), "apptmp")
 
     /**
      * Present while an update, uninstall or repair runs; removed when it ends. Still there at the
@@ -82,7 +89,7 @@ object AppData {
     fun baselineMarker(context: Context): File = File(context.filesDir.canonicalFile, "file-check-baselines-pending")
 
     /** The running session's sockets, VNC password file and generated /etc files. */
-    fun sessionDir(context: Context): File = File(context.cacheDir.canonicalFile, "session")
+    fun sessionDir(context: Context): File = File(workDir(context), "session")
 
     /** File-integrity baselines, one manifest per deployment commit (see FileIntegrityCheck). */
     fun integrityDir(context: Context): File = File(context.filesDir.canonicalFile, "integrity")

@@ -31,7 +31,7 @@ data class ExtensionPoint(
     val addLdPath: String?,
 )
 
-/** The `[Context]` permissions an app asks for. Read now; enforced per app later. */
+/** The `[Context]` permissions an app asks for: the defaults of its per-app permissions, where the user lets them be. */
 data class FlatpakContext(
     val shared: List<String> = emptyList(),
     val sockets: List<String> = emptyList(),
@@ -46,7 +46,6 @@ data class FlatpakContext(
     /**
      * The app may use a camera. Metadata can't say it: the camera portal needs no declaration, so
      * this is a hint, from what an app that opens a camera itself asks for: the PipeWire socket.
-     * In the future, when we support faux camera based devices that we also include all /dev.
      */
     val mayUseCamera: Boolean
         get() = filesystems.any { it.substringBefore(':') == PIPEWIRE_SOCKET }

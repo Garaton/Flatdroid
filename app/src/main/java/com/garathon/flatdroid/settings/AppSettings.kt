@@ -109,9 +109,10 @@ data class AppSettings(
      */
     val network: Boolean? = null,
     /**
-     * Clipboard text goes both ways between the app and Android, through the VNC viewer. Off,
-     * Xvnc neither takes the viewer's clipboard nor sends its own, so the app can't read what was
-     * copied in Android. Null follows [defaults] ([sharesClipboard]).
+     * Clipboard text goes both ways between the app and Android, through the viewer. Off, neither
+     * way: Xvnc neither takes the viewer's clipboard nor sends its own, and on Wayland the viewer
+     * offers the app no text and takes none, so the app can't read what was copied in Android.
+     * Null follows [defaults] ([sharesClipboard]).
      */
     val clipboard: Boolean? = null,
     /** Developer setting: the filter refuses the rarely used system calls for this app or not; null follows [defaults] ([blocksExtraSyscalls]). */

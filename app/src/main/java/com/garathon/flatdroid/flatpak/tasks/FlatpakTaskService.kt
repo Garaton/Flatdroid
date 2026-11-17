@@ -11,6 +11,7 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.os.StatFs
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
@@ -143,6 +144,8 @@ class FlatpakTaskService : Service() {
             var dns: ResolvConfRefresher? = null
             try {
                 previous?.join()
+                // Before it begins: nothing to clean up after a refusal.
+                requireFreeSpace(task)
                 began = true
                 following = followInNotification(task)
                 // A download can outlast a switch between networks: keep Alpine's resolv.conf current.
@@ -183,6 +186,8 @@ class FlatpakTaskService : Service() {
                 // Before the end: once nothing runs, a new start must not look like a duplicate of this one.
                 launched = null
                 FlatpakTasks.end(task, error)
+                // An update that ended before its catalog step: a refresh that joined it runs on its own.
+                if (task == FlatpakTask.UpdateAll && FlatpakTasks.takeCatalogWithUpdate()) FlatpakTasks.enqueue(FlatpakTask.RefreshCatalog)
                 // What waited for this task starts now, unless Android's limit ended it (the next would be refused
                 // too): Flatdroid starts it when it comes to the front. On the main thread, where a launch is also
                 // checked against tasks, so both claims can't pass their checks at once. Without a claimed task, the
@@ -223,6 +228,17 @@ class FlatpakTaskService : Service() {
                 failed.joinToString("\n") { getString(R.string.task_failed_title, describe(this, it.first)) }
         }
         DoneNotice.post(applicationContext, DoneNotice.TASKS_ID, title, text, failed = failed.isNotEmpty())
+    }
+
+    /**
+     * Refuses a task that downloads when storage is nearly full: Flatpak would fail part-way, and
+     * Android empties apps' caches by then.
+     */
+    private fun requireFreeSpace(task: FlatpakTask) {
+        val downloads = task is FlatpakTask.Install || task == FlatpakTask.UpdateAll || task is FlatpakTask.Reinstall || task == FlatpakTask.ReinstallAll
+        if (!downloads) return
+        val free = StatFs(filesDir.path).availableBytes
+        if (free < MIN_FREE_BYTES) throw IOException(getString(R.string.task_low_storage, free shr 20, MIN_FREE_BYTES shr 20))
     }
 
     /** Android 15 limits dataSync services to 6 hours a day. */
@@ -267,7 +283,7 @@ class FlatpakTaskService : Service() {
      * depend on it.
      */
     private fun updateAlpine(env: AlpineEnvironment) {
-        val cache = File(cacheDir, "apk-cache").apply { mkdirs() }
+        val cache = env.apkCacheDir.apply { mkdirs() }
         var allInstalled = false
         val check = thread(name = "apk-info") {
             allInstalled = runCatching { env.run(listOf("/sbin/apk", "info", "-e") + AlpineSetup.PACKAGES).exitCode == 0 }.getOrDefault(false)
@@ -326,7 +342,18 @@ class FlatpakTaskService : Service() {
                 }
                 run(env, FlatpakCommands.update)
                 applyExtraDataAndBaseline(env, FlatpakInstallation(env.flatpakDir, env.arch).appIds())
-                catalogRefreshed(popular = false)
+                // A refresh asked while this update ran or waited joined it (TaskQueue.joinsUpdate).
+                if (FlatpakTasks.takeCatalogWithUpdate()) {
+                    // The update is done: a failed refresh is only logged, as the catalog's reading is.
+                    try {
+                        run(env, FlatpakCommands.updateCatalog, getString(R.string.task_refreshing_catalog))
+                    } catch (e: IOException) {
+                        FlatpakTasks.log(getString(R.string.task_catalog_failed, e.message ?: e.toString()))
+                    }
+                    catalogRefreshed(popular = true)
+                } else {
+                    catalogRefreshed(popular = false)
+                }
             }
             // After a force stop, which kills processes anywhere.
             FlatpakTask.Repair -> {
@@ -514,7 +541,7 @@ class FlatpakTaskService : Service() {
         }
     }
 
-    private fun extraData(env: AlpineEnvironment) = ExtraData(env, AppData.extraDataState(applicationContext), File(cacheDir, "extra-data"))
+    private fun extraData(env: AlpineEnvironment) = ExtraData(env, AppData.extraDataState(applicationContext), env.extraDataDir)
 
     /**
      * After an update or uninstall that stopped part way. flatpak's own SIGINT handling exits in
@@ -604,7 +631,7 @@ class FlatpakTaskService : Service() {
         val ctx = applicationContext
         val remove = mutableListOf(
             File(AppData.cacheRoot(ctx), appId), File(AppData.rootsDir(ctx), appId), File(AppData.appTmpDir(ctx), appId),
-            File(AppData.electronDir(ctx), appId), File(AlpineEnvironment.get(ctx).cacheDir, "${ElectronSwap.BUILD_DIR}/$appId"),
+            File(AppData.electronDir(ctx), appId), File(AlpineEnvironment.get(ctx).workDir, "${ElectronSwap.BUILD_DIR}/$appId"),
         )
         if (TempHomes.owner(ctx) == appId) TempHomes.delete(ctx)
         if (deleteData) {
@@ -684,6 +711,12 @@ class FlatpakTaskService : Service() {
         private const val NOTIFICATION_INTERVAL_MS = 500L
         private const val ACTION_CANCEL = "com.garathon.flatdroid.action.CANCEL_TASK"
         private const val TIMEOUT_SECONDS = 2 * 60 * 60L
+        /**
+         * Least free storage for a task that downloads: Android's own low-storage mark on most
+         * phones, where it starts emptying apps' caches. A task that needs more than this still
+         * fails as Flatpak reports it ("Not enough disk space").
+         */
+        private const val MIN_FREE_BYTES = 500L shl 20
         /** An OSTree commit's checksum, in hex. */
         private const val COMMIT_LENGTH = 64
         private const val ALPINE_TIMEOUT_SECONDS = 60 * 60L

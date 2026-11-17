@@ -348,7 +348,7 @@ class StorageTaskService : Service() {
 
     private fun appData(appId: String) = File(AppData.root(this), appId)
 
-    /** Where an import that replaces files lands first, in the cache; null for other tasks. */
+    /** Where an import that replaces files lands first, in the work folder ([AppData.workDir]); null for other tasks. */
     private fun stagingDir(task: StorageTask): File? = when (task) {
         is StorageTask.ImportHome -> "${task.appId}-home"
         is StorageTask.ImportAppFiles -> "${task.appId}-settings"
@@ -356,7 +356,7 @@ class StorageTaskService : Service() {
         StorageTask.ImportAllAppFiles -> "all-settings"
         StorageTask.ImportSharedDotfiles -> "shared-dotfiles"
         else -> null
-    }?.let { File(cacheDir.canonicalFile, "import/$it") }
+    }?.let { File(AppData.workDir(this), "import/$it") }
 
     /** [task]'s staging folder, new and empty. */
     private fun staging(task: StorageTask): File = stagingDir(task)!!.also { AndroidTarFs.deleteTree(it); it.mkdirs() }

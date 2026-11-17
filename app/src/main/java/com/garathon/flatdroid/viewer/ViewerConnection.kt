@@ -140,6 +140,7 @@ object ViewerConnection {
                 }
 
                 override fun resized(width: Int, height: Int) {
+                    DebugLog.i("Viewer: screen ${width}x$height")
                     SessionController.onDisplayResized?.invoke(width, height)
                     waylandClient?.outputResized(width, height)
                     // X keeps the pointer inside a smaller screen: follow it there, as above.

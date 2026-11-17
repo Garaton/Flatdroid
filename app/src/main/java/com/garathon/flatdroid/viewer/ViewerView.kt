@@ -42,6 +42,7 @@ import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.min
+import kotlin.math.round
 import kotlin.math.roundToInt
 
 /**
@@ -90,13 +91,30 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
     var followPercent: Int? = null
     /** The size last asked of the server, so a refused one isn't asked again. */
     private var requestedSize: Pair<Int, Int>? = null
-    /** Asks the server for the screen size that fits the view, once it has settled (rotation, first frame). */
+    /** The server's size changes so far, and their count when [requestedSize] was asked. */
+    private var sizeChanges = 0
+    private var sizeChangesAtRequest = 0
+    /** Times [requestedSize] was asked. */
+    private var requestTries = 0
+    /**
+     * Asks the server for the screen size that fits the view, once it has settled (rotation, first
+     * frame, a size the server chose). The same size is asked again only when the server's size
+     * changed since the last ask and settled elsewhere: a request can be undone by one still under
+     * way (the session's own start-up size, or an ask from before a turn of the phone).
+     */
     private val resizeCheck = Runnable {
         val percent = followPercent ?: return@Runnable
         if (frameWidth == 0 || width == 0 || height == 0) return@Runnable
         val wanted = Resolution.entries.first { it.percent == percent }.scaled(width, height)
-        if (wanted == frameWidth to frameHeight || wanted == requestedSize) return@Runnable
+        if (wanted == frameWidth to frameHeight) return@Runnable
+        if (wanted == requestedSize) {
+            if (sizeChanges == sizeChangesAtRequest || requestTries >= RESIZE_TRIES) return@Runnable
+            requestTries++
+        } else {
+            requestTries = 1
+        }
         requestedSize = wanted
+        sizeChangesAtRequest = sizeChanges
         connection.resize(wanted.first, wanted.second)
     }
 
@@ -310,9 +328,11 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
                 frameHeight = fb.height
                 layoutFrame()
                 reportVisible()
-                // The server's first frame says whether it can be resized: check once it is here.
+                // The server's first frame says whether it can be resized: check once it is here,
+                // and after any change of size, once it settles (a resize passes through others).
+                sizeChanges++
                 removeCallbacks(resizeCheck)
-                post(resizeCheck)
+                postDelayed(resizeCheck, RESIZE_DELAY_MS)
             }
             visiblePart()
             copied = frames.frame(fb, visible)
@@ -538,6 +558,12 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
             moved -> offsetY.coerceIn(min(0f, room - h), height - h)
             zoom < 1f -> (room - h) / 2
             else -> (height - h) / 2
+        }
+        // Unscaled, on whole pixels: half a pixel off (a frame one pixel narrower than the view, centred)
+        // makes a compositor that samples the nearest pixel drop and double columns here and there.
+        if (s == 1f) {
+            offsetX = round(offsetX)
+            offsetY = round(offsetY)
         }
         placement.setScale(s, s)
         placement.postTranslate(offsetX, offsetY)
@@ -931,6 +957,8 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
         /** The frame's way back to where it lay, once the keyboard has closed. */
         private const val PLACE_BACK_MS = 200L
         private const val RESIZE_DELAY_MS = 250L
+        /** Asks for one size before it is left to the server. */
+        private const val RESIZE_TRIES = 3
         /** Three fingers down and up within this: a tap, not the start of a pinch. */
         private const val THREE_FINGER_TAP_MS = 400L
         // Wheel "buttons" 4 to 7, as bits of the pointer mask.

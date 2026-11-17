@@ -9,7 +9,7 @@ Android app (`com.garathon.flatdroid`, Kotlin, GPL-3.0-or-later) that installs F
 - **Mark anything untested as (verify)** in code comments and in what you report; keep confirmed and planned apart.
 - **Never describe proot, a setting or a home mode as a sandbox.** It narrows exposure; it doesn't isolate.
 - Don't spend time on bubblewrap or stock `flatpak run`; the custom launcher is the design.
-- Write temporary files to cache, if something is being downloaded, or will be deleted later that goes to cache. The only files that remain outside of cache are files and directories needed for the app to function and have persistence (Alpine rootfs, Flatpaks, settings, etc).
+- Write temporary files to cache, if something is being downloaded, or will be deleted later that goes to cache. The only files that remain outside of cache are files and directories needed for the app to function and have persistence (Alpine rootfs, Flatpaks, settings, etc), along with files that could crash Flatdroid if removed during a run.
 - Do not modify the README.md, if you believe it should be changed, if it needs changing, give short suggestions to the owner, suggestions are not lines to copy paste.
 
 ## Working with the owner
