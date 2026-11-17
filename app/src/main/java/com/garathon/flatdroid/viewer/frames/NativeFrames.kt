@@ -39,8 +39,9 @@ class NativeFrames private constructor(private val descriptor: ParcelFileDescrip
     private val fd = descriptor.fd
 
     override val input = object : InputStream() {
-        override fun read() = readByte(fd)
-        override fun read(b: ByteArray, off: Int, len: Int) = readBytes(fd, b, off, len)
+        // The buffer is the frame's own (one per connection); 0 once the connection ended.
+        override fun read() = frame.let { if (it == 0L) -1 else readByte(fd, it) }
+        override fun read(b: ByteArray, off: Int, len: Int) = frame.let { if (it == 0L) -1 else readBytes(fd, it, b, off, len) }
     }
 
     /** The frame (native); 0 once the connection ended. Released on the main thread. */
@@ -179,14 +180,12 @@ class NativeFrames private constructor(private val descriptor: ParcelFileDescrip
         fun open(socket: LocalSocket): NativeFrames? {
             return runCatching {
                 System.loadLibrary("fdview")
-                reset()
                 NativeFrames(ParcelFileDescriptor.dup(socket.fileDescriptor))
             }.onFailure { DebugLog.w("Viewer: no native frames: $it") }.getOrNull()
         }
 
-        @JvmStatic private external fun reset()
-        @JvmStatic private external fun readByte(fd: Int): Int
-        @JvmStatic private external fun readBytes(fd: Int, to: ByteArray, offset: Int, length: Int): Int
+        @JvmStatic private external fun readByte(fd: Int, frame: Long): Int
+        @JvmStatic private external fun readBytes(fd: Int, frame: Long, to: ByteArray, offset: Int, length: Int): Int
         @JvmStatic private external fun create(): Long
         @JvmStatic private external fun destroy(frame: Long)
         @JvmStatic private external fun resize(frame: Long, width: Int, height: Int): Boolean

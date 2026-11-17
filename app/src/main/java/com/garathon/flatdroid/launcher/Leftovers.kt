@@ -15,7 +15,7 @@ class Leftovers(
     private val installation: FlatpakInstallation,
     /** `files/electron`: one swap per app ID. */
     private val electronDir: File,
-    /** Per-app directories in the cache, one entry per app ID (caches, roots, private /tmp, swaps being built). */
+    /** Per-app directories in the cache and the work folder, one entry per app ID (caches, roots, private /tmp, swaps being built). */
     private val perAppCacheDirs: List<File>,
     private val fs: TarFs,
 ) {

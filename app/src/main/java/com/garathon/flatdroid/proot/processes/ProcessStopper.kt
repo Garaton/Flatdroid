@@ -97,12 +97,14 @@ class ProcessStopper(
         /** For commands that change Alpine or the Flatpak installation (see the class comment). */
         const val LENIENT_GRACE_MS = 60_000L
 
+        private val PID = Regex("""pid=(\d+)""")
+
         /**
          * The pid of [process]. java.lang.Process has no pid() on Android, but its toString() is
          * "Process[pid=…, …]" (on Android and on the desktop JDK alike).
          */
         fun pidOf(process: Process): Int? =
-            Regex("""pid=(\d+)""").find(process.toString())?.groupValues?.get(1)?.toIntOrNull()
+            PID.find(process.toString())?.groupValues?.get(1)?.toIntOrNull()
 
         /** Waits up to [millis] for [process] to exit (Process.waitFor(timeout) needs API 26). */
         fun waitForExit(process: Process, millis: Long): Boolean {

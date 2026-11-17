@@ -12,12 +12,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.garathon.flatdroid.R
+import com.garathon.flatdroid.ui.common.FollowEnd
 import com.garathon.flatdroid.ui.common.LogText
 import com.garathon.flatdroid.ui.common.aboveKeyboard
 import com.garathon.flatdroid.ui.theme.FlatdroidTheme
@@ -36,7 +36,7 @@ fun TerminalScreen(
     modifier: Modifier = Modifier,
 ) {
     val scroll = rememberScrollState()
-    LaunchedEffect(output) { scroll.scrollTo(scroll.maxValue) }
+    FollowEnd(scroll, output)
 
     Column(
         modifier = modifier.fillMaxSize().aboveKeyboard().padding(16.dp),
@@ -45,7 +45,7 @@ fun TerminalScreen(
         Text(stringResource(R.string.terminal_title), style = MaterialTheme.typography.headlineSmall)
         CommandInput(running, onRun, onCancel, Modifier.fillMaxWidth()) {
             OutlinedButton(onClick = onBack) {
-                Text(stringResource(R.string.settings_back))
+                Text(stringResource(R.string.back))
             }
         }
         Box(modifier = Modifier.fillMaxWidth().weight(1f).verticalScroll(scroll)) {

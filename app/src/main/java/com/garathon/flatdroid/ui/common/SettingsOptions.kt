@@ -1,7 +1,7 @@
 package com.garathon.flatdroid.ui.common
 
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -48,6 +48,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import com.garathon.flatdroid.R
+import com.garathon.flatdroid.settings.Rendering
 
 /**
  * Whether developer options are on, for the rows below: a row marked `developer` shows nothing
@@ -171,23 +172,18 @@ fun TextRow(
     minLines: Int = 3,
 ) {
     if (developer && !LocalDeveloperOptions.current) return
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        OutlinedTextField(
-            value = content,
-            onValueChange = onChange,
-            label = { SettingTitle(title, developer, enabled = enabled) },
-            supportingText = { if (hint != null) Text(hint) else null },
-            isError = isError,
-            singleLine = singleLine,
-            minLines = if (singleLine) 1 else minLines,
-            enabled = enabled,
-            keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
-            modifier = Modifier.weight(1f).keepInViewWhileFocused(),
-        )
-    }
+    OutlinedTextField(
+        value = content,
+        onValueChange = onChange,
+        label = { SettingTitle(title, developer, enabled = enabled) },
+        supportingText = hint?.let { { Text(it) } },
+        isError = isError,
+        singleLine = singleLine,
+        minLines = if (singleLine) 1 else minLines,
+        enabled = enabled,
+        keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
+        modifier = Modifier.fillMaxWidth().keepInViewWhileFocused(),
+    )
 }
 
 /**
@@ -287,3 +283,11 @@ fun DeveloperMark(size: Dp = 20.dp, enabled: Boolean = true) {
         modifier = Modifier.size(size),
     )
 }
+
+/** The Rendering setting's choices as the user reads them. */
+@Composable
+fun renderingNames(): Map<Rendering, String> = mapOf(
+    Rendering.AUTOMATIC to stringResource(R.string.app_settings_rendering_automatic),
+    Rendering.SOFTWARE to stringResource(R.string.app_settings_rendering_software),
+    Rendering.GL to stringResource(R.string.app_settings_rendering_gl),
+)

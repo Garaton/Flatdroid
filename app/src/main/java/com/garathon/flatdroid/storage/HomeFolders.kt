@@ -43,6 +43,11 @@ object HomeFolders {
         for (key in HOME_ONLY) append("XDG_${key}_DIR=\"\$HOME/\"\n")
     }
 
-    /** Where imported files go: the home's Downloads folder, or the home itself without one. */
-    fun importDir(home: File): File = File(home, STANDARD.getValue("DOWNLOAD")).takeIf { it.isDirectory } ?: home
+    /**
+     * Where imported files go: the home's Downloads folder, or the home itself without one. A
+     * `Downloads` that is a link (only an app can make one, in a private or temporary home) is no
+     * folder: [isLink] says whether a file is one itself.
+     */
+    fun importDir(home: File, isLink: (File) -> Boolean): File =
+        File(home, STANDARD.getValue("DOWNLOAD")).takeIf { it.isDirectory && !isLink(it) } ?: home
 }

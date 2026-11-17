@@ -68,7 +68,7 @@ sealed interface StorageTask {
     /** Replaces the settings and other files of each app in a picked zip ([ExportAllAppFiles]); other apps' are left alone. */
     data object ImportAllAppFiles : AllAppsTask
 
-    /** Zips the hidden files apps share when they opt in ([com.garathon.flatdroid.flatpak.AppData.sharedDotfilesDir]) into Download. */
+    /** Zips the hidden files apps share when they opt in ([com.garathon.flatdroid.storage.AppData.sharedDotfilesDir]) into Download. */
     data object ExportSharedDotfiles : AllAppsTask
 
     /** Replaces the shared hidden files with a picked zip's. */

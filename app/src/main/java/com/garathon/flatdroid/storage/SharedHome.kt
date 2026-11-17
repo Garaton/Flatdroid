@@ -25,7 +25,7 @@ object SharedHome {
      * `Download/` stays in use when All files access is turned off.
      */
     fun dir(context: Context): File {
-        val chosen = SetupController.settings(context).load()?.sharedHome ?: return defaultDir()
+        val chosen = SetupController.saved(context)?.sharedHome ?: return defaultDir()
         return if (SharedFolderPath.check(chosen, storageRoot().path, broadAccess = true) is SharedFolderPath.Result.Ok) File(chosen) else defaultDir()
     }
 

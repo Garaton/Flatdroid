@@ -7,7 +7,6 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
-import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
@@ -16,6 +15,7 @@ import androidx.core.content.ContextCompat
 import com.garathon.flatdroid.MainActivity
 import com.garathon.flatdroid.R
 import com.garathon.flatdroid.util.DoneNotice
+import com.garathon.flatdroid.util.startDataSyncForeground
 import com.garathon.flatdroid.alpine.AlpineEnvironment
 import com.garathon.flatdroid.storage.AppData
 import com.garathon.flatdroid.storage.sizes.SavedSizes
@@ -45,7 +45,12 @@ class SetupService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startInForeground(notification(SetupController.state.value))
+        if (!startInForeground(notification(SetupController.state.value))) {
+            // Android 15's daily limit for this kind of service is used up: nothing started, and the user can start again.
+            SetupController.error(getString(R.string.setup_time_limit))
+            stopSelf()
+            return START_NOT_STICKY
+        }
         if (job?.isActive == true) return START_NOT_STICKY
         if (!SetupController.begin()) {
             stopSelf()
@@ -74,6 +79,8 @@ class SetupService : Service() {
                     SetupController.beginReset()
                     SetupController.reporter.progress(null, getString(R.string.reset_running))
                     runInterruptible { reset.finish() }
+                    // The reset deleted Flatdroid's settings file.
+                    SetupController.settings(applicationContext).loadLive()
                     SetupController.cleared()
                     SetupController.reporter.log(getString(R.string.reset_done))
                 }
@@ -115,13 +122,7 @@ class SetupService : Service() {
         super.onDestroy()
     }
 
-    private fun startInForeground(notification: Notification) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
-        }
-    }
+    private fun startInForeground(notification: Notification): Boolean = startDataSyncForeground(NOTIFICATION_ID, notification)
 
     private fun notification(ui: SetupUi): Notification {
         createChannel()

@@ -23,6 +23,7 @@ import java.util.zip.ZipInputStream
  */
 class ElectronSwap(
     private val dir: File,
+    /** Where the swap is built and Electron downloaded (the cache: a preparation that loses them runs again). */
     private val cacheDir: File,
     private val arch: String,
     /**
@@ -35,7 +36,7 @@ class ElectronSwap(
     private val download: (url: String, dest: File, maxBytes: Long, onProgress: (Long, Long) -> Unit) -> Unit,
     private val sha256: (File) -> String,
 ) {
-    /** Where the swap is built; in the cache, so a half-built one never stays in private storage. */
+    /** Where the swap is built, apart from the prepared ones, so a half-built one is never taken for one. */
     private val work get() = File(cacheDir, "$BUILD_DIR/${dir.name}")
 
     /** The prepared directory, if it was made for this deployment of the app. */
@@ -157,7 +158,7 @@ class ElectronSwap(
         private const val MARKER = ".flatdroid-electron"
         /** Electron's Linux zips are 60–120 MiB. */
         private const val MAX_ZIP_BYTES = 256L shl 20
-        /** Under the cache directory: swaps being built, one directory per app. */
+        /** Under the cache: swaps being built, one directory per app. */
         const val BUILD_DIR = "electron-build"
         private const val DOWNLOAD_PREFIX = "electron-"
         /** The marker is in a directory bound into the app's root, so the app can write it. */

@@ -46,7 +46,7 @@ object ViewerDebug {
     private var postNanos = 0L
     private var postMax = 0L
 
-    fun postMeter(): (Long) -> Unit = { nanos ->
+    fun postMeter(): ((Long) -> Unit)? = { nanos ->
         posts++
         postNanos += nanos
         postMax = maxOf(postMax, nanos)

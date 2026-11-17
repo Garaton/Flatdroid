@@ -38,18 +38,19 @@ class FlathubClientTest {
         assertEquals(setOf(FlathubApp.Permission.FILES), app.permissions)
         assertTrue(app.builtFor("aarch64"))
         assertFalse(app.builtFor("riscv64"))
-        assertFalse(app.verified)
+        assertEquals(false, app.verified)
     }
 
     @Test
     fun theVerificationComesFromTheAppstreamAnswer() {
         val verified = """{"name":"Mousepad","metadata":{"flathub::verification::verified":true,"flathub::verification::website":"xfce.org"}}"""
-        assertTrue(FlathubClient.parse("org.xfce.mousepad", mousepadSummary, verified).verified)
+        assertEquals(true, FlathubClient.parse("org.xfce.mousepad", mousepadSummary, verified).verified)
         val asText = """{"name":"Mousepad","metadata":{"flathub::verification::verified":"true"}}"""
-        assertTrue(FlathubClient.parse("org.xfce.mousepad", mousepadSummary, asText).verified)
+        assertEquals(true, FlathubClient.parse("org.xfce.mousepad", mousepadSummary, asText).verified)
         val no = """{"name":"Mousepad","metadata":{"flathub::verification::verified":false}}"""
-        assertFalse(FlathubClient.parse("org.xfce.mousepad", mousepadSummary, no).verified)
-        assertFalse(FlathubClient.parse("org.xfce.mousepad", mousepadSummary, null).verified)
+        assertEquals(false, FlathubClient.parse("org.xfce.mousepad", mousepadSummary, no).verified)
+        // No answer is not a no: the page then keeps what the saved lists say.
+        assertNull(FlathubClient.parse("org.xfce.mousepad", mousepadSummary, null).verified)
     }
 
     @Test
@@ -80,9 +81,9 @@ class FlathubClientTest {
 
     @Test
     fun collectionsKeepTheOrderValidIdsAndInstalls() {
-        val answer = """{"hits":[{"app_id":"org.vinegarhq.Sober","installs_last_month":240647,"added_at":1743316841,"updated_at":1793923967},{"app_id":"bad id"},{"name":"no id"},{"app_id":"org.mozilla.firefox"},{"app_id":"org.vinegarhq.Sober","installs_last_month":1}],"totalHits":3,"totalPages":7}"""
+        val answer = """{"hits":[{"app_id":"org.vinegarhq.Sober","installs_last_month":240647,"added_at":1743316841,"updated_at":1793923967,"verification_verified":true},{"app_id":"bad id"},{"name":"no id"},{"app_id":"org.mozilla.firefox"},{"app_id":"org.vinegarhq.Sober","installs_last_month":1}],"totalHits":3,"totalPages":7}"""
         assertEquals(
-            CollectionPage(listOf(CollectionApp("org.vinegarhq.Sober", 240647, 1743316841, 1793923967), CollectionApp("org.mozilla.firefox", null)), 7),
+            CollectionPage(listOf(CollectionApp("org.vinegarhq.Sober", 240647, 1743316841, 1793923967, verified = true), CollectionApp("org.mozilla.firefox", null)), 7),
             FlathubClient.parseCollection(answer),
         )
         assertEquals(CollectionPage(emptyList(), 0), FlathubClient.parseCollection("{}"))

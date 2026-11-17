@@ -76,7 +76,7 @@ class AlpineSetup(
     private fun packages(reporter: SetupReporter) {
         // A retry after a partial install needs less; only check while packages are missing.
         if (run(listOf("/sbin/apk", "info", "-e") + PACKAGES, reporter).exitCode != 0) requireSpace(PACKAGES_BYTES)
-        val cache = File(env.cacheDir, "apk-cache").apply { mkdirs() }
+        val cache = env.apkCacheDir.apply { mkdirs() }
         // Upgrade the minirootfs's own packages first: `apk add` alone only upgrades what the new
         // packages require, so base packages would miss fixes released after the minirootfs.
         reporter.progress(null, context.getString(R.string.setup_progress_upgrade))

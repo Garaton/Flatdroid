@@ -17,9 +17,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Link
-import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material3.CircularProgressIndicator
@@ -84,6 +84,7 @@ fun RunningRow(
                         is SessionState.Starting -> state.detail
                         is SessionState.PreparingElectron -> state.detail
                         is SessionState.Stopping -> stringResource(R.string.session_stopping_short)
+                        is SessionState.Running -> if (state.opening) stringResource(R.string.session_opening) else appId
                         else -> appId
                     },
                     style = MaterialTheme.typography.bodySmall,
@@ -104,7 +105,7 @@ fun RunningRow(
                     if (developerOptions) IconAction(Icons.Filled.Info, R.string.show_log, onLog, size = ICON)
                     if (state.socket == null) IconAction(Icons.Filled.Link, R.string.session_external_title, { viewerInfo = true }, size = ICON)
                     IconAction(Icons.Filled.PowerSettingsNew, R.string.session_stop, onStop, size = ICON)
-                    IconAction(Icons.Filled.OpenInNew, if (state.socket != null) R.string.session_open_app else R.string.session_open_viewer, { onOpen(state) }, size = ICON)
+                    IconAction(Icons.AutoMirrored.Filled.OpenInNew, if (state.socket != null) R.string.session_open_app else R.string.session_open_viewer, { onOpen(state) }, size = ICON)
                 }
                 else -> Unit
             }

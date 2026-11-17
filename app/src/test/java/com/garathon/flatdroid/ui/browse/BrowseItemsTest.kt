@@ -8,7 +8,7 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Test
 
 class BrowseItemsTest {
-    private fun app(id: String, runtime: String? = null) = CatalogApp(id, id.substringAfterLast('.'), "", null, false, emptyList(), emptyList(), null, runtime)
+    private fun app(id: String, runtime: String? = null) = CatalogApp(id, id.substringAfterLast('.'), "", null, emptyList(), emptyList(), null, runtime)
 
     // Saved as Catalog writes them: Popular's order, then installs, added and updated (seconds).
     private val lists = FlathubLists.parse(

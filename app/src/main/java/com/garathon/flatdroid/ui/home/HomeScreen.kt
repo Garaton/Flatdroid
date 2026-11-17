@@ -81,6 +81,8 @@ private const val PIN_MILLIS = 300
 private const val LIST_FADE_MILLIS = 700
 /** A row of an app just stopped in place fades from the running row's color to the list's. */
 private const val ROW_FADE_MILLIS = 500
+/** How faint an app that can't start shows. */
+private const val DISABLED_ALPHA = 0.6f
 
 /**
  * The home list's scroll position and search, kept by the activity so they survive a visit to
@@ -293,7 +295,7 @@ private fun TopIcons(
     }
     Box {
         IconButton(onClick = { importMenu = true }) {
-            Icon(Icons.Filled.UploadFile, contentDescription = stringResource(R.string.home_import))
+            Icon(Icons.Filled.UploadFile, contentDescription = stringResource(R.string.home_import_files))
         }
         DropdownMenu(expanded = importMenu, onDismissRequest = { importMenu = false }) {
             DropdownMenuItem(text = { Text(stringResource(R.string.home_import_files)) }, onClick = { importMenu = false; onImportFiles() })
@@ -324,14 +326,16 @@ private fun AppRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        AppIcon(app.icon, Modifier.size(48.dp))
-        Column(modifier = Modifier.weight(1f)) {
+        // Dimmed while the app can't start (another app or a task runs); the settings button stays as it is.
+        val dim = if (enabled) 1f else DISABLED_ALPHA
+        AppIcon(app.icon, Modifier.size(48.dp).alpha(dim))
+        Column(modifier = Modifier.weight(1f).alpha(dim)) {
             Text(app.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(app.id, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         // An app that never ran says so, rather than "0 min".
         val never = if (showTimeUsed) app.launches == 0 && app.usedMillis == 0L else app.lastOpened == null
-        Column(horizontalAlignment = Alignment.End) {
+        Column(horizontalAlignment = Alignment.End, modifier = Modifier.alpha(dim)) {
             Text(
                 stringResource(if (showTimeUsed) R.string.home_time_used else R.string.home_last_opened),
                 style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,

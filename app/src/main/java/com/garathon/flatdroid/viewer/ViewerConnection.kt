@@ -43,7 +43,8 @@ interface ViewerSink {
  * The one connection to the session's display, kept for the whole session: it outlives the
  * viewer screen (rotation, leaving and coming back) so no other process can take the server's
  * one connection meanwhile ([SessionScript] starts it never shared, keeping the first client).
- * While no viewer is shown it asks for no updates.
+ * While no viewer is shown it asks for no updates. It also keeps the count of the app's windows
+ * ([WaylandClient]) that [HiddenPause] acts on, with the viewer closed too.
  *
  * Updates are paced by the screen: the next is asked for only after the last was copied out, so
  * they never queue up behind a slow draw. While zoomed in it asks only for the part on screen
@@ -84,10 +85,15 @@ object ViewerConnection {
         wayland = waylandSocket != null
         speedsFile = File(cacheDir, SCROLL_SPEEDS)
         speedKey = appId?.let { "$it.${if (wayland) "wayland" else "x11"}" }
-        speed = ScrollSpeed(speedKey?.let { speeds().getProperty(it) })
-        speedAcross = ScrollSpeed(speedKey?.let { speeds().getProperty("$it$ACROSS") })
+        val saved = speedKey?.let { speeds() }
+        speed = ScrollSpeed(speedKey?.let { saved?.getProperty(it) })
+        speedAcross = ScrollSpeed(speedKey?.let { saved?.getProperty("$it$ACROSS") })
         waylandClient = waylandSocket?.let { socket ->
-            WaylandClient(socket, ::androidText.takeIf { shareClipboard }, outputRefresh?.let { it * 1000 }, cacheDir).apply { start() }
+            // The windows are counted for the app HiddenPause was attached to (every app, not only those that pause while hidden).
+            WaylandClient(
+                socket, ::androidText.takeIf { shareClipboard }, outputRefresh?.let { it * 1000 }, cacheDir,
+                onWindows = HiddenPause::windows.takeIf { HiddenPause.attached },
+            ).apply { start() }
         }
         sender = Executors.newSingleThreadExecutor()
         val socket = LocalSocket().also { socket = it }
@@ -134,6 +140,7 @@ object ViewerConnection {
                 }
 
                 override fun resized(width: Int, height: Int) {
+                    DebugLog.i("Viewer: screen ${width}x$height")
                     SessionController.onDisplayResized?.invoke(width, height)
                     waylandClient?.outputResized(width, height)
                     // X keeps the pointer inside a smaller screen: follow it there, as above.
@@ -209,14 +216,14 @@ object ViewerConnection {
         if (this.sink !== sink) return
         this.sink = null
         shown = false
-        HiddenPause.viewerShown(false)
+        SessionController.viewerVisible(false)
     }
 
     /** [sink] became visible or hidden; a newer viewer may already be the one attached. Main thread. */
     fun shown(sink: ViewerSink, visible: Boolean) {
         if (this.sink !== sink) return
         shown = visible
-        HiddenPause.viewerShown(visible)
+        SessionController.viewerVisible(visible)
         // Nobody sees the output while hidden: the apps needn't draw more than about once a second.
         client?.framebuffer?.let { fb -> waylandClient?.hidden(!visible, fb.width, fb.height) }
         if (visible) {

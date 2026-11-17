@@ -31,7 +31,7 @@ data class ExtensionPoint(
     val addLdPath: String?,
 )
 
-/** The `[Context]` permissions an app asks for. Read now; enforced per app later. */
+/** The `[Context]` permissions an app asks for: the defaults of its per-app permissions, where the user lets them be. */
 data class FlatpakContext(
     val shared: List<String> = emptyList(),
     val sockets: List<String> = emptyList(),
@@ -45,18 +45,19 @@ data class FlatpakContext(
 
     /**
      * The app may use a camera. Metadata can't say it: the camera portal needs no declaration, so
-     * this is a hint, from what an app that opens a camera itself asks for: the PipeWire socket.
-     * In the future, when we support faux camera based devices that we also include all /dev.
+     * this is a hint, from what such an app asks for: the `Camera` folders of the pictures and videos
+     * directories that camera apps save to. (The PipeWire socket isn't one: apps that open
+     * `/dev/video*` themselves ask for it too.)
      */
     val mayUseCamera: Boolean
-        get() = filesystems.any { it.substringBefore(':') == PIPEWIRE_SOCKET }
+        get() = filesystems.any { it.substringBefore(':').trimEnd('/') in CAMERA_PATHS }
     /** Asks for both Wayland and X11 (`x11` or `fallback-x11`), so X11 can be forced. */
     val waylandAndX11: Boolean
         get() = wayland && ("x11" in sockets || "fallback-x11" in sockets)
 }
 
-/** The PipeWire socket's `filesystems=` name. */
-private const val PIPEWIRE_SOCKET = "xdg-run/pipewire-0"
+/** The `filesystems=` names that hint at a camera: the folders camera apps save to. */
+private val CAMERA_PATHS = setOf("xdg-pictures/Camera", "xdg-videos/Camera")
 
 /** The metadata file of an installed app or runtime. */
 class FlatpakMetadata(private val keyfile: Keyfile) {

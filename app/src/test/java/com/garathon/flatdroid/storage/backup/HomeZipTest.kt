@@ -17,6 +17,23 @@ class HomeZipTest {
     @get:Rule val tmp = TemporaryFolder()
 
     @Test
+    fun aPartThatIsALinkIsLeftOutWhole() {
+        val elsewhere = tmp.newFolder("elsewhere")
+        File(elsewhere, "secret").writeText("private")
+        val home = File(tmp.root, "home")
+        Files.createSymbolicLink(home.toPath(), elsewhere.toPath())
+        val other = tmp.newFolder("other")
+        File(other, "kept").writeText("x")
+        val out = ByteArrayOutputStream()
+        HomeZip.write(listOf(HomeZip.Part(home), HomeZip.Part(other, "other/")), out, isLink = { Files.isSymbolicLink(it.toPath()) })
+        val names = mutableListOf<String>()
+        ZipInputStream(out.toByteArray().inputStream()).use { zip ->
+            while (true) names += (zip.nextEntry ?: break).name
+        }
+        assertEquals(listOf("other/", "other/kept"), names)
+    }
+
+    @Test
     fun zipsFilesAndFoldersWithoutSettingsOrLinks() {
         val home = tmp.newFolder("home")
         File(home, "Pictures").mkdir()

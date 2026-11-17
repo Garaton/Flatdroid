@@ -138,7 +138,7 @@ class IntegrityGuard(context: Context) {
                 val diff = check.verify(d.dir.name, d.files, ignore, { done, total -> onProgress(d.ref, done, total) }, cancelled, listed)
                 if (diff == null) {
                     // First time (or install predating the check): trust the current files as the baseline.
-                    check.baseline(d.dir.name, d.files, ignore, { done, total -> onProgress(d.ref, done, total) }, cancelled)
+                    check.baseline(d.dir.name, d.files, ignore, { done, total -> onProgress(d.ref, done, total) }, cancelled, listed)
                 }
                 val tampered = (if (metadataChanged) listOf(METADATA) else emptyList()) + diff?.tampered.orEmpty()
                 val removed = diff?.removed.orEmpty()

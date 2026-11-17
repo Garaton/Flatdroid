@@ -54,7 +54,7 @@ fun CommandInput(
                 keyboardActions = KeyboardActions(onGo = { if (!running) onRun(command) }),
                 modifier = Modifier.weight(1f).keepInViewWhileFocused(),
             )
-            val cancel = stringResource(R.string.command_cancel)
+            val cancel = stringResource(R.string.cancel)
             IconButton(onClick = onCancel, enabled = running, modifier = Modifier.semantics { contentDescription = cancel }) {
                 Text("✕", style = MaterialTheme.typography.titleLarge)
             }

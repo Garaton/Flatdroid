@@ -66,6 +66,10 @@ int main(int argc, char **argv)
 	expect("getxattrat", syscall(464, -1, "", 0, 0, 0, 0), base, ENOSYS);
 	expect("listxattrat", syscall(465, -1, "", 0, 0, 0), base, ENOSYS);
 	expect("removexattrat", syscall(466, -1, "", 0, 0), base, ENOSYS);
+	/* Paths proot doesn't translate; unfiltered they fail with something else (EBADF, EPERM, EINVAL). */
+	expect("fanotify_init", syscall(SYS_fanotify_init, 0xffff, 0), base, ENOSYS);
+	expect("fanotify_mark", syscall(SYS_fanotify_mark, -1, 0, 0, -1, "/"), base, ENOSYS);
+	expect("quotactl", syscall(SYS_quotactl, 0, "", 0, 0), base, ENOSYS);
 	expect("file_getattr", syscall(468, -1, "", 0, 0, 0), base, ENOSYS);
 	expect("file_setattr", syscall(469, -1, "", 0, 0, 0), base, ENOSYS);
 	/* open_tree_attr is the last one proot translates, so it stays allowed (EBADF here). */
@@ -84,6 +88,19 @@ int main(int argc, char **argv)
 	expect("socket AF_INET6", socket_result(AF_INET6), noinet, EACCES);
 	expect("socket AF_UNIX", socket_result(AF_UNIX), 0, EACCES);
 	expect("socket AF_NETLINK", socket_result(AF_NETLINK), 0, EACCES);
+	/* Families outside the allowlist. A kernel without one says EAFNOSUPPORT itself, so they are
+	 * only checked under the filter, where that answer can only be fdsec's. */
+	if (base) {
+		static const struct { const char *name; int family; } other[] = {
+			{ "AF_PACKET", 17 }, { "AF_KEY", 15 }, { "AF_BLUETOOTH", 31 }, { "AF_ALG", 38 },
+			{ "AF_VSOCK", 40 }, { "AF_SMC", 43 }, { "family 255", 255 },
+		};
+		for (unsigned i = 0; i < sizeof other / sizeof *other; i++) {
+			char name[32];
+			snprintf(name, sizeof name, "socket %s", other[i].name);
+			expect(name, syscall(SYS_socket, other[i].family, SOCK_STREAM, 0), 1, EAFNOSUPPORT);
+		}
+	}
 	/* A bad descriptor: EBADF when connect is allowed. */
 	expect("connect", connect(-1, 0, 0), noconnect, EACCES);
 

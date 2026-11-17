@@ -1,6 +1,6 @@
 # Security probes
 
-Manual tools that check, from inside a launched Flatpak, that the milestone 6 hardening holds. They are not part of the app and are not built or run by Gradle; run them by hand on a device against a session Flatdroid started. There is no way to automate them (they need a live Flatpak session with a chosen security level), but they are kept here so the checks can be re-run and extended.
+Manual tools that check, from inside a launched Flatpak, that the hardening holds. They are not part of the app and are not built or run by Gradle; run them by hand on a device against a session Flatdroid started. There is no way to automate them (they need a live Flatpak session with a chosen security level), but they are kept here so the checks can be re-run and extended.
 
 ## fdprobe.c - system-call and /proc escape probe
 
@@ -28,7 +28,7 @@ cp /path/to/fdprobe /app/bin/fdprobe && chmod +x /app/bin/fdprobe
 /app/bin/fdprobe /system <helper-pid>     # helper pid e.g. from: adb shell pidof Xvnc
 ```
 
-Under milestone 6, at Hardened every escape reads `blocked` and the helpers are not even visible; at Performant the helpers' memory reads as `EXPOSED` (the documented trade-off) and `/proc/root` reads as the guest root (not an escape).
+At Hardened every escape reads `blocked` and the helpers are not even visible; at Performant the helpers' memory reads as `EXPOSED` (the documented trade-off) and `/proc/root` reads as the guest root (not an escape).
 
 ## fdprobe.sh - config-level checks (no compiler)
 

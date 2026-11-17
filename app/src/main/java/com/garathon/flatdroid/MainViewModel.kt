@@ -16,6 +16,9 @@ import com.garathon.flatdroid.setup.rootfs.deleteTree
 import com.garathon.flatdroid.storage.sizes.SavedSizes
 import com.garathon.flatdroid.util.debug.DebugLog
 import com.garathon.flatdroid.util.io.LineBuffer
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
@@ -27,7 +30,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
@@ -78,12 +80,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _settingsError.value = null
     }
 
+    /** What the screen does once settings are applied and saved. */
+    enum class AfterApply { HOME, REINSTALL_ALL, BASELINE_ALL }
+
     /**
-     * Applies [settings] in Alpine, then saves them and calls [onApplied] (on the main thread).
-     * Only commands that differ from the saved settings' run, and they run first, so settings whose
-     * commands failed aren't saved and a second save tries them again.
+     * Applied settings, one event each. An event and not a callback: applying outlives the window
+     * (a rotation rebuilds it), and the window that is there when it ends answers it.
      */
-    fun applySettings(settings: UserSettings, onApplied: () -> Unit) {
+    private val _applied = Channel<AfterApply>(Channel.UNLIMITED)
+    val applied: Flow<AfterApply> = _applied.receiveAsFlow()
+
+    /**
+     * Applies [settings] in Alpine, then saves them and sends [after] to [applied].
+     * Only commands that differ from the saved settings' run, and they run first, so settings whose
+     * commands failed aren't saved and a second save tries them again. [alsoWrite] (the settings
+     * import's app files) runs on the same thread after they are saved, so nothing of it is
+     * written when a command fails, and a rotation can't cut it off.
+     */
+    fun applySettings(settings: UserSettings, after: AfterApply, alsoWrite: (() -> Unit)? = null) {
         if (_applying.value) return
         _applying.value = true
         _settingsError.value = null
@@ -105,12 +119,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 }
                 SetupController.settings(app).save(settings)
+                alsoWrite?.invoke()
                 // Off, the file check's baselines aren't kept up (installs and updates record none), so
                 // they are dropped; turning it on again asks how to record them.
                 if (before?.security?.checkFilesBeforeLaunch == true && !settings.security.checkFilesBeforeLaunch) {
                     AndroidTarFs.deleteTree(AppData.integrityDir(app))
                 }
-                withContext(Dispatchers.Main) { onApplied() }
+                _applied.send(after)
             } catch (e: Exception) {
                 _settingsError.value = e.message ?: e.toString()
             } finally {
@@ -167,6 +182,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 end(text(R.string.terminal_cancelled))
                 throw e
             } catch (e: Exception) {
+                // Whatever went wrong, the command must not outlive the "running" flag (the session check relies on it) (verify: not forced).
+                proc?.let { withContext(NonCancellable) { runCatching { runInterruptible { it.stop() } } } }
                 end(text(R.string.terminal_error, e))
             } finally {
                 SavedSizes.changedAll(getApplication(), measureNow = false)

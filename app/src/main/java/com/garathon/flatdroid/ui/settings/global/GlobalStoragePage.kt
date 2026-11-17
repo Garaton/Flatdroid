@@ -115,6 +115,8 @@ fun GlobalStoragePage(s: GlobalPageState) = SettingsPageColumn(R.string.settings
     val names = remember(env.apps) { env.apps.associate { it.id to it.name } }
     val nameOf = { id: String -> names[id] ?: id }
     val canChange = env.canReset && !env.storageBusy
+    // One app's home or files: only that app running matters (a Flatpak task or another app doesn't touch them).
+    val appFree = { id: String -> env.runningAppId != id }
 
     confirm?.let { key ->
         StorageConfirmDialog(
@@ -172,9 +174,10 @@ fun GlobalStoragePage(s: GlobalPageState) = SettingsPageColumn(R.string.settings
             listOf(
                 StorageSegment(R.string.storage_part_runtimes, storage?.runtimes, colors[0]),
                 StorageSegment(R.string.storage_part_apps, storage?.apps, colors[1]),
-                StorageSegment(R.string.storage_part_app_data, storage?.appData, colors[2]),
-                StorageSegment(R.string.storage_part_homes, storage?.privateHomes, colors[3]),
-                StorageSegment(R.string.storage_part_cache, storage?.cache, colors[4]),
+                // The second column (held sideways) is what each app keeps; the first, the Flatpaks' parts.
+                StorageSegment(R.string.storage_part_app_data, storage?.appData, colors[2], column = 1),
+                StorageSegment(R.string.storage_part_homes, storage?.privateHomes, colors[3], column = 1),
+                StorageSegment(R.string.storage_part_cache, storage?.cache, colors[4], column = 1),
                 StorageSegment(R.string.storage_part_other, storage?.other, colors[5]),
             ),
         )
@@ -243,13 +246,13 @@ fun GlobalStoragePage(s: GlobalPageState) = SettingsPageColumn(R.string.settings
         val homes = remember(files, names) { files.map { (id, sizes) -> AppFilesEntry(id, names[id] ?: id, id in names, sizes?.privateHome ?: 0) } }
         StorageList(appFilesSpec, homes, key = { it.id }, emptyText = R.string.storage_list_empty) { entry ->
             StorageRow(entry.name, size(entry.bytes), subtitle = if (entry.installed) entry.id else stringResource(R.string.storage_not_installed), dimmed = !entry.installed, actionsBelow = true) {
-                IconAction(Icons.Filled.FolderOpen, R.string.storage_open_in_files, { actions.onOpenHome(entry.id) }, enabled = entry.bytes > 0)
-                IconAction(Icons.Filled.UploadFile, R.string.storage_import, { confirm = StorageConfirm.app(entry.id, StorageAction.IMPORT_HOME) }, enabled = canChange)
-                IconAction(Icons.Filled.SaveAlt, R.string.storage_export, { actions.onAppStorage(entry.id, StorageAction.EXPORT_HOME) }, enabled = entry.bytes > 0)
+                IconAction(Icons.Filled.FolderOpen, R.string.storage_open_in_files, { actions.onOpenHome(entry.id) }, enabled = appFree(entry.id) && entry.bytes > 0)
+                IconAction(Icons.Filled.UploadFile, R.string.storage_import, { confirm = StorageConfirm.app(entry.id, StorageAction.IMPORT_HOME) }, enabled = appFree(entry.id) && !env.storageBusy)
+                IconAction(Icons.Filled.SaveAlt, R.string.storage_export, { actions.onAppStorage(entry.id, StorageAction.EXPORT_HOME) }, enabled = appFree(entry.id) && entry.bytes > 0)
                 IconAction(
                     Icons.Filled.Delete, R.string.storage_delete,
                     { confirm = StorageConfirm.app(entry.id, if (entry.installed) StorageAction.RESET_HOME else StorageAction.DELETE_HOME) },
-                    enabled = canChange && entry.bytes > 0, danger = true,
+                    enabled = appFree(entry.id) && !env.storageBusy && entry.bytes > 0, danger = true,
                 )
             }
         }
@@ -259,12 +262,12 @@ fun GlobalStoragePage(s: GlobalPageState) = SettingsPageColumn(R.string.settings
         val data = remember(files, names) { files.map { (id, sizes) -> AppFilesEntry(id, names[id] ?: id, id in names, sizes?.settings ?: 0) } }
         StorageList(appFilesSpec, data, key = { it.id }, emptyText = R.string.storage_list_empty) { entry ->
             StorageRow(entry.name, size(entry.bytes), subtitle = if (entry.installed) entry.id else stringResource(R.string.storage_not_installed), dimmed = !entry.installed, actionsBelow = true) {
-                IconAction(Icons.Filled.UploadFile, R.string.storage_import, { confirm = StorageConfirm.app(entry.id, StorageAction.IMPORT_SETTINGS) }, enabled = canChange)
-                IconAction(Icons.Filled.SaveAlt, R.string.storage_export, { actions.onAppStorage(entry.id, StorageAction.EXPORT_SETTINGS) }, enabled = entry.bytes > 0)
+                IconAction(Icons.Filled.UploadFile, R.string.storage_import, { confirm = StorageConfirm.app(entry.id, StorageAction.IMPORT_SETTINGS) }, enabled = appFree(entry.id) && !env.storageBusy)
+                IconAction(Icons.Filled.SaveAlt, R.string.storage_export, { actions.onAppStorage(entry.id, StorageAction.EXPORT_SETTINGS) }, enabled = appFree(entry.id) && entry.bytes > 0)
                 IconAction(
                     Icons.Filled.Delete, R.string.storage_delete,
                     { confirm = StorageConfirm.app(entry.id, if (entry.installed) StorageAction.RESET_SETTINGS else StorageAction.DELETE_SETTINGS) },
-                    enabled = canChange && entry.bytes > 0, danger = true,
+                    enabled = appFree(entry.id) && !env.storageBusy && entry.bytes > 0, danger = true,
                 )
             }
         }

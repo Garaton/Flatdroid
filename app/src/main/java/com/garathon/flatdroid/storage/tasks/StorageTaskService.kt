@@ -8,7 +8,6 @@ import android.app.Service
 import android.content.ClipData
 import android.content.Context
 import android.content.Intent
-import android.content.pm.ServiceInfo
 import android.net.Uri
 import android.os.Build
 import android.os.IBinder
@@ -38,6 +37,7 @@ import com.garathon.flatdroid.storage.backup.HomeZip
 import com.garathon.flatdroid.storage.backup.SettingsBackup
 import com.garathon.flatdroid.storage.sizes.SavedSizes
 import com.garathon.flatdroid.util.io.CountingInputStream
+import com.garathon.flatdroid.util.startDataSyncForeground
 import com.garathon.flatdroid.util.debug.DebugLog
 import com.garathon.flatdroid.util.io.copyWithProgress
 import com.garathon.flatdroid.util.io.removeAtomicLeftovers
@@ -46,10 +46,15 @@ import com.garathon.flatdroid.util.io.writeAtomically
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
@@ -72,12 +77,19 @@ class StorageTaskService : Service() {
     private var worker: Job? = null
     private var lastPercent = -1
     private var lastUpdate = 0L
+    /** The running task's title, made once when it starts: each progress update would read the app's metadata and desktop file again. */
+    @Volatile private var title: String? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val record = intent?.let(::recordOf)
-        startInForeground(progressNotification(record?.task ?: StorageTasks.ui.value.running, null))
+        if (!startInForeground(progressNotification(record?.task ?: StorageTasks.ui.value.running, null))) {
+            // Android 15's daily limit for this kind of service is used up. The task stays recorded
+            // ([PendingTasks]), so Flatdroid offers to continue it when it is opened.
+            stopSelf()
+            return START_NOT_STICKY
+        }
         if (record == null) {
             if (StorageTasks.ui.value.running == null && StorageTasks.ui.value.queued.isEmpty()) stopSelf()
             return START_NOT_STICKY
@@ -107,20 +119,37 @@ class StorageTaskService : Service() {
             StorageTasks.start(task)
             lastPercent = -1
             lastUpdate = 0L
+            title = describe(this, task)
             updateProgress(task, null)
+            // Stopped (the time limit, the service's end), not failed or done: the staging and the record stay for Continue.
+            var stopped = false
             val result = try {
                 withContext(Dispatchers.IO) {
-                    forgetSizes(task, done = false)
-                    perform(record)
+                    // An interrupt, so a stop by Android's time limit ends the copy instead of leaving it running unseen (verify: not run).
+                    runInterruptible {
+                        forgetSizes(task, done = false)
+                        perform(record)
+                    }
                 }
+            } catch (e: CancellationException) {
+                stopped = true
+                throw e
             } catch (e: Exception) {
+                // An interrupted copy may surface as an I/O error instead of the cancellation (verify): that is a stop too.
+                if (!currentCoroutineContext().isActive) {
+                    stopped = true
+                    throw CancellationException("Stopped during ${describe(this, task)}").apply { initCause(e) }
+                }
                 failed(task, e)
             } finally {
-                // Ended, done or failed: nothing to continue, and the picked files aren't needed any more.
-                withContext(Dispatchers.IO) {
+                // Whatever the end, what the task changed is measured again; the picked files are let go and the record
+                // dropped only when it ended (done or failed), since nothing is left to continue. Not cancellable, or a stop would skip it.
+                withContext(NonCancellable + Dispatchers.IO) {
                     forgetSizes(task, done = true)
-                    pending.remove(record.id)
-                    releaseAccess(this@StorageTaskService, record.uris, pending.all())
+                    if (!stopped) {
+                        pending.remove(record.id)
+                        releaseAccess(this@StorageTaskService, record.uris, pending.all())
+                    }
                 }
                 StorageTasks.end()
             }
@@ -145,7 +174,7 @@ class StorageTaskService : Service() {
                 ImportTarget.Shared -> sharedHome()
                 is ImportTarget.Private -> privateHome(target.appId)
             }
-            val dir = HomeFolders.importDir(home)
+            val dir = HomeFolders.importDir(home, AndroidTarFs::isSymlink)
             val result = copyIn(record, uris, dir, home.takeIf { task.target == ImportTarget.Shared })
             getString(R.string.storage_imported_title) to listOfNotNull(
                 result.copied.takeIf { it > 0 || result.adopted + result.present == 0 }
@@ -169,19 +198,20 @@ class StorageTaskService : Service() {
         }
         is StorageTask.ExportTempHome -> {
             val home = TempHomes.home(this)
-            if (TempHomes.owner(this) != task.appId || !home.isDirectory) throw IOException(getString(R.string.storage_temp_home_gone))
-            val saved = zipOut(task, uris, listOf(HomeZip.Part(home, exclude = HomeZip.SETTINGS_DIRS)))
+            // A link in the home's place is refused by zipOut, which also removes the file the user picked.
+            if (TempHomes.owner(this) != task.appId || !(home.isDirectory || AndroidTarFs.isSymlink(home))) throw IOException(getString(R.string.storage_temp_home_gone))
+            val saved = zipOut(task, uris, listOf(HomeZip.Part(home, exclude = HomeZip.SETTINGS_DIRS)), task.appId)
             TempHomes.delete(this)
             getString(R.string.storage_exported_title) to getString(R.string.storage_exported, saved)
         }
         is StorageTask.ExportHome -> {
             val home = AppData.privateHome(this, task.appId)
-            if (!home.isDirectory) throw IOException(getString(R.string.storage_no_private_home, label(task.appId)))
-            val saved = zipOut(task, uris, listOf(HomeZip.Part(home, exclude = HomeZip.SETTINGS_DIRS)))
+            if (!(home.isDirectory || AndroidTarFs.isSymlink(home))) throw IOException(getString(R.string.storage_no_private_home, label(task.appId)))
+            val saved = zipOut(task, uris, listOf(HomeZip.Part(home, exclude = HomeZip.SETTINGS_DIRS)), task.appId)
             getString(R.string.storage_exported_title) to getString(R.string.storage_exported, saved)
         }
         is StorageTask.ExportAppFiles -> {
-            val saved = zipOut(task, uris, AppFiles.parts(appData(task.appId), task.appId))
+            val saved = zipOut(task, uris, AppFiles.parts(appData(task.appId), task.appId), task.appId)
             getString(R.string.storage_exported_title) to getString(R.string.storage_exported, saved)
         }
         StorageTask.ExportAllHomes -> {
@@ -306,7 +336,7 @@ class StorageTaskService : Service() {
     }
 
     /**
-     * Puts an import staged in the cache where [target] is (see replaceWith: the old one goes only
+     * Puts an import staged in the work folder where [target] is (see replaceWith: the old one goes only
      * once the new one is in place), then gives it the app's own group, since files made in the
      * cache keep the cache's, which Android counts as cache wherever they are.
      */
@@ -318,11 +348,20 @@ class StorageTaskService : Service() {
     private fun sharedHome(): File = SharedHome.ensure(this)
         ?: throw IOException(getString(R.string.storage_shared_home_missing, SharedHome.display(SharedHome.dir(this))))
 
-    private fun privateHome(appId: String): File = AppData.privateHome(this, appId).also { HomeFolders.create(it) }
+    /** The app's home, made when it has none. A link where the home should be (an app can leave one) is removed, as the launcher does: files must not land where it leads. */
+    private fun privateHome(appId: String): File = AppData.privateHome(this, appId).also {
+        if (AndroidTarFs.isSymlink(it)) AndroidTarFs.deleteTree(it)
+        HomeFolders.create(it)
+    }
+
+    /** An export of a folder that is a link now would be empty ([HomeZip] leaves it out, whatever it leads to). */
+    private fun refuseLinks(appId: String, vararg dirs: File) {
+        if (dirs.any { AndroidTarFs.isSymlink(it) }) throw IOException(getString(R.string.storage_folder_is_link, label(appId)))
+    }
 
     private fun appData(appId: String) = File(AppData.root(this), appId)
 
-    /** Where an import that replaces files lands first, in the cache; null for other tasks. */
+    /** Where an import that replaces files lands first, in the work folder ([AppData.workDir]); null for other tasks. */
     private fun stagingDir(task: StorageTask): File? = when (task) {
         is StorageTask.ImportHome -> "${task.appId}-home"
         is StorageTask.ImportAppFiles -> "${task.appId}-settings"
@@ -330,16 +369,21 @@ class StorageTaskService : Service() {
         StorageTask.ImportAllAppFiles -> "all-settings"
         StorageTask.ImportSharedDotfiles -> "shared-dotfiles"
         else -> null
-    }?.let { File(cacheDir.canonicalFile, "import/$it") }
+    }?.let { File(AppData.workDir(this), "import/$it") }
 
     /** [task]'s staging folder, new and empty. */
     private fun staging(task: StorageTask): File = stagingDir(task)!!.also { AndroidTarFs.deleteTree(it); it.mkdirs() }
 
     private fun open(uri: Uri): InputStream = contentResolver.openInputStream(uri) ?: throw IOException(getString(R.string.storage_unreadable))
 
-    /** [parts] zipped, to the file the user chose in the "save as" picker ([uris]) or into Download. */
-    private fun zipOut(task: StorageTask, uris: List<Uri>, parts: List<HomeZip.Part>): String =
+    /**
+     * [parts] zipped, to the file the user chose in the "save as" picker ([uris]) or into Download.
+     * With [ofApp] (one app's export), a part that is a link is refused: it would be left out and
+     * the zip would be empty. Inside the write, so the picked file goes with the failure.
+     */
+    private fun zipOut(task: StorageTask, uris: List<Uri>, parts: List<HomeZip.Part>, ofApp: String? = null): String =
         saveExport(exportName(this, task), uris.firstOrNull()) { out ->
+            if (ofApp != null) refuseLinks(ofApp, *parts.map { it.dir }.toTypedArray())
             HomeZip.write(parts, out, AndroidTarFs::isSymlink) { done, total -> updateProgress(task, if (total > 0) done.toFloat() / total else null) }
         }
 
@@ -471,18 +515,15 @@ class StorageTaskService : Service() {
         if (percent == lastPercent || now - lastUpdate < PROGRESS_INTERVAL_MS) return
         lastPercent = percent
         lastUpdate = now
-        getSystemService(NotificationManager::class.java).notify(PROGRESS_ID, progressNotification(task, fraction))
+        getSystemService(NotificationManager::class.java).notify(PROGRESS_ID, progressNotification(task, fraction, title))
     }
 
-    private fun startInForeground(notification: Notification) {
-        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else 0
-        ServiceCompat.startForeground(this, PROGRESS_ID, notification, type)
-    }
+    private fun startInForeground(notification: Notification): Boolean = startDataSyncForeground(PROGRESS_ID, notification)
 
-    private fun progressNotification(task: StorageTask?, fraction: Float?): Notification {
+    private fun progressNotification(task: StorageTask?, fraction: Float?, known: String? = null): Notification {
         createChannel(this)
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
-        val title = task?.let { describe(this, it) } ?: getString(R.string.storage_working)
+        val title = known ?: task?.let { describe(this, it) } ?: getString(R.string.storage_working)
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_download)
             .setContentTitle(title)

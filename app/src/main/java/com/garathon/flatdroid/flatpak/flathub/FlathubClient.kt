@@ -9,6 +9,7 @@ import org.json.JSONObject
 import java.io.FileNotFoundException
 import java.io.IOException
 import java.net.HttpURLConnection
+import kotlin.concurrent.thread
 import java.net.URL
 
 /** What an app's install confirmation shows. Sizes are bytes, null when Flathub doesn't say. */
@@ -25,8 +26,8 @@ data class FlathubApp(
     val runtimeSize: Long?,
     val runtimeRef: FlatpakRef?,
     val permissions: Set<Permission>,
-    /** Flathub verified that the app comes from who it says (its developer's website or account). */
-    val verified: Boolean = false,
+    /** Flathub verified that the app comes from who it says (its developer's website or account); null when its AppStream answer didn't come. */
+    val verified: Boolean? = null,
 ) {
     /** What an app asks for that Flatdroid shows, as it does for installed apps. */
     enum class Permission { NETWORK, SOUND, ALL_DEVICES, FILES }
@@ -38,7 +39,7 @@ data class FlathubApp(
  * An app of Flathub's list, with its installs of the last month and when it was added to Flathub
  * and last updated there (seconds since the epoch); each null when not given.
  */
-data class CollectionApp(val id: String, val installsLastMonth: Long?, val addedAt: Long? = null, val updatedAt: Long? = null)
+data class CollectionApp(val id: String, val installsLastMonth: Long?, val addedAt: Long? = null, val updatedAt: Long? = null, val verified: Boolean = false)
 
 /** One page of a Flathub list, and how many pages it has. */
 data class CollectionPage(val apps: List<CollectionApp>, val pages: Int)
@@ -73,9 +74,12 @@ object FlathubClient {
     /** [id] must be a valid app ID (it goes into the address). */
     fun fetch(id: String): FlathubApp {
         require(InstalledApps.isValidId(id)) { "Not an app ID: $id" }
+        // Asked side by side: on a slow connection the two waits would add up. The name, summary and
+        // verification are nice to have; the summary's facts are what matter, and its failure is the failure.
+        var appstream: String? = null
+        val side = thread(name = "flathub-appstream", isDaemon = true) { appstream = runCatching { get("$API/appstream/$id", id) }.getOrNull() }
         val summary = get("$API/summary/$id", id)
-        // The name, summary and verification are nice to have; the summary's facts are what matter.
-        val appstream = runCatching { get("$API/appstream/$id", id) }.getOrNull()
+        side.join()
         return try {
             parse(id, summary, appstream)
         } catch (e: JSONException) {
@@ -91,6 +95,8 @@ object FlathubClient {
         val apps = mutableListOf<CollectionApp>()
         var page = 1
         do {
+            // A Cancel waits for the page in flight, not for every page after it.
+            if (Thread.interrupted()) throw InterruptedException()
             val answer = get("$API/collection/popular?page=$page&per_page=$PAGE_SIZE", "popular")
             val parsed = try {
                 parseCollection(answer)
@@ -105,7 +111,7 @@ object FlathubClient {
 
     /**
      * The apps of a collection answer (`hits[].app_id`, `installs_last_month`, `added_at`,
-     * `updated_at`), valid IDs only, each once, and its page count (`totalPages`).
+     * `updated_at`, `verification_verified`), valid IDs only, each once, and its page count (`totalPages`).
      */
     fun parseCollection(json: String): CollectionPage {
         val answer = JSONObject(json)
@@ -113,7 +119,7 @@ object FlathubClient {
         val apps = (0 until hits.length()).mapNotNull { i ->
             val hit = hits.optJSONObject(i) ?: return@mapNotNull null
             val id = hit.optString("app_id").takeIf(InstalledApps::isValidId) ?: return@mapNotNull null
-            CollectionApp(id, hit.longOrNull("installs_last_month"), hit.longOrNull("added_at"), hit.longOrNull("updated_at"))
+            CollectionApp(id, hit.longOrNull("installs_last_month"), hit.longOrNull("added_at"), hit.longOrNull("updated_at"), hit.optBoolean("verification_verified"))
         }.distinctBy { it.id }
         return CollectionPage(apps, answer.optInt("totalPages", 1))
     }
@@ -159,7 +165,7 @@ object FlathubClient {
                 if (filesystems.any { it.substringBefore(':') in setOf("home", "host", "host-os") }) add(FlathubApp.Permission.FILES)
             },
             // A JSON true, or "true" as AppStream's own custom values are strings.
-            verified = appstream?.optJSONObject("metadata")?.optBoolean(VERIFIED) == true,
+            verified = appstream?.let { it.optJSONObject("metadata")?.optBoolean(VERIFIED) == true },
         )
     }
 

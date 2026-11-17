@@ -21,9 +21,9 @@ import androidx.core.net.toUri
 import androidx.lifecycle.lifecycleScope
 import com.garathon.flatdroid.MainViewModel
 import com.garathon.flatdroid.R
+import com.garathon.flatdroid.session.SessionController
 import com.garathon.flatdroid.storage.AppData
 import com.garathon.flatdroid.flatpak.InstalledApps
-import com.garathon.flatdroid.settings.AppSettingsStore
 import com.garathon.flatdroid.settings.HomeMode
 import com.garathon.flatdroid.settings.UserSettingsStore
 import com.garathon.flatdroid.setup.SetupController
@@ -41,6 +41,7 @@ import com.garathon.flatdroid.storage.tasks.StorageTasks
 import com.garathon.flatdroid.storage.TempHomePrompt
 import com.garathon.flatdroid.storage.TempHomes
 import com.garathon.flatdroid.ui.home.HomeViewModel
+import com.garathon.flatdroid.util.io.writeAtomically
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -99,9 +100,6 @@ class StorageFlows(
 
     /** What the zip being picked is for. */
     private var zipTarget: ZipTarget? = null
-
-    /** What follows a successful import of Flatdroid's settings. */
-    private var afterSettingsImport: (() -> Unit)? = null
 
     init {
         activity.savedStateRegistry.registerSavedStateProvider(SAVED_STATE) {
@@ -339,6 +337,7 @@ class StorageFlows(
 
     /** Opens [appId]'s app home in Android's Files app, through Flatdroid's documents provider. */
     fun openHomeInFiles(appId: String) {
+        if (runningApp(appId)) return
         val intent = Intent(Intent.ACTION_VIEW)
             .setDataAndType(DocumentsContract.buildDocumentUri(HomesProvider.AUTHORITY, appId), DocumentsContract.Document.MIME_TYPE_DIR)
         try {
@@ -350,6 +349,8 @@ class StorageFlows(
 
     /** An action from an app's Storage section; the ones that replace or delete files were confirmed. */
     fun storageAction(appId: String, action: StorageAction) {
+        // A running app can swap its files for links while they are copied: not for what reads them (the screens gate it too).
+        if (action in READS_FILES && runningApp(appId)) return
         when (action) {
             StorageAction.CLEAR_CACHE -> home.clearCache(appId)
             StorageAction.COPY_INTO_HOME -> importFiles(ImportTarget.Private(appId))
@@ -384,11 +385,8 @@ class StorageFlows(
     /** Confirmed: replaces the settings and other files of the apps in the picked zip. */
     fun importAllAppFiles() = pickZip(ZipTarget.AllAppFiles)
 
-    /** Picks a settings zip and applies it as Save does; [then] once applied. */
-    fun importFlatdroidSettings(then: () -> Unit) {
-        afterSettingsImport = then
-        pickZip(ZipTarget.FlatdroidSettings)
-    }
+    /** Picks a settings zip and applies it as Save does (the window then goes back to Home, as for Save). */
+    fun importFlatdroidSettings() = pickZip(ZipTarget.FlatdroidSettings)
 
     fun changeSharedHome() = withStorage(true) { folderPicker.launch(null) }
 
@@ -448,11 +446,13 @@ class StorageFlows(
     /**
      * Replaces Flatdroid's settings and every app's launcher settings with a zip's, then applies
      * them as Save does (running their commands in Alpine). A zip without valid settings changes
-     * nothing.
+     * nothing, and neither does one whose commands fail: the app files are worked out here, and
+     * written by [MainViewModel.applySettings] once the commands have run (its scope outlives a
+     * rotation, this one doesn't).
      */
     private fun applyFlatdroidSettings(uri: Uri) {
-        val then = afterSettingsImport
-        afterSettingsImport = null
+        // The write below outlives this window (a rotation): it must hold the application, not the activity.
+        val appContext = activity.applicationContext
         activity.lifecycleScope.launch {
             val imported = withContext(Dispatchers.IO) {
                 try {
@@ -463,32 +463,20 @@ class StorageFlows(
                         ?: throw IOException(activity.getString(R.string.storage_settings_invalid))
                     val appDir = AppData.settingsDir(activity)
                     val local = HashMap<String, ByteArray>()
-                    // They count in each app's settings size.
                     appDir.listFiles().orEmpty().forEach { file ->
-                        SettingsBackup.appId(file.name)?.let {
-                            SavedSizes.forget(activity, it)
-                            runCatching { file.readBytes() }.onSuccess { bytes -> local[file.name] = bytes }
-                            file.delete()
-                            SavedSizes.changed(activity, it)
+                        if (SettingsBackup.appId(file.name) != null) runCatching { file.readBytes() }.onSuccess { local[file.name] = it }
+                    }
+                    val appFiles = SettingsBackup.appSettingsToWrite(files, local)
+                    // Not the activity: the model keeps this until Alpine's commands finish, a rotation or more.
+                    val appContext = activity.applicationContext
+                    val write = {
+                        for ((fileName, bytes) in appFiles) {
+                            File(appDir, fileName).writeAtomically { it.write(bytes) }
+                            // They count in each app's settings size.
+                            SettingsBackup.appId(fileName)?.let { SavedSizes.changed(appContext, it) }
                         }
                     }
-                    for ((name, bytes) in files) {
-                        if (name.startsWith(SettingsBackup.APP_SETTINGS)) {
-                            val fileName = name.removePrefix(SettingsBackup.APP_SETTINGS)
-                            File(appDir, fileName).apply { parentFile?.mkdirs() }.writeBytes(AppSettingsStore.imported(bytes, local[fileName]))
-                            SettingsBackup.appId(fileName)?.let { SavedSizes.changed(activity, it) }
-                        }
-                    }
-                    // The viewer stays this device's choice: it gets every session's VNC password. So do
-                    // the security level and the terminal's settings, which decide how far apps reach.
-                    val device = SetupController.settings(activity).load()
-                    settings.copy(
-                        vncViewer = device?.vncViewer,
-                        externalViewer = device?.externalViewer ?: false,
-                        security = device?.security ?: settings.security,
-                        terminalFilter = device?.terminalFilter ?: settings.terminalFilter,
-                        terminalDuringSession = device?.terminalDuringSession ?: false,
-                    )
+                    SettingsBackup.keepingDevice(settings, SetupController.saved(activity)) to write
                 } catch (e: Exception) {
                     withContext(Dispatchers.Main) {
                         Toast.makeText(activity, activity.getString(R.string.storage_failed, e.message ?: e.toString()), Toast.LENGTH_LONG).show()
@@ -496,7 +484,7 @@ class StorageFlows(
                     null
                 }
             }
-            if (imported != null) mainModel().applySettings(imported) { refresh(); then?.invoke() }
+            if (imported != null) mainModel().applySettings(imported.first, MainViewModel.AfterApply.HOME, imported.second)
         }
     }
 
@@ -599,7 +587,17 @@ class StorageFlows(
         }
     }
 
+    /** Whether [appId] runs: then says so, and the caller does nothing (verify: not seen on a phone). */
+    private fun runningApp(appId: String): Boolean {
+        if (SessionController.ui.value.state.appIdOrNull != appId) return false
+        Toast.makeText(activity, R.string.storage_app_running, Toast.LENGTH_LONG).show()
+        return true
+    }
+
     private companion object {
+        /** The actions that read an app's files, which a running app could swap for links meanwhile. */
+        val READS_FILES = setOf(StorageAction.DOWNLOAD_FROM_HOME, StorageAction.EXPORT_HOME, StorageAction.EXPORT_SETTINGS)
+
         /** Download by path, before Android 10, needs the storage permission. */
         val LEGACY_DOWNLOAD = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
         const val KEY_EXPORT_QUESTION = "exportQuestion."

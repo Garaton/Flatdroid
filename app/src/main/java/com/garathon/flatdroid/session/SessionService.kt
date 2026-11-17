@@ -36,6 +36,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.SupervisorJob
@@ -48,7 +49,7 @@ import kotlinx.coroutines.runInterruptible
 
 /**
  * Keeps one Flatpak session (display helpers and the app) running in the foreground, so Android
- * doesn't stop it while the user is in the VNC viewer. specialUse: dataSync is limited to 6 hours
+ * doesn't stop it while the user is in the viewer (Flatdroid's own, or an external VNC one). specialUse: dataSync is limited to 6 hours
  * a day on Android 15. With the microphone type too when the app may use the microphone: Android
  * lets a service record in the background only with that type, given while Flatdroid is in the
  * foreground (at launch, or when the user allows it in Flatdroid). The camera type likewise, at
@@ -82,6 +83,10 @@ class SessionService : Service() {
                 SessionController.answerMicrophone(false)
                 return START_NOT_STICKY
             }
+            ACTION_RESUME_NO_WINDOW -> {
+                HiddenPause.resumeNoWindow()
+                return START_NOT_STICKY
+            }
             ACTION_LAUNCH, ACTION_PREPARE_ELECTRON -> Unit
             else -> {
                 stopSelf()
@@ -89,9 +94,14 @@ class SessionService : Service() {
             }
         }
         if (job?.isActive != true && appId != null && InstalledApps.isValidId(appId)) {
-            microphoneType = mayRecord(appId)
-            cameraType = AndroidCameras.hasPermission(this) &&
-                InstalledApps(this).context(appId)?.let { AppData.settings(this, appId).load().cameraAllowed(it) } == true
+            // The service takes the microphone type at launch, while Flatdroid is in the foreground: the
+            // app's sound and microphone are on and Android's permission is granted. Android then lets the
+            // session record later from the background, once the user allows it in the notification; until
+            // then the type is held but the microphone isn't used. The camera type likewise.
+            val settings = AppData.settings(this, appId).load()
+            val appContext = InstalledApps(this).context(appId)
+            microphoneType = MicStreamer.hasPermission(this) && settings.microphoneAllowed(appContext?.sockets.orEmpty())
+            cameraType = AndroidCameras.hasPermission(this) && appContext?.let { settings.cameraAllowed(it) } == true
         }
         startInForeground(notification(SessionController.ui.value.state))
         if (job?.isActive == true) return START_NOT_STICKY
@@ -105,7 +115,7 @@ class SessionService : Service() {
         val micAnswer = if (intent.hasExtra(EXTRA_MIC_ANSWER)) intent.getBooleanExtra(EXTRA_MIC_ANSWER, false) else null
         val notifications = getSystemService(NotificationManager::class.java)
         val updates = scope.launch {
-            SessionController.ui.distinctUntilChangedBy { it.state::class to it.state.appIdOrNull }
+            SessionController.ui.distinctUntilChangedBy { Triple(it.state::class, it.state.appIdOrNull, stage(it.state)) }
                 .filter { it.state !is SessionState.Idle && it.state !is SessionState.Question }
                 .collect { notifications.notify(NOTIFICATION_ID, notification(it.state)) }
         }
@@ -114,6 +124,18 @@ class SessionService : Service() {
                 if (request == null) notifications.cancel(MIC_NOTIFICATION_ID)
                 else notifications.notify(MIC_NOTIFICATION_ID, micNotification(request))
             }
+        }
+        // The question about an app with no window goes to a notification only while Flatdroid's viewer, which asks itself, isn't on screen.
+        val noWindowAsks = scope.launch {
+            combine(
+                SessionController.ui.map { (it.state as? SessionState.Running)?.takeIf { running -> running.noWindow }?.let { running -> running.appId to running.noWindowNeverOpened } },
+                SessionController.viewerVisible,
+            ) { asked, visible -> asked.takeUnless { visible } }
+                .distinctUntilChanged()
+                .collect { asked ->
+                    if (asked == null) notifications.cancel(NO_WINDOW_NOTIFICATION_ID)
+                    else notifications.notify(NO_WINDOW_NOTIFICATION_ID, noWindowNotification(asked.first, asked.second))
+                }
         }
         job = scope.launch {
             var message: String? = null
@@ -149,8 +171,10 @@ class SessionService : Service() {
                 withContext(NonCancellable) {
                     updates.cancelAndJoin()
                     micRequests.cancelAndJoin()
+                    noWindowAsks.cancelAndJoin()
                 }
                 notifications.cancel(MIC_NOTIFICATION_ID)
+                notifications.cancel(NO_WINDOW_NOTIFICATION_ID)
                 removeNotification()
                 SavedSizes.changed(applicationContext, appId)
                 // Before the session counts as ended, so Flatdroid's window doesn't ask as well.
@@ -161,7 +185,8 @@ class SessionService : Service() {
                 val awaitingUi = SessionController.ui.value.state is SessionState.Question
                 if (!awaitingUi) SessionController.ended(message, failed)
                 // Tasks that waited for the app start now (while this service still runs in the foreground).
-                if (!awaitingUi) FlatpakTaskService.startNext(applicationContext)
+                // On the main thread, where a launch is checked against tasks: both claims on one thread.
+                if (!awaitingUi) withContext(NonCancellable + Dispatchers.Main) { FlatpakTaskService.startNext(applicationContext) }
                 stopSelf()
             }
         }
@@ -180,18 +205,14 @@ class SessionService : Service() {
         getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_ID)
     }
 
-    private fun label(appId: String) = InstalledApps(applicationContext).name(appId) ?: appId
-
-    /**
-     * Whether [appId] may record, so the session takes the microphone type at launch, while
-     * Flatdroid is in the foreground: its sound and microphone are on, and Android's permission is
-     * granted. Android then lets the session record later from the background, once the user
-     * allows it in the notification; until then the type is held but the microphone isn't used.
-     */
-    private fun mayRecord(appId: String): Boolean {
-        val settings = AppData.settings(this, appId).load()
-        return MicStreamer.hasPermission(this) && settings.microphoneAllowed(InstalledApps(applicationContext).sockets(appId))
+    /** What the notification's text says: a new stage reaches it, an unchanged one (the file check's progress goes on) doesn't repost it. */
+    private fun stage(state: SessionState): String? = when (state) {
+        is SessionState.Starting -> state.detail
+        is SessionState.PreparingElectron -> state.detail
+        else -> null
     }
+
+    private fun label(appId: String) = InstalledApps(applicationContext).name(appId) ?: appId
 
     private fun startInForeground(notification: Notification) {
         var type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0
@@ -228,6 +249,33 @@ class SessionService : Service() {
             .build()
     }
 
+    /** Asks what to do with an app that was paused for having no window open, answered in the notification: Resume or Stop. */
+    private fun noWindowNotification(appId: String, neverOpened: Boolean): Notification {
+        // High importance: it pops up, as the microphone's question does, since the app is waiting on the answer.
+        createChannel(NO_WINDOW_CHANNEL_ID, R.string.no_window_channel, NotificationManager.IMPORTANCE_HIGH)
+        val open = PendingIntent.getActivity(
+            this, 5, Intent(this, ViewerActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT), PendingIntent.FLAG_IMMUTABLE,
+        )
+        val resume = PendingIntent.getService(
+            this, 6, Intent(this, SessionService::class.java).setAction(ACTION_RESUME_NO_WINDOW), PendingIntent.FLAG_IMMUTABLE,
+        )
+        val stop = PendingIntent.getService(
+            this, 2, Intent(this, SessionService::class.java).setAction(ACTION_STOP), PendingIntent.FLAG_IMMUTABLE,
+        )
+        return NotificationCompat.Builder(this, NO_WINDOW_CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_media_pause)
+            .setContentTitle(getString(if (neverOpened) R.string.no_window_never_title else R.string.no_window_title, label(appId)))
+            .setContentText(getString(R.string.no_window_notification))
+            .setContentIntent(open)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setOnlyAlertOnce(true)
+            // Its own group, so Android doesn't bundle it with the session's and hide its buttons.
+            .setGroup(NO_WINDOW_CHANNEL_ID)
+            .addAction(0, getString(R.string.no_window_resume), resume)
+            .addAction(0, getString(R.string.session_stop), stop)
+            .build()
+    }
+
     private fun notification(state: SessionState): Notification {
         createChannel(CHANNEL_ID, R.string.session_channel, NotificationManager.IMPORTANCE_LOW)
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
@@ -249,15 +297,16 @@ class SessionService : Service() {
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setGroup(CHANNEL_ID)
-        val viewerIntent = (state as? SessionState.Running)?.let {
+        val running = state as? SessionState.Running
+        val viewerIntent = running?.let {
             // An open viewer comes forward rather than a second one.
             if (it.socket != null) Intent(this, ViewerActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
-            else ExternalViewer.intent(this, it.password, SetupController.settings(this).load()?.vncViewer, username = it.username)
+            else it.password?.let { password -> ExternalViewer.intent(this, password, SetupController.settings(this).load()?.vncViewer, username = it.username) }
         }
-        if (viewerIntent != null) {
+        if (running != null && viewerIntent != null) {
             // Cancel, not update: an update keeps the old intent's flags (one from before an app update, say).
             val viewer = PendingIntent.getActivity(this, 1, viewerIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_CANCEL_CURRENT)
-            val label = if ((state as SessionState.Running).socket != null) R.string.session_open_app else R.string.session_open_viewer
+            val label = if (running.socket != null) R.string.session_open_app else R.string.session_open_viewer
             builder.addAction(0, getString(label), viewer)
         }
         val stop = PendingIntent.getService(
@@ -279,6 +328,8 @@ class SessionService : Service() {
         private const val NOTIFICATION_ID = 10
         private const val MIC_CHANNEL_ID = "permissions"
         private const val MIC_NOTIFICATION_ID = 11
+        private const val NO_WINDOW_CHANNEL_ID = "no_window_alert"
+        private const val NO_WINDOW_NOTIFICATION_ID = 12
         private const val EXTRA_APP_ID = "appId"
         private const val EXTRA_MIC_ANSWER = "micAnswer"
         private const val ACTION_LAUNCH = "com.garathon.flatdroid.action.LAUNCH"
@@ -286,6 +337,7 @@ class SessionService : Service() {
         private const val ACTION_STOP = "com.garathon.flatdroid.action.STOP"
         private const val ACTION_ALLOW_MICROPHONE = "com.garathon.flatdroid.action.ALLOW_MICROPHONE"
         private const val ACTION_DENY_MICROPHONE = "com.garathon.flatdroid.action.DENY_MICROPHONE"
+        private const val ACTION_RESUME_NO_WINDOW = "com.garathon.flatdroid.action.RESUME_NO_WINDOW"
 
         /** [micAnswer]: the microphone's answer for the session, when asked before the launch. */
         fun launch(context: Context, appId: String, micAnswer: Boolean? = null) = start(context, ACTION_LAUNCH, appId, micAnswer)

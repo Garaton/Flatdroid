@@ -12,7 +12,7 @@ data class SecuritySettings(
     val extraSyscallFilter: Boolean = true,
     /**
      * The helpers' /proc entries are hidden from the app's root (an empty directory over each).
-     * About 2% on program starts and file lookups (proot checks every bind), so not in Performant.
+     * Measured at 4 to 8% of an app's launch (proot checks every bind on every file lookup), so not in Performant.
      */
     val hideHelperProcesses: Boolean = true,
     /** Network and sound follow what an app's metadata asks for; otherwise they're off until allowed. */

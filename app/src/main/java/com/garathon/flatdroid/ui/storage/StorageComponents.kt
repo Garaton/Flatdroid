@@ -1,5 +1,6 @@
 package com.garathon.flatdroid.ui.storage
 
+import android.content.res.Configuration
 import android.text.format.Formatter
 import androidx.annotation.StringRes
 import androidx.compose.foundation.background
@@ -11,14 +12,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -30,10 +28,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
 import com.garathon.flatdroid.R
 import com.garathon.flatdroid.ui.list.ListSearchBar
@@ -41,8 +39,11 @@ import com.garathon.flatdroid.ui.list.ScrollToTopOnNewOrder
 import com.garathon.flatdroid.ui.list.ListSpec
 import com.garathon.flatdroid.ui.list.rememberListQuery
 
-/** One part of the size bar. A null [bytes] isn't measured yet. */
-class StorageSegment(@StringRes val label: Int, val bytes: Long?, val color: Color)
+/**
+ * One part of the size bar. A null [bytes] isn't measured yet. Held sideways the legend has a
+ * column for each [column] used, in its order.
+ */
+class StorageSegment(@StringRes val label: Int, val bytes: Long?, val color: Color, val column: Int = 0)
 
 /** A bar of the parts of a total, and a legend with each part's size. */
 @Composable
@@ -55,16 +56,28 @@ fun StorageBar(segments: List<StorageSegment>, modifier: Modifier = Modifier) {
             for (segment in measured) Box(Modifier.weight(segment.bytes!!.toFloat()).height(12.dp).background(segment.color))
         }
         // One part to a line: its name, and its size and share at the right edge, so the lines line up.
-        for (segment in segments) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Box(Modifier.size(10.dp).clip(CircleShape).background(segment.color))
-                Text(stringResource(segment.label), style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
-                val size = segment.bytes?.let { Formatter.formatShortFileSize(context, it) } ?: "…"
-                Text(
-                    if (segment.bytes != null && total > 0) stringResource(R.string.storage_legend_percent, size, (segment.bytes * 100 / total).toInt()) else size,
-                    style = MaterialTheme.typography.bodySmall,
-                )
+        @Composable
+        fun Legend(parts: List<StorageSegment>, modifier: Modifier) = Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            for (segment in parts) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Box(Modifier.size(10.dp).clip(CircleShape).background(segment.color))
+                    Text(stringResource(segment.label), style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                    val size = segment.bytes?.let { Formatter.formatShortFileSize(context, it) } ?: "…"
+                    Text(
+                        if (segment.bytes != null && total > 0) stringResource(R.string.storage_legend_percent, size, (segment.bytes * 100 / total).toInt()) else size,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
             }
+        }
+        // Held sideways the legend has a column for each [StorageSegment.column] used, each in the segments' order.
+        val columns = segments.groupBy { it.column }.toSortedMap().values
+        if (LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE && columns.size > 1) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                for (column in columns) Legend(column, Modifier.weight(1f))
+            }
+        } else {
+            Legend(segments, Modifier.fillMaxWidth())
         }
     }
 }

@@ -1,5 +1,6 @@
 package com.garathon.flatdroid.proot
 
+import com.garathon.flatdroid.util.ENV_NAME
 /** Host paths proot needs. All must be absolute. */
 data class ProotPaths(
     /** nativeLibraryDir/libproot.so */
@@ -58,7 +59,10 @@ data class AlpineBinds(
     }
 
     companion object {
-        /** Guest /dev entries and the /proc/self/fd paths that stand in for them; always bound. */
+        /**
+         * Guest /dev entries and the /proc/self/fd paths that stand in for them: bound in Alpine and
+         * over a whole /dev, links in an app's own /dev otherwise ([com.garathon.flatdroid.launcher.RootLayout]).
+         */
         val FD_LINKS = linkedMapOf(
             "/dev/fd" to "/proc/self/fd",
             "/dev/stdin" to "/proc/self/fd/0",
@@ -83,12 +87,12 @@ data class FlatpakBinds(
     /** Private /tmp and /dev/shm. */
     val tmp: String,
     val shm: String,
-    /** Xvnc's socket directory ([GuestPaths.X11_DIR]) and PulseAudio's ([GuestPaths.PULSE_DIR]; null without sound). */
-    val x11Sockets: String,
+    /** Xvnc's socket directory ([GuestPaths.X11_DIR]; null in a Wayland session) and PulseAudio's ([GuestPaths.PULSE_DIR]; null without sound). */
+    val x11Sockets: String?,
     val pulseSockets: String?,
     /** The Wayland compositor's socket directory ([GuestPaths.WAYLAND_DIR]); null when the session is X11. */
     val waylandSockets: String? = null,
-    /** [GuestPaths.HOME], then the app's own private directories over parts of it and at /var/…: host to guest path. */
+    /** [GuestPaths.HOME], then the app's own private directories over parts of it: host to guest path. */
     val home: String,
     val appDirs: List<Pair<String, String>> = emptyList(),
     /** Single files of the app's own, bound like [appDirs] (host to guest path). */
@@ -117,11 +121,13 @@ data class FlatpakBinds(
         for (name in etc.keys) require(name.isNotEmpty() && '/' !in name && ':' !in name && name != "..") { "Unusable /etc name: $name" }
         require(dev.all(DevNodes::isAllowed)) { "Unusable /dev path: $dev" }
         require(sys.orEmpty().all { it.startsWith("/sys/") && ':' !in it && ".." !in it.split('/') }) { "Unusable /sys path: $sys" }
-        require(hiddenProc.all { Regex("/proc/[0-9]+").matches(it) }) { "Unusable /proc path: $hiddenProc" }
+        require(hiddenProc.all { HIDDEN_PROC.matches(it) }) { "Unusable /proc path: $hiddenProc" }
         require(hiddenProc.isEmpty() || emptyDir != null) { "Hidden /proc entries need an empty directory" }
         require(fakeProc.keys.all { it.startsWith("/proc/") && ':' !in it && ".." !in it.split('/') }) { "Unusable /proc path: ${fakeProc.keys}" }
     }
 }
+
+private val HIDDEN_PROC = Regex("/proc/[0-9]+")
 
 /** A complete process description: argv and the whole environment (nothing is inherited). */
 data class ProotInvocation(val argv: List<String>, val env: Map<String, String>)
@@ -257,7 +263,7 @@ object ProotCommand {
             "Guest command must start with an absolute path: $command"
         }
         require(command[0].none { it == '=' }) { "The command would be read as a variable: ${command[0]}" }
-        require(environment.keys.all { Regex("[A-Za-z_][A-Za-z0-9_]*").matches(it) }) { "Bad variable name in $environment" }
+        require(environment.keys.all { ENV_NAME.matches(it) }) { "Bad variable name in $environment" }
         val argv = mutableListOf(
             paths.proot,
             "--sysvipc",
@@ -279,10 +285,11 @@ object ProotCommand {
         for (path in binds.hiddenProc) argv += "--bind=${binds.emptyDir}:$path"
         for ((guest, host) in binds.fakeProc) argv += "--bind=$host:$guest"
         if (binds.sys == null) argv += "--bind=/sys" else for (path in binds.sys) argv += "--bind=$path"
-        for ((guest, host) in AlpineBinds.FD_LINKS) argv += "--bind=$host:$guest"
+        // Links in the root's own /dev otherwise.
+        if (binds.wholeDev) for ((guest, host) in AlpineBinds.FD_LINKS) argv += "--bind=$host:$guest"
         argv += "--bind=${binds.shm}:/dev/shm"
         argv += "--bind=${binds.tmp}:/tmp"
-        argv += "--bind=${binds.x11Sockets}:${GuestPaths.X11_DIR}"
+        binds.x11Sockets?.let { argv += "--bind=$it:${GuestPaths.X11_DIR}" }
         binds.pulseSockets?.let { argv += "--bind=$it:${GuestPaths.PULSE_DIR}" }
         binds.waylandSockets?.let { argv += "--bind=$it:${GuestPaths.WAYLAND_DIR}" }
         argv += "--bind=${binds.home}:${GuestPaths.HOME}"

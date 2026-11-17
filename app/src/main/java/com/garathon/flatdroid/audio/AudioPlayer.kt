@@ -69,6 +69,8 @@ class AudioPlayer(
             var playing = false
             while (running) {
                 input.readFully(buffer)
+                // Muted: silence from this chunk on, also for the stretch before the track pauses.
+                if (muted) buffer.fill(0)
                 if (muted || Pcm.isSilent(buffer, buffer.size)) {
                     silentBytes = (silentBytes + buffer.size).coerceAtMost(pauseAfter)
                     if (playing && silentBytes >= pauseAfter) {

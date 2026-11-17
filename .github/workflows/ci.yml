@@ -38,7 +38,7 @@ jobs:
         with:
           cache-provider: basic
 
-      # native/build-proot.sh needs gawk (strtonum); make, git, curl, sha256sum and readelf are on the runner.
+      # native/build-proot.sh needs gawk (strtonum); make, git, curl, sha256sum, b2sum and readelf are on the runner.
       - name: Host tools
         run: sudo apt-get update -q && sudo apt-get install -y --no-install-recommends gawk
 

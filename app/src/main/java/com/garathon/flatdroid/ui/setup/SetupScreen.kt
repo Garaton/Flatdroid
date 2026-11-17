@@ -8,13 +8,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
@@ -28,7 +26,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -44,6 +41,7 @@ import com.garathon.flatdroid.setup.ResetMode
 import com.garathon.flatdroid.setup.SetupStep
 import com.garathon.flatdroid.setup.SetupUi
 import com.garathon.flatdroid.ui.terminal.CommandInput
+import com.garathon.flatdroid.ui.common.FollowEnd
 import com.garathon.flatdroid.ui.common.LogText
 import com.garathon.flatdroid.ui.dialogs.ResetDialog
 import com.garathon.flatdroid.ui.theme.FlatdroidTheme
@@ -110,7 +108,7 @@ fun SetupScreen(
         }
 
         if (command != null && command.output.isNotEmpty() && !ui.running) {
-            LaunchedEffect(command.output) { scroll.scrollTo(scroll.maxValue) }
+            FollowEnd(scroll, command.output)
             Box(modifier = Modifier.fillMaxWidth().height(OUTPUT_HEIGHT).verticalScroll(scroll)) {
                 LogText(command.output, Modifier.fillMaxWidth())
             }
@@ -118,7 +116,7 @@ fun SetupScreen(
             TextButton(onClick = { showLog = !showLog }) {
                 Text(stringResource(if (showLog) R.string.setup_hide_log else R.string.setup_show_log))
             }
-            LaunchedEffect(ui.log.size, showLog) { scroll.scrollTo(scroll.maxValue) }
+            FollowEnd(scroll, ui.log, showLog)
             val logModifier = if (showLog) Modifier.height(OUTPUT_HEIGHT).verticalScroll(scroll) else Modifier
             Surface(Modifier.fillMaxWidth().animateContentSize(), shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.surfaceContainer) {
                 Box(modifier = Modifier.padding(8.dp).then(logModifier)) {

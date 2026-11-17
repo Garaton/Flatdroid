@@ -20,12 +20,13 @@ data class HostDirs(
     val tmp: File,
     val shm: File,
     val home: File,
-    /** The app's own private directories, over parts of the home and at Flatpak's /var ones: host to guest path. */
+    /** The app's own private directories, over parts of the home: host to guest path. */
     val appDirs: List<Pair<File, String>>,
     /** The app's own single files over the home's ([FlatpakBinds.privateFiles]): host to guest path. */
     val privateFiles: List<Pair<File, String>> = emptyList(),
     /** Generated /etc files: name to host file. */
     val etc: Map<String, File>,
+    /** Xvnc's socket directory, bound only for apps in an X11 session. */
     val x11Sockets: File,
     /** The Wayland compositor's socket directory, bound only for apps in a Wayland session. */
     val waylandSockets: File? = null,
@@ -100,6 +101,10 @@ data class LaunchOptions(
     val darkTheme: Boolean = false,
     /** The device's languages (BCP 47) for the app's locale; empty gives the generic C.UTF-8. */
     val languageTags: List<String> = emptyList(),
+    /** GTK 4 and Qt Quick draw on the CPU instead of through GL ([com.garathon.flatdroid.settings.Rendering]). */
+    val softwareRendering: Boolean = true,
+    /** Electron and Chromium apps are told to reduce motion ([Electron.REDUCED_MOTION]). */
+    val reduceMotion: Boolean = false,
 )
 
 /** Everything needed to start an app: its proot binds, environment and command, and its root's layout. */
@@ -224,12 +229,12 @@ class LaunchPlanner(
                 }
                 extraBinds += swap.path to appDir
             }
-            command = listOf(electronBinary) + Electron.flags(options.newerElectronFlags, wayland)
+            command = listOf(electronBinary) + Electron.flags(options.newerElectronFlags, wayland, options.reduceMotion)
         } else if (cobaltBrowser != null) {
             isElectron = true
             val binaryArch = (hostPath(app, cobaltBrowser)?.let(Executable::of) as? Executable.Elf)?.arch
             if (binaryArch != null && binaryArch != arch) return PlanResult.WrongArchitecture(cobaltBrowser, binaryArch)
-            command = listOf(cobaltBrowser) + Electron.flags(options.newerElectronFlags, wayland)
+            command = listOf(cobaltBrowser) + Electron.flags(options.newerElectronFlags, wayland, options.reduceMotion)
         } else {
             val binaryArch = (hostPath(app, commandPath)?.let(Executable::of) as? Executable.Elf)?.arch
             if (binaryArch != null && binaryArch != arch) return PlanResult.WrongArchitecture(commandPath, binaryArch)
@@ -261,6 +266,7 @@ class LaunchPlanner(
             runtimeDir = runtimeDir ?: "/tmp",
             flatpakContainer = options.flatpakInfo,
             wayland = wayland,
+            softwareRendering = options.softwareRendering,
         )
         val devices = app.metadata.context.devices
         val binds = FlatpakBinds(
@@ -272,7 +278,7 @@ class LaunchPlanner(
             extensions = extensions.map { (base, ext) -> ext.deployment.files.path to "$base/${ext.guestPath}" },
             tmp = dirs.tmp.path,
             shm = dirs.shm.path,
-            x11Sockets = dirs.x11Sockets.path,
+            x11Sockets = dirs.x11Sockets.path.takeIf { !wayland },
             waylandSockets = dirs.waylandSockets?.path?.takeIf { wayland },
             pulseSockets = dirs.pulseSockets?.takeIf { options.audio }?.path,
             home = dirs.home.path,

@@ -28,7 +28,7 @@ class SessionAudioTest {
     @Test
     fun helpersGetSoundAndResampler() {
         assertEquals(
-            listOf("/bin/sh", SessionScript.GUEST_SCRIPT, "1000x1400", "14400", "30", "on", "speex-float-0", "on", "on", "on", "off", "off", "1.00"),
+            listOf("/bin/sh", SessionScript.GUEST_SCRIPT, "1000x1400", "14400", "30", "on", "speex-float-0", "on", "on", "on", "off", "off", "1.00", "on"),
             SessionScript.command("1000x1400", 30, sound = true, Resampler.FAST, sessionBus = true, camera = true),
         )
         assertEquals(
@@ -36,6 +36,19 @@ class SessionAudioTest {
             listOf("off", "speex-float-1", "off", "off"),
             SessionScript.command("1000x1400", 30, sound = false, Resampler.STANDARD, sessionBus = false, camera = true).subList(5, 9),
         )
+    }
+
+    @Test
+    fun pulseAudioSharesMemoryOnlyWhereTheKernelHasMemfd() {
+        assertTrue(SessionScript.kernelHasMemfd("4.19.191-g1234"))
+        assertTrue(SessionScript.kernelHasMemfd("3.18.71"))
+        assertTrue(SessionScript.kernelHasMemfd("3.17.0"))
+        assertTrue(SessionScript.kernelHasMemfd("6.1.0-android14"))
+        assertTrue(!SessionScript.kernelHasMemfd("3.10.0+"))
+        assertTrue(!SessionScript.kernelHasMemfd("2.6.32"))
+        assertTrue(SessionScript.kernelHasMemfd("unreadable"))
+        assertEquals("off", SessionScript.command("1000x1400", 30, sound = true, Resampler.FAST, sessionBus = true, memfd = false)[13])
+        assertTrue("memfd=${'$'}{12}" in SessionScript.TEXT.lines().map { it.trim() })
     }
 
     @Test
@@ -50,9 +63,16 @@ class SessionAudioTest {
         assertTrue("/usr/bin/labwc -C /run/flatdroid/vnc/labwc -S" in text)
         // The output refreshes at the frame rate sent, unless uncapped.
         assertTrue("[ \"${'$'}frame_rate\" -le 240 ] && mode=\"${'$'}geometry@${'$'}{frame_rate}Hz\"" in text)
-        // Flatdroid's viewer: a Unix socket, no login, no network; an external viewer: the port and the login.
-        assertTrue(text.lines().any { it.trim().startsWith("guard=\"") && it.endsWith(" --no-inet --\" listen=\"-u /run/flatdroid/vnc/vnc.sock\"") })
-        assertTrue("guard= listen=\"-C /run/flatdroid/vnc/wayvnc.conf 127.0.0.1 ${'$'}port\"" in text)
+        // labwc always runs behind a filter without Internet sockets, whatever the viewer: it parses what the app sends.
+        val lines = text.lines().map { it.trim() }
+        val labwc = lines.filter { "/usr/bin/labwc" in it }
+        assertEquals(2, labwc.size)
+        assertTrue(labwc.all { " --no-inet -- /usr/bin/labwc" in it })
+        // Flatdroid's viewer: wayvnc starts under labwc, on a Unix socket, with no login.
+        assertTrue("-f ${'$'}frame_rate -u /run/flatdroid/vnc/vnc.sock" in text)
+        // An external viewer: wayvnc listens on the port with the login, so the script starts it (after the output's mode is set), unfiltered.
+        assertTrue(lines.any { it.startsWith("/usr/bin/wayvnc -S") && "-C /run/flatdroid/vnc/wayvnc.conf 127.0.0.1 ${'$'}port" in it })
+        assertTrue(lines.any { it.startsWith("/usr/bin/wlr-randr ") })
     }
 
     @Test
@@ -103,6 +123,22 @@ class SessionAudioTest {
         assertTrue("sound=${'$'}4" in lines && "resampler=${'$'}5" in lines)
         // Whether the app records comes from the microphone's pipe, not from a process started later.
         assertTrue(lines.none { "pactl" in it })
+    }
+
+    @Test
+    fun theBusAndPulseAudioStartBeforeTheDisplayAndTheirSocketsAreWaitedForAfterIt() {
+        val lines = SessionScript.TEXT.lines().map { it.trim() }
+        val bus = lines.indexOfFirst { "/usr/bin/dbus-daemon" in it }
+        val pulse = lines.indexOfFirst { "/usr/bin/pulseaudio " in it }
+        val labwc = lines.indexOfFirst { "/usr/bin/labwc" in it }
+        val xvnc = lines.indexOfFirst { "Xvnc :1" in it }
+        val proxy = lines.indexOfFirst { "/usr/bin/xdg-dbus-proxy" in it }
+        val ready = lines.indexOfFirst { it.startsWith("echo \"flatdroid: display ready") }
+        assertTrue(bus in 0 until labwc && bus < xvnc && pulse in 0 until labwc && pulse < xvnc)
+        // The proxy needs the daemon's socket: started after the display, not in front of it.
+        assertTrue(proxy > xvnc && proxy > labwc && proxy < ready)
+        // Nothing in front of the display waits: the only sleep is in wait_socket's own definition.
+        assertEquals(1, lines.subList(0, minOf(labwc, xvnc)).count { it.startsWith("sleep ") })
     }
 
     @Test

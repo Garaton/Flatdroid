@@ -9,7 +9,7 @@ Android app (`com.garathon.flatdroid`, Kotlin, GPL-3.0-or-later) that installs F
 - **Mark anything untested as (verify)** in code comments and in what you report; keep confirmed and planned apart.
 - **Never describe proot, a setting or a home mode as a sandbox.** It narrows exposure; it doesn't isolate.
 - Don't spend time on bubblewrap or stock `flatpak run`; the custom launcher is the design.
-- Write temporary files to cache, if something is being downloaded, or will be deleted later that goes to cache. The only files that remain outside of cache are files and directories needed for the app to function and have persistence (Alpine rootfs, Flatpaks, settings, etc).
+- Write temporary files to cache, if something is being downloaded, or will be deleted later that goes to cache. The only files that remain outside of cache are files and directories needed for the app to function and have persistence (Alpine rootfs, Flatpaks, settings, etc), along with files that could crash Flatdroid if removed during a run.
 - Do not modify the README.md, if you believe it should be changed, if it needs changing, give short suggestions to the owner, suggestions are not lines to copy paste.
 
 ## Working with the owner
@@ -21,13 +21,12 @@ Android app (`com.garathon.flatdroid`, Kotlin, GPL-3.0-or-later) that installs F
 
 ## Environment
 
-- Host: JDK 21 (`JAVA_HOME` set), Android SDK (`ANDROID_HOME`): platform-tools, `platforms;android-35`, build-tools 35.0.0, NDK 30.0.16248370, CMake 3.22.1.
-- App: targetSdk 35+, minSdk 24. ABIs: arm64-v8a and x86_64 only. Native libraries packaged with `useLegacyPackaging = true`, 16 KB page aligned.
-- Test device: moto g power 5G (2024), aarch64, Android 15, 4 KB pages, no user namespaces, over `adb`. Waydroid for x86_64, over `adb`.
+- Host: JDK 21 (`JAVA_HOME` set), Android SDK (`ANDROID_HOME`): platform-tools, `platforms;android-37.0`, build-tools 36.0.0, NDK 30.0.16248370, CMake 3.22.1.
+- App: targetSdk 37, minSdk 24. ABIs: arm64-v8a and x86_64 only. Native libraries packaged with `useLegacyPackaging = true`, 16 KB page aligned.
 
 ## Commands
 
-- Build: `./gradlew assembleDebug` (flavors `arm64`, `x86_64`, `universal`; native/build-proot.sh runs from Gradle and needs make, git, curl, gawk, readelf on the host)
+- Build: `./gradlew assembleDebug` (flavors `arm64`, `x86_64`, `universal`; native/build-proot.sh runs from Gradle and needs make, git, curl, b2sum, gawk, readelf on the host)
 - Unit tests: `./gradlew testDebugUnitTest testReleaseUnitTest` (release builds have their own source set)
 - Install and run: `./gradlew installArm64Debug` (Waydroid: `installX86_64Debug`), then `adb shell am start -n com.garathon.flatdroid/.MainActivity`
 - Logs: `adb logcat --pid=$(adb shell pidof com.garathon.flatdroid)`
@@ -41,7 +40,7 @@ Android app (`com.garathon.flatdroid`, Kotlin, GPL-3.0-or-later) that installs F
 - Every launch: non-dumpable proot, `fdsec` run first inside the root (before `/usr/bin/env`). `fdsec` checks its own filter took effect (a marker rule, plus `Seccomp_filters` where the kernel reports it — 5.9+, not the T607's 4.19) and refuses to exec the app otherwise.
 - Keep architecture strings (`aarch64`, `aarch64-linux-gnu`) parameterised.
 - Avoid referencing documents outside of the repository outside of the README. Comments shouldn't refer to "section 13", or "DocumentNotInRepository.md". Avoid referencing prompts in comments (e.g. "applied the requested change to optimize the file storage process", etc).
-- No device or app-specific code or comments: no test device names ("faster on the T607"), no Flatpak app IDs or app names in app code; describe the general case ("on a Cortex-A53", "apps that use the camera portal"). App IDs in unit tests as example data are fine.
+- No device or app-specific code or comments: no test device names ("faster on the T607"), no Flatpak app IDs or app names in app code; describe the general case ("on a Cortex-A53", "apps that use the camera portal"). App IDs in unit tests as example data are fine. And when it comes to previews, the agreed upon ok generic app is `org.xfce.mousepad`.
 
 ## Pre v1.0 Milestones
 
@@ -56,5 +55,5 @@ Android app (`com.garathon.flatdroid`, Kotlin, GPL-3.0-or-later) that installs F
 7. **Embedded viewer:** Flatdroid's own RFB viewer (Kotlin, with `fdview` reading frames into memory and posting them through a buffer queue straight to Android's compositor on Android 10 and later) on the display's Unix socket (no TCP port, no password); the external viewer stays as a setting, off by default.
 8. **UI:** if not fully done yet, it should be done here. It is expected that by this point most UI will already be done, and the UI Document has already been requested.
 9. **Feature cleanup:** It is expected that some requested features will be missed as they have not fully pertained to what was needed in the previous milestones, this milestone is aimed at getting the rest of the features that could have been missed. Also handle links using possibly OpenURI portal and/or `xdg-open` stand-in. Also at this point with a mostly working app we consider what else might be nice before initial release.
-10. **Testing:** experiment 9 (background survival and child-process limits); a review of the codebase for device- or app-specific code and comments, removed or made general. Different Android version testing to guarantee support. Implementing more general Flatpak support vectors.
+10. **Testing:** experiment 9 (background survival and child-process limits); a review of the codebase for device- or app-specific code and comments, removed or made general. Different Android version testing to guarantee support. Implementing more general Flatpak support vectors. A review of what apps ask for in their Flatpak metadata (`filesystems`, `sockets`, `devices`, bus names, `features`, extensions) across Flathub, sorted into what Flatdroid supports, could support (such as `xdg-data/flatpak` for Flatpak managers) and can't, with how many apps each affects.
 

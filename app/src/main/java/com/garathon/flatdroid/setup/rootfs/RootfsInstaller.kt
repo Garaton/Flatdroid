@@ -7,19 +7,19 @@ import java.util.zip.GZIPInputStream
 
 /**
  * Extracts the Alpine minirootfs to `<alpineDir>/rootfs`. The tarball's sha256 is checked before
- * anything is written; extraction goes to `<workDir>/rootfs.partial` and is renamed into place
+ * anything is written; extraction goes to `<cacheDir>/rootfs.partial` and is renamed into place
  * when complete, so an interrupted run starts over instead of leaving a half-extracted root.
- * [workDir] is the cache directory, which is on the same filesystem as files/ (both in the app's
+ * [cacheDir], which is on the same filesystem as files/ (both in the app's
  * data directory), so the renames here are atomic and copy nothing.
  *
  * A complete rootfs is never replaced by [install]: Alpine is upgraded inside it with apk. A reset
  * ([setAside] or [discardKept], then [wipe]) is the only way to start over; [CARRIED] paths set
  * aside are moved into the next rootfs at the same place.
  */
-class RootfsInstaller(alpineDir: File, private val workDir: File, private val fs: TarFs) {
+class RootfsInstaller(alpineDir: File, private val cacheDir: File, private val fs: TarFs) {
     val rootfs = File(alpineDir, "rootfs")
     private val marker = File(rootfs, MARKER)
-    private val partial = File(workDir, "rootfs.partial")
+    private val partial = File(cacheDir, "rootfs.partial")
     private val keptDir = File(alpineDir, "kept")
 
     /** The Alpine version the rootfs was extracted from, or null when there is no complete rootfs. */

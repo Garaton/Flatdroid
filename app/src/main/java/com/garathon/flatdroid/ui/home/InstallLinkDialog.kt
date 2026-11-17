@@ -104,7 +104,7 @@ fun InstallLinkDialog(
                 Text(stringResource(R.string.install_link_title, found?.name ?: appId), Modifier.weight(1f, fill = false))
                 if (found?.verified == true) {
                     Icon(
-                        Icons.Filled.Verified, contentDescription = stringResource(R.string.install_link_verified),
+                        Icons.Filled.Verified, contentDescription = stringResource(R.string.flathub_verified),
                         tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 8.dp).size(24.dp),
                     )
                 }
@@ -115,9 +115,9 @@ fun InstallLinkDialog(
                 when (val r = result) {
                     LinkApp.Loading -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 3.dp)
-                        Text(stringResource(R.string.install_link_loading))
+                        Text(stringResource(R.string.flathub_loading))
                     }
-                    LinkApp.NotFound -> Text(stringResource(R.string.install_link_not_found, appId))
+                    LinkApp.NotFound -> Text(stringResource(R.string.flathub_not_found, appId))
                     LinkApp.MobileData -> Text(stringResource(R.string.install_link_mobile_data), color = MaterialTheme.colorScheme.error)
                     is LinkApp.Failed -> Text(
                         if (r.code != null) stringResource(r.message, r.code) else stringResource(r.message),
@@ -157,11 +157,11 @@ fun InstallLinkDialog(
         },
         confirmButton = {
             when (result) {
-                is LinkApp.Failed, LinkApp.MobileData -> Button(onClick = { attempt++ }) { Text(stringResource(R.string.install_link_retry)) }
-                else -> Button(onClick = onInstall, enabled = canInstall) { Text(stringResource(R.string.install_confirm)) }
+                is LinkApp.Failed, LinkApp.MobileData -> Button(onClick = { attempt++ }) { Text(stringResource(R.string.retry)) }
+                else -> Button(onClick = onInstall, enabled = canInstall) { Text(stringResource(R.string.install)) }
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.reset_cancel)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
     )
 }
 

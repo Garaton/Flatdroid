@@ -32,6 +32,15 @@ class TaskQueueTest {
     }
 
     @Test
+    fun aCatalogRefreshJoinsARunningOrWaitingUpdate() {
+        assertEquals(true, TaskQueue.joinsUpdate(emptyList(), FlatpakTask.RefreshCatalog, running = FlatpakTask.UpdateAll))
+        assertEquals(true, TaskQueue.joinsUpdate(listOf(Install(listOf("org.xfce.mousepad")), FlatpakTask.UpdateAll), FlatpakTask.RefreshCatalog, running = null))
+        // Without an update it is queued as usual, and nothing else joins an update.
+        assertEquals(false, TaskQueue.joinsUpdate(listOf(Install(listOf("org.xfce.mousepad"))), FlatpakTask.RefreshCatalog, running = FlatpakTask.Repair))
+        assertEquals(false, TaskQueue.joinsUpdate(emptyList(), Install(listOf("org.xfce.mousepad")), running = FlatpakTask.UpdateAll))
+    }
+
+    @Test
     fun duplicatesAreQueuedOnce() {
         assertEquals(
             listOf(FlatpakTask.UpdateAll, Install(listOf("org.xfce.mousepad")), FlatpakTask.RefreshCatalog),

@@ -6,8 +6,6 @@ data class CatalogApp(
     val name: String,
     val summary: String,
     val developer: String?,
-    /** Flathub verified that the app comes from who it says. */
-    val verified: Boolean,
     /** AppStream's main categories (`Game`, `Utility`, …). */
     val categories: List<String>,
     val keywords: List<String>,

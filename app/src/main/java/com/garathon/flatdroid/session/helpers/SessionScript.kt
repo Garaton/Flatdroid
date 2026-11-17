@@ -48,13 +48,26 @@ object SessionScript {
     fun command(
         geometry: String, frameRate: Int, sound: Boolean, resampler: Resampler, sessionBus: Boolean,
         camera: Boolean = false, clipboard: Boolean = true, wayland: Boolean = false, externalViewer: Boolean = false,
-        interfaceSize: Int = 100,
+        interfaceSize: Int = 100, memfd: Boolean = true,
     ): List<String> =
         listOf(
             "/bin/sh", GUEST_SCRIPT, geometry, VNC_PORT.toString(), frameRate.toString(),
             onOff(sound), resampler.pulseName, onOff(sessionBus), onOff(sessionBus && camera),
             onOff(clipboard), onOff(wayland), onOff(externalViewer), scale(interfaceSize),
+            onOff(memfd),
         )
+
+    /**
+     * Whether a kernel of this [release] ("4.19.191-g1234", say) has `memfd_create` (3.17 and later).
+     * Without it PulseAudio would share memory through POSIX shared memory, which the app and the
+     * helpers can't reach in each other's roots, so it runs without shared memory then. Unreadable: true (verify).
+     */
+    fun kernelHasMemfd(release: String): Boolean {
+        val numbers = Regex("^(\\d+)\\.(\\d+)").find(release)?.groupValues ?: return true
+        val major = numbers[1].toInt()
+        val minor = numbers[2].toInt()
+        return major > 3 || major == 3 && minor >= 17
+    }
 
     /** A percent as the output's scale ("1.5" for 150). */
     fun scale(percent: Int): String = "${percent / 100}.${(percent % 100).toString().padStart(2, '0')}"
@@ -73,12 +86,13 @@ object SessionScript {
      * starts only then), PulseAudio's resample method, "on" for the session bus, "on" for PipeWire, "on" when the clipboard is shared ([command]
      * builds them; off adds `-AcceptCutText=0 -SendCutText=0` to Xvnc), "on" for a Wayland session (labwc and wayvnc instead of
      * Xvnc and Openbox), "on" for an external viewer (the TCP port and login; else the viewer's Unix
-     * socket), and the Wayland output's scale ([scale]); title bars come from Openbox's and labwc's configurations. Exits when the display does; Flatdroid ends the session by stopping this proot.
+     * socket), the Wayland output's scale ([scale]), and "on" when PulseAudio may share memory through memfd ([kernelHasMemfd]); title bars come from Openbox's and labwc's configurations. Exits when the display does; Flatdroid ends the session by stopping this proot.
      * `-extension GLX` turns GLX off in Alpine's Xvnc, which has it (apps use EGL). `-nolisten local` drops the abstract socket
      * `@/tmp/.X11-unix/X1`: proot doesn't translate abstract names, so it would be open to other
      * users of the device, with no authentication; clients use the socket file in private storage
-     * instead. `-NeverShared -DisconnectClients=0`: while a viewer is connected, Xvnc refuses
-     * further connections rather than sharing or handing over the session.
+     * instead. `-NeverShared -DisconnectClients=1`: one viewer at a time, and a new one that logs in
+     * replaces the one connected. A viewer that is closed but not yet ended (Android can freeze
+     * its process) keeps its connection open, and refusing new ones would lock the user out.
      * `--use-pid-file=no`: proot shares the process list, so a stale PID file can match a live
      * process. `--disallow-module-loading` (after [PulseScript]'s modules are loaded) and
      * `--disallow-exit`: the app is PulseAudio's client, and a module it could load (the CLI
@@ -88,9 +102,9 @@ object SessionScript {
      * nothing here starts a process during the session, which the app could see and take over.
      * The session bus's proxy reads its arguments from a file ([SessionBus.proxyArgs]), so none
      * pass through the shell.
-     * The whole script runs behind fdsec's filter; every helper but Xvnc, which serves the VNC
-     * port, also runs behind a second one without Internet sockets, so exploiting one from the
-     * app gives no network the app may not have.
+     * The whole script runs behind fdsec's filter; every helper but Xvnc and, with an external
+     * viewer, wayvnc, which serve the VNC port, also runs behind a second one without Internet
+     * sockets, so exploiting one from the app gives no network the app may not have.
      */
     val TEXT = """
         |#!/bin/sh
@@ -105,6 +119,7 @@ object SessionScript {
         |wayland=$9
         |external=${'$'}{10}
         |scale=${'$'}{11}
+        |memfd=${'$'}{12}
         |clipboard_args=
         |[ "${'$'}clipboard" = on ] || clipboard_args="-AcceptCutText=0 -SendCutText=0"
         |rm -f /tmp/.X1-lock ${GuestPaths.X11_DIR}/$X_SOCKET ${GuestPaths.PULSE_DIR}/* $GUEST_VNC_DIR/$VNC_SOCKET
@@ -120,6 +135,22 @@ object SessionScript {
         |  done
         |}
         |
+        |# The session bus and PulseAudio need nothing from the display: they start first and come up
+        |# while it does. Flatdroid waits for their sockets only after the display is there.
+        |if [ "${'$'}session_bus" = on ]; then
+        |  rm -f ${SessionBus.GUEST_DAEMON_DIR}/${SessionBus.SOCKET} ${SessionBus.GUEST_PROXY_DIR}/${SessionBus.SOCKET}
+        |  $NO_INTERNET /usr/bin/dbus-daemon --config-file=${SessionBus.GUEST_CONFIG} --nofork --nopidfile --nosyslog &
+        |fi
+        |# PulseAudio shares memory with the app through memfd: an app that writes many small blocks costs
+        |# less than through the socket, whose every call proot traces. Where the kernel has no memfd it
+        |# shares nothing: the POSIX fallback needs one /dev/shm for the app and the helpers, which they don't have.
+        |if [ "${'$'}sound" = on ]; then
+        |  shm_args="--disable-shm=no --enable-memfd=yes"
+        |  [ "${'$'}memfd" = on ] || shm_args="--disable-shm=yes"
+        |  $NO_INTERNET /usr/bin/pulseaudio -n --use-pid-file=no --daemonize=no --exit-idle-time=-1 ${'$'}shm_args \
+        |    --disallow-module-loading --disallow-exit --resample-method="${'$'}resampler" -F $GUEST_PULSE_SCRIPT &
+        |fi
+        |
         |if [ "${'$'}wayland" = on ]; then
         |  # labwc (headless, drawn in software) with wayvnc as a client, on the viewer's socket (or
         |  # the VNC port for an external viewer). Their buffers come from fdshm (Android has no
@@ -129,17 +160,26 @@ object SessionScript {
         |  rm -f ${GuestPaths.WAYLAND_DIR}/* $GUEST_VNC_DIR/wayvncctl
         |  mode=${'$'}geometry
         |  [ "${'$'}frame_rate" -le $MAX_OUTPUT_REFRESH ] && mode="${'$'}geometry@${'$'}{frame_rate}Hz"
+        |  wl_mode="--output HEADLESS-1 --custom-mode ${'$'}mode --scale ${'$'}scale"
         |  if [ "${'$'}external" = on ]; then
-        |    guard= listen="-C $GUEST_WAYVNC_CONFIG 127.0.0.1 ${'$'}port"
+        |    # wayvnc has to listen on TCP, so it can't run behind the second filter, but the compositor,
+        |    # which parses everything the app sends, does. wayvnc starts here, once the output has its mode.
+        |    LD_PRELOAD=${Fdshm.ALPINE_PATH} XDG_RUNTIME_DIR=${GuestPaths.WAYLAND_DIR} WLR_BACKENDS=headless WLR_RENDERER=pixman \
+        |      WLR_LIBINPUT_NO_DEVICES=1 WLR_HEADLESS_OUTPUTS=1 $NO_INTERNET /usr/bin/labwc -C $GUEST_LABWC_DIR &
+        |    display=${'$'}!
+        |    wait_socket ${GuestPaths.WAYLAND_DIR}/${GuestPaths.WAYLAND_SOCKET} "the Wayland compositor"
+        |    LD_PRELOAD=${Fdshm.ALPINE_PATH} XDG_RUNTIME_DIR=${GuestPaths.WAYLAND_DIR} WAYLAND_DISPLAY=${GuestPaths.WAYLAND_SOCKET} \
+        |      /usr/bin/wlr-randr ${'$'}wl_mode
+        |    LD_PRELOAD=${Fdshm.ALPINE_PATH} XDG_RUNTIME_DIR=${GuestPaths.WAYLAND_DIR} WAYLAND_DISPLAY=${GuestPaths.WAYLAND_SOCKET} \
+        |      /usr/bin/wayvnc -S $GUEST_VNC_DIR/wayvncctl -f ${'$'}frame_rate -C $GUEST_WAYVNC_CONFIG 127.0.0.1 ${'$'}port &
         |  else
-        |    guard="$NO_INTERNET" listen="-u $GUEST_VNC_DIR/$VNC_SOCKET"
+        |    # labwc starts wayvnc itself, once its own socket is there, behind the same second filter.
+        |    LD_PRELOAD=${Fdshm.ALPINE_PATH} XDG_RUNTIME_DIR=${GuestPaths.WAYLAND_DIR} WLR_BACKENDS=headless WLR_RENDERER=pixman \
+        |      WLR_LIBINPUT_NO_DEVICES=1 WLR_HEADLESS_OUTPUTS=1 $NO_INTERNET /usr/bin/labwc -C $GUEST_LABWC_DIR -S \
+        |      "/bin/sh -c '/usr/bin/wlr-randr ${'$'}wl_mode; exec /usr/bin/wayvnc -S $GUEST_VNC_DIR/wayvncctl -f ${'$'}frame_rate -u $GUEST_VNC_DIR/$VNC_SOCKET'" &
+        |    display=${'$'}!
+        |    wait_socket ${GuestPaths.WAYLAND_DIR}/${GuestPaths.WAYLAND_SOCKET} "the Wayland compositor"
         |  fi
-        |  LD_PRELOAD=${Fdshm.ALPINE_PATH} XDG_RUNTIME_DIR=${GuestPaths.WAYLAND_DIR} WLR_BACKENDS=headless WLR_RENDERER=pixman \
-        |    WLR_LIBINPUT_NO_DEVICES=1 WLR_HEADLESS_OUTPUTS=1 ${'$'}guard /usr/bin/labwc -C $GUEST_LABWC_DIR -S \
-        |    "/bin/sh -c '/usr/bin/wlr-randr --output HEADLESS-1 --custom-mode ${'$'}mode --scale ${'$'}scale; exec /usr/bin/wayvnc -S $GUEST_VNC_DIR/wayvncctl -f ${'$'}frame_rate ${'$'}listen'" &
-        |  display=${'$'}!
-        |  wait_socket ${GuestPaths.WAYLAND_DIR}/${GuestPaths.WAYLAND_SOCKET} "the Wayland compositor"
-        |  # labwc starts wayvnc itself, once its own socket is there.
         |  wait_socket $GUEST_VNC_DIR/wayvncctl wayvnc
         |else
         |  if [ "${'$'}external" = on ]; then
@@ -151,7 +191,7 @@ object SessionScript {
         |  fi
         |  # No parameters changeable through the VNC extension: any X client could otherwise turn the clipboard back on.
         |  # Only copies reach the viewer, not every selection (PRIMARY).
-        |  ${'$'}guard /usr/bin/Xvnc :1 -geometry "${'$'}geometry" -depth 24 ${'$'}listen -NeverShared -DisconnectClients=0 -FrameRate "${'$'}frame_rate" \
+        |  ${'$'}guard /usr/bin/Xvnc :1 -geometry "${'$'}geometry" -depth 24 ${'$'}listen -NeverShared -DisconnectClients=1 -FrameRate "${'$'}frame_rate" \
         |    -AllowOverride= -nolisten local -extension MIT-SHM -extension GLX -SendPrimary=0 ${'$'}clipboard_args &
         |  display=${'$'}!
         |  wait_socket ${GuestPaths.X11_DIR}/$X_SOCKET Xvnc
@@ -159,8 +199,6 @@ object SessionScript {
         |  DISPLAY=:1 $NO_INTERNET /usr/bin/openbox &
         |fi
         |if [ "${'$'}session_bus" = on ]; then
-        |  rm -f ${SessionBus.GUEST_DAEMON_DIR}/${SessionBus.SOCKET} ${SessionBus.GUEST_PROXY_DIR}/${SessionBus.SOCKET}
-        |  $NO_INTERNET /usr/bin/dbus-daemon --config-file=${SessionBus.GUEST_CONFIG} --nofork --nopidfile --nosyslog &
         |  i=0
         |  while [ ! -S ${SessionBus.GUEST_DAEMON_DIR}/${SessionBus.SOCKET} ] && [ "${'$'}i" -le 100 ]; do
         |    i=${'$'}((i + 1))
@@ -176,10 +214,6 @@ object SessionScript {
         |  else
         |    echo "flatdroid: the session bus did not start"
         |  fi
-        |fi
-        |if [ "${'$'}sound" = on ]; then
-        |  $NO_INTERNET /usr/bin/pulseaudio -n --use-pid-file=no --daemonize=no --exit-idle-time=-1 --disable-shm=yes \
-        |    --disallow-module-loading --disallow-exit --resample-method="${'$'}resampler" -F $GUEST_PULSE_SCRIPT &
         |fi
         |echo "$DISPLAY_READY"
         |wait "${'$'}display"

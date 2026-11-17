@@ -10,6 +10,7 @@ import android.provider.DocumentsContract
 import android.provider.DocumentsContract.Document
 import android.provider.DocumentsContract.Root
 import android.provider.DocumentsProvider
+import android.system.ErrnoException
 import android.system.Os
 import android.webkit.MimeTypeMap
 import com.garathon.flatdroid.R
@@ -71,7 +72,7 @@ class HomesProvider : DocumentsProvider() {
         val cursor = MatrixCursor(projection ?: DOCUMENT_COLUMNS)
         if (parentDocumentId == HomeDocuments.ROOT) {
             val apps = AppData.root(context).list().orEmpty()
-                .filter { InstalledApps.isValidId(it) && AppData.privateHome(context, it).isDirectory }.sorted()
+                .filter { id -> InstalledApps.isValidId(id) && AppData.privateHome(context, id).let { it.isDirectory && !AndroidTarFs.isSymlink(it) } }.sorted()
             for (appId in apps) addRow(cursor, appId, home(appId))
         } else {
             val (appId, _) = HomeDocuments.parse(parentDocumentId) ?: throw FileNotFoundException(parentDocumentId)
@@ -90,10 +91,23 @@ class HomesProvider : DocumentsProvider() {
         val file = fileOf(documentId)
         if (!file.isFile) throw FileNotFoundException(documentId)
         val parsed = ParcelFileDescriptor.parseMode(mode)
-        if (mode == "r") return checkOpened(documentId, ParcelFileDescriptor.open(file, parsed))
+        // Opened without the bits that act at once: with them a file swapped for a link after
+        // fileOf's check would already be created or emptied, wherever the link leads. Emptied only
+        // once checkOpened has seen it is the file asked for.
+        val plain = parsed and (ParcelFileDescriptor.MODE_TRUNCATE or ParcelFileDescriptor.MODE_CREATE).inv()
+        if (mode == "r") return checkOpened(documentId, ParcelFileDescriptor.open(file, plain))
         // Written until it is closed: its home's saved size is forgotten now and again then.
         forgetSize(documentId)
-        return checkOpened(documentId, ParcelFileDescriptor.open(file, parsed, Handler(Looper.getMainLooper())) { forgetSize(documentId, changed = true) })
+        val opened = checkOpened(documentId, ParcelFileDescriptor.open(file, plain, Handler(Looper.getMainLooper())) { forgetSize(documentId, changed = true) })
+        if (parsed and ParcelFileDescriptor.MODE_TRUNCATE != 0) {
+            try {
+                Os.ftruncate(opened.fileDescriptor, 0)
+            } catch (_: ErrnoException) {
+                opened.close()
+                throw FileNotFoundException(documentId)
+            }
+        }
+        return opened
     }
 
     /**
@@ -199,7 +213,8 @@ class HomesProvider : DocumentsProvider() {
     private fun fileOf(documentId: String): File {
         val (appId, path) = HomeDocuments.parse(documentId) ?: throw FileNotFoundException(documentId)
         val home = home(appId)
-        if (!home.isDirectory) throw FileNotFoundException(documentId)
+        // An app can put a link where its home was (the launcher removes it at the next launch): no home.
+        if (!home.isDirectory || AndroidTarFs.isSymlink(home)) throw FileNotFoundException(documentId)
         val homePath = home.canonicalPath
         if (path.isEmpty()) return File(homePath)
         val file = File(home, path)

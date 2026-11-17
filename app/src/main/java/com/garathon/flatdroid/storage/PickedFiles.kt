@@ -40,7 +40,7 @@ object PickedFiles {
     fun visible(file: File): Boolean =
         file.parentFile?.list()?.contains(file.name) == true && runCatching { file.inputStream().close() }.isSuccess
 
-    /** [file] is [dir] or inside it, links resolved. */
+    /** [file] is inside [dir] (not [dir] itself), links resolved. */
     fun inside(file: File, dir: File): Boolean {
         val path = file.canonicalPath
         val base = dir.canonicalPath

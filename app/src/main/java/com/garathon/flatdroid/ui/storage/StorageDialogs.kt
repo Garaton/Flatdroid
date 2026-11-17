@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
@@ -70,13 +71,17 @@ fun BaselineChoiceDialog(canStartTask: Boolean, onReinstall: () -> Unit, onRecor
 
 /** Asks before something that replaces or deletes files; [confirm] is the button, in the error color. */
 @Composable
-fun ConfirmDialog(title: String, text: String, confirm: String, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+fun ConfirmDialog(
+    title: String, text: String, confirm: String, onConfirm: () -> Unit, onDismiss: () -> Unit,
+    /** More under the text, such as options that go with the confirmation. */
+    extra: @Composable ColumnScope.() -> Unit = {},
+) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
-        text = { Text(text) },
+        text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Text(text); extra() } },
         confirmButton = { TextButton(onClick = onConfirm) { Text(confirm, color = MaterialTheme.colorScheme.error) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.reset_cancel)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
     )
 }
 
@@ -94,7 +99,7 @@ fun UnfinishedDialog(title: String, text: String, canContinue: Boolean, onContin
             if (canContinue) Button(onClick = onContinue) { Text(stringResource(R.string.storage_continue)) }
             else TextButton(onClick = onCancel) { Text(stringResource(R.string.ok)) }
         },
-        dismissButton = { if (canContinue) TextButton(onClick = onCancel) { Text(stringResource(R.string.reset_cancel)) } },
+        dismissButton = { if (canContinue) TextButton(onClick = onCancel) { Text(stringResource(R.string.cancel)) } },
     )
 }
 
@@ -112,7 +117,7 @@ fun ClashDialog(onChoice: (HomeZip.Clash) -> Unit, onDismiss: () -> Unit) {
                 TextButton(onClick = { onChoice(HomeZip.Clash.RENAME) }) { Text(stringResource(R.string.clash_keep_both)) }
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.reset_cancel)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
     )
 }
 

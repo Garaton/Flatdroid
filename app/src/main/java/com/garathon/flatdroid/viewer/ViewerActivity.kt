@@ -31,7 +31,9 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
@@ -46,6 +48,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -53,6 +56,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
@@ -89,6 +93,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.garathon.flatdroid.MainActivity
 import com.garathon.flatdroid.R
 import com.garathon.flatdroid.flatpak.InstalledApps
+import com.garathon.flatdroid.session.HiddenPause
 import com.garathon.flatdroid.session.SessionController
 import com.garathon.flatdroid.session.SessionService
 import com.garathon.flatdroid.session.SessionState
@@ -97,6 +102,8 @@ import com.garathon.flatdroid.ui.theme.FlatdroidTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -140,6 +147,7 @@ class ViewerActivity : ComponentActivity() {
             finish()
             return
         }
+        shareClipboard = session.shareClipboard
         WindowCompat.setDecorFitsSystemWindows(window, false)
         WindowInsetsControllerCompat(window, window.decorView).apply {
             hide(WindowInsetsCompat.Type.systemBars())
@@ -149,9 +157,12 @@ class ViewerActivity : ComponentActivity() {
         followHideScreen()
         view = ViewerView(this, ViewerConnection).apply {
             followPercent = session.followPercent
-            // Wayland has no server option for it: the app's copies stop here.
-            if (session.shareClipboard) onClipboard = ::copiedInApp
-            onClipboardRequested = ::androidClipboardText
+            // Wayland has no server option for it: the app's copies stop here. Android's text
+            // reaches the app only with the setting too, whatever the display server would do.
+            if (session.shareClipboard) {
+                onClipboard = ::copiedInApp
+                onClipboardRequested = ::androidClipboardText
+            }
             // A keyboard pasting what is on Android's clipboard: the app pastes it itself, at once.
             onLongText = { text ->
                 if (session.shareClipboard && androidClipboardText() == text) keys.chord(Keysyms.PASTE)
@@ -180,15 +191,28 @@ class ViewerActivity : ComponentActivity() {
                 var keysWithKeyboard by rememberSaveable { mutableStateOf(true) }
                 val keysAloneOffset = animateIntAsState(if (keysAlone) 0 else rowHeight, label = "extra keys")
                 val keysWithKeyboardOffset = animateIntAsState(if (keysWithKeyboard) 0 else rowHeight, label = "extra keys with keyboard")
+                var confirmStop by rememberSaveable { mutableStateOf(false) }
+                val noWindow by remember {
+                    SessionController.ui.map { (it.state as? SessionState.Running)?.noWindow == true }.distinctUntilChanged()
+                }.collectAsState(false)
+                val opening by remember {
+                    SessionController.ui.map { (it.state as? SessionState.Running)?.opening == true }.distinctUntilChanged()
+                }.collectAsState(false)
                 Box(Modifier.fillMaxSize()) {
                     Column(Modifier.fillMaxSize()) {
                         TopBar(
                             keyboardShown = keyboardShown,
                             onToggleKeys = { if (keyboardShown) keysWithKeyboard = !keysWithKeyboard else keysAlone = !keysAlone },
+                            onStop = { confirmStop = true },
                         )
                         // The keyboard and the extra keys lie over the screen, which stays as it was.
-                        AndroidView(factory = { frameHolder() }, modifier = Modifier.fillMaxWidth().weight(1f).clipToBounds())
+                        Box(Modifier.fillMaxWidth().weight(1f)) {
+                            AndroidView(factory = { frameHolder() }, modifier = Modifier.fillMaxSize().clipToBounds())
+                            if (opening) Opening(Modifier.align(Alignment.Center))
+                            if (noWindow) NoWindowCard(onStop = { SessionService.stop(this@ViewerActivity) }, Modifier.align(Alignment.Center))
+                        }
                     }
+                    if (confirmStop) StopDialog(onDismiss = { confirmStop = false })
                     // Always there: above the keyboard while it is shown, sliding below the screen as it closes.
                     ExtraKeys(
                         Modifier.align(Alignment.BottomCenter).imePadding()
@@ -228,8 +252,7 @@ class ViewerActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun TopBar(keyboardShown: Boolean, onToggleKeys: () -> Unit) {
-        var confirmStop by rememberSaveable { mutableStateOf(false) }
+    private fun TopBar(keyboardShown: Boolean, onToggleKeys: () -> Unit, onStop: () -> Unit) {
         // Flatdroid's background, as its other screens' top bars, so leaving for the list doesn't change it.
         Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxWidth()) {
             Row(
@@ -266,24 +289,56 @@ class ViewerActivity : ComponentActivity() {
                 IconButton(onClick = ::closeWindow, modifier = NO_KEY_FOCUS) {
                     Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.viewer_close_window))
                 }
-                IconButton(onClick = { confirmStop = true }, modifier = NO_KEY_FOCUS) {
+                IconButton(onClick = onStop, modifier = NO_KEY_FOCUS) {
                     Icon(Icons.Filled.PowerSettingsNew, contentDescription = stringResource(R.string.session_stop))
                 }
             }
         }
-        if (confirmStop) {
-            AlertDialog(
-                onDismissRequest = { confirmStop = false },
-                title = { Text(stringResource(R.string.viewer_stop_title, appLabel)) },
-                text = { Text(stringResource(R.string.viewer_stop_text)) },
-                confirmButton = {
-                    TextButton(onClick = {
-                        confirmStop = false
-                        SessionService.stop(this)
-                    }) { Text(stringResource(R.string.session_stop)) }
-                },
-                dismissButton = { TextButton(onClick = { confirmStop = false }) { Text(stringResource(android.R.string.cancel)) } },
-            )
+    }
+
+    @Composable
+    private fun StopDialog(onDismiss: () -> Unit) {
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text(stringResource(R.string.viewer_stop_title, appLabel)) },
+            text = { Text(stringResource(R.string.viewer_stop_text)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    onDismiss()
+                    SessionService.stop(this)
+                }) { Text(stringResource(R.string.session_stop)) }
+            },
+            dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(android.R.string.cancel)) } },
+        )
+    }
+
+    /** Over the empty screen of an app that has not shown its first window yet. */
+    @Composable
+    private fun Opening(modifier: Modifier) {
+        Column(modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            CircularProgressIndicator(Modifier.size(32.dp))
+            Text(stringResource(R.string.viewer_opening, appLabel), style = MaterialTheme.typography.bodyMedium, color = Color.White)
+        }
+    }
+
+    /**
+     * Over the empty screen of an app that was paused for having no window ([HiddenPause.windows]):
+     * Resume lets it go on (and wait longer before the next pause), Stop stops it at once.
+     */
+    @Composable
+    private fun NoWindowCard(onStop: () -> Unit, modifier: Modifier) {
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            shape = RoundedCornerShape(16.dp),
+            modifier = modifier.padding(24.dp).widthIn(max = 360.dp),
+        ) {
+            Column(Modifier.padding(20.dp)) {
+                Text(stringResource(R.string.no_window_card, appLabel), style = MaterialTheme.typography.bodyMedium)
+                Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = onStop, modifier = NO_KEY_FOCUS) { Text(stringResource(R.string.session_stop)) }
+                    TextButton(onClick = HiddenPause::resumeNoWindow, modifier = NO_KEY_FOCUS) { Text(stringResource(R.string.no_window_resume)) }
+                }
+            }
         }
     }
 
@@ -441,6 +496,8 @@ class ViewerActivity : ComponentActivity() {
     // ---- Clipboard: the app's copies go to Android's; Android's text goes to the app only when it pastes.
 
     private val clipboard by lazy { getSystemService(ClipboardManager::class.java) }
+    /** The session shares the clipboard ([SessionState.Running.shareClipboard]). */
+    private var shareClipboard = false
     private val clipChanged = ClipboardManager.OnPrimaryClipChangedListener { offerClipboard() }
     /** When the clip the app copied was put on Android's clipboard: not offered back to it. */
     private var ownClip = NO_CLIP
@@ -455,6 +512,7 @@ class ViewerActivity : ComponentActivity() {
 
     /** Tells the app there is new text on Android's clipboard, without reading it. */
     private fun offerClipboard() {
+        if (!shareClipboard) return
         val description = clipboard.primaryClipDescription ?: return
         if (!description.hasMimeType("text/*")) return
         val made = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) description.timestamp else NO_CLIP

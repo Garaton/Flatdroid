@@ -7,7 +7,9 @@ import com.garathon.flatdroid.util.io.sha256
 import com.garathon.flatdroid.util.io.writeTextAtomically
 import java.io.File
 import java.util.concurrent.Callable
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.Future
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicInteger
@@ -31,7 +33,8 @@ class FileIntegrityCheck(
 
     private fun fs(hash: Boolean) = FileIntegrity.Fs(
         isSymlink = { isSymlink(it) },
-        readlink = { if (isSymlink(it)) runCatching { Os.readlink(it.path) }.getOrNull() else null },
+        // No lstat first: nearly every deployed file is a link, and readlink says EINVAL for one that isn't.
+        readlink = { runCatching { Os.readlink(it.path) }.getOrNull() },
         stat = {
             runCatching { Os.stat(it.path) }.getOrNull()?.let { s -> Triple(s.st_ino, s.st_ctime, s.st_size) }
         },
@@ -46,7 +49,8 @@ class FileIntegrityCheck(
     /**
      * Records the baseline of [files] under [commit] (hashing every file, in parallel). [ignore]
      * leaves out deployment-relative paths Flatdroid overrides at launch, which the app never reads
-     * from the deployment and which proot can leave a stub for (see [IntegrityGuard]).
+     * from the deployment and which proot can leave a stub for (see [IntegrityGuard]). [listed] is
+     * [leaves]' result when the caller listed them already.
      */
     fun baseline(
         commit: String,
@@ -54,9 +58,12 @@ class FileIntegrityCheck(
         ignore: (String) -> Boolean = { false },
         onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
         cancelled: () -> Boolean = { false },
+        listed: List<String>? = null,
     ) {
-        val leaves = FileIntegrity.walk(files, statOnly, cancelled).filterNot(ignore)
-        val entries = parallel(leaves, onProgress, cancelled) { rel -> rel to FileIntegrity.entry(File(files, rel), withHash) }.toMap()
+        val leaves = listed ?: leaves(files, ignore, cancelled)
+        val entries = withPool { pool ->
+            parallel(pool, leaves, onProgress, cancelled) { rel -> rel to FileIntegrity.entry(File(files, rel), withHash) }
+        }.toMap()
         // A skipped baseline writes nothing, so the next launch records it afresh (and trusts it).
         if (cancelled()) return
         write(commit, entries)
@@ -88,17 +95,20 @@ class FileIntegrityCheck(
             .filterKeys { !ignore(it) }
         val leaves = listed ?: leaves(files, ignore, cancelled)
         if (cancelled()) return FileIntegrity.Diff(emptyList(), emptyList())
-        // Cheap pass: shape only (stat + readlink, no content read).
-        val shapes = parallel(leaves, onProgress, cancelled) { rel -> rel to FileIntegrity.entry(File(files, rel), statOnly) }.toMap()
-        if (cancelled()) return FileIntegrity.Diff(emptyList(), emptyList())
-        // Only files the baseline has, whose shape changed, need their content read (a new file is
-        // tampering whatever it holds, and a link-only entry is compared by its target).
-        val toHash = shapes.filter { (rel, shape) ->
-            val base = baseline[rel]
-            base != null && !shape.linkOnly && !base.sameShape(shape)
-        }.keys.toList()
-        val hashed = parallel(toHash, onProgress, cancelled) { rel -> rel to FileIntegrity.entry(File(files, rel), withHash) }.toMap()
-        if (cancelled()) return FileIntegrity.Diff(emptyList(), emptyList())
+        // One pool for both passes.
+        val (shapes, hashed) = withPool { pool ->
+            // Cheap pass: shape only (stat + readlink, no content read).
+            val shapes = parallel(pool, leaves, onProgress, cancelled) { rel -> rel to FileIntegrity.entry(File(files, rel), statOnly) }.toMap()
+            if (cancelled()) return@withPool null
+            // Only files the baseline has, whose shape changed, need their content read (a new file is
+            // tampering whatever it holds, and a link-only entry is compared by its target).
+            val toHash = shapes.filter { (rel, shape) ->
+                val base = baseline[rel]
+                base != null && !shape.linkOnly && !base.sameShape(shape)
+            }.keys.toList()
+            val hashed = parallel(pool, toHash, onProgress, cancelled) { rel -> rel to FileIntegrity.entry(File(files, rel), withHash) }.toMap()
+            if (cancelled()) null else shapes to hashed
+        } ?: return FileIntegrity.Diff(emptyList(), emptyList())
         val diff = FileIntegrity.diff(baseline, shapes) { hashed[it] }
         if (diff.clean && diff.refreshed.isNotEmpty()) write(commit, baseline + diff.refreshed)
         return diff
@@ -176,10 +186,12 @@ class FileIntegrityCheck(
      * Runs [work] over [items] across [threads], in chunks of [CHUNK] (one task per file would
      * cost more than a stat), reporting progress; order of the result is undefined. When
      * [cancelled] turns true the chunks stop between files and the wait ends at once, returning the
-     * results so far (the caller discards them on a skip); the pool is shut down with an interrupt,
-     * so a skipped check doesn't hold the launch while a large runtime finishes hashing.
+     * results so far (the caller discards them on a skip); the unfinished chunks are cancelled with
+     * an interrupt, so a skipped check doesn't hold the launch while a large runtime finishes hashing.
+     * [pool] is [withPool]'s, shared by the passes of one check.
      */
     private fun <T> parallel(
+        pool: ExecutorService,
         items: List<String>,
         onProgress: (Int, Int) -> Unit,
         cancelled: () -> Boolean,
@@ -189,13 +201,13 @@ class FileIntegrityCheck(
         val total = items.size
         val done = AtomicInteger()
         val chunks = items.chunked(CHUNK)
-        val pool = Executors.newFixedThreadPool(threads.coerceAtMost(chunks.size))
+        val futures = ArrayList<Future<ArrayList<T>>>(chunks.size)
         try {
-            val futures = chunks.map { chunk ->
-                pool.submit(Callable {
+            for (chunk in chunks) {
+                futures += pool.submit(Callable {
                     val results = ArrayList<T>(chunk.size)
                     for (item in chunk) {
-                        // Skipped, or stopped (the pool is shut down with an interrupt): no more files.
+                        // Skipped, or stopped (the chunk is cancelled with an interrupt): no more files.
                         if (cancelled() || Thread.currentThread().isInterrupted) break
                         results += work(item)
                         onProgress(done.incrementAndGet(), total)
@@ -215,6 +227,17 @@ class FileIntegrityCheck(
                 break // skipped: stop collecting, leave the rest to the interrupt below
             }
             return results
+        } finally {
+            // Nothing is left running when this returns normally; after a skip or a stop the interrupt ends the chunks.
+            futures.forEach { it.cancel(true) }
+        }
+    }
+
+    /** One pool of [threads] for a check, ended (with an interrupt, for what is still running) when [block] returns. */
+    private fun <T> withPool(block: (ExecutorService) -> T): T {
+        val pool = Executors.newFixedThreadPool(threads)
+        try {
+            return block(pool)
         } finally {
             pool.shutdownNow()
         }

@@ -3,6 +3,7 @@ package com.garathon.flatdroid.settings
 import com.garathon.flatdroid.camera.AndroidCameras
 import com.garathon.flatdroid.flatpak.FlatpakContext
 import com.garathon.flatdroid.launcher.LaunchEnvironment
+import com.garathon.flatdroid.util.WHITESPACE
 import com.garathon.flatdroid.util.io.writeTextAtomically
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -29,6 +30,12 @@ enum class Resolution(val percent: Int?) {
         const val MIN_FOLLOW = 200
     }
 }
+
+/**
+ * How GTK 4 and Qt Quick apps draw. [AUTOMATIC] is software unless the app's camera is on (its
+ * preview needs GL to keep up); [SOFTWARE] and [GL] are always that.
+ */
+enum class Rendering(val key: String) { AUTOMATIC("automatic"), SOFTWARE("software"), GL("gl") }
 
 /** What an app gets as its home. None of them isolates the app; they change what it can reach. */
 enum class HomeMode {
@@ -59,6 +66,8 @@ data class AppDefaults(
     val resolution: Resolution = DEFAULT_RESOLUTION,
     /** How large Wayland apps draw everything, for apps that don't choose their own ([AppSettings.INTERFACE_SIZES]). */
     val interfaceSize: Int = DEFAULT_INTERFACE_SIZE,
+    /** How GTK 4 and Qt Quick apps draw, for apps that don't choose their own. */
+    val rendering: Rendering = Rendering.AUTOMATIC,
 ) {
     companion object {
         val DEFAULT_RESOLUTION = Resolution.THREE_QUARTERS
@@ -101,9 +110,10 @@ data class AppSettings(
      */
     val network: Boolean? = null,
     /**
-     * Clipboard text goes both ways between the app and Android, through the VNC viewer. Off,
-     * Xvnc neither takes the viewer's clipboard nor sends its own, so the app can't read what was
-     * copied in Android. Null follows [defaults] ([sharesClipboard]).
+     * Clipboard text goes both ways between the app and Android, through the viewer. Off, neither
+     * way: Xvnc neither takes the viewer's clipboard nor sends its own, and on Wayland the viewer
+     * offers the app no text and takes none, so the app can't read what was copied in Android.
+     * Null follows [defaults] ([sharesClipboard]).
      */
     val clipboard: Boolean? = null,
     /** Developer setting: the filter refuses the rarely used system calls for this app or not; null follows [defaults] ([blocksExtraSyscalls]). */
@@ -154,6 +164,8 @@ data class AppSettings(
     val forceX11: Boolean = false,
     /** On Wayland, how large the app draws everything, in percent ([INTERFACE_SIZES]); X11 apps keep their size. Null follows [defaults] ([interfaceSize]). */
     val interfaceSizeChoice: Int? = null,
+    /** How GTK 4 and Qt Quick apps draw; null follows [defaults] ([rendering]). */
+    val renderingChoice: Rendering? = null,
     /** The user's choice of home; null follows [defaults] ([homeMode]). */
     val homeModeChoice: HomeMode? = null,
     /**
@@ -167,26 +179,39 @@ data class AppSettings(
     val homeMode: HomeMode get() = homeModeChoice ?: defaults.homeMode
     val resolution: Resolution get() = resolutionChoice ?: defaults.resolution
     val interfaceSize: Int get() = interfaceSizeChoice ?: defaults.interfaceSize
+    val rendering: Rendering get() = renderingChoice ?: defaults.rendering
     val sharesClipboard: Boolean get() = clipboard ?: defaults.clipboard
     val blocksExtraSyscalls: Boolean get() = blockExtraSyscalls ?: defaults.blockExtraSyscalls
     val cameraResolution: Int get() = cameraResolutionOverride ?: defaults.cameraResolution
     val cameraFrameRate: Int get() = cameraFrameRateOverride ?: defaults.cameraFrameRate
 
     /** Whether the app gets sound: its own setting, else [defaults] and whether its metadata asks for PulseAudio. */
-    fun audioAllowed(sockets: List<String>): Boolean = audio ?: (defaults.permissionsFromMetadata && PULSEAUDIO_SOCKET in sockets)
+    fun audioAllowed(sockets: List<String>): Boolean = audioOn(PULSEAUDIO_SOCKET in sockets)
+
+    /**
+     * The four below take what the app's metadata asks for as a flag ([audioOn] and [microphoneOn]:
+     * PulseAudio's socket; [cameraOn]: [FlatpakContext.mayUseCamera]), so the launcher, the
+     * overview and the Permissions page can't work out a permission differently.
+     */
+    fun networkOn(requested: Boolean): Boolean = network ?: defaultOn(requested)
+
+    fun audioOn(requested: Boolean): Boolean = audio ?: defaultOn(requested)
+
+    fun microphoneOn(audioRequested: Boolean): Boolean = audioOn(audioRequested) && (microphone ?: defaultOn(audioRequested))
+
+    fun cameraOn(mayUse: Boolean): Boolean = camera ?: defaultOn(mayUse)
+
+    /** What a permission the user hasn't set follows: [defaults] and whether the metadata asks for it. */
+    fun defaultOn(requested: Boolean): Boolean = defaults.permissionsFromMetadata && requested
 
     /** Whether the app's microphone is on, whatever Android's permission: its own setting, else [defaults] and whether it asks for sound. */
-    fun microphoneAllowed(sockets: List<String>): Boolean = audioAllowed(sockets) && (microphone ?: microphoneDefault(sockets))
-
-    fun microphoneDefault(sockets: List<String>): Boolean = defaults.permissionsFromMetadata && PULSEAUDIO_SOCKET in sockets
+    fun microphoneAllowed(sockets: List<String>): Boolean = microphoneOn(PULSEAUDIO_SOCKET in sockets)
 
     /** Whether the app's camera is on, whatever Android's permission: its own setting, else [defaults] and the hint that it uses one. */
-    fun cameraAllowed(context: FlatpakContext): Boolean = camera ?: cameraDefault(context)
-
-    fun cameraDefault(context: FlatpakContext): Boolean = defaults.permissionsFromMetadata && context.mayUseCamera
+    fun cameraAllowed(context: FlatpakContext): Boolean = cameraOn(context.mayUseCamera)
 
     /** Whether the app gets the Internet: its own setting, else [defaults] and whether its metadata asks for the network. */
-    fun networkAllowed(shared: List<String>): Boolean = network ?: (defaults.permissionsFromMetadata && NETWORK in shared)
+    fun networkAllowed(shared: List<String>): Boolean = networkOn(NETWORK in shared)
 
     /** The screen's size at launch for a viewer of [viewWidth] x [viewHeight]. */
     fun size(viewWidth: Int, viewHeight: Int): Pair<Int, Int> =
@@ -277,6 +302,7 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
             forceX11 = props.getProperty(KEY_FORCE_X11) == "true",
             continueWhileHidden = props.getProperty(KEY_CONTINUE_HIDDEN) == "true",
             interfaceSizeChoice = props.getProperty(KEY_INTERFACE_SIZE)?.toIntOrNull()?.takeIf { it in AppSettings.INTERFACE_SIZES && it != appDefaults.interfaceSize },
+            renderingChoice = Rendering.entries.firstOrNull { it.key == props.getProperty(KEY_RENDERING) }?.takeIf { it != appDefaults.rendering },
             homeModeChoice = HomeMode.entries.firstOrNull { it.name.lowercase() == props.getProperty(KEY_HOME_MODE) },
             sdcard = props.getProperty(KEY_SDCARD) == "true",
             defaults = appDefaults,
@@ -309,6 +335,7 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
         if (settings.launchArgs.isNotEmpty()) props.setProperty(KEY_LAUNCH_ARGS, LaunchArgs.format(settings.launchArgs))
         if (settings.forceX11) props.setProperty(KEY_FORCE_X11, "true")
         settings.interfaceSizeChoice?.let { props.setProperty(KEY_INTERFACE_SIZE, it.toString()) }
+        settings.renderingChoice?.let { props.setProperty(KEY_RENDERING, it.key) }
         if (settings.continueWhileHidden) props.setProperty(KEY_CONTINUE_HIDDEN, "true")
         settings.homeModeChoice?.let { props.setProperty(KEY_HOME_MODE, it.name.lowercase()) }
         if (settings.sdcard) props.setProperty(KEY_SDCARD, "true")
@@ -360,6 +387,7 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
         private const val KEY_LAUNCH_ARGS = "launch.args"
         private const val KEY_FORCE_X11 = "display.x11"
         private const val KEY_INTERFACE_SIZE = "display.interfaceSize"
+        private const val KEY_RENDERING = "display.rendering"
         private const val KEY_CONTINUE_HIDDEN = "session.continueWhileHidden"
         private const val KEY_HOME_MODE = "home.mode"
         private const val KEY_SDCARD = "storage.sdcard"
@@ -378,7 +406,7 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
 
 /** [AppSettings.launchArgs] as the user edits it: arguments separated by whitespace, each taken as it is (no quoting). */
 object LaunchArgs {
-    fun parse(text: String): List<String> = text.split(Regex("\\s+")).filter { it.isNotEmpty() }
+    fun parse(text: String): List<String> = text.split(WHITESPACE).filter { it.isNotEmpty() }
 
     fun format(args: List<String>): String = args.joinToString(" ")
 }

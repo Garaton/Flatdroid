@@ -17,69 +17,7 @@
 #define FN(name) Java_com_garathon_flatdroid_viewer_frames_NativeFrames_##name
 #define BYTES_PER_PIXEL 4
 
-/* All of the connection's reading comes here (one reading thread): few system calls for many small rows. */
-static uint8_t input[256 * 1024];
-static size_t input_at, input_end;
-
-/* A new connection. */
-JNIEXPORT void JNICALL FN(reset)(JNIEnv *env, jclass cls) {
-    (void)env; (void)cls;
-    input_at = input_end = 0;
-}
-
-static int fill(int fd) {
-    for (;;) {
-        ssize_t got = read(fd, input, sizeof input);
-        if (got < 0 && errno == EINTR) continue;
-        if (got <= 0) return -1;
-        input_at = 0;
-        input_end = (size_t)got;
-        return 0;
-    }
-}
-
-static int read_fully(int fd, uint8_t *to, size_t count) {
-    while (count > 0) {
-        if (input_at == input_end) {
-            /* Large reads skip the buffer: straight from the socket into the pixels. */
-            if (count >= sizeof input) {
-                ssize_t got = read(fd, to, count);
-                if (got < 0 && errno == EINTR) continue;
-                if (got <= 0) return -1;
-                to += got;
-                count -= (size_t)got;
-                continue;
-            }
-            if (fill(fd) != 0) return -1;
-        }
-        size_t part = input_end - input_at;
-        if (part > count) part = count;
-        memcpy(to, input + input_at, part);
-        input_at += part;
-        to += part;
-        count -= part;
-    }
-    return 0;
-}
-
-/* The next byte, or -1 when the connection ended. */
-JNIEXPORT jint JNICALL FN(readByte)(JNIEnv *env, jclass cls, jint fd) {
-    (void)env; (void)cls;
-    if (input_at == input_end && fill(fd) != 0) return -1;
-    return input[input_at++];
-}
-
-/* Up to length bytes into a Java array: how many, or -1 when the connection ended. */
-JNIEXPORT jint JNICALL FN(readBytes)(JNIEnv *env, jclass cls, jint fd, jbyteArray to, jint offset, jint length) {
-    (void)cls;
-    if (length == 0) return 0;
-    if (input_at == input_end && fill(fd) != 0) return -1;
-    size_t part = input_end - input_at;
-    if (part > (size_t)length) part = (size_t)length;
-    (*env)->SetByteArrayRegion(env, to, offset, (jsize)part, (const jbyte *)(input + input_at));
-    input_at += part;
-    return (jint)part;
-}
+#define INPUT_SIZE (256 * 1024)
 
 /*
  * The frame, and the window it is shown through. The pixels are written by the reading thread
@@ -95,9 +33,69 @@ struct frame {
     int width, height;
     ANativeWindow *window;
     int window_width, window_height; /* the size its buffers were set to */
+    /* The connection's reading (one reading thread): few system calls for many small rows. Each connection has its own frame, so a reader still unwinding from the last one can't share it. */
+    uint8_t input[INPUT_SIZE];
+    size_t input_at, input_end;
 };
 
 #define FRAME(handle) ((struct frame *)(intptr_t)(handle))
+
+static int fill(struct frame *f, int fd) {
+    for (;;) {
+        ssize_t got = read(fd, f->input, sizeof f->input);
+        if (got < 0 && errno == EINTR) continue;
+        if (got <= 0) return -1;
+        f->input_at = 0;
+        f->input_end = (size_t)got;
+        return 0;
+    }
+}
+
+static int read_fully(struct frame *f, int fd, uint8_t *to, size_t count) {
+    while (count > 0) {
+        if (f->input_at == f->input_end) {
+            /* Large reads skip the buffer: straight from the socket into the pixels. */
+            if (count >= sizeof f->input) {
+                ssize_t got = read(fd, to, count);
+                if (got < 0 && errno == EINTR) continue;
+                if (got <= 0) return -1;
+                to += got;
+                count -= (size_t)got;
+                continue;
+            }
+            if (fill(f, fd) != 0) return -1;
+        }
+        size_t part = f->input_end - f->input_at;
+        if (part > count) part = count;
+        memcpy(to, f->input + f->input_at, part);
+        f->input_at += part;
+        to += part;
+        count -= part;
+    }
+    return 0;
+}
+
+/* The next byte, or -1 when the connection ended. */
+JNIEXPORT jint JNICALL FN(readByte)(JNIEnv *env, jclass cls, jint fd, jlong handle) {
+    (void)env; (void)cls;
+    struct frame *f = FRAME(handle);
+    if (f->input_at == f->input_end && fill(f, fd) != 0) return -1;
+    return f->input[f->input_at++];
+}
+
+/* Up to length bytes into a Java array: how many, or -1 when the connection ended. */
+JNIEXPORT jint JNICALL FN(readBytes)(JNIEnv *env, jclass cls, jint fd, jlong handle, jbyteArray to, jint offset, jint length) {
+    (void)cls;
+    struct frame *f = FRAME(handle);
+    if (length == 0) return 0;
+    if (f->input_at == f->input_end && fill(f, fd) != 0) return -1;
+    size_t part = f->input_end - f->input_at;
+    if (part > (size_t)length) part = (size_t)length;
+    (*env)->SetByteArrayRegion(env, to, offset, (jsize)part, (const jbyte *)(f->input + f->input_at));
+    f->input_at += part;
+    return (jint)part;
+}
+
 
 JNIEXPORT jlong JNICALL FN(create)(JNIEnv *env, jclass cls) {
     (void)env; (void)cls;
@@ -138,9 +136,9 @@ JNIEXPORT jint JNICALL FN(readRect)(JNIEnv *env, jclass cls, jint fd, jlong hand
     struct frame *f = FRAME(handle);
     size_t pitch = (size_t)f->width * BYTES_PER_PIXEL, row = (size_t)width * BYTES_PER_PIXEL;
     uint8_t *to = f->pixels + (size_t)y * pitch + (size_t)x * BYTES_PER_PIXEL;
-    if (row == pitch) return read_fully(fd, to, row * (size_t)height);
+    if (row == pitch) return read_fully(f, fd, to, row * (size_t)height);
     for (jint r = 0; r < height; r++, to += pitch) {
-        if (read_fully(fd, to, row) != 0) return -1;
+        if (read_fully(f, fd, to, row) != 0) return -1;
     }
     return 0;
 }

@@ -96,6 +96,9 @@ data class UserSettings(
     /** The screen's size and the interface size for apps that don't choose their own (see [AppSettings]). */
     val appResolution: Resolution = AppDefaults.DEFAULT_RESOLUTION,
     val appInterfaceSize: Int = AppDefaults.DEFAULT_INTERFACE_SIZE,
+    val appRendering: Rendering = Rendering.AUTOMATIC,
+    /** Apps are asked to turn off their animations (GTK's, and Chromium's on Electron apps). Not part of the security level. */
+    val reduceMotion: Boolean = false,
     /** What the security level sets ([SecurityLevel]). */
     val security: SecuritySettings = SecuritySettings(),
     /** Developer setting: the terminal's commands run behind fdsec's filter. */
@@ -136,6 +139,7 @@ data class UserSettings(
     /** What an app's own settings start as. */
     val appDefaults: AppDefaults get() = security.appDefaults.copy(
         cameraResolution = cameraResolution, cameraFrameRate = cameraFrameRate, resolution = appResolution, interfaceSize = appInterfaceSize,
+        rendering = appRendering,
     )
 
     /** The audio player's buffer; the developer setting counts only while developer options are on. */
@@ -183,11 +187,15 @@ data class UserSettings(
 }
 
 class UserSettingsStore(private val file: File) {
-    /** Reads [LiveSettings] (at start-up; [save] keeps them current). */
+    /**
+     * Reads [LiveSettings] from the file: at start-up, and again after a reset, which deletes the
+     * file. [save] keeps them current, so every other change of the file goes through one of the two.
+     */
     fun loadLive() {
         val settings = runCatching { load() }.getOrNull()
         LiveSettings.theme.value = settings?.theme ?: InterfaceTheme.SYSTEM
         LiveSettings.hideScreen.value = settings?.security?.hideScreen == true
+        LiveSettings.user.value = settings
     }
 
     /** The saved settings, or null when the user hasn't chosen any yet. */
@@ -210,6 +218,8 @@ class UserSettingsStore(private val file: File) {
                 ?: AppDefaults.DEFAULT_RESOLUTION,
             appInterfaceSize = props.getProperty(KEY_APP_INTERFACE_SIZE)?.toIntOrNull()?.takeIf { it in AppSettings.INTERFACE_SIZES }
                 ?: AppDefaults.DEFAULT_INTERFACE_SIZE,
+            reduceMotion = props.getProperty(KEY_REDUCE_MOTION) == "true",
+            appRendering = Rendering.entries.firstOrNull { it.key == props.getProperty(KEY_APP_RENDERING) } ?: Rendering.AUTOMATIC,
             vncViewer = props.getProperty(KEY_VNC_VIEWER)?.takeIf { it.isNotBlank() },
             frameRate60 = props.getProperty(KEY_FRAME_RATE_60) == "true",
             customFrameRate = props.getProperty(KEY_CUSTOM_FRAME_RATE)?.toIntOrNull()?.takeIf { it in UserSettings.CUSTOM_FRAME_RATES },
@@ -262,6 +272,8 @@ class UserSettingsStore(private val file: File) {
         if (settings.cameraFrameRate != AndroidCameras.DEFAULT_FRAME_RATE) props.setProperty(KEY_CAMERA_FRAME_RATE, settings.cameraFrameRate.toString())
         if (settings.appResolution != AppDefaults.DEFAULT_RESOLUTION) props.setProperty(KEY_APP_RESOLUTION, settings.appResolution.percent.toString())
         if (settings.appInterfaceSize != AppDefaults.DEFAULT_INTERFACE_SIZE) props.setProperty(KEY_APP_INTERFACE_SIZE, settings.appInterfaceSize.toString())
+        if (settings.reduceMotion) props.setProperty(KEY_REDUCE_MOTION, "true")
+        if (settings.appRendering != Rendering.AUTOMATIC) props.setProperty(KEY_APP_RENDERING, settings.appRendering.key)
         settings.vncViewer?.let { props.setProperty(KEY_VNC_VIEWER, it) }
         if (settings.frameRate60) props.setProperty(KEY_FRAME_RATE_60, "true")
         settings.customFrameRate?.let { props.setProperty(KEY_CUSTOM_FRAME_RATE, it.toString()) }
@@ -292,6 +304,7 @@ class UserSettingsStore(private val file: File) {
         file.writeTextAtomically(StringWriter().also { props.store(it, null) }.toString())
         LiveSettings.theme.value = settings.theme
         LiveSettings.hideScreen.value = settings.security.hideScreen
+        LiveSettings.user.value = settings
     }
 
     private companion object {
@@ -328,12 +341,19 @@ class UserSettingsStore(private val file: File) {
         private const val KEY_CAMERA_RESOLUTION = "camera.resolution"
         private const val KEY_APP_RESOLUTION = "apps.resolution"
         private const val KEY_APP_INTERFACE_SIZE = "apps.interfaceSize"
+        private const val KEY_APP_RENDERING = "apps.rendering"
+        private const val KEY_REDUCE_MOTION = "display.reduceMotion"
         private const val KEY_CAMERA_FRAME_RATE = "camera.frameRate"
     }
 }
 
-/** Settings every screen follows as soon as they are saved: Flatdroid's theme, hiding the screen. */
+/**
+ * Settings every screen follows as soon as they are saved: Flatdroid's theme, hiding the screen,
+ * and the saved settings as a whole ([user]), so the screens needn't read the file on the main thread.
+ */
 object LiveSettings {
     val theme = kotlinx.coroutines.flow.MutableStateFlow(InterfaceTheme.SYSTEM)
     val hideScreen = kotlinx.coroutines.flow.MutableStateFlow(false)
+    /** What [UserSettingsStore.load] returns for Flatdroid's settings file; null until loaded, and when none are saved yet. */
+    val user = kotlinx.coroutines.flow.MutableStateFlow<UserSettings?>(null)
 }

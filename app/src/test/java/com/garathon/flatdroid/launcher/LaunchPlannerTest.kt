@@ -107,7 +107,7 @@ class LaunchPlannerTest {
         ld.cache.writeText("glibc-ld.so.cache")
         val next = Ready(planner.plan(id, withCache))
         assertEquals(ld.dir, next.ldCache!!.dir)
-        assertFalse(next.ldCache!!.generate)
+        assertFalse(next.ldCache.generate)
         assertEquals(listOf("/app/bin/scanner"), next.command)
         assertEquals(baseExtra(id) + (ld.cache.path to "/etc/ld.so.cache"), next.binds.extra)
     }
@@ -188,6 +188,8 @@ class LaunchPlannerTest {
             val app = plan("org.example.App" + sockets.length, sockets)
             assertTrue(sockets, app.wayland)
             assertEquals(wayland.path, app.binds.waylandSockets)
+            // No X server runs in a Wayland session.
+            assertEquals(null, app.binds.x11Sockets)
             assertEquals("/run/flatdroid/wayland/wayland-0", app.environment["WAYLAND_DISPLAY"])
             assertEquals(null, app.environment["DISPLAY"])
         }
@@ -195,6 +197,7 @@ class LaunchPlannerTest {
         val forced = plan("org.example.Forced", "x11;wayland;", force = true)
         assertFalse(forced.wayland)
         assertEquals(null, forced.binds.waylandSockets)
+        assertTrue(forced.binds.x11Sockets!!.endsWith("/x11"))
         assertEquals(":1", forced.environment["DISPLAY"])
         // An app that takes only Wayland keeps it: the setting is ignored.
         assertTrue(plan("org.example.WaylandOnly", "wayland;", force = true).wayland)
@@ -275,6 +278,8 @@ class LaunchPlannerTest {
         assertEquals(Electron.BASE_FLAGS, Electron.flags(newer = false, wayland = false))
         assertEquals(Electron.BASE_FLAGS + Electron.OZONE_WAYLAND, Electron.flags(newer = false, wayland = true))
         assertEquals(Electron.BASE_FLAGS + Electron.NEWER_FLAGS + Electron.OZONE_WAYLAND, Electron.flags(newer = true, wayland = true))
+        assertEquals(Electron.BASE_FLAGS + Electron.OZONE_WAYLAND + Electron.REDUCED_MOTION, Electron.flags(newer = false, wayland = true, reduceMotion = true))
+        assertEquals(Electron.BASE_FLAGS + Electron.REDUCED_MOTION, Electron.flags(newer = false, wayland = false, reduceMotion = true))
     }
 
     @Test

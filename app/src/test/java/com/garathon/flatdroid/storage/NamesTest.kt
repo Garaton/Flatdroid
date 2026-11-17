@@ -1,6 +1,7 @@
 package com.garathon.flatdroid.storage
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -15,6 +16,24 @@ class NamesTest {
         assertEquals("x", Names.safe("..", "x"))
         assertEquals("x", Names.safe(null, "x"))
         assertEquals("x", Names.safe("  ", "x"))
+    }
+
+    @Test
+    fun longNamesAreCutByBytesNotCharacters() {
+        // 100 Japanese characters are 300 bytes: more than a file system takes once a temporary name is added.
+        val long = "あ".repeat(100) + ".txt"
+        val cut = Names.safe(long, "x")
+        assertTrue(cut.endsWith(".txt"))
+        assertTrue(cut.toByteArray(Charsets.UTF_8).size <= 200)
+        assertEquals("あ".repeat(65) + ".txt", cut)
+        // A code point of two UTF-16 units isn't split.
+        val emoji = Names.safe("😀".repeat(80), "x")
+        assertEquals("😀".repeat(50), emoji)
+        // Short names and plain long ASCII names keep working.
+        assertEquals("a.txt", Names.safe("a.txt", "x"))
+        assertEquals(200, Names.safe("a".repeat(300), "x").length)
+        // A long extension is cut with the rest, not kept.
+        assertTrue(Names.safe("a." + "b".repeat(300), "x").toByteArray(Charsets.UTF_8).size <= 200)
     }
 
     @Test

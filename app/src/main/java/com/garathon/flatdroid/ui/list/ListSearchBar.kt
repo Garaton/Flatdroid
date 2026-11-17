@@ -8,11 +8,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
@@ -63,7 +63,7 @@ fun <T> ListSearchBar(
                 Row {
                     if (spec.sorts.size > 1) {
                         IconButton(onClick = { sortMenu = true }, modifier = Modifier.size(40.dp)) {
-                            Icon(Icons.Filled.Sort, contentDescription = stringResource(R.string.list_sort))
+                            Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = stringResource(R.string.list_sort))
                         }
                         DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
                             for (sort in spec.sorts) {

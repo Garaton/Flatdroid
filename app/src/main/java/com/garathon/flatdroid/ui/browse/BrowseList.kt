@@ -22,7 +22,7 @@ enum class BrowseOrder(val key: String) { POPULAR("popular"), ADDED("added"), UP
 fun browseListSpec(lists: FlathubLists, installedRuntimes: Set<String> = emptySet()) = ListSpec<CatalogApp>(
     searchText = { listOfNotNull(it.name, it.id, it.summary, it.developer) + it.keywords },
     filters = listOf(
-        ListFilter("verified", R.string.browse_filter_verified) { it.verified },
+        ListFilter("verified", R.string.browse_filter_verified) { it.id in lists.verified },
         ListFilter("runtimes", R.string.browse_filter_runtimes) { it.runtime != null && it.runtime in installedRuntimes },
     ),
     sorts = listOf(

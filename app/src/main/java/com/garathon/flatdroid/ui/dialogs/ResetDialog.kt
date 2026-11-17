@@ -50,7 +50,7 @@ fun ResetDialog(onConfirm: (ResetMode) -> Unit, onDismiss: () -> Unit) {
             }
         },
         confirmButton = { TextButton(onClick = { onConfirm(mode) }) { Text(stringResource(R.string.reset_confirm)) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.reset_cancel)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
     )
 }
 

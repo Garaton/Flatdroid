@@ -19,6 +19,7 @@ import com.garathon.flatdroid.proot.ProotCommand
 import com.garathon.flatdroid.proot.ProotPaths
 import com.garathon.flatdroid.proot.ProotRunner
 import com.garathon.flatdroid.setup.rootfs.AndroidTarFs
+import com.garathon.flatdroid.storage.AppData
 import com.garathon.flatdroid.setup.rootfs.RootfsInstaller
 import com.garathon.flatdroid.util.io.writeTextAtomically
 import com.garathon.flatdroid.util.io.readTextUpTo
@@ -30,7 +31,9 @@ import java.io.FileInputStream
  * and running commands in it.
  *
  * Persistent: `files/alpine/rootfs` and `files/alpine/generated` (config bound into the guest).
- * Temporary, in cache: the guest's /tmp and /dev/shm, proot's own temporary files, downloads.
+ * Temporary, in the work folder ([AppData.workDir]): the guest's /tmp and /dev/shm and proot's own
+ * temporary files, which a running command or app can't do without. In cache: the rootfs and
+ * package downloads and extra data, which a task or setup that loses them can run again.
  */
 class AlpineEnvironment private constructor(private val context: Context) {
     // Fully resolved paths only. Android hands out /data/user/0/<package>, which on some devices
@@ -39,11 +42,19 @@ class AlpineEnvironment private constructor(private val context: Context) {
     // With the unresolved prefix, every hard link in Alpine dangled (gpg couldn't lock its keyring).
     private val filesDir = context.filesDir.canonicalFile
 
-    /** For downloads and other files that are deleted once used. */
+    /** For files Android may delete at any time, even while in use. */
     val cacheDir: File = context.cacheDir.canonicalFile
+    /** For temporary files a task or session uses ([AppData.workDir]). */
+    val workDir: File = AppData.workDir(context)
     private val alpineDir = File(filesDir, "alpine")
     private val generatedDir = File(alpineDir, "generated")
-    private val cacheAlpine = File(cacheDir, "alpine")
+    private val tmpAlpine = File(workDir, "alpine")
+    /** proot's own temporary files. */
+    private val prootTmp = File(workDir, "proot-tmp")
+    /** apk's downloads during setup and Alpine's updates, deleted once installed (in cache: a lost download is made again). */
+    val apkCacheDir = File(cacheDir, "apk-cache")
+    /** Where extra data is unpacked (`flatpak.tasks.ExtraData`); in cache, since a task that loses it runs again. */
+    val extraDataDir = File(cacheDir, "extra-data")
     private val libDir = File(context.applicationInfo.nativeLibraryDir).canonicalFile
 
     val installer = RootfsInstaller(alpineDir, cacheDir, AndroidTarFs)
@@ -55,8 +66,15 @@ class AlpineEnvironment private constructor(private val context: Context) {
 
     /** Everything temporary that belongs to Alpine: guest /tmp and /dev/shm, proot's files, downloads. */
     fun temporaryFiles(): List<File> =
-        listOf(cacheAlpine, File(cacheDir, "proot-tmp"), File(cacheDir, "apk-cache")) +
+        listOf(tmpAlpine, prootTmp, apkCacheDir, extraDataDir) +
             (cacheDir.listFiles { f -> f.name.startsWith("alpine-minirootfs-") }?.toList() ?: emptyList())
+
+    /**
+     * What no command or app of a new run of Flatdroid's process can be using yet, and Android can't
+     * reclaim: the guest's /tmp and /dev/shm, proot's files, and the last session's roots, private /tmp and sockets.
+     */
+    fun leftoverFiles(): List<File> =
+        listOf(tmpAlpine, prootTmp, AppData.rootsDir(context), AppData.appTmpDir(context), AppData.sessionDir(context))
 
     /**
      * Runs [command] in Alpine as fake root. Generated files are refreshed first, since the
@@ -114,7 +132,7 @@ class AlpineEnvironment private constructor(private val context: Context) {
     fun paths(): ProotPaths = ProotPaths(
         proot = File(libDir, "libproot.so").path,
         loader = File(libDir, "libproot-loader.so").path,
-        tmpDir = dir(File(cacheDir, "proot-tmp")).path,
+        tmpDir = dir(prootTmp).path,
         rootfs = installer.rootfs.path,
         fdsec = File(libDir, Fdsec.LIBRARY).path,
         fdshm = File(libDir, Fdshm.LIBRARY).path,
@@ -134,8 +152,8 @@ class AlpineEnvironment private constructor(private val context: Context) {
         return AlpineBinds(
             resolvConf = resolv.path,
             hosts = hosts.path,
-            tmp = dir(File(cacheAlpine, "tmp")).path,
-            shm = dir(File(cacheAlpine, "shm")).path,
+            tmp = dir(File(tmpAlpine, "tmp")).path,
+            shm = dir(File(tmpAlpine, "shm")).path,
             emptyDir = dir(File(generatedDir, "empty")).path,
             fakeProc = fakeProc,
             dev = dev,

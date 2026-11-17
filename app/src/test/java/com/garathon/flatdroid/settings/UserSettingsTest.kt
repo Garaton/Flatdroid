@@ -20,6 +20,20 @@ class UserSettingsTest {
     }
 
     @Test
+    fun theLiveCopyFollowsTheFile() {
+        val store = UserSettingsStore(File(tmp.root, "settings.properties"))
+        // Nothing saved: not chosen yet.
+        store.loadLive()
+        assertNull(LiveSettings.user.value)
+        store.save(UserSettings("de;en", mobileData = MobileData.NEVER))
+        assertEquals(MobileData.NEVER, LiveSettings.user.value?.mobileData)
+        // The file deleted (a reset) and read again.
+        File(tmp.root, "settings.properties").delete()
+        store.loadLive()
+        assertNull(LiveSettings.user.value)
+    }
+
+    @Test
     fun roundTrips() {
         val store = UserSettingsStore(File(tmp.root, "settings.properties"))
         store.save(UserSettings("de;en"))
@@ -31,6 +45,7 @@ class UserSettingsTest {
             uncappedFrameRate = true, installGpuRuntimes = true, customAudioLatencyMs = 30,
             lowLatencyAudio = true, highQualityAudio = true, sharedHome = "/storage/emulated/0/Download/Home", theme = InterfaceTheme.AMOLED,
             externalViewer = true, mobileData = MobileData.NEVER, appTime = AppTime.LAST_OPENED, cameraResolution = 480, cameraFrameRate = 15,
+            appRendering = Rendering.GL, reduceMotion = true,
         )
         store.save(all)
         assertEquals(all, store.load())
@@ -78,6 +93,17 @@ class UserSettingsTest {
         // Performant doesn't filter the rarely used system calls, so an app starts without blocking them.
         assertFalse(defaults.blockExtraSyscalls)
         assertTrue(UserSettings("en").appDefaults.blockExtraSyscalls)
+        assertEquals(Rendering.AUTOMATIC, UserSettings("en").appDefaults.rendering)
+        assertEquals(Rendering.SOFTWARE, UserSettings("en", appRendering = Rendering.SOFTWARE).appDefaults.rendering)
+    }
+
+    @Test
+    fun reduceMotionIsOffAndNotPartOfASecurityLevel() {
+        assertFalse(UserSettings("en").reduceMotion)
+        val store = UserSettingsStore(File(tmp.root, "motion.properties"))
+        store.save(UserSettings("en", reduceMotion = true, security = SecurityLevel.HARDENED.settings))
+        assertTrue(store.load()!!.reduceMotion)
+        assertEquals(SecurityLevel.HARDENED, store.load()!!.securityLevel)
     }
 
     @Test

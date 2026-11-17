@@ -42,7 +42,7 @@ class FlatpakProgress {
             return false
         }
         TABLE_ROW.find(line)?.let { row ->
-            refs[row.groupValues[1].toInt()] = "${row.groupValues[2]} ${row.groupValues[3]}"
+            row.groupValues[1].toIntOrNull()?.let { refs[it] = "${row.groupValues[2]} ${row.groupValues[3]}" }
             return false
         }
         val progress = PROGRESS.find(line) ?: return false

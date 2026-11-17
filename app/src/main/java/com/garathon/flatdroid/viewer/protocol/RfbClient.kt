@@ -1,5 +1,6 @@
 package com.garathon.flatdroid.viewer.protocol
 
+import com.garathon.flatdroid.settings.AppSettings
 import com.garathon.flatdroid.viewer.frames.NativeFrames
 import java.io.DataInputStream
 import java.io.EOFException
@@ -213,8 +214,10 @@ class RfbClient(
                         input.skipFully(12)
                         if (s == 0) screenId = id
                     }
-                    // y is the result of a resize request: anything but 0 means refused, size unchanged.
-                    if (w != framebuffer.width || h != framebuffer.height) resize(w, h, listener)
+                    // An answer to this client's request (x = 1) with y other than 0 is a refusal, or
+                    // (4) the request passed on, whose size comes later in a message of its own.
+                    val answered = x == 1 && y != 0
+                    if (!answered && (w != framebuffer.width || h != framebuffer.height)) resize(w, h, listener)
                 }
                 // Asked for only so the server leaves the pointer out of the screen; never drawn
                 // (touch needs none, and Android draws a mouse's own).
@@ -339,7 +342,10 @@ class RfbClient(
         /** Longest name, reason or clipboard text accepted. */
         const val MAX_TEXT = 16 * 1024 * 1024
 
-        /** Widest or tallest screen accepted: twice the largest Flatdroid asks a server for. */
-        const val MAX_SCREEN = 8192
+        /**
+         * Widest or tallest screen accepted: the largest Flatdroid asks a server for. A larger one
+         * (an app resizing the X screen itself) ends the connection instead of taking 256 MB.
+         */
+        const val MAX_SCREEN = AppSettings.MAX_SIZE
     }
 }

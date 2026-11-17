@@ -121,6 +121,21 @@ class AppSettingsTest {
     }
 
     @Test
+    fun renderingFollowsTheDefaultUntilChosen() {
+        assertEquals(Rendering.AUTOMATIC, AppSettings().rendering)
+        val defaults = AppDefaults(rendering = Rendering.SOFTWARE)
+        val file = File(tmp.root, "rendering.properties")
+        val store = AppSettingsStore(file, defaults)
+        store.save(AppSettings(defaults = defaults))
+        assertEquals(Rendering.SOFTWARE, store.load().rendering)
+        store.save(AppSettings(defaults = defaults, renderingChoice = Rendering.GL))
+        assertEquals(Rendering.GL, store.load().rendering)
+        // An own choice that equals a new default is read as following it.
+        assertEquals(Rendering.GL, AppSettingsStore(file, AppDefaults(rendering = Rendering.AUTOMATIC)).load().rendering)
+        assertEquals(null, AppSettingsStore(file, AppDefaults(rendering = Rendering.GL)).load().renderingChoice)
+    }
+
+    @Test
     fun environmentTextIsOneNameValuePerLine() {
         assertEquals(
             mapOf("VLC_PLUGIN_PATH" to "/app/lib/vlc/plugins", "A" to "x=y z", "EMPTY" to ""),
@@ -167,10 +182,33 @@ class AppSettingsTest {
     }
 
     @Test
+    fun theFlagVersionsAgreeWithTheListVersions() {
+        // The overview, the Permissions page and the launcher ask the same question in different shapes.
+        val hardened = AppSettings(defaults = AppDefaults(permissionsFromMetadata = false))
+        for (settings in listOf(AppSettings(), hardened, AppSettings(audio = false, network = true, microphone = true, camera = true))) {
+            for (asks in listOf(true, false)) {
+                assertEquals(settings.audioAllowed(if (asks) listOf("pulseaudio") else emptyList()), settings.audioOn(asks))
+                assertEquals(settings.networkAllowed(if (asks) listOf("network") else emptyList()), settings.networkOn(asks))
+                assertEquals(settings.microphoneAllowed(if (asks) listOf("pulseaudio") else emptyList()), settings.microphoneOn(asks))
+                assertEquals(settings.cameraAllowed(FlatpakContext(filesystems = if (asks) listOf("xdg-pictures/Camera:create") else emptyList())), settings.cameraOn(asks))
+            }
+        }
+        assertTrue(AppSettings().defaultOn(true))
+        assertFalse(AppSettings().defaultOn(false))
+        assertFalse(hardened.defaultOn(true))
+    }
+
+    @Test
+    fun launchArgsSplitOnAnyWhitespace() {
+        assertEquals(listOf("--a", "b", "c"), LaunchArgs.parse("  --a \t b\n c "))
+        assertEquals(emptyList<String>(), LaunchArgs.parse("  "))
+    }
+
+    @Test
     fun microphoneAndCameraFollowTheMetadataUntilOverridden() {
         val sound = listOf("x11", "pulseaudio")
         val allDevices = FlatpakContext(devices = listOf("all"))
-        val camera = FlatpakContext(filesystems = listOf("xdg-run/pipewire-0:ro"))
+        val camera = FlatpakContext(filesystems = listOf("xdg-pictures/Camera:create"))
         val plain = FlatpakContext(sockets = sound, devices = listOf("dri"))
         // By default: the microphone for an app that asks for sound, the camera for a hint that it uses one.
         val unset = AppSettings()

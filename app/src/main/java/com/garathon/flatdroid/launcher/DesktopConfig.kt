@@ -7,9 +7,12 @@ package com.garathon.flatdroid.launcher
  */
 object DesktopConfig {
     /** GTK 3 and 4 read it from `gtk-3.0/settings.ini` and `gtk-4.0/settings.ini`. */
-    fun gtkSettings(dark: Boolean): String =
+    fun gtkSettings(dark: Boolean, reduceMotion: Boolean = false): String =
         "[Settings]\n" +
             "gtk-decoration-layout=menu:maximize,close\n" +
+            // A blinking cursor keeps the toolkit drawing; it stops after 3 seconds, as on a desktop that is left alone.
+            "gtk-cursor-blink-timeout=3\n" +
+            (if (reduceMotion) "gtk-enable-animations=0\n" else "") +
             "gtk-application-prefer-dark-theme=${if (dark) 1 else 0}\n"
 
     /**

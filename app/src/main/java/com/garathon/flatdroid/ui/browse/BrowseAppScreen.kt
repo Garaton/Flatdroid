@@ -47,6 +47,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.Folder
@@ -74,6 +75,8 @@ import androidx.compose.material3.VerticalDivider
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.garathon.flatdroid.ui.common.SettingsCard
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -91,6 +94,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import java.io.File
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.map
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -153,6 +161,8 @@ fun BrowseAppScreen(
     /** The index is being read or built (after a change, or Android's Clear cache): the page says so meanwhile. */
     catalogLoading: Boolean,
     arch: String,
+    /** Flathub's saved lists say the app is verified: shown until the page's own answer comes. */
+    listedVerified: Boolean,
     installState: InstallState,
     mobileDataBlocked: () -> Boolean,
     /** What the mobile data setting says now ([MobileData.ALWAYS] when the connection isn't metered). */
@@ -161,8 +171,8 @@ fun BrowseAppScreen(
     runtimeInstalled: (FlatpakRef) -> Boolean,
     onInstall: () -> Unit,
     onUnqueue: () -> Unit,
-    /** For an installed app: starts it (when [canOpen]: nothing else runs), opens its settings, uninstalls it (queued behind what runs). */
-    canOpen: Boolean,
+    /** For an installed app: starts it, shows it ([open] says which), opens its settings, uninstalls it (queued behind what runs). */
+    open: OpenState,
     onOpen: () -> Unit,
     onAppSettings: () -> Unit,
     onUninstall: (deleteData: Boolean, keepRuntimes: Boolean) -> Unit,
@@ -174,6 +184,8 @@ fun BrowseAppScreen(
     val details by produceState<CatalogDetails?>(null, appId, index) {
         value = index?.let { withContext(Dispatchers.IO) { it.details(appId) } }
     }
+    // A file check, so off the main thread (a page is composed for every swipe).
+    val iconFile by produceState<File?>(null, app?.icon) { value = withContext(Dispatchers.IO) { Catalog.iconFile(context, app?.icon) } }
     var attempt by rememberSaveable { mutableIntStateOf(0) }
     val summary by produceState<Summary>(Summary.Loading, appId, attempt) {
         value = Summary.Loading
@@ -206,7 +218,8 @@ fun BrowseAppScreen(
     // The catalog only has apps built for this phone; one it doesn't have is checked with Flathub's answer.
     val builtHere = app != null || found?.builtFor(arch) == true
     val name = app?.name ?: found?.name ?: appId
-    val verified = app?.verified ?: found?.verified ?: false
+    // Flathub's answer, not the catalog's, which an installed app can rewrite: the page's own, else the saved lists'.
+    val verified = found?.verified ?: listedVerified
 
     val scroll = rememberScrollState()
     // The header's name is in view: the top bar has none, so it isn't shown twice.
@@ -231,7 +244,9 @@ fun BrowseAppScreen(
                 // Open with its label; settings and uninstall as icons beside it, uninstall in red.
                 InstallState.INSTALLED -> Row(Modifier.height(IntrinsicSize.Min), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     val settingsButton = @Composable {
-                        OutlinedIconButton(onClick = onAppSettings) { Icon(Icons.Outlined.Settings, contentDescription = stringResource(R.string.settings_title)) }
+                        OutlinedIconButton(onClick = onAppSettings, modifier = Modifier.alpha(if (open == OpenState.STARTING || open == OpenState.RUNNING) 0.6f else 1f)) {
+                            Icon(Icons.Outlined.Settings, contentDescription = stringResource(R.string.settings_title))
+                        }
                     }
                     val uninstallButton = @Composable {
                         OutlinedIconButton(
@@ -241,9 +256,7 @@ fun BrowseAppScreen(
                         ) { Icon(Icons.Outlined.Delete, contentDescription = stringResource(R.string.uninstall_button)) }
                     }
                     // In landscape the icons stay square, one over the other, and Open is as tall as both.
-                    Button(onClick = onOpen, enabled = canOpen, shape = tallShape, modifier = Modifier.weight(1f).then(if (landscape) Modifier.fillMaxHeight() else Modifier)) {
-                        ButtonContent(Icons.Filled.PlayArrow, stringResource(R.string.browse_open), large = landscape)
-                    }
+                    OpenButton(open, onOpen, tallShape, landscape, Modifier.weight(1f).then(if (landscape) Modifier.fillMaxHeight() else Modifier))
                     if (landscape) {
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             settingsButton()
@@ -266,13 +279,13 @@ fun BrowseAppScreen(
                 }
                 InstallState.QUEUED -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(stringResource(R.string.browse_queued_waiting), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                    OutlinedButton(onClick = onUnqueue) { Text(stringResource(R.string.browse_queued_cancel)) }
+                    OutlinedButton(onClick = onUnqueue) { Text(stringResource(R.string.cancel)) }
                 }
                 InstallState.UNKNOWN -> Button(onClick = {}, enabled = false, shape = tallShape, modifier = Modifier.fillMaxWidth().then(tall)) {
-                    ButtonContent(Icons.Filled.Download, stringResource(R.string.install_confirm), large = landscape)
+                    ButtonContent(Icons.Filled.Download, stringResource(R.string.install), large = landscape)
                 }
                 InstallState.NOT_INSTALLED -> Button(onClick = onInstall, enabled = builtHere, shape = tallShape, modifier = Modifier.fillMaxWidth().then(tall)) {
-                    ButtonContent(Icons.Filled.Download, stringResource(R.string.install_confirm), large = landscape)
+                    ButtonContent(Icons.Filled.Download, stringResource(R.string.install), large = landscape)
                 }
             }
         }
@@ -285,13 +298,13 @@ fun BrowseAppScreen(
         Column(Modifier.weight(1f).verticalScroll(scroll).padding(top = 8.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             // Header: the icon, the name, who made it, the ID.
             Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                AppIcon(Catalog.iconFile(context, app?.icon), Modifier.size(80.dp))
+                AppIcon(iconFile, Modifier.size(80.dp))
                 Column(Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(name, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f, fill = false))
                         if (verified) {
                             Icon(
-                                Icons.Filled.Verified, contentDescription = stringResource(R.string.install_link_verified),
+                                Icons.Filled.Verified, contentDescription = stringResource(R.string.flathub_verified),
                                 tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 8.dp).size(22.dp),
                             )
                         }
@@ -320,9 +333,9 @@ fun BrowseAppScreen(
             when (val s = summary) {
                 Summary.Loading -> Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                    Text(stringResource(R.string.install_link_loading), style = MaterialTheme.typography.bodySmall)
+                    Text(stringResource(R.string.flathub_loading), style = MaterialTheme.typography.bodySmall)
                 }
-                Summary.NotFound -> Text(stringResource(R.string.install_link_not_found, appId), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp))
+                Summary.NotFound -> Text(stringResource(R.string.flathub_not_found, appId), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp))
                 Summary.MobileData -> Column(Modifier.padding(horizontal = 16.dp)) { Retry(stringResource(R.string.install_link_mobile_data)) { attempt++ } }
                 is Summary.Failed -> Column(Modifier.padding(horizontal = 16.dp)) {
                     Retry(if (s.code != null) stringResource(s.message, s.code) else stringResource(s.message)) { attempt++ }
@@ -465,6 +478,10 @@ fun BrowseAppScreen(
  * A drag that starts up or down scrolls the page instead. [onSettled] gets the app swiped to and
  * its place in [ids]. An app not in [ids] (opened from a link) has no neighbors. The top bar (Back,
  * and the app's name once its header has scrolled away) stays put while pages slide.
+ *
+ * Only the apps around the one shown are pages ([WINDOW] each way, moving with it): a pager asked
+ * to fill a viewport that has no width (measured while the window is resized) composes page after
+ * page, a whole app page each, until memory runs out, however many apps the list has.
  */
 @Composable
 fun BrowseAppPager(
@@ -476,8 +493,13 @@ fun BrowseAppPager(
     modifier: Modifier = Modifier,
     page: @Composable (id: String, onTitle: (String?) -> Unit) -> Unit,
 ) {
-    val pages = remember(ids, current) { ids?.takeIf { current in it } ?: listOf(current) }
-    val pager = rememberPagerState(initialPage = pages.indexOf(current).coerceAtLeast(0)) { pages.size }
+    // Each app once: the pager's keys are the IDs, and a repeated one ends Flatdroid.
+    val order = remember(ids, current) { ids?.takeIf { current in it }?.distinct() ?: listOf(current) }
+    val window = remember(order, current) { pagerWindow(order, current, WINDOW) }
+    // Where the pages start in [order]; a page's place in the list is this and its place here.
+    val first = window.first
+    val pages = window.pages
+    val pager = rememberPagerState(initialPage = window.currentAt) { pages.size }
     val shown by rememberUpdatedState(current)
     // The list was prepared or changed (a filter) with the page open: keep the app shown.
     LaunchedEffect(pages) {
@@ -485,13 +507,18 @@ fun BrowseAppPager(
         if (at >= 0 && at != pager.currentPage) pager.scrollToPage(at)
     }
     LaunchedEffect(pager, pages) {
-        snapshotFlow { pager.settledPage }.collect { at -> pages.getOrNull(at)?.takeIf { it != shown }?.let { onSettled(it, at) } }
+        snapshotFlow { pager.settledPage to pager.isScrollInProgress }
+            // Not while it moves (the window follows what is shown, which moves the pages under it), and not for the app already shown.
+            .filter { (_, moving) -> !moving }
+            .map { (at, _) -> at }
+            .distinctUntilChanged()
+            .collect { at -> pages.getOrNull(at)?.takeIf { it != shown }?.let { onSettled(it, first + at) } }
     }
     // Each page's title, by app.
     val titles = remember { mutableStateMapOf<String, String?>() }
     Column(modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 16.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.settings_back)) }
+            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back)) }
             Crossfade(pages.getOrNull(pager.currentPage)?.let { titles[it] }, label = "title") { title ->
                 if (title != null) Text(title, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 4.dp))
             }
@@ -503,6 +530,20 @@ fun BrowseAppPager(
         bottomBar()
     }
 }
+
+/** The pages around the app shown: [pages] from [first] in the whole list, the app being at [currentAt]. */
+class PagerWindow(val first: Int, val pages: List<String>, val currentAt: Int)
+
+/** [radius] apps each side of [current] in [order] (fewer near the ends); [current] not in [order] is the only page. */
+fun pagerWindow(order: List<String>, current: String, radius: Int): PagerWindow {
+    val centre = order.indexOf(current)
+    if (centre < 0) return PagerWindow(0, listOf(current), 0)
+    val first = (centre - radius).coerceAtLeast(0)
+    return PagerWindow(first, order.subList(first, minOf(order.size, centre + radius + 1)), centre - first)
+}
+
+/** How many apps each side of the one shown the pager holds as pages ([BrowseAppPager]). */
+private const val WINDOW = 3
 
 /**
  * Screenshots full size over everything, starting at [start]; swiped through. The original picture
@@ -537,7 +578,34 @@ private fun ScreenshotViewer(shots: List<Screenshot>, start: Int, onClose: () ->
 @Composable
 private fun Retry(text: String, onRetry: () -> Unit) {
     Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-    TextButton(onClick = onRetry, contentPadding = PaddingValues(0.dp)) { Text(stringResource(R.string.install_link_retry)) }
+    TextButton(onClick = onRetry, contentPadding = PaddingValues(0.dp)) { Text(stringResource(R.string.retry)) }
+}
+
+/**
+ * What the page's main button for an installed app does: [READY] starts it, [STARTING] is it
+ * starting, [RUNNING] brings its window forward, [BUSY] is another app or a task in the way.
+ */
+enum class OpenState { READY, STARTING, RUNNING, BUSY }
+
+/** The four states look different: a filled Open, a spinner while it starts, a tonal Show app once it runs, an outlined Busy. */
+@Composable
+private fun OpenButton(state: OpenState, onOpen: () -> Unit, shape: Shape, large: Boolean, modifier: Modifier) {
+    when (state) {
+        OpenState.READY -> Button(onClick = onOpen, shape = shape, modifier = modifier) {
+            ButtonContent(Icons.Filled.PlayArrow, stringResource(R.string.browse_open), large = large)
+        }
+        OpenState.STARTING -> FilledTonalButton(onClick = {}, enabled = false, shape = shape, modifier = modifier) {
+            CircularProgressIndicator(Modifier.size(if (large) 28.dp else 18.dp), strokeWidth = 2.dp)
+            Spacer(Modifier.width(if (large) 12.dp else 8.dp))
+            Text(stringResource(R.string.browse_starting), style = if (large) MaterialTheme.typography.titleLarge else LocalTextStyle.current)
+        }
+        OpenState.RUNNING -> FilledTonalButton(onClick = onOpen, shape = shape, modifier = modifier) {
+            ButtonContent(Icons.AutoMirrored.Outlined.OpenInNew, stringResource(R.string.browse_show), large = large)
+        }
+        OpenState.BUSY -> OutlinedButton(onClick = {}, enabled = false, shape = shape, modifier = modifier) {
+            ButtonContent(Icons.Outlined.Block, stringResource(R.string.browse_busy), large = large)
+        }
+    }
 }
 
 /** A button's icon and label; [large] for the tall buttons beside the header in landscape. */

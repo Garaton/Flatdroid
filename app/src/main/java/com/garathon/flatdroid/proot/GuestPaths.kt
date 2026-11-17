@@ -1,5 +1,7 @@
 package com.garathon.flatdroid.proot
 
+import android.annotation.SuppressLint
+
 /** Guest paths shared by the helpers' Alpine root and every Flatpak's root. */
 object GuestPaths {
     /** Xvnc's socket directory. */
@@ -33,7 +35,8 @@ object GuestPaths {
     /** Where the launcher has `ldconfig` build an app's ld.so.cache ([com.garathon.flatdroid.launcher.LdCache]). */
     const val LD_CACHE_DIR = "/run/flatdroid/ld"
 
-    /** All of shared storage, when an app's setting asks for it. */
+    /** All of shared storage, when an app's setting asks for it. A guest path, not Android's. */
+    @SuppressLint("SdCardPath")
     const val SDCARD = "/sdcard"
 
     /** Holds [SESSION_BUS_SOCKET], the app's session bus (Flatpak's path). */
