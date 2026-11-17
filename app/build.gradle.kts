@@ -23,7 +23,7 @@ android {
     defaultConfig {
         applicationId = "com.garathon.flatdroid"
         minSdk = 24
-        targetSdk = 35
+        targetSdk = 37
         versionCode = 3
         versionName = "0.8.1"
 
@@ -61,6 +61,9 @@ android {
             versionCode = 10 * defaultConfig.versionCode!!
         }
     }
+
+    // The arm64 flavor leaves x86_64 out on purpose; the x86_64 and universal ones carry it.
+    lint { disable += "ChromeOsAbiSupport" }
 
     packaging { jniLibs { useLegacyPackaging = true } }
     ndkVersion = "30.0.16248370"

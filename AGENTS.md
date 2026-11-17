@@ -21,12 +21,12 @@ Android app (`com.garathon.flatdroid`, Kotlin, GPL-3.0-or-later) that installs F
 
 ## Environment
 
-- Host: JDK 21 (`JAVA_HOME` set), Android SDK (`ANDROID_HOME`): platform-tools, `platforms;android-35`, build-tools 35.0.0, NDK 30.0.16248370, CMake 3.22.1.
-- App: targetSdk 35+, minSdk 24. ABIs: arm64-v8a and x86_64 only. Native libraries packaged with `useLegacyPackaging = true`, 16 KB page aligned.
+- Host: JDK 21 (`JAVA_HOME` set), Android SDK (`ANDROID_HOME`): platform-tools, `platforms;android-37.0`, build-tools 36.0.0, NDK 30.0.16248370, CMake 3.22.1.
+- App: targetSdk 37, minSdk 24. ABIs: arm64-v8a and x86_64 only. Native libraries packaged with `useLegacyPackaging = true`, 16 KB page aligned.
 
 ## Commands
 
-- Build: `./gradlew assembleDebug` (flavors `arm64`, `x86_64`, `universal`; native/build-proot.sh runs from Gradle and needs make, git, curl, gawk, readelf on the host)
+- Build: `./gradlew assembleDebug` (flavors `arm64`, `x86_64`, `universal`; native/build-proot.sh runs from Gradle and needs make, git, curl, b2sum, gawk, readelf on the host)
 - Unit tests: `./gradlew testDebugUnitTest testReleaseUnitTest` (release builds have their own source set)
 - Install and run: `./gradlew installArm64Debug` (Waydroid: `installX86_64Debug`), then `adb shell am start -n com.garathon.flatdroid/.MainActivity`
 - Logs: `adb logcat --pid=$(adb shell pidof com.garathon.flatdroid)`

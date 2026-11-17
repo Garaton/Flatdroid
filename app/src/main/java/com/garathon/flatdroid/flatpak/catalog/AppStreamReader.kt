@@ -231,7 +231,7 @@ class AppStreamReader(languages: List<String>) {
     /** Skips the current element and everything in it. */
     private fun skip(parser: XmlPullParser) {
         val depth = parser.depth
-        while (next(parser, depth)) Unit
+        while (next(parser, depth)) {}
     }
 
     private fun collapse(text: String) = text.replace(WHITESPACE, " ").trim()

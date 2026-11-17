@@ -5,7 +5,7 @@
 #   build-proot.sh <abi> <ndk dir> <work dir> <output dir>
 #
 # abi: arm64-v8a or x86_64. Outputs <output dir>/libproot.so and libproot-loader.so.
-# Host needs: sh, make, git, curl, sha256sum, gawk and readelf
+# Host needs: sh, make, git, curl, sha256sum, b2sum, gawk and readelf
 # (proot's loader-info.awk on aarch64).
 set -eu
 
@@ -32,7 +32,7 @@ esac
 TC=$NDK/toolchains/llvm/prebuilt/linux-x86_64
 [ -x "$TC/bin/clang" ] || { echo "NDK toolchain not found in $TC" >&2; exit 1; }
 CC="$TC/bin/clang --target=$TRIPLE$API"
-for tool in make git curl sha256sum gawk readelf; do
+for tool in make git curl sha256sum b2sum gawk readelf; do
     command -v $tool >/dev/null || { echo "missing host tool: $tool" >&2; exit 1; }
 done
 
@@ -47,10 +47,26 @@ ln -s "$(command -v gawk)" "$WORK/bin/awk"
 PATH=$WORK/bin:$PATH
 
 # ---- talloc
+# Downloaded once for both ABIs, kept between builds, and checked against the pinned hash before
+# each use. Gentoo's distfiles carry the same tarball, for when samba.org drops the connection
+# (their directory is the first byte of the file name's BLAKE2b).
+TALLOC_NAME=talloc-$TALLOC_VERSION.tar.gz
+TALLOC_TGZ=$3/$TALLOC_NAME
+talloc_ok() { echo "$TALLOC_SHA256  $1" | sha256sum -c --status -; }
+if ! { [ -f "$TALLOC_TGZ" ] && talloc_ok "$TALLOC_TGZ"; }; then
+    tmp=$(mktemp "$TALLOC_TGZ.XXXXXX")
+    got=
+    for url in "https://www.samba.org/ftp/talloc/$TALLOC_NAME" \
+        "https://distfiles.gentoo.org/distfiles/$(printf %s "$TALLOC_NAME" | b2sum | cut -c1-2)/$TALLOC_NAME"; do
+        curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 --connect-timeout 30 -o "$tmp" "$url" \
+            && talloc_ok "$tmp" && { got=1; break; }
+        echo "talloc: no good tarball from $url" >&2
+    done
+    [ -n "$got" ] || { rm -f "$tmp"; exit 1; }
+    mv -f "$tmp" "$TALLOC_TGZ"
+fi
 cd "$WORK"
-curl -fsSL -o talloc.tar.gz "https://www.samba.org/ftp/talloc/talloc-$TALLOC_VERSION.tar.gz"
-echo "$TALLOC_SHA256  talloc.tar.gz" | sha256sum -c -
-tar xzf talloc.tar.gz
+tar xzf "$TALLOC_TGZ"
 T=$WORK/talloc-$TALLOC_VERSION
 mkdir -p "$T/bin/default"
 cp "$HERE/talloc-config.h" "$T/bin/default/config.h"

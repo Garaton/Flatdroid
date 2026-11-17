@@ -270,7 +270,7 @@ object SavedSizes {
         val l2s = File(env.paths().l2sDir).canonicalFile
         val flatpak = env.flatpakDir.canonicalFile
         val objects = File(flatpak, "repo/objects")
-        val kinds = setOf(File(flatpak, "app").path, File(flatpak, "runtime").path)
+        val kinds: Set<String> = setOf(File(flatpak, "app").path, File(flatpak, "runtime").path)
         val listed = ListedSizes(File(sizesDir(context), "listed"))
         val deployment = deploymentSize(context, l2s)
         val millis = LongArray(3)

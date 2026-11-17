@@ -297,15 +297,16 @@ class SessionService : Service() {
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setGroup(CHANNEL_ID)
-        val viewerIntent = (state as? SessionState.Running)?.let {
+        val running = state as? SessionState.Running
+        val viewerIntent = running?.let {
             // An open viewer comes forward rather than a second one.
             if (it.socket != null) Intent(this, ViewerActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
             else it.password?.let { password -> ExternalViewer.intent(this, password, SetupController.settings(this).load()?.vncViewer, username = it.username) }
         }
-        if (viewerIntent != null) {
+        if (running != null && viewerIntent != null) {
             // Cancel, not update: an update keeps the old intent's flags (one from before an app update, say).
             val viewer = PendingIntent.getActivity(this, 1, viewerIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_CANCEL_CURRENT)
-            val label = if ((state as SessionState.Running).socket != null) R.string.session_open_app else R.string.session_open_viewer
+            val label = if (running.socket != null) R.string.session_open_app else R.string.session_open_viewer
             builder.addAction(0, getString(label), viewer)
         }
         val stop = PendingIntent.getService(

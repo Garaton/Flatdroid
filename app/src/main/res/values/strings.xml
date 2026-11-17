@@ -551,7 +551,7 @@
     <string name="app_settings_rendering_automatic">Automatic</string>
     <string name="app_settings_rendering_software">Software</string>
     <string name="app_settings_rendering_gl">OpenGL</string>
-    <string name="app_settings_rendering_hint">How GTK 4 and Qt Quick apps draw. Software needs less memory and CPU, but sacrifices compatability, and performs worse with cameras. Automatic turns on OpenGL when camera permissions are on.</string>
+    <string name="app_settings_rendering_hint">How GTK 4 and Qt Quick apps draw. Software needs less memory and CPU, but sacrifices compatibility, and performs worse with cameras. Automatic turns on OpenGL when camera permissions are on.</string>
     <string name="app_settings_interface_size_hint">Draws the app\'s text and controls larger or smaller. Older apps run better at 100% or 200%.</string>
     <string name="app_settings_force_x11">Force X11</string>
     <string name="app_settings_force_x11_hint">Runs the app on X11 instead of Wayland, using more CPU. Try X11 if the app misbehaves.</string>

@@ -61,7 +61,7 @@ fun httpDownload(url: String, dest: File, maxBytes: Long, onProgress: (bytes: Lo
 fun sha256(file: File): String {
     val digest = java.security.MessageDigest.getInstance("SHA-256")
     file.inputStream().use { input ->
-        val buf = BUFFER.get()
+        val buf = BUFFER.get()!!
         while (true) {
             val n = input.read(buf)
             if (n < 0) break

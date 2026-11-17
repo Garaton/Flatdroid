@@ -90,8 +90,9 @@ object SessionScript {
      * `-extension GLX` turns GLX off in Alpine's Xvnc, which has it (apps use EGL). `-nolisten local` drops the abstract socket
      * `@/tmp/.X11-unix/X1`: proot doesn't translate abstract names, so it would be open to other
      * users of the device, with no authentication; clients use the socket file in private storage
-     * instead. `-NeverShared -DisconnectClients=0`: while a viewer is connected, Xvnc refuses
-     * further connections rather than sharing or handing over the session.
+     * instead. `-NeverShared -DisconnectClients=1`: one viewer at a time, and a new one that logs in
+     * replaces the one connected. A viewer that is closed but not yet ended (Android can freeze
+     * its process) keeps its connection open, and refusing new ones would lock the user out.
      * `--use-pid-file=no`: proot shares the process list, so a stale PID file can match a live
      * process. `--disallow-module-loading` (after [PulseScript]'s modules are loaded) and
      * `--disallow-exit`: the app is PulseAudio's client, and a module it could load (the CLI
@@ -190,7 +191,7 @@ object SessionScript {
         |  fi
         |  # No parameters changeable through the VNC extension: any X client could otherwise turn the clipboard back on.
         |  # Only copies reach the viewer, not every selection (PRIMARY).
-        |  ${'$'}guard /usr/bin/Xvnc :1 -geometry "${'$'}geometry" -depth 24 ${'$'}listen -NeverShared -DisconnectClients=0 -FrameRate "${'$'}frame_rate" \
+        |  ${'$'}guard /usr/bin/Xvnc :1 -geometry "${'$'}geometry" -depth 24 ${'$'}listen -NeverShared -DisconnectClients=1 -FrameRate "${'$'}frame_rate" \
         |    -AllowOverride= -nolisten local -extension MIT-SHM -extension GLX -SendPrimary=0 ${'$'}clipboard_args &
         |  display=${'$'}!
         |  wait_socket ${GuestPaths.X11_DIR}/$X_SOCKET Xvnc

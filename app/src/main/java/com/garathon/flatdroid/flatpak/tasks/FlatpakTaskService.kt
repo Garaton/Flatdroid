@@ -117,10 +117,11 @@ class FlatpakTaskService : Service() {
 
         wakeLock?.takeIf { it.isHeld }?.release()
         // Held for the whole task, which is several commands, and let go in its job's end; the service's
-        // end (Android's time limit, a stop) and the process's death drop it too.
+        // end (Android's time limit, a stop) and the process's death drop it too. The timeout only
+        // backs those up: it matches Android 15's dataSync limit.
         val lock = getSystemService(PowerManager::class.java)
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Flatdroid:flatpak")
-            .apply { acquire() }
+            .apply { acquire(WAKE_LOCK_TIMEOUT_MS) }
         wakeLock = lock
         // Installs are left out: an interrupted download is already safe (see cleanUpAfter); so is a
         // baseline, which changes no Flatpak files.
@@ -704,6 +705,7 @@ class FlatpakTaskService : Service() {
         private const val NOTIFICATION_ID = 20
         private const val PROGRESS_MAX = 1000
         private const val NOTIFICATION_INTERVAL_MS = 500L
+        private const val WAKE_LOCK_TIMEOUT_MS = 6 * 60 * 60 * 1000L
         private const val ACTION_CANCEL = "com.garathon.flatdroid.action.CANCEL_TASK"
         private const val TIMEOUT_SECONDS = 2 * 60 * 60L
         /**

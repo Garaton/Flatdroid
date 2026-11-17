@@ -107,7 +107,7 @@ class LaunchPlannerTest {
         ld.cache.writeText("glibc-ld.so.cache")
         val next = Ready(planner.plan(id, withCache))
         assertEquals(ld.dir, next.ldCache!!.dir)
-        assertFalse(next.ldCache!!.generate)
+        assertFalse(next.ldCache.generate)
         assertEquals(listOf("/app/bin/scanner"), next.command)
         assertEquals(baseExtra(id) + (ld.cache.path to "/etc/ld.so.cache"), next.binds.extra)
     }

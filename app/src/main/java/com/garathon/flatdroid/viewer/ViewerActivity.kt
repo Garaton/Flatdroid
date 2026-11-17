@@ -192,10 +192,12 @@ class ViewerActivity : ComponentActivity() {
                 val keysAloneOffset = animateIntAsState(if (keysAlone) 0 else rowHeight, label = "extra keys")
                 val keysWithKeyboardOffset = animateIntAsState(if (keysWithKeyboard) 0 else rowHeight, label = "extra keys with keyboard")
                 var confirmStop by rememberSaveable { mutableStateOf(false) }
-                val noWindow by SessionController.ui.map { (it.state as? SessionState.Running)?.noWindow == true }
-                    .distinctUntilChanged().collectAsState(false)
-                val opening by SessionController.ui.map { (it.state as? SessionState.Running)?.opening == true }
-                    .distinctUntilChanged().collectAsState(false)
+                val noWindow by remember {
+                    SessionController.ui.map { (it.state as? SessionState.Running)?.noWindow == true }.distinctUntilChanged()
+                }.collectAsState(false)
+                val opening by remember {
+                    SessionController.ui.map { (it.state as? SessionState.Running)?.opening == true }.distinctUntilChanged()
+                }.collectAsState(false)
                 Box(Modifier.fillMaxSize()) {
                     Column(Modifier.fillMaxSize()) {
                         TopBar(

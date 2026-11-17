@@ -71,7 +71,7 @@
             <!-- Flathub's install pages (with or without the language part). The domain can't be verified,
                  so Android 12 and later open these in the browser until the user allows them (App info,
                  Open by default); earlier versions ask. The app asks before it installs anything. -->
-            <intent-filter>
+            <intent-filter android:autoVerify="false">
                 <action android:name="android.intent.action.VIEW" />
 
                 <category android:name="android.intent.category.DEFAULT" />
