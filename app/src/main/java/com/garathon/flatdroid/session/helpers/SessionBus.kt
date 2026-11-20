@@ -52,8 +52,12 @@ object SessionBus {
      * serves ([Portal]: settings, network monitor, proxy resolver, links and their requests), and
      * with [camera], where the real portal runs, its camera and its links for addresses only. The
      * portal's other interfaces stay closed, whoever owns its name.
+     *
+     * The other names Flatdroid owns ([FLATDROID_NAMES]) are reached as in Flatpak: by apps whose
+     * metadata lets them talk to one, or that have the whole bus there ([wholeBus], `sockets=session-bus`).
+     * The metadata may not own them.
      */
-    fun proxyArgs(appId: String, policy: Map<String, String>, camera: Boolean): List<String> {
+    fun proxyArgs(appId: String, policy: Map<String, String>, camera: Boolean, wholeBus: Boolean = false): List<String> {
         val args = mutableListOf(
             "unix:path=$GUEST_DAEMON_DIR/$SOCKET",
             "$GUEST_PROXY_DIR/$SOCKET",
@@ -62,8 +66,10 @@ object SessionBus {
             "--own=org.mpris.MediaPlayer2.$appId.*",
         )
         for ((name, level) in policy) {
-            if (level in LEVELS && isPolicyName(name) && !isReserved(name)) args += "--$level=$name"
+            if (level !in LEVELS || !isPolicyName(name) || isReserved(name)) continue
+            args += "--${if (level == "own" && FLATDROID_NAMES.any { covers(name, it) }) "talk" else level}=$name"
         }
+        if (wholeBus) for (name in FLATDROID_NAMES) args += "--talk=$name"
         args += PORTAL_RULES
         args += if (camera) CAMERA_RULES else LINK_RULES
         return args
@@ -90,6 +96,16 @@ object SessionBus {
         return RESERVED.any { base == it || base.startsWith("$it.") || (wildcard && it.startsWith("$base.")) }
     }
 
+    /** `sockets=` entry for the whole session bus. */
+    const val WHOLE_BUS = "session-bus"
+
+    /** Names Flatdroid owns beside the portal's ([Portal.names]). */
+    val FLATDROID_NAMES = listOf(Portal.SCREENSAVER, Portal.FILE_MANAGER)
+
+    /** Whether the policy [name] (optionally ending in `.*`) is or covers [owned]. */
+    private fun covers(name: String, owned: String): Boolean =
+        name == owned || (name.endsWith(".*") && owned.startsWith(name.removeSuffix("*")))
+
     /** The portal, its backends and the permission store (the camera's helpers), and the bus itself. */
     private val RESERVED = listOf("org.freedesktop.portal", "org.freedesktop.impl.portal", "org.freedesktop.DBus")
     private val LEVELS = setOf("see", "talk", "own")
@@ -103,6 +119,7 @@ object SessionBus {
         "--broadcast=$PORTAL=${Portal.REQUEST}.Response@$PORTAL_PATH/request/*",
         "--call=$PORTAL=${Portal.NETWORK_MONITOR}.*@$PORTAL_PATH",
         "--call=$PORTAL=${Portal.PROXY_RESOLVER}.*@$PORTAL_PATH",
+        "--call=$PORTAL=${Portal.INHIBIT}.Inhibit@$PORTAL_PATH",
         "--call=$PORTAL=${Portal.PROPERTIES}.Get@$PORTAL_PATH",
         "--call=$PORTAL=${Portal.PROPERTIES}.GetAll@$PORTAL_PATH",
         "--call=$PORTAL=${Portal.INTROSPECTABLE}.Introspect@$PORTAL_PATH",

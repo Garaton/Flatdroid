@@ -8,6 +8,7 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.os.Build
+import android.os.PowerManager
 import com.garathon.flatdroid.session.links.AndroidLinks
 import com.garathon.flatdroid.session.links.OpenedFiles
 import com.garathon.flatdroid.settings.LiveSettings
@@ -24,14 +25,18 @@ import java.io.File
 /**
  * Flatdroid on one session's bus ([Portal] through a [BusClient]): the settings ([Appearance],
  * followed as Android's and Flatdroid's change), the network as the app may use it ([appNetwork]),
- * kept up to date with Android's, and links ([AndroidLinks]). In [Portal.Role.BACKEND] the real
- * portal answers the app's network calls, so Android's network isn't watched here.
+ * kept up to date with Android's, links ([AndroidLinks]), and inhibits: the screen kept on
+ * through [keepScreenOn] (the viewer does it while visible), the processor through a partial wake
+ * lock. In [Portal.Role.BACKEND] the real portal answers the app's network calls, so Android's
+ * network isn't watched here.
  */
 class SessionPortal private constructor(
     private val context: Context,
     private val role: Portal.Role,
     private val appNetwork: Boolean,
     @Volatile private var user: UserSettings?,
+    hostPath: (String) -> String?,
+    private val keepScreenOn: (Boolean) -> Unit,
     log: (String) -> Unit,
 ) : Closeable {
     @Volatile private var appearance = AndroidAppearance.of(context, user)
@@ -41,7 +46,10 @@ class SessionPortal private constructor(
     private val cm = context.getSystemService(ConnectivityManager::class.java)
     @Volatile private var lastStatus: Portal.NetworkStatus? = null
     private var callback: ConnectivityManager.NetworkCallback? = null
-    private val portal = Portal(role, ::settings, ::networkStatus, AndroidLinks(context, log))
+    private val wakeLock = context.getSystemService(PowerManager::class.java)
+        ?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Flatdroid:inhibit")?.apply { setReferenceCounted(false) }
+    private val inhibitions = Inhibitions(::inhibited)
+    private val portal = Portal(role, ::settings, ::networkStatus, AndroidLinks(context, log), inhibitions, hostPath)
     private var client: BusClient? = null
 
     private fun settings(): Map<String, Map<String, Variant>> = appearance.settings()
@@ -118,6 +126,15 @@ class SessionPortal private constructor(
         portal.networkChanged()?.let { client?.send(it) }
     }
 
+    /** What the app holds off now: the screen's timeout, the processor's sleep (released at the session's end at the latest). */
+    private fun inhibited(state: Inhibitions.State) {
+        DebugLog.i("Bus: inhibits now $state")
+        keepScreenOn(state.idle)
+        wakeLock?.let { lock ->
+            runCatching { if (state.suspend) lock.acquire() else if (lock.isHeld) lock.release() }
+        }
+    }
+
     override fun close() {
         callback?.let { runCatching { cm?.unregisterNetworkCallback(it) } }
         callback = null
@@ -130,6 +147,7 @@ class SessionPortal private constructor(
         contrastListener = null
         client?.close()
         client = null
+        inhibitions.clear()
         // The files the app opened stop being served with its session.
         OpenedFiles.clear()
     }
@@ -142,13 +160,14 @@ class SessionPortal private constructor(
 
         /**
          * Joins the bus whose daemon listens on [socket] in [role], with Flatdroid's settings as
-         * loaded for the launch ([user]); null, logged through [log], when it can't (the app then
-         * runs without these services).
+         * loaded for the launch ([user]) and the app's paths mapped to the host's by [hostPath];
+         * null, logged through [log], when it can't (the app then runs without these services).
          */
         fun open(
-            context: Context, socket: File, role: Portal.Role, appNetwork: Boolean, user: UserSettings?, log: (String) -> Unit,
+            context: Context, socket: File, role: Portal.Role, appNetwork: Boolean, user: UserSettings?,
+            hostPath: (String) -> String?, keepScreenOn: (Boolean) -> Unit, log: (String) -> Unit,
         ): SessionPortal? {
-            val session = SessionPortal(context, role, appNetwork, user, log)
+            val session = SessionPortal(context, role, appNetwork, user, hostPath, keepScreenOn, log)
             session.client = BusClient.open(socket, session.portal.names, session.portal::handle, log) ?: return null
             session.watchNetwork()
             session.watchAppearance()

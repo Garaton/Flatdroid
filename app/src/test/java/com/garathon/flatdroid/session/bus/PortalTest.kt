@@ -15,9 +15,13 @@ class PortalTest {
         override fun openUri(uri: String) = shows.also { opened += uri }
         override fun openFile(fd: FileDescriptor, writable: Boolean) = shows.also { opened += "file writable=$writable" }
         override fun openDirectory(fd: FileDescriptor) = shows.also { opened += "folder" }
+        override fun showFolder(path: String) = shows.also { opened += "show $path" }
     }
-    private val portal = Portal(Portal.Role.PORTAL, { settings }, { status }, links)
-    private val backend = Portal(Portal.Role.BACKEND, { settings }, { status }, links)
+    private val states = mutableListOf<Inhibitions.State>()
+    private val inhibitions = Inhibitions { states += it }
+    private val hostPath: (String) -> String? = { guest -> guest.takeIf { it.startsWith("/home/user") }?.replaceFirst("/home/user", "/host/home") }
+    private val portal = Portal(Portal.Role.PORTAL, { settings }, { status }, links, inhibitions, hostPath)
+    private val backend = Portal(Portal.Role.BACKEND, { settings }, { status }, links, inhibitions, hostPath)
 
     private fun call(iface: String, member: String, signature: String = "", vararg body: Any?, path: String = Portal.PATH) =
         Message.call(Portal.PORTAL_NAME, path, iface, member, signature, *body).copy(serial = 3u, sender = ":1.9")
@@ -31,8 +35,8 @@ class PortalTest {
 
     @Test
     fun ownsThePortalOrItsBackendName() {
-        assertEquals(listOf("org.freedesktop.portal.Desktop"), portal.names)
-        assertEquals(listOf("org.freedesktop.impl.portal.desktop.flatdroid"), backend.names)
+        assertEquals(listOf("org.freedesktop.portal.Desktop", "org.freedesktop.ScreenSaver", "org.freedesktop.FileManager1"), portal.names)
+        assertEquals(listOf("org.freedesktop.impl.portal.desktop.flatdroid", "org.freedesktop.ScreenSaver", "org.freedesktop.FileManager1"), backend.names)
     }
 
     @Test
@@ -173,5 +177,77 @@ class PortalTest {
         assertEquals("org.freedesktop.DBus.Error.UnknownInterface", ask(call(Portal.OPEN_URI, "OpenURI", "ssa{sv}", "", "https://a", emptyMap<String, Variant>()), backend).errorName)
         assertEquals("org.freedesktop.DBus.Error.UnknownInterface", ask(call(Portal.LINKS, "Open", "s", "https://a")).errorName)
         assertEquals(listOf("https://flathub.org"), opened)
+    }
+
+    private fun screenSaver(member: String, signature: String = "", vararg body: Any?, sender: String = ":1.9", path: String = "/org/freedesktop/ScreenSaver") =
+        Message.call(Portal.SCREENSAVER, path, Portal.SCREENSAVER, member, signature, *body).copy(serial = 5u, sender = sender)
+
+    private fun left(name: String, sender: String = "org.freedesktop.DBus") =
+        Message.signal("/org/freedesktop/DBus", "org.freedesktop.DBus", "NameOwnerChanged", "sss", name, name, "").copy(serial = 6u, sender = sender)
+
+    @Test
+    fun screenSaverInhibitsUntilReleased() {
+        val cookie = ask(screenSaver("Inhibit", "ss", "Videos", "Playing")).body[0] as UInt
+        assertEquals(listOf(Inhibitions.State(idle = true)), states)
+        // Another connection can't release it.
+        ask(screenSaver("UnInhibit", "u", cookie, sender = ":1.10"))
+        assertEquals(1, states.size)
+        ask(screenSaver("UnInhibit", "u", cookie, path = "/ScreenSaver"))
+        assertEquals(Inhibitions.State(), states.last())
+        assertEquals(listOf(false), ask(screenSaver("GetActive")).body)
+        assertEquals(DBusWire.METHOD_RETURN, ask(screenSaver("SimulateUserActivity")).type)
+    }
+
+    @Test
+    fun leavingTheBusReleases() {
+        ask(screenSaver("Inhibit", "ss", "a", "b"))
+        // Only the bus itself says who left.
+        portal.handle(left(":1.9", sender = ":1.10"))
+        assertEquals(1, states.size)
+        assertEquals(emptyList<Message>(), portal.handle(left(":1.9")))
+        assertEquals(Inhibitions.State(), states.last())
+    }
+
+    @Test
+    fun portalInhibitIsHeldUntilItsRequestCloses() {
+        val handle = ask(call(Portal.INHIBIT, "Inhibit", "sua{sv}", "", 12u, mapOf("handle_token" to Variant("s", "i1")))).body[0]
+        assertEquals("/org/freedesktop/portal/desktop/request/1_9/i1", handle)
+        assertEquals(listOf(Inhibitions.State(idle = true, suspend = true)), states)
+        ask(call(Portal.REQUEST, "Close", path = handle as String))
+        assertEquals(Inhibitions.State(), states.last())
+        assertEquals(listOf(Variant("u", 3u)), ask(call(Portal.PROPERTIES, "Get", "ss", Portal.INHIBIT, "version")).body)
+    }
+
+    @Test
+    fun theBackendInhibitsForTheRealPortal() {
+        val handle = "/org/freedesktop/portal/desktop/request/1_3/x"
+        assertEquals(DBusWire.METHOD_RETURN, ask(call(Portal.IMPL_INHIBIT, "Inhibit", "ossua{sv}", handle, "app", "", 8u, emptyMap<String, Variant>()), backend).type)
+        assertEquals(listOf(Inhibitions.State(idle = true)), states)
+        ask(call(Portal.IMPL_REQUEST, "Close", path = handle), backend)
+        assertEquals(Inhibitions.State(), states.last())
+        val elsewhere = call(Portal.IMPL_INHIBIT, "Inhibit", "ossua{sv}", "/x", "app", "", 8u, emptyMap<String, Variant>())
+        assertEquals("org.freedesktop.DBus.Error.InvalidArgs", ask(elsewhere, backend).errorName)
+        assertEquals("org.freedesktop.DBus.Error.UnknownInterface", ask(call(Portal.IMPL_INHIBIT, "Inhibit")).errorName)
+    }
+
+    private fun fileManager(member: String, vararg uris: String) =
+        Message.call(Portal.FILE_MANAGER, Portal.FILE_MANAGER_PATH, Portal.FILE_MANAGER, member, "ass", uris.toList(), "").copy(serial = 7u, sender = ":1.9")
+
+    @Test
+    fun showsFoldersInTheHome() {
+        ask(fileManager("ShowFolders", "file:///home/user/Music"))
+        ask(fileManager("ShowItems", "file:///usr/share/a", "file:///home/user/Pictures/a%20b.png"))
+        ask(fileManager("ShowItems", "https://example.org/a", "file://otherhost/home/user/x"))
+        assertEquals(listOf("show /host/home/Music", "show /host/home/Pictures"), opened)
+        assertEquals("org.freedesktop.DBus.Error.InvalidArgs", ask(fileManager("ShowFolders").copy(signature = "as", body = listOf(emptyList<String>()))).errorName)
+    }
+
+    @Test
+    fun fileAddresses() {
+        assertEquals("/home/user/a b", Portal.guestPath("file:///home/user/a%20b"))
+        assertEquals("/x", Portal.guestPath("file://localhost/x"))
+        assertNull(Portal.guestPath("file://host/x"))
+        assertNull(Portal.guestPath("file:relative"))
+        assertNull(Portal.guestPath("not a uri"))
     }
 }

@@ -14,6 +14,11 @@ import java.io.FileDescriptor
  * Once the portal's name has an owner, GLib in a root with `/.flatpak-info` takes its network
  * state and proxies from it: the network monitor and proxy resolver are answered here so those
  * apps keep their network ([network], `direct://`).
+ *
+ * In both roles Flatdroid also owns `org.freedesktop.ScreenSaver` and `org.freedesktop.FileManager1`:
+ * inhibits ([inhibitions], with the portal's or its backend's `Inhibit`), released when the app
+ * asks, closes the request, or leaves the bus; and folders shown in Android's Files app
+ * ([links], the app's paths mapped to the host's by [hostPath]).
  */
 class Portal(
     private val role: Role,
@@ -22,6 +27,9 @@ class Portal(
     /** The network as the app may use it, read at each call. */
     private val network: () -> NetworkStatus,
     private val links: Links,
+    private val inhibitions: Inhibitions = Inhibitions {},
+    /** The host path behind a path in the app's root, or null. */
+    private val hostPath: (String) -> String? = { null },
 ) {
     enum class Role { PORTAL, BACKEND }
 
@@ -33,6 +41,8 @@ class Portal(
         fun openFile(fd: FileDescriptor, writable: Boolean): Boolean
         /** The folder open at [fd] (the call's, closed after it). */
         fun openDirectory(fd: FileDescriptor): Boolean
+        /** The folder at the host's [path]. */
+        fun showFolder(path: String): Boolean
     }
 
     /**
@@ -42,8 +52,8 @@ class Portal(
 
     /** The names Flatdroid owns in this [role]. */
     val names: List<String> = when (role) {
-        Role.PORTAL -> listOf(PORTAL_NAME)
-        Role.BACKEND -> listOf(BACKEND_NAME)
+        Role.PORTAL -> listOf(PORTAL_NAME, SCREENSAVER, FILE_MANAGER)
+        Role.BACKEND -> listOf(BACKEND_NAME, SCREENSAVER, FILE_MANAGER)
     }
 
     /**
@@ -52,6 +62,10 @@ class Portal(
      * the request, as the real portal sends it).
      */
     fun handle(call: Message, fds: List<FileDescriptor> = emptyList()): List<Message> {
+        if (call.type == DBusWire.SIGNAL) {
+            busSignal(call)
+            return emptyList()
+        }
         if (call.type != DBusWire.METHOD_CALL) return emptyList()
         val signals = ArrayList<Message>()
         val reply = try {
@@ -68,24 +82,38 @@ class Portal(
         if (iface == PEER) {
             return if (member == "Ping") call.args("").let { call.reply() } else call.error(UNKNOWN_METHOD, "Unknown method $member")
         }
-        // Requests answer at once, so closing one has nothing left to stop.
+        // Requests other than inhibits answer at once, so closing one has nothing left to stop.
         if (call.path?.startsWith("$PATH/request/") == true && (iface == REQUEST || iface == IMPL_REQUEST) && member == "Close") {
-            return call.args("").let { call.reply() }
+            return call.args("").let {
+                inhibitions.remove(call.sender ?: "", call.path)
+                call.reply()
+            }
         }
-        if (call.path != PATH) return call.error(UNKNOWN_OBJECT, "No object at ${call.path}")
-        val interfaces = interfaces()
+        val interfaces = interfaces(call.path) ?: return call.error(UNKNOWN_OBJECT, "No object at ${call.path}")
+        if (iface != INTROSPECTABLE && iface != PROPERTIES && iface != null && iface !in interfaces) return unknownInterface(call)
         return when (iface) {
-            INTROSPECTABLE -> if (member == "Introspect") call.args("").let { call.reply("s", introspection()) } else unknown(call)
+            INTROSPECTABLE -> if (member == "Introspect") call.args("").let { call.reply("s", introspection(interfaces)) } else unknown(call)
             PROPERTIES -> properties(call, interfaces)
-            SETTINGS, IMPL_SETTINGS -> if (iface in interfaces) settings(call) else unknownInterface(call)
-            NETWORK_MONITOR -> if (iface in interfaces) networkMonitor(call) else unknownInterface(call)
-            PROXY_RESOLVER -> if (iface in interfaces) proxyResolver(call) else unknownInterface(call)
-            OPEN_URI -> if (iface in interfaces) openUri(call, fds, signals) else unknownInterface(call)
-            IMPL_APP_CHOOSER -> if (iface in interfaces) appChooser(call) else unknownInterface(call)
-            LINKS -> if (iface in interfaces) handlerLink(call) else unknownInterface(call)
+            SETTINGS, IMPL_SETTINGS -> settings(call)
+            NETWORK_MONITOR -> networkMonitor(call)
+            PROXY_RESOLVER -> proxyResolver(call)
+            OPEN_URI -> openUri(call, fds, signals)
+            IMPL_APP_CHOOSER -> appChooser(call)
+            LINKS -> handlerLink(call)
+            INHIBIT -> inhibit(call)
+            IMPL_INHIBIT -> implInhibit(call)
+            SCREENSAVER_IFACE -> screenSaver(call)
+            FILE_MANAGER_IFACE -> fileManager(call)
             null -> call.error(UNKNOWN_METHOD, "No interface")
             else -> unknownInterface(call)
         }
+    }
+
+    /** A connection that left the bus releases what it held. Only the bus itself sends this. */
+    private fun busSignal(signal: Message) {
+        if (signal.sender != BUS || signal.iface != BUS || signal.member != "NameOwnerChanged" || signal.signature != "sss") return
+        val (name, _, newOwner) = signal.body.map { it as String }
+        if (name.startsWith(":") && newOwner.isEmpty()) inhibitions.removeOwner(name)
     }
 
     /** The `SettingChanged` signal for [key] in [namespace], now [value]. */
@@ -95,22 +123,27 @@ class Portal(
     /** The network monitor's `changed` signal, after which GLib reads the status again; null when this role doesn't serve it. */
     fun networkChanged(): Message? = if (role == Role.PORTAL) Message.signal(PATH, NETWORK_MONITOR, "changed") else null
 
-    /** The interfaces at [PATH] with their `version` property. */
-    private fun interfaces(): Map<String, UInt> = when (role) {
-        Role.PORTAL -> mapOf(SETTINGS to 2u, NETWORK_MONITOR to 3u, PROXY_RESOLVER to 1u, OPEN_URI to 5u)
-        Role.BACKEND -> mapOf(IMPL_SETTINGS to 1u, IMPL_APP_CHOOSER to 2u, LINKS to 1u)
+    /** The interfaces at [path] with their `version` property (0 for those without one), or null for no object there. */
+    private fun interfaces(path: String?): Map<String, UInt>? = when (path) {
+        PATH -> when (role) {
+            Role.PORTAL -> mapOf(SETTINGS to 2u, NETWORK_MONITOR to 3u, PROXY_RESOLVER to 1u, OPEN_URI to 5u, INHIBIT to 3u)
+            Role.BACKEND -> mapOf(IMPL_SETTINGS to 1u, IMPL_APP_CHOOSER to 2u, LINKS to 1u, IMPL_INHIBIT to 3u)
+        }
+        in SCREENSAVER_PATHS -> mapOf(SCREENSAVER_IFACE to 0u)
+        FILE_MANAGER_PATH -> mapOf(FILE_MANAGER_IFACE to 0u)
+        else -> null
     }
 
     private fun properties(call: Message, interfaces: Map<String, UInt>): Message = when (call.member) {
         "Get" -> {
             val (iface, name) = call.strings("ss")
             val version = interfaces[iface] ?: return call.error(UNKNOWN_INTERFACE, "No interface $iface")
-            if (name == "version") call.reply("v", Variant("u", version)) else call.error(UNKNOWN_PROPERTY, "No property $name")
+            if (name == "version" && version != 0u) call.reply("v", Variant("u", version)) else call.error(UNKNOWN_PROPERTY, "No property $name")
         }
         "GetAll" -> {
             val (iface) = call.strings("s")
             val version = interfaces[iface] ?: return call.error(UNKNOWN_INTERFACE, "No interface $iface")
-            call.reply("a{sv}", mapOf("version" to Variant("u", version)))
+            call.reply("a{sv}", if (version == 0u) emptyMap() else mapOf("version" to Variant("u", version)))
         }
         "Set" -> call.error(PROPERTY_READ_ONLY, "Properties here are read-only")
         else -> unknown(call)
@@ -222,13 +255,78 @@ class Portal(
         else -> unknown(call)
     }
 
-    private fun introspection(): String = buildString {
+    /**
+     * The portal's `Inhibit`: held until the app closes the request it names, or leaves the bus.
+     * No `Response`: the request stands for the hold.
+     */
+    private fun inhibit(call: Message): Message = when (call.member) {
+        "Inhibit" -> {
+            val args = call.args("sua{sv}")
+            val token = ((args[2] as Map<*, *>)["handle_token"] as? Variant)?.value as? String
+            val handle = requestPath(call.sender ?: "", token?.takeIf { TOKEN.matches(it) } ?: "flatdroid${++requests}")
+            inhibitions.add(call.sender ?: "", handle, args[1] as UInt)
+            call.reply("o", handle)
+        }
+        else -> unknown(call)
+    }
+
+    /** The real portal's backend call for an app's `Inhibit`: held until it closes [handle]'s request. */
+    private fun implInhibit(call: Message): Message = when (call.member) {
+        "Inhibit" -> {
+            val args = call.args("ossua{sv}")
+            val handle = args[0] as String
+            if (!handle.startsWith("$PATH/request/")) throw ArgumentException("Not a request: $handle")
+            inhibitions.add(call.sender ?: "", handle, args[3] as UInt)
+            call.reply()
+        }
+        else -> unknown(call)
+    }
+
+    /** `org.freedesktop.ScreenSaver`: an inhibit keeps the screen on; the screen is never reported as blanked. */
+    private fun screenSaver(call: Message): Message = when (call.member) {
+        "Inhibit" -> {
+            call.strings("ss")
+            val cookie = inhibitions.nextCookie()
+            if (!inhibitions.add(call.sender ?: "", "$SCREENSAVER:$cookie", Inhibitions.IDLE)) {
+                call.error(LIMITS_EXCEEDED, "Too many inhibits")
+            } else {
+                call.reply("u", cookie)
+            }
+        }
+        "UnInhibit" -> {
+            val cookie = call.args("u")[0] as UInt
+            inhibitions.remove(call.sender ?: "", "$SCREENSAVER:$cookie")
+            call.reply()
+        }
+        "SimulateUserActivity" -> call.args("").let { call.reply() }
+        "GetActive" -> call.args("").let { call.reply("b", false) }
+        else -> unknown(call)
+    }
+
+    /**
+     * `org.freedesktop.FileManager1`: Android's Files app at the first folder shown, or at the
+     * folder holding the first item (it can't point at a file). Only folders the Files app can
+     * open, in an app home or shared storage.
+     */
+    private fun fileManager(call: Message): Message = when (call.member) {
+        "ShowFolders", "ShowItems", "ShowItemProperties" -> {
+            @Suppress("UNCHECKED_CAST")
+            val uris = call.args("ass")[0] as List<String>
+            val folders = uris.asSequence().take(MAX_ITEMS).mapNotNull(::guestPath)
+                .map { if (call.member == "ShowFolders") it else it.substringBeforeLast('/').ifEmpty { "/" } }
+            folders.mapNotNull(hostPath).firstOrNull()?.let { links.showFolder(it) }
+            call.reply()
+        }
+        else -> unknown(call)
+    }
+
+    private fun introspection(interfaces: Map<String, UInt>): String = buildString {
         append("<!DOCTYPE node PUBLIC \"-//freedesktop//DTD D-BUS Object Introspection 1.0//EN\"\n")
         append(" \"http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd\">\n<node>\n")
         append(INTROSPECTION[INTROSPECTABLE])
         append(INTROSPECTION[PROPERTIES])
         append(INTROSPECTION[PEER])
-        for (iface in interfaces().keys) append(INTROSPECTION[iface])
+        for (iface in interfaces.keys) append(INTROSPECTION[iface])
         append("</node>\n")
     }
 
@@ -263,6 +361,28 @@ class Portal(
         const val LINKS = "com.garathon.flatdroid.Links"
         /** The desktop file (without `.desktop`) the real portal launches for a link in camera sessions. */
         const val LINK_HANDLER = "flatdroid-links"
+
+        const val INHIBIT = "org.freedesktop.portal.Inhibit"
+        const val IMPL_INHIBIT = "org.freedesktop.impl.portal.Inhibit"
+        const val SCREENSAVER = "org.freedesktop.ScreenSaver"
+        const val SCREENSAVER_IFACE = SCREENSAVER
+        /** The freedesktop path, and KDE's. */
+        val SCREENSAVER_PATHS = listOf("/org/freedesktop/ScreenSaver", "/ScreenSaver")
+        const val FILE_MANAGER = "org.freedesktop.FileManager1"
+        const val FILE_MANAGER_IFACE = FILE_MANAGER
+        const val FILE_MANAGER_PATH = "/org/freedesktop/FileManager1"
+        /** Items of one `ShowItems` looked at; the first that maps is shown. */
+        private const val MAX_ITEMS = 32
+        private const val BUS = "org.freedesktop.DBus"
+        private const val LIMITS_EXCEEDED = "org.freedesktop.DBus.Error.LimitsExceeded"
+
+        /** The path of a `file:` address on the local host, or null. */
+        fun guestPath(uri: String): String? {
+            val parsed = runCatching { java.net.URI(uri) }.getOrNull() ?: return null
+            if (!parsed.scheme.equals("file", ignoreCase = true) || parsed.isOpaque) return null
+            if (!parsed.authority.isNullOrEmpty() && parsed.authority != "localhost") return null
+            return parsed.path?.takeIf { it.startsWith("/") && '\u0000' !in it }
+        }
 
         const val RESPONSE_SUCCESS = 0u
         const val RESPONSE_CANCELLED = 1u
@@ -379,6 +499,33 @@ class Portal(
                 | <interface name="$PROXY_RESOLVER">
                 |  <method name="Lookup"><arg type="s" name="uri" direction="in"/><arg type="as" direction="out"/></method>
                 |  <property name="version" type="u" access="read"/>
+                | </interface>
+                |""".trimMargin(),
+            INHIBIT to """
+                | <interface name="$INHIBIT">
+                |  <method name="Inhibit"><arg type="s" name="window" direction="in"/><arg type="u" name="flags" direction="in"/><arg type="a{sv}" name="options" direction="in"/><arg type="o" name="handle" direction="out"/></method>
+                |  <property name="version" type="u" access="read"/>
+                | </interface>
+                |""".trimMargin(),
+            IMPL_INHIBIT to """
+                | <interface name="$IMPL_INHIBIT">
+                |  <method name="Inhibit"><arg type="o" name="handle" direction="in"/><arg type="s" name="app_id" direction="in"/><arg type="s" name="window" direction="in"/><arg type="u" name="flags" direction="in"/><arg type="a{sv}" name="options" direction="in"/></method>
+                |  <property name="version" type="u" access="read"/>
+                | </interface>
+                |""".trimMargin(),
+            SCREENSAVER_IFACE to """
+                | <interface name="$SCREENSAVER_IFACE">
+                |  <method name="Inhibit"><arg type="s" name="application_name" direction="in"/><arg type="s" name="reason_for_inhibit" direction="in"/><arg type="u" name="cookie" direction="out"/></method>
+                |  <method name="UnInhibit"><arg type="u" name="cookie" direction="in"/></method>
+                |  <method name="SimulateUserActivity"/>
+                |  <method name="GetActive"><arg type="b" direction="out"/></method>
+                | </interface>
+                |""".trimMargin(),
+            FILE_MANAGER_IFACE to """
+                | <interface name="$FILE_MANAGER_IFACE">
+                |  <method name="ShowFolders"><arg type="as" name="uris" direction="in"/><arg type="s" name="startup_id" direction="in"/></method>
+                |  <method name="ShowItems"><arg type="as" name="uris" direction="in"/><arg type="s" name="startup_id" direction="in"/></method>
+                |  <method name="ShowItemProperties"><arg type="as" name="uris" direction="in"/><arg type="s" name="startup_id" direction="in"/></method>
                 | </interface>
                 |""".trimMargin(),
         )

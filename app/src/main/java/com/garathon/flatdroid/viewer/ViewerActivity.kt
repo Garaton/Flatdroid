@@ -153,7 +153,6 @@ class ViewerActivity : ComponentActivity() {
             hide(WindowInsetsCompat.Type.systemBars())
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         followHideScreen()
         view = ViewerView(this, ViewerConnection).apply {
             followPercent = session.followPercent
@@ -241,6 +240,15 @@ class ViewerActivity : ComponentActivity() {
         appLabel = session.appId
         lifecycleScope.launch(Dispatchers.IO) {
             InstalledApps(applicationContext).name(session.appId)?.let { name -> withContext(Dispatchers.Main) { appLabel = name } }
+        }
+        // On only while the app holds an inhibit (a video, a presentation); else Android's timeout.
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.CREATED) {
+                SessionController.keepScreenOn.collect { on ->
+                    if (on) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                }
+            }
         }
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.CREATED) {

@@ -49,6 +49,7 @@ import com.garathon.flatdroid.flatpak.InstalledApps
 import com.garathon.flatdroid.proot.AlpineBinds
 import com.garathon.flatdroid.proot.DevNodes
 import com.garathon.flatdroid.proot.Fdsec
+import com.garathon.flatdroid.proot.hostOf
 import com.garathon.flatdroid.proot.GuestPaths
 import com.garathon.flatdroid.proot.processes.HelperProcesses
 import com.garathon.flatdroid.proot.processes.LeftoverProcesses
@@ -245,7 +246,10 @@ class FlatpakLauncher(private val context: Context) {
             password, wayvncLogin = plan.wayland && externalViewer, titleBars = userSettings?.windowTitleBars ?: true,
             darkDecorations = isDarkTheme(userSettings),
             pulseScript = if (audio) PulseScript.text(outputRate, microphone, micRate) else null,
-            busArgs = SessionBus.proxyArgs(appId, plan.app.metadata.sessionBusPolicy, camera = cameraNodes.isNotEmpty()),
+            busArgs = SessionBus.proxyArgs(
+                appId, plan.app.metadata.sessionBusPolicy, camera = cameraNodes.isNotEmpty(),
+                wholeBus = SessionBus.WHOLE_BUS in plan.app.metadata.context.sockets,
+            ),
             cameraNodes = cameraNodes,
         )
         // After both, which create the directories it checks: they live in the work folder, which a start of Flatdroid empties, or in the cache, which Android may
@@ -314,6 +318,7 @@ class FlatpakLauncher(private val context: Context) {
                     context, File(busDaemonDir, SessionBus.SOCKET),
                     role = if (streamers.isNotEmpty()) Portal.Role.BACKEND else Portal.Role.PORTAL,
                     appNetwork = settings.networkAllowed(appContext.shared), user = userSettings,
+                    hostPath = plan.binds::hostOf, keepScreenOn = SessionController::keepScreenOn,
                     log = SessionController::log,
                 )
                 if (streamers.isNotEmpty()) {

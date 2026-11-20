@@ -1,6 +1,7 @@
 package com.garathon.flatdroid.proot
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -164,6 +165,20 @@ class ProotCommandTest {
         dev = listOf("/dev/null", "/dev/dri"),
         extra = listOf("/files/electron/x" to "/app/x"),
     )
+
+    @Test
+    fun hostPathsBehindTheHomeAndItsBinds() {
+        val binds = flatpakBinds.copy(extra = flatpakBinds.extra + ("/storage/emulated/0" to "/sdcard") + ("/files/other" to "/home/user/.config"))
+        assertEquals("/files/appdata/org.xfce.mousepad/home", binds.hostOf("/home/user"))
+        assertEquals("/files/appdata/org.xfce.mousepad/home/Music", binds.hostOf("/home/user/Music/"))
+        // The last bind at the longest path, as proot.
+        assertEquals("/files/other/a", binds.hostOf("/home/user/.config/a"))
+        assertEquals("/files/appdata/org.xfce.mousepad/home/.configx", binds.hostOf("/home/user/.configx"))
+        assertEquals("/storage/emulated/0/Download", binds.hostOf("/sdcard/Download"))
+        for (refused in listOf("/usr/share", "/tmp/a", "/home/user/../etc", "/home/user/./a", "home/user", "/home/username")) {
+            assertNull(refused, binds.hostOf(refused))
+        }
+    }
 
     /** The same binds, in the same order, as the tested shell launcher (fdrun). */
     @Test

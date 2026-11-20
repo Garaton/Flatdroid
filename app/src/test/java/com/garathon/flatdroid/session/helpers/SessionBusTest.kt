@@ -70,6 +70,21 @@ class SessionBusTest {
     }
 
     @Test
+    fun screenSaverAndFileManagerAsInFlatpak() {
+        val names = listOf("org.freedesktop.ScreenSaver", "org.freedesktop.FileManager1")
+        fun policy(args: List<String>) = args.filter { arg -> names.any { it in arg } }
+        assertEquals(emptyList<String>(), policy(SessionBus.proxyArgs("org.example.App", emptyMap(), camera = false)))
+        assertEquals(
+            listOf("--talk=org.freedesktop.ScreenSaver", "--talk=org.freedesktop.FileManager1"),
+            policy(SessionBus.proxyArgs("org.example.App", emptyMap(), camera = false, wholeBus = true)),
+        )
+        // The metadata may talk to them, not own them.
+        val owned = SessionBus.proxyArgs("org.example.App", mapOf("org.freedesktop.ScreenSaver" to "own", "org.freedesktop.FileManager1" to "talk"), camera = false)
+        assertEquals(listOf("--talk=org.freedesktop.ScreenSaver", "--talk=org.freedesktop.FileManager1"), policy(owned))
+        assertTrue("--call=org.freedesktop.portal.Desktop=org.freedesktop.portal.Inhibit.Inhibit@/org/freedesktop/portal/desktop" in owned)
+    }
+
+    @Test
     fun theCameraPortalOnlyWithTheCamera() {
         val args = SessionBus.proxyArgs("org.gnome.Snapshot", emptyMap(), camera = true)
         val portal = args.filter { "portal" in it }

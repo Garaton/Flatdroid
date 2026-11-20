@@ -129,6 +129,27 @@ data class FlatpakBinds(
 
 private val HIDDEN_PROC = Regex("/proc/[0-9]+")
 
+/**
+ * The host path behind [guest] in the app's root, among the home and the binds over and beside it
+ * ([FlatpakBinds.home], [FlatpakBinds.appDirs], [FlatpakBinds.privateFiles], [FlatpakBinds.extra]):
+ * the last bind at the longest matching path wins, as in proot. Null elsewhere (the runtime, the
+ * app, /tmp) and for paths that aren't absolute or have `.` or `..` in them. Symbolic links in the
+ * app's files aren't followed: whoever opens the result sees what is there on the host.
+ */
+fun FlatpakBinds.hostOf(guest: String): String? {
+    if (!guest.startsWith("/") || guest.split('/').any { it == "." || it == ".." }) return null
+    val path = guest.trimEnd('/').ifEmpty { "/" }
+    val mounts = listOf(home to GuestPaths.HOME) + appDirs + privateFiles + extra
+    var best: Pair<String, String>? = null
+    for ((host, at) in mounts) {
+        val mount = at.trimEnd('/')
+        if (path != mount && !path.startsWith("$mount/")) continue
+        if (best == null || mount.length >= best.second.trimEnd('/').length) best = host to mount
+    }
+    val (host, mount) = best ?: return null
+    return host.trimEnd('/') + path.removePrefix(mount)
+}
+
 /** A complete process description: argv and the whole environment (nothing is inherited). */
 data class ProotInvocation(val argv: List<String>, val env: Map<String, String>)
 

@@ -124,6 +124,11 @@ object SessionController {
         if (state == null || state.opening == on) it else it.copy(state = state.copy(opening = on))
     }
 
+    private val _keepScreenOn = MutableStateFlow(false)
+    /** The running app holds an inhibit against the screen's timeout: Flatdroid's viewer keeps the screen on while visible. */
+    val keepScreenOn: StateFlow<Boolean> = _keepScreenOn.asStateFlow()
+    fun keepScreenOn(on: Boolean) { _keepScreenOn.value = on }
+
     private val _viewerVisible = MutableStateFlow(false)
     /** Flatdroid's viewer is on screen: the question about a window-less app is asked there, else in a notification. */
     val viewerVisible: StateFlow<Boolean> = _viewerVisible.asStateFlow()
@@ -150,6 +155,7 @@ object SessionController {
     fun ended(message: String?, failed: Boolean = false) {
         ViewerConnection.closeOnMain()
         message?.let { DebugLog.i("Session: $it") }
+        _keepScreenOn.value = false
         _ui.update { it.copy(state = SessionState.Idle, message = message, failed = failed && message != null, micRequest = null) }
     }
 

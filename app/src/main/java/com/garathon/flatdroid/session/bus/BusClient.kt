@@ -52,8 +52,11 @@ class BusClient private constructor(
             while (!closed) {
                 val (message, fds) = readMessage(socket, input) ?: continue
                 try {
-                    if (message.type != DBusWire.METHOD_CALL) continue
-                    DebugLog.i("Bus: ${message.sender} called ${message.iface}.${message.member}(${message.signature}) ${message.body.toString().take(240)}")
+                    // Calls, and the bus's own signals Flatdroid subscribed to (connections leaving).
+                    if (message.type != DBusWire.METHOD_CALL && message.type != DBusWire.SIGNAL) continue
+                    if (message.type == DBusWire.METHOD_CALL) {
+                        DebugLog.i("Bus: ${message.sender} called ${message.iface}.${message.member}(${message.signature}) ${message.body.toString().take(240)}")
+                    }
                     val replies = try {
                         handler(message, fds)
                     } catch (e: Exception) {
@@ -97,6 +100,8 @@ class BusClient private constructor(
         private const val DO_NOT_QUEUE = 4u
         private const val PRIMARY_OWNER = 1u
         private const val SETUP_TIMEOUT_MS = 5_000
+        /** Connections leaving the bus (their unique name losing its owner), from the bus itself. */
+        private const val LEFT_THE_BUS = "type='signal',sender='$BUS',path='$BUS_PATH',interface='$BUS',member='NameOwnerChanged',arg2=''"
 
         /**
          * Connects to the daemon's socket [path], authenticates as Flatdroid's user, and owns
@@ -115,6 +120,7 @@ class BusClient private constructor(
                 if (!authenticate(input, output)) log("[flatdroid] the session bus passes no files to Flatdroid; apps can't open files through it")
                 val client = BusClient(socket, input, output, handler, log)
                 client.call(Message.call(BUS, BUS_PATH, BUS, "Hello"))
+                client.call(Message.call(BUS, BUS_PATH, BUS, "AddMatch", "s", LEFT_THE_BUS))
                 for (name in names) {
                     val reply = client.call(Message.call(BUS, BUS_PATH, BUS, "RequestName", "su", name, DO_NOT_QUEUE))
                     if (reply.body.firstOrNull() != PRIMARY_OWNER) throw IOException("$name is taken (${reply.body.firstOrNull()})")

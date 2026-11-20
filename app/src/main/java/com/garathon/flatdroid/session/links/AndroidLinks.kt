@@ -20,7 +20,8 @@ import java.io.FileDescriptor
 
 /**
  * Opens an app's links through Android's chooser, every time: addresses as they are, files
- * through [OpenedFilesProvider], folders in the Files app ([FolderDocuments]). Only while
+ * through [OpenedFilesProvider], folders in the Files app ([FolderDocuments]), by descriptor or
+ * by host path (`FileManager1`). Only while
  * Flatdroid is on screen: Android doesn't let an app in the background start one (Android 10 and
  * later), and a link the user didn't just ask for shouldn't appear later. At most one a second, so
  * an app can't bury the screen in choosers.
@@ -55,6 +56,14 @@ class AndroidLinks(private val context: Context, private val log: (String) -> Un
         val stat = runCatching { Os.fstat(fd) }.getOrNull() ?: return false
         if (!OsConstants.S_ISDIR(stat.st_mode)) return false
         val path = runCatching { ParcelFileDescriptor.dup(fd).use { Os.readlink("/proc/self/fd/${it.fd}") } }.getOrNull() ?: return false
+        return showFolder(path)
+    }
+
+    override fun showFolder(path: String): Boolean {
+        if (!File(path).isDirectory) {
+            log("[flatdroid] the app asked to show a folder that isn't there")
+            return false
+        }
         val (authority, document) = FolderDocuments.of(path, AppData.root(context).path, SharedHome.storageRoot().path) ?: run {
             log("[flatdroid] the app asked to show a folder Android's Files app can't open")
             return false
