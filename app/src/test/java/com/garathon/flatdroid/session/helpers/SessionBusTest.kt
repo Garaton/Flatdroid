@@ -22,9 +22,21 @@ class SessionBusTest {
                 "--own=org.kde.kmines.*", "--own=org.mpris.MediaPlayer2.org.kde.kmines.*",
                 "--talk=org.kde.StatusNotifierWatcher", "--own=org.example.Own.*",
             ),
-            args,
+            args.filter { "portal" !in it },
         )
-        assertTrue(args.none { "portal" in it })
+        assertTrue(args.none { "Camera" in it || "Request" in it })
+    }
+
+    @Test
+    fun flatdroidsPortalInterfacesForEveryApp() {
+        val portal = SessionBus.proxyArgs("org.example.App", emptyMap(), camera = false).filter { "portal" in it }
+        assertTrue(portal.all { it.startsWith("--call=org.freedesktop.portal.Desktop=") || it.startsWith("--broadcast=org.freedesktop.portal.Desktop=") })
+        assertTrue(portal.all { it.endsWith("@/org/freedesktop/portal/desktop") })
+        assertFalse(portal.any { it.endsWith("=*") || "org.freedesktop.portal.*" in it })
+        for (iface in listOf("Settings", "NetworkMonitor", "ProxyResolver")) {
+            assertTrue("--call=org.freedesktop.portal.Desktop=org.freedesktop.portal.$iface.*@/org/freedesktop/portal/desktop" in portal)
+        }
+        assertTrue("--broadcast=org.freedesktop.portal.Desktop=org.freedesktop.portal.Settings.SettingChanged@/org/freedesktop/portal/desktop" in portal)
     }
 
     @Test

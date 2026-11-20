@@ -23,6 +23,8 @@ import com.garathon.flatdroid.camera.CameraScript
 import com.garathon.flatdroid.camera.CameraStreamer
 import com.garathon.flatdroid.flatpak.integrity.AndroidLinkFs
 import com.garathon.flatdroid.session.helpers.PulseScript
+import com.garathon.flatdroid.session.bus.Portal
+import com.garathon.flatdroid.session.bus.SessionPortal
 import com.garathon.flatdroid.session.helpers.SessionBus
 import com.garathon.flatdroid.session.helpers.SessionScript
 import com.garathon.flatdroid.session.helpers.WaylandVnc
@@ -264,6 +266,7 @@ class FlatpakLauncher(private val context: Context) {
         var mic: MicrophoneSession? = null
         var helpersProot: ProotProcess? = null
         var dns: ResolvConfRefresher? = null
+        var portal: SessionPortal? = null
         val streamers = LinkedHashMap<String, CameraStreamer>()
         try {
             mic = if (!microphone) null else {
@@ -304,8 +307,17 @@ class FlatpakLauncher(private val context: Context) {
             }
             if (!waitForFile(File(busProxyDir, SessionBus.SOCKET), helpers, BUS_TIMEOUT_MS, null)) {
                 SessionController.log("[flatdroid] the session bus did not start; the app has none")
-            } else if (streamers.isNotEmpty()) {
-                cameraHelpers = startCamera(helpers, streamers, Fdsec.Filter(extraSyscalls = security.extraSyscallFilter, noInternet = true), filterRefused)
+            } else {
+                // Before the camera's portal, which asks Flatdroid for the settings, and before the app.
+                portal = SessionPortal.open(
+                    context, File(busDaemonDir, SessionBus.SOCKET),
+                    role = if (streamers.isNotEmpty()) Portal.Role.BACKEND else Portal.Role.PORTAL,
+                    appNetwork = settings.networkAllowed(appContext.shared), darkTheme = isDarkTheme(userSettings),
+                    log = SessionController::log,
+                )
+                if (streamers.isNotEmpty()) {
+                    cameraHelpers = startCamera(helpers, streamers, Fdsec.Filter(extraSyscalls = security.extraSyscallFilter, noInternet = true), filterRefused)
+                }
             }
             if (!audio) {
                 SessionController.log("[flatdroid] sound is off for this app; PulseAudio isn't started")
@@ -441,6 +453,7 @@ class FlatpakLauncher(private val context: Context) {
             // A paused app ignores the signals that end it: let it go on first.
             step { HiddenPause.detach() }
             step { app?.stop() }
+            step { portal?.close() }
             step { mic?.stop() }
             // The helpers first, so a streamer still writing to its pipe fails instead of waiting.
             step { cameraHelpers?.stop() }

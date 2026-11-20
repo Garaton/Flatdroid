@@ -1,12 +1,13 @@
 package com.garathon.flatdroid.session.helpers
 
 import com.garathon.flatdroid.proot.GuestPaths
+import com.garathon.flatdroid.session.bus.Portal
 
 /**
  * The app's session bus: a `dbus-daemon` among the helpers, which the app reaches only through
  * `xdg-dbus-proxy`'s filter, as in Flatpak. The app may own its ID and the names below it and use
  * what its metadata's `[Session Bus Policy]` names (nothing else is on this bus unless Flatdroid
- * starts it), but can't watch other connections or change the bus's environment. The bus starts
+ * starts it or joins it itself, [com.garathon.flatdroid.session.bus.SessionPortal]), but can't watch other connections or change the bus's environment. The bus starts
  * no services of its own.
  */
 object SessionBus {
@@ -47,9 +48,10 @@ object SessionBus {
     /**
      * `xdg-dbus-proxy`'s arguments for [appId]: Flatpak's own rules (its ID and MPRIS names below
      * it) and the valid entries of the metadata's [policy], without those naming or covering the
-     * services Flatdroid runs on this bus ([RESERVED]). With [camera], the camera portal too: its
-     * methods, the properties of the portal object and the replies to its requests; no other
-     * portal.
+     * services Flatdroid runs on this bus ([RESERVED]). Always the portal's interfaces Flatdroid
+     * serves ([Portal]: settings, network monitor, proxy resolver), and with [camera] the camera
+     * portal too: its methods and the replies to its requests. The portal's other interfaces stay
+     * closed, whoever owns its name.
      */
     fun proxyArgs(appId: String, policy: Map<String, String>, camera: Boolean): List<String> {
         val args = mutableListOf(
@@ -62,6 +64,7 @@ object SessionBus {
         for ((name, level) in policy) {
             if (level in LEVELS && isPolicyName(name) && !isReserved(name)) args += "--$level=$name"
         }
+        args += PORTAL_RULES
         if (camera) args += CAMERA_RULES
         return args
     }
@@ -92,14 +95,22 @@ object SessionBus {
     private val LEVELS = setOf("see", "talk", "own")
     private val ELEMENT = Regex("[A-Za-z0-9_-]+")
 
-    private const val PORTAL = "org.freedesktop.portal.Desktop"
-    private const val PORTAL_PATH = "/org/freedesktop/portal/desktop"
+    private const val PORTAL = Portal.PORTAL_NAME
+    private const val PORTAL_PATH = Portal.PATH
+    private val PORTAL_RULES = listOf(
+        "--call=$PORTAL=${Portal.SETTINGS}.*@$PORTAL_PATH",
+        "--call=$PORTAL=${Portal.NETWORK_MONITOR}.*@$PORTAL_PATH",
+        "--call=$PORTAL=${Portal.PROXY_RESOLVER}.*@$PORTAL_PATH",
+        "--call=$PORTAL=${Portal.PROPERTIES}.Get@$PORTAL_PATH",
+        "--call=$PORTAL=${Portal.PROPERTIES}.GetAll@$PORTAL_PATH",
+        "--call=$PORTAL=${Portal.INTROSPECTABLE}.Introspect@$PORTAL_PATH",
+        "--broadcast=$PORTAL=${Portal.SETTINGS}.SettingChanged@$PORTAL_PATH",
+        "--broadcast=$PORTAL=${Portal.NETWORK_MONITOR}.changed@$PORTAL_PATH",
+        "--broadcast=$PORTAL=${Portal.PROPERTIES}.PropertiesChanged@$PORTAL_PATH",
+    )
     private val CAMERA_RULES = listOf(
         "--call=$PORTAL=org.freedesktop.portal.Camera.*@$PORTAL_PATH",
-        "--call=$PORTAL=org.freedesktop.DBus.Properties.Get@$PORTAL_PATH",
-        "--call=$PORTAL=org.freedesktop.DBus.Properties.GetAll@$PORTAL_PATH",
         "--call=$PORTAL=org.freedesktop.portal.Request.Close@$PORTAL_PATH/request/*",
         "--broadcast=$PORTAL=org.freedesktop.portal.Request.Response@$PORTAL_PATH/request/*",
-        "--broadcast=$PORTAL=org.freedesktop.DBus.Properties.PropertiesChanged@$PORTAL_PATH",
     )
 }

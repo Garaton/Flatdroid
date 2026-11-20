@@ -66,7 +66,7 @@ class LaunchPlannerTest {
         assertFalse(plan.isElectron)
         assertEquals(listOf("bin", "lib"), plan.usrLinks)
         assertEquals(
-            "[Application]\nname=org.supertuxproject.SuperTux.Devel\nruntime=runtime/org.freedesktop.Platform/aarch64/26.08\n\n[Instance]\nbuild=true\n",
+            "[Application]\nname=org.supertuxproject.SuperTux.Devel\nruntime=runtime/org.freedesktop.Platform/aarch64/26.08\n\n[Context]\nshared=network;\n\n[Instance]\nbuild=true\n",
             plan.flatpakInfo,
         )
         assertEquals(listOf("/usr/lib/aarch64-linux-gnu/GL/default"), plan.binds.extensions.map { it.second })
@@ -350,6 +350,9 @@ class LaunchPlannerTest {
         File(inst.app("org.kde.konsole", metadata = appMetadata("org.kde.konsole", "x")), "bin").mkdirs()
         assertTrue(Ready(planner.plan("org.kde.konsole", dirs)).flatpakInfo!!.contains("build=true"))
         assertEquals(null, Ready(planner.plan("org.kde.konsole", dirs, LaunchOptions(flatpakInfo = false))).flatpakInfo)
+        // GLib, which reads it, sees a network only where the app has one.
+        assertTrue("[Context]\nshared=network;\n" in Ready(planner.plan("org.kde.konsole", dirs)).flatpakInfo!!)
+        assertFalse("shared=network" in Ready(planner.plan("org.kde.konsole", dirs, LaunchOptions(network = false))).flatpakInfo!!)
     }
 
     @Test

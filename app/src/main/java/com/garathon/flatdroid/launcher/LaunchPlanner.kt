@@ -297,7 +297,7 @@ class LaunchPlanner(
                 binds = binds,
                 environment = environment,
                 command = command,
-                flatpakInfo = if (options.flatpakInfo) flatpakInfo(appId, runtimeRef) else null,
+                flatpakInfo = if (options.flatpakInfo) flatpakInfo(appId, runtimeRef, options.network) else null,
                 usrLinks = USR_LINKS.filter { File(runtime.files, it).exists() },
                 isElectron = isElectron,
                 wayland = wayland,
@@ -411,10 +411,14 @@ class LaunchPlanner(
 
         /**
          * `.Devel` and `build=true` turn off old glycin's sandbox (GTK dialogs crash with it); the
-         * file's presence also makes GLib use portals, hence GDK_DEBUG=no-portals.
+         * file's presence also makes GLib use portals, hence GDK_DEBUG=no-portals. GLib then takes
+         * the network state and proxies from the portal, and sees a network only where `shared`
+         * names it: written for an app with the [network].
          */
-        fun flatpakInfo(appId: String, runtime: FlatpakRef): String =
-            "[Application]\nname=$appId.Devel\nruntime=runtime/$runtime\n\n[Instance]\nbuild=true\n"
+        fun flatpakInfo(appId: String, runtime: FlatpakRef, network: Boolean): String =
+            "[Application]\nname=$appId.Devel\nruntime=runtime/$runtime\n\n" +
+                (if (network) "[Context]\nshared=network;\n\n" else "") +
+                "[Instance]\nbuild=true\n"
 
         /**
          * Printed by KDE's frameworks (KSandbox) when /.flatpak-info makes them run a process on

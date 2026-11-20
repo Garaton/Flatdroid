@@ -1,5 +1,6 @@
 package com.garathon.flatdroid.camera
 
+import com.garathon.flatdroid.session.bus.Portal
 import com.garathon.flatdroid.session.helpers.SessionBus
 
 /**
@@ -69,8 +70,9 @@ object CameraScript {
 
     /**
      * WirePlumber without its hardware monitors, and the portal with a stand-in
-     * for the access dialog: the permission is set before the app starts, so
-     * the dialog is never asked for.
+     * for the access dialog (the permission is set before the app starts, so
+     * the dialog is never asked for) and Flatdroid's settings, which Flatdroid serves itself
+     * under that name ([Portal.Role.BACKEND]).
      */
     val CONFIG_FILES = mapOf(
         "wireplumber/wireplumber.conf.d/flatdroid.conf" to """
@@ -88,7 +90,7 @@ object CameraScript {
         // XDG_DESKTOP_PORTAL_DIR: the portal reads its backends and its configuration only from there.
         "portals/flatdroid-portals.conf" to "[preferred]\ndefault=flatdroid\n",
         "portals/flatdroid.portal" to
-            "[portal]\nDBusName=org.freedesktop.impl.portal.desktop.flatdroid\nInterfaces=org.freedesktop.impl.portal.Access;\n",
+            "[portal]\nDBusName=${Portal.BACKEND_NAME}\nInterfaces=org.freedesktop.impl.portal.Access;${Portal.IMPL_SETTINGS};\n",
     )
 
     /**

@@ -52,10 +52,12 @@ class CameraScriptTest {
     }
 
     @Test
-    fun noHardwareMonitorsAndOnlyTheStandInAccessBackend() {
+    fun noHardwareMonitorsAndFlatdroidsBackends() {
         val wireplumber = CameraScript.CONFIG_FILES.getValue("wireplumber/wireplumber.conf.d/flatdroid.conf")
         for (monitor in listOf("alsa", "bluez", "v4l2", "libcamera")) assertTrue("monitor.$monitor = disabled" in wireplumber)
-        assertTrue("Interfaces=org.freedesktop.impl.portal.Access;" in CameraScript.CONFIG_FILES.getValue("portals/flatdroid.portal"))
+        val backend = CameraScript.CONFIG_FILES.getValue("portals/flatdroid.portal")
+        assertTrue("DBusName=org.freedesktop.impl.portal.desktop.flatdroid\n" in backend)
+        assertTrue("Interfaces=org.freedesktop.impl.portal.Access;org.freedesktop.impl.portal.Settings;\n" in backend)
         // With XDG_DESKTOP_PORTAL_DIR, the portal reads its configuration only beside its backends.
         assertTrue("default=flatdroid" in CameraScript.CONFIG_FILES.getValue("portals/flatdroid-portals.conf"))
     }
