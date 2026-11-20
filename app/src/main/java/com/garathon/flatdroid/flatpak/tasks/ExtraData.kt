@@ -97,7 +97,8 @@ class ExtraData(private val env: AlpineEnvironment, private val stateFile: File,
             onLine("[flatdroid] apply_extra for $name")
             val invocation = ProotCommand.applyExtra(env.paths(), root.path, runtime?.path, File(deployment, "files").path, tmp.path)
             // Stopped when the task is cancelled (rethrown, so this deployment isn't recorded) or runs too long.
-            val result = ProotRunner.run(invocation, workDir, timeoutSeconds = TIMEOUT_SECONDS, onLine = onLine)
+            // The app's script writes these: tagged, so they can't pass for Flatdroid's lines or flatpak's progress.
+            val result = ProotRunner.run(invocation, workDir, timeoutSeconds = TIMEOUT_SECONDS) { onLine("[apply_extra] $it") }
             if (result.timedOut) onLine("[flatdroid] apply_extra for $name took too long and was stopped")
             return result.exitCode ?: -1
         } catch (e: ErrnoException) {

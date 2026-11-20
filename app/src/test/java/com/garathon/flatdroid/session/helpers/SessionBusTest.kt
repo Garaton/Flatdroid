@@ -24,19 +24,33 @@ class SessionBusTest {
             ),
             args.filter { "portal" !in it },
         )
-        assertTrue(args.none { "Camera" in it || "Request" in it })
+        assertTrue(args.none { "Camera" in it })
     }
 
     @Test
     fun flatdroidsPortalInterfacesForEveryApp() {
         val portal = SessionBus.proxyArgs("org.example.App", emptyMap(), camera = false).filter { "portal" in it }
         assertTrue(portal.all { it.startsWith("--call=org.freedesktop.portal.Desktop=") || it.startsWith("--broadcast=org.freedesktop.portal.Desktop=") })
-        assertTrue(portal.all { it.endsWith("@/org/freedesktop/portal/desktop") })
+        assertTrue(portal.all { it.endsWith("@/org/freedesktop/portal/desktop") || it.endsWith("@/org/freedesktop/portal/desktop/request/*") })
         assertFalse(portal.any { it.endsWith("=*") || "org.freedesktop.portal.*" in it })
         for (iface in listOf("Settings", "NetworkMonitor", "ProxyResolver")) {
             assertTrue("--call=org.freedesktop.portal.Desktop=org.freedesktop.portal.$iface.*@/org/freedesktop/portal/desktop" in portal)
         }
         assertTrue("--broadcast=org.freedesktop.portal.Desktop=org.freedesktop.portal.Settings.SettingChanged@/org/freedesktop/portal/desktop" in portal)
+        assertTrue("--call=org.freedesktop.portal.Desktop=org.freedesktop.portal.OpenURI.*@/org/freedesktop/portal/desktop" in portal)
+        assertTrue("--broadcast=org.freedesktop.portal.Desktop=org.freedesktop.portal.Request.Response@/org/freedesktop/portal/desktop/request/*" in portal)
+    }
+
+    @Test
+    fun theRealPortalsLinksForAddressesOnly() {
+        val portal = SessionBus.proxyArgs("org.example.App", emptyMap(), camera = true).filter { "OpenURI" in it }
+        assertEquals(
+            listOf(
+                "--call=org.freedesktop.portal.Desktop=org.freedesktop.portal.OpenURI.OpenURI@/org/freedesktop/portal/desktop",
+                "--call=org.freedesktop.portal.Desktop=org.freedesktop.portal.OpenURI.SchemeSupported@/org/freedesktop/portal/desktop",
+            ),
+            portal,
+        )
     }
 
     @Test

@@ -4,12 +4,14 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
+import com.garathon.flatdroid.session.links.AndroidLinks
+import com.garathon.flatdroid.session.links.OpenedFiles
 import java.io.Closeable
 import java.io.File
 
 /**
- * Flatdroid on one session's bus ([Portal] through a [BusClient]): the settings, and the network
- * as the app may use it ([appNetwork]), kept up to date with Android's. In [Portal.Role.BACKEND]
+ * Flatdroid on one session's bus ([Portal] through a [BusClient]): the settings, the network
+ * as the app may use it ([appNetwork]), kept up to date with Android's, and links ([AndroidLinks]). In [Portal.Role.BACKEND]
  * the real portal answers the app's network calls, so Android's network isn't watched here.
  */
 class SessionPortal private constructor(
@@ -17,12 +19,13 @@ class SessionPortal private constructor(
     private val role: Portal.Role,
     private val appNetwork: Boolean,
     darkTheme: Boolean,
+    log: (String) -> Unit,
 ) : Closeable {
     @Volatile private var colorScheme = if (darkTheme) Portal.PREFER_DARK else Portal.PREFER_LIGHT
     private val cm = context.getSystemService(ConnectivityManager::class.java)
     @Volatile private var lastStatus: Portal.NetworkStatus? = null
     private var callback: ConnectivityManager.NetworkCallback? = null
-    private val portal = Portal(role, ::settings, ::networkStatus)
+    private val portal = Portal(role, ::settings, ::networkStatus, AndroidLinks(context, log))
     private var client: BusClient? = null
 
     private fun settings(): Map<String, Map<String, Variant>> =
@@ -63,6 +66,8 @@ class SessionPortal private constructor(
         callback = null
         client?.close()
         client = null
+        // The files the app opened stop being served with its session.
+        OpenedFiles.clear()
     }
 
     companion object {
@@ -78,7 +83,7 @@ class SessionPortal private constructor(
         fun open(
             context: Context, socket: File, role: Portal.Role, appNetwork: Boolean, darkTheme: Boolean, log: (String) -> Unit,
         ): SessionPortal? {
-            val session = SessionPortal(context, role, appNetwork, darkTheme)
+            val session = SessionPortal(context, role, appNetwork, darkTheme, log)
             session.client = BusClient.open(socket, session.portal.names, session.portal::handle, log) ?: return null
             session.watchNetwork()
             log("[flatdroid] Flatdroid joined the session bus as ${session.portal.names.joinToString()}")

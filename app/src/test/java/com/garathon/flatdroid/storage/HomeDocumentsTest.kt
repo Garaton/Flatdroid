@@ -14,4 +14,13 @@ class HomeDocumentsTest {
         assertNull(HomeDocuments.parse("../appdata"))
         assertNull(HomeDocuments.parse(HomeDocuments.ROOT))
     }
+
+    @Test
+    fun chainsFromTheRootOrAParent() {
+        assertEquals(listOf("root", "org.xfce.mousepad", "org.xfce.mousepad/a", "org.xfce.mousepad/a/b"), HomeDocuments.chain(null, "org.xfce.mousepad/a/b"))
+        assertEquals(listOf("org.xfce.mousepad/a", "org.xfce.mousepad/a/b"), HomeDocuments.chain("org.xfce.mousepad/a", "org.xfce.mousepad/a/b"))
+        assertEquals(listOf("root", "org.xfce.mousepad"), HomeDocuments.chain("root", "org.xfce.mousepad"))
+        assertEquals(null, HomeDocuments.chain("org.kde.kalk", "org.xfce.mousepad/a"))
+        assertEquals(null, HomeDocuments.chain(null, "org.xfce.mousepad/../x"))
+    }
 }

@@ -57,7 +57,11 @@ class CameraScriptTest {
         for (monitor in listOf("alsa", "bluez", "v4l2", "libcamera")) assertTrue("monitor.$monitor = disabled" in wireplumber)
         val backend = CameraScript.CONFIG_FILES.getValue("portals/flatdroid.portal")
         assertTrue("DBusName=org.freedesktop.impl.portal.desktop.flatdroid\n" in backend)
-        assertTrue("Interfaces=org.freedesktop.impl.portal.Access;org.freedesktop.impl.portal.Settings;\n" in backend)
+        assertTrue("Interfaces=org.freedesktop.impl.portal.Access;org.freedesktop.impl.portal.Settings;org.freedesktop.impl.portal.AppChooser;\n" in backend)
+        val handler = CameraScript.CONFIG_FILES.getValue("applications/flatdroid-links.desktop")
+        assertTrue("Exec=gdbus call --session --dest org.freedesktop.impl.portal.desktop.flatdroid --object-path /org/freedesktop/portal/desktop --method com.garathon.flatdroid.Links.Open %u\n" in handler)
+        assertTrue("MimeType=x-scheme-handler/http;x-scheme-handler/https;x-scheme-handler/mailto;\n" in handler)
+        assertTrue("x-scheme-handler/https=flatdroid-links.desktop;\n" in CameraScript.CONFIG_FILES.getValue("applications/mimeinfo.cache"))
         // With XDG_DESKTOP_PORTAL_DIR, the portal reads its configuration only beside its backends.
         assertTrue("default=flatdroid" in CameraScript.CONFIG_FILES.getValue("portals/flatdroid-portals.conf"))
     }

@@ -49,9 +49,9 @@ object SessionBus {
      * `xdg-dbus-proxy`'s arguments for [appId]: Flatpak's own rules (its ID and MPRIS names below
      * it) and the valid entries of the metadata's [policy], without those naming or covering the
      * services Flatdroid runs on this bus ([RESERVED]). Always the portal's interfaces Flatdroid
-     * serves ([Portal]: settings, network monitor, proxy resolver), and with [camera] the camera
-     * portal too: its methods and the replies to its requests. The portal's other interfaces stay
-     * closed, whoever owns its name.
+     * serves ([Portal]: settings, network monitor, proxy resolver, links and their requests), and
+     * with [camera], where the real portal runs, its camera and its links for addresses only. The
+     * portal's other interfaces stay closed, whoever owns its name.
      */
     fun proxyArgs(appId: String, policy: Map<String, String>, camera: Boolean): List<String> {
         val args = mutableListOf(
@@ -65,7 +65,7 @@ object SessionBus {
             if (level in LEVELS && isPolicyName(name) && !isReserved(name)) args += "--$level=$name"
         }
         args += PORTAL_RULES
-        if (camera) args += CAMERA_RULES
+        args += if (camera) CAMERA_RULES else LINK_RULES
         return args
     }
 
@@ -99,6 +99,8 @@ object SessionBus {
     private const val PORTAL_PATH = Portal.PATH
     private val PORTAL_RULES = listOf(
         "--call=$PORTAL=${Portal.SETTINGS}.*@$PORTAL_PATH",
+        "--call=$PORTAL=${Portal.REQUEST}.Close@$PORTAL_PATH/request/*",
+        "--broadcast=$PORTAL=${Portal.REQUEST}.Response@$PORTAL_PATH/request/*",
         "--call=$PORTAL=${Portal.NETWORK_MONITOR}.*@$PORTAL_PATH",
         "--call=$PORTAL=${Portal.PROXY_RESOLVER}.*@$PORTAL_PATH",
         "--call=$PORTAL=${Portal.PROPERTIES}.Get@$PORTAL_PATH",
@@ -108,9 +110,15 @@ object SessionBus {
         "--broadcast=$PORTAL=${Portal.NETWORK_MONITOR}.changed@$PORTAL_PATH",
         "--broadcast=$PORTAL=${Portal.PROPERTIES}.PropertiesChanged@$PORTAL_PATH",
     )
+    /** Flatdroid's own links: addresses, files and folders. */
+    private val LINK_RULES = listOf("--call=$PORTAL=${Portal.OPEN_URI}.*@$PORTAL_PATH")
+    /**
+     * The real portal's camera, and its links for addresses only: its OpenFile would look up the
+     * app's descriptor from another proot (verify).
+     */
     private val CAMERA_RULES = listOf(
         "--call=$PORTAL=org.freedesktop.portal.Camera.*@$PORTAL_PATH",
-        "--call=$PORTAL=org.freedesktop.portal.Request.Close@$PORTAL_PATH/request/*",
-        "--broadcast=$PORTAL=org.freedesktop.portal.Request.Response@$PORTAL_PATH/request/*",
+        "--call=$PORTAL=${Portal.OPEN_URI}.OpenURI@$PORTAL_PATH",
+        "--call=$PORTAL=${Portal.OPEN_URI}.SchemeSupported@$PORTAL_PATH",
     )
 }

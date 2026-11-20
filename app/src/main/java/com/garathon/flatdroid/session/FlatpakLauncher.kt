@@ -363,7 +363,8 @@ class FlatpakLauncher(private val context: Context) {
                     if (LaunchPlanner.KDE_HOST_PROCESS_WARNING in line) kdeHostProcess.set(true)
                     if (LaunchPlanner.PROOT_KILLED_BY_SIGNAL in line) killedBySignal.set(true)
                     ProotExit.signalOf(line)?.let { appSignal.compareAndSet(0, it) }
-                    SessionController.log(line)
+                    // Tagged: the app writes these, and a line of its own claiming to be Flatdroid's would show as the app's.
+                    SessionController.log("[app] $line")
                 }
                 // Hidden, the app goes quiet and then pauses, unless it continues while hidden, and with no
                 // window it is paused whatever it continues; with an external viewer Flatdroid can't tell

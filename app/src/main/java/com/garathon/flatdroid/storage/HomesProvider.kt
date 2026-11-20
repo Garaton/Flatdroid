@@ -2,6 +2,7 @@ package com.garathon.flatdroid.storage
 
 import android.database.Cursor
 import android.database.MatrixCursor
+import android.os.Build
 import android.os.CancellationSignal
 import android.os.Handler
 import android.os.Looper
@@ -13,6 +14,7 @@ import android.provider.DocumentsProvider
 import android.system.ErrnoException
 import android.system.Os
 import android.webkit.MimeTypeMap
+import androidx.annotation.RequiresApi
 import com.garathon.flatdroid.R
 import com.garathon.flatdroid.flatpak.InstalledApps
 import com.garathon.flatdroid.setup.rootfs.AndroidTarFs
@@ -38,6 +40,18 @@ object HomeDocuments {
     }
 
     fun child(parentId: String, name: String) = "$parentId/$name"
+
+    /**
+     * The documents from [parentId] (or [ROOT] when null) down to [id], both included: what the
+     * Files app walks to open a folder deep in a home. Null when [id] isn't below [parentId].
+     */
+    fun chain(parentId: String?, id: String): List<String>? {
+        val (appId, path) = parse(id) ?: return null
+        val all = mutableListOf(ROOT, appId)
+        for (part in path.split('/').filter { it.isNotEmpty() }) all += child(all.last(), part)
+        val start = all.indexOf(parentId ?: ROOT)
+        return if (start < 0) null else all.drop(start)
+    }
 }
 
 /**
@@ -168,6 +182,12 @@ class HomesProvider : DocumentsProvider() {
     override fun isChildDocument(parentDocumentId: String, documentId: String): Boolean =
         parentDocumentId == HomeDocuments.ROOT && HomeDocuments.parse(documentId) != null ||
             documentId.startsWith("$parentDocumentId/") && HomeDocuments.parse(documentId) != null
+
+    @RequiresApi(Build.VERSION_CODES.O)
+    override fun findDocumentPath(parentDocumentId: String?, childDocumentId: String): DocumentsContract.Path {
+        val chain = HomeDocuments.chain(parentDocumentId, childDocumentId) ?: throw FileNotFoundException(childDocumentId)
+        return DocumentsContract.Path(if (parentDocumentId == null) HomeDocuments.ROOT else null, chain)
+    }
 
     override fun getDocumentType(documentId: String): String =
         if (documentId == HomeDocuments.ROOT) Document.MIME_TYPE_DIR else mimeOf(fileOf(documentId))

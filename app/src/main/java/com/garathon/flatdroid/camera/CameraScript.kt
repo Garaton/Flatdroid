@@ -68,11 +68,15 @@ object CameraScript {
         return name to count
     }
 
+    /** The addresses the real portal hands to Flatdroid in camera sessions: web and mail. */
+    private val LINK_TYPES = listOf("x-scheme-handler/http", "x-scheme-handler/https", "x-scheme-handler/mailto")
+    private val LINK_TYPES_LIST = LINK_TYPES.joinToString("") { "$it;" }
+
     /**
      * WirePlumber without its hardware monitors, and the portal with a stand-in
      * for the access dialog (the permission is set before the app starts, so
-     * the dialog is never asked for) and Flatdroid's settings, which Flatdroid serves itself
-     * under that name ([Portal.Role.BACKEND]).
+     * the dialog is never asked for), Flatdroid's settings and app chooser, which Flatdroid serves
+     * itself under that name ([Portal.Role.BACKEND]), and the one app for links.
      */
     val CONFIG_FILES = mapOf(
         "wireplumber/wireplumber.conf.d/flatdroid.conf" to """
@@ -90,7 +94,17 @@ object CameraScript {
         // XDG_DESKTOP_PORTAL_DIR: the portal reads its backends and its configuration only from there.
         "portals/flatdroid-portals.conf" to "[preferred]\ndefault=flatdroid\n",
         "portals/flatdroid.portal" to
-            "[portal]\nDBusName=${Portal.BACKEND_NAME}\nInterfaces=org.freedesktop.impl.portal.Access;${Portal.IMPL_SETTINGS};\n",
+            "[portal]\nDBusName=${Portal.BACKEND_NAME}\nInterfaces=org.freedesktop.impl.portal.Access;${Portal.IMPL_SETTINGS};${Portal.IMPL_APP_CHOOSER};\n",
+        // The real portal opens a link with the one app it finds for the scheme, without asking
+        // (xdg-desktop-portal 1.20): this command, which hands the address to Flatdroid. %u is one
+        // argument; gdbus reads it as the string the method takes.
+        "applications/${Portal.LINK_HANDLER}.desktop" to
+            "[Desktop Entry]\nType=Application\nName=Android\n" +
+            "Exec=gdbus call --session --dest ${Portal.BACKEND_NAME} --object-path ${Portal.PATH} --method ${Portal.LINKS}.Open %u\n" +
+            "MimeType=$LINK_TYPES_LIST\n",
+        // GLib 2.88 finds a handler for a type only through this index (checked in Alpine), not the desktop file alone.
+        "applications/mimeinfo.cache" to
+            "[MIME Cache]\n" + LINK_TYPES.joinToString("") { "$it=${Portal.LINK_HANDLER}.desktop;\n" },
     )
 
     /**
@@ -114,6 +128,7 @@ object CameraScript {
             |#!/bin/sh
             |export XDG_RUNTIME_DIR=$GUEST_PIPEWIRE_DIR DBUS_SESSION_BUS_ADDRESS=unix:path=${SessionBus.GUEST_DAEMON_DIR}/${SessionBus.SOCKET}
             |export XDG_CURRENT_DESKTOP=flatdroid XDG_CONFIG_DIRS=$GUEST_CONFIG_DIR XDG_DESKTOP_PORTAL_DIR=$GUEST_CONFIG_DIR/portals
+            |export XDG_DATA_DIRS=$GUEST_CONFIG_DIR:/usr/local/share:/usr/share
             |/usr/libexec/xdg-permission-store &
             |i=0
             |until gdbus call --session --dest org.freedesktop.impl.portal.PermissionStore \
