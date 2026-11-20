@@ -97,8 +97,6 @@ data class LaunchOptions(
     val limitDevices: Boolean = false,
     /** The root gets /.flatpak-info ([LaunchPlanner.flatpakInfo]). */
     val flatpakInfo: Boolean = true,
-    /** Android is in dark mode; apps are asked to follow it. */
-    val darkTheme: Boolean = false,
     /** The device's languages (BCP 47) for the app's locale; empty gives the generic C.UTF-8. */
     val languageTags: List<String> = emptyList(),
     /** GTK 4 and Qt Quick draw on the CPU instead of through GL ([com.garathon.flatdroid.settings.Rendering]). */
@@ -258,7 +256,6 @@ class LaunchPlanner(
             glDefault = glDefault,
             extensionLdPaths = ldPaths,
             overrides = options.environment,
-            darkTheme = options.darkTheme,
             kdePlatformTheme = DesktopConfig.KDE_PLATFORM_THEMES.any { File(runtime.files, it).exists() },
             sessionBus = dirs.sessionBus != null,
             lang = if (options.languageTags.isEmpty()) LaunchEnvironment.GENERIC_LOCALE

@@ -282,6 +282,12 @@ class Portal(
         /** `color-scheme`'s values. */
         const val PREFER_DARK = 1u
         const val PREFER_LIGHT = 2u
+        /** `(ddd)`: red, green and blue from 0 to 1. */
+        const val ACCENT_COLOR = "accent-color"
+        /** 0 normal, 1 high. */
+        const val CONTRAST = "contrast"
+        /** 0 no preference, 1 reduced. */
+        const val REDUCED_MOTION = "reduced-motion"
 
         const val DIRECT = "direct://"
 

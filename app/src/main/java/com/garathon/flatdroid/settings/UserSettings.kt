@@ -18,10 +18,18 @@ enum class AudioOutputMode {
 
 /** The theme Flatpak apps are asked to use (see DesktopConfig). */
 enum class FlatpakTheme {
-    /** Android's dark mode, at each launch. */
+    /** Android's dark mode, followed while an app runs where the app reads the settings portal. */
     SYSTEM,
     DARK,
     LIGHT,
+    ;
+
+    /** Dark or not, with Android in dark mode or not ([androidDark]). */
+    fun isDark(androidDark: Boolean): Boolean = when (this) {
+        SYSTEM -> androidDark
+        DARK -> true
+        LIGHT -> false
+    }
 }
 
 /** Flatdroid's own theme: Android's light or dark mode, or one of them; AMOLED is dark with black backgrounds. */

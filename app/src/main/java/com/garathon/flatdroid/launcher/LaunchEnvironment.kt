@@ -23,8 +23,6 @@ object LaunchEnvironment {
         glDefault: String?,
         extensionLdPaths: List<String> = emptyList(),
         overrides: Map<String, String> = emptyMap(),
-        /** Android is in dark mode. */
-        darkTheme: Boolean = false,
         /** The runtime has KDE's Qt platform theme, which applies Flatdroid's kdeglobals. */
         kdePlatformTheme: Boolean = false,
         /** The app's session bus is bound at [GuestPaths.SESSION_BUS_DIR]. */
@@ -97,9 +95,7 @@ object LaunchEnvironment {
             env["GSK_RENDERER"] = "cairo"
             env["QT_QUICK_BACKEND"] = "software"
         }
-        // libadwaita follows only the settings portal, or this (portals are off).
         if (flatpakContainer) env["container"] = "flatpak"
-        if (darkTheme) env["ADW_DEBUG_COLOR_SCHEME"] = "prefer-dark"
         if (kdePlatformTheme) env["QT_QPA_PLATFORMTHEME"] = "kde"
         if (sessionBus) env["DBUS_SESSION_BUS_ADDRESS"] = "unix:path=${GuestPaths.SESSION_BUS_DIR}/${GuestPaths.SESSION_BUS_SOCKET}"
         for ((key, value) in metadataEnvironment) {

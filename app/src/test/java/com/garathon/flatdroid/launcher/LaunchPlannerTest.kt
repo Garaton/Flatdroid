@@ -160,10 +160,8 @@ class LaunchPlannerTest {
 
         val plain = Ready(planner.plan("org.kde.kate", dirs))
         assertEquals("kde", plain.environment["QT_QPA_PLATFORMTHEME"])
-        assertFalse("ADW_DEBUG_COLOR_SCHEME" in plain.environment)
-        val plan = Ready(planner.plan("org.kde.kate", dirs.copy(sdcard = sdcard), LaunchOptions(darkTheme = true)))
+        val plan = Ready(planner.plan("org.kde.kate", dirs.copy(sdcard = sdcard)))
         assertEquals(baseExtra("org.kde.kate") + (sdcard.path to "/sdcard"), plan.binds.extra)
-        assertEquals("prefer-dark", plan.environment["ADW_DEBUG_COLOR_SCHEME"])
     }
 
     @Test

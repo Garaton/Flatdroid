@@ -23,6 +23,7 @@ import com.garathon.flatdroid.camera.CameraScript
 import com.garathon.flatdroid.camera.CameraStreamer
 import com.garathon.flatdroid.flatpak.integrity.AndroidLinkFs
 import com.garathon.flatdroid.session.helpers.PulseScript
+import com.garathon.flatdroid.session.bus.AndroidAppearance
 import com.garathon.flatdroid.session.bus.Portal
 import com.garathon.flatdroid.session.bus.SessionPortal
 import com.garathon.flatdroid.session.helpers.SessionBus
@@ -312,7 +313,7 @@ class FlatpakLauncher(private val context: Context) {
                 portal = SessionPortal.open(
                     context, File(busDaemonDir, SessionBus.SOCKET),
                     role = if (streamers.isNotEmpty()) Portal.Role.BACKEND else Portal.Role.PORTAL,
-                    appNetwork = settings.networkAllowed(appContext.shared), darkTheme = isDarkTheme(userSettings),
+                    appNetwork = settings.networkAllowed(appContext.shared), user = userSettings,
                     log = SessionController::log,
                 )
                 if (streamers.isNotEmpty()) {
@@ -687,11 +688,8 @@ class FlatpakLauncher(private val context: Context) {
     }
 
     /** The theme setting; with System, Android's dark mode now. */
-    private fun isDarkTheme(user: UserSettings?) = when (user?.flatpakTheme ?: FlatpakTheme.SYSTEM) {
-        FlatpakTheme.SYSTEM -> context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
-        FlatpakTheme.DARK -> true
-        FlatpakTheme.LIGHT -> false
-    }
+    private fun isDarkTheme(user: UserSettings?) =
+        (user?.flatpakTheme ?: FlatpakTheme.SYSTEM).isDark(AndroidAppearance.androidDark(context.resources.configuration))
 
     /** [appId]'s launch with its [settings] and the [user]'s. */
     private fun plan(appId: String, settings: AppSettings, user: UserSettings?): PlanResult =
@@ -710,7 +708,6 @@ class FlatpakLauncher(private val context: Context) {
             electronSwap = app?.let { electronSwap(appId).preparedFor(it) },
             wholeDev = settings.wholeDev,
             flatpakInfo = !settings.withoutFlatpakInfo,
-            darkTheme = isDarkTheme(user),
             languageTags = if (security.shareLocale) context.resources.configuration.locales.toLanguageTags().split(',').filter { it.isNotBlank() } else emptyList(),
             audio = settings.audioAllowed(app?.metadata?.context?.sockets.orEmpty()),
             network = settings.networkAllowed(app?.metadata?.context?.shared.orEmpty()),

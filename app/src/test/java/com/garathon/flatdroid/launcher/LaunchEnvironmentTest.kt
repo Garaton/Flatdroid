@@ -14,7 +14,6 @@ class LaunchEnvironmentTest {
         assertEquals("/home/user/.var/app/org.xfce.mousepad/.local/state", env["XDG_STATE_HOME"])
         assertEquals("/app/share:/usr/share:/usr/share/runtime/share", env["XDG_DATA_DIRS"])
         assertEquals("/app/etc/xdg:/etc/xdg:/run/flatdroid/xdg", env["XDG_CONFIG_DIRS"])
-        assertFalse("ADW_DEBUG_COLOR_SCHEME" in env)
         assertFalse("QT_QPA_PLATFORMTHEME" in env)
         assertEquals("unix:/run/pulse/native", env["PULSE_SERVER"])
         assertEquals("/app/lib:/usr/lib/aarch64-linux-gnu", env["LD_LIBRARY_PATH"])
