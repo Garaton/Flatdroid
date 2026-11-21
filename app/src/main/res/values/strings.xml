@@ -778,6 +778,13 @@
     <string name="settings_terminal_during_session">Terminal while an app runs</string>
     <string name="settings_terminal_during_session_hint">Lets the terminal run commands while an app runs, and apps start while a command runs. A running app can take over those commands and run its own code in Alpine\'s proot, with everything Alpine reaches.</string>
     <string name="app_running_settings">Stop the app to change its settings.</string>
+    <!-- Home-screen shortcuts to apps. -->
+    <string name="shortcut_add">Add to home screen</string>
+    <string name="shortcut_failed">The home screen didn\'t take the shortcut.</string>
+    <string name="shortcut_not_installed">Not installed in Flatdroid</string>
+    <string name="shortcut_app_running">%1$s is running. Stop it first.</string>
+    <string name="shortcut_app_asking">Flatdroid is asking about %1$s. Answer it first.</string>
+    <string name="shortcut_busy">Flatdroid is busy. Try again once its task is done.</string>
     <string name="storage_app_running">This app is running. Stop it first.</string>
     <string name="settings_app_running">These settings change Alpine, which can\'t happen while an app runs. Stop the app, then save again.</string>
     <string name="terminal_app_running">An app is running. Stop it first: a command run now could be taken over by the app (see the developer setting \"Terminal while an app runs\").</string>

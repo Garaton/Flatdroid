@@ -119,6 +119,9 @@ class InstalledApps(private val context: Context) {
 
     fun name(id: String): String? = installation.app(id)?.let { desktopName(it, id) }
 
+    /** [id]'s name and icon, as the list has them (without its use and metadata); null if it isn't installed. */
+    fun brief(id: String): InstalledApp? = installation.app(id)?.let { InstalledApp(id, desktopName(it, id) ?: id, icon(it, id), lastOpened = null) }
+
     /** The app's metadata permissions; null if it isn't installed. */
     fun context(id: String): FlatpakContext? = installation.app(id)?.metadata?.context
 

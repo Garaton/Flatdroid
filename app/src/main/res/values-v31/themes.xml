@@ -5,4 +5,10 @@
     <style name="Theme.Flatdroid" parent="Base.Flatdroid">
         <item name="android:windowSplashScreenBackground">@android:color/white</item>
     </style>
+    <!-- A shortcut's cover (LaunchActivity): a plain splash in the window's own colour, no icon,
+         so the cover follows it unseen. -->
+    <style name="Theme.Flatdroid.Launch" parent="Theme.Flatdroid">
+        <item name="android:windowSplashScreenBackground">@color/launch_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@android:color/transparent</item>
+    </style>
 </resources>

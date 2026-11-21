@@ -64,6 +64,8 @@ class AppSettingsEnv(
     val permissionAnswer: PermissionAnswer?,
     val onPermissionHandled: () -> Unit,
     val onUninstall: (deleteData: Boolean, keepRuntimes: Boolean) -> Unit,
+    /** Asks the launcher for a home-screen shortcut to the app; null when it takes none. */
+    val onAddShortcut: (() -> Unit)?,
     val sharedHome: String,
     val broadAccess: Boolean,
     val onStorage: (StorageAction) -> Unit,
@@ -160,7 +162,7 @@ private fun AppSettingsScreenPreview() {
                 storage = AppStorage(9_000_000, 12_345_678, 4_096, 65_536), canChangeFiles = true, canUninstall = true,
                 developerOptions = true, showsWebContent = false, hasCamera = true,
                 cameraResolutions = mapOf(15 to listOf(AndroidCameras.Resolution(720)), 30 to listOf(AndroidCameras.Resolution(720))),
-                onRequestMicrophone = {}, onRequestCamera = {}, permissionAnswer = null, onPermissionHandled = {}, onUninstall = { _, _ -> },
+                onRequestMicrophone = {}, onRequestCamera = {}, permissionAnswer = null, onPermissionHandled = {}, onUninstall = { _, _ -> }, onAddShortcut = {},
                 sharedHome = "Documents/Flatdroid", broadAccess = true, onStorage = {}, onOpenHome = {},
                 limitDevices = false, onResetFlatdroidSettings = {},
             ),

@@ -22,6 +22,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
@@ -52,8 +53,13 @@ import com.garathon.flatdroid.flatpak.FlatpakInstallation
 import com.garathon.flatdroid.flatpak.tasks.FlatpakTask
 import com.garathon.flatdroid.flatpak.tasks.FlatpakTaskService
 import com.garathon.flatdroid.flatpak.tasks.FlatpakTasks
+import com.garathon.flatdroid.flatpak.InstalledApp
 import com.garathon.flatdroid.flatpak.InstalledApps
 import com.garathon.flatdroid.session.SessionController
+import com.garathon.flatdroid.shortcuts.ShortcutActivity
+import com.garathon.flatdroid.shortcuts.QuietLaunch
+import com.garathon.flatdroid.shortcuts.ShortcutLaunch
+import com.garathon.flatdroid.shortcuts.Shortcuts
 import com.garathon.flatdroid.ui.home.HomeViewModel
 import com.garathon.flatdroid.ui.storage.StorageFlows
 import com.garathon.flatdroid.viewer.ViewerActivity
@@ -75,6 +81,7 @@ import com.garathon.flatdroid.ui.setup.CommandState
 import com.garathon.flatdroid.ui.dialogs.ElectronDialog
 import com.garathon.flatdroid.ui.dialogs.FilesChangedDialog
 import com.garathon.flatdroid.ui.home.HomeScreen
+import com.garathon.flatdroid.ui.home.LaunchCover
 import com.garathon.flatdroid.ui.home.InstallLinkDialog
 import com.garathon.flatdroid.ui.home.StatusBar
 import com.garathon.flatdroid.ui.browse.BrowseAppPager
@@ -112,6 +119,7 @@ import com.garathon.flatdroid.ui.home.PendingLaunch
 import com.garathon.flatdroid.ui.settings.PermissionAnswer
 import com.garathon.flatdroid.ui.settings.PermissionAsk
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.IOException
@@ -147,12 +155,29 @@ class MainActivity : ComponentActivity() {
 
     private val storage = StorageFlows(this, { home }, { viewModel })
 
+    /** Whether the launcher takes home-screen shortcuts (asked once per window). */
+    private val shortcutsSupported by lazy { Shortcuts.supported(this) }
+
+    /** Asks the launcher to add [app]'s shortcut; it confirms with the user. */
+    private fun addShortcut(app: InstalledApp) {
+        lifecycleScope.launch {
+            val added = withContext(Dispatchers.IO) { Shortcuts.pin(this@MainActivity, app) }
+            if (!added) Toast.makeText(this@MainActivity, R.string.shortcut_failed, Toast.LENGTH_LONG).show()
+        }
+    }
+
     /**
-     * An app a Flathub link named ([LinkActivity]): its confirmation opens in the window. Not when
+     * An app a Flathub link named ([LinkActivity]): its confirmation opens in the window. An app a
+     * home-screen shortcut started ([ShortcutActivity]): it starts once the window is up. Not when
      * the window is reopened from Recents, which hands back the intent that first started it.
      */
     private fun handleLink(intent: Intent?) {
         if (intent == null || intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0) return
+        intent.getStringExtra(EXTRA_LAUNCH)?.let { id ->
+            intent.removeExtra(EXTRA_LAUNCH)
+            // Only once set up: a launch held until setup ends would start unasked.
+            if (InstalledApps.isValidId(id) && SetupController.state.value.isComplete) home.requestShortcutLaunch(id)
+        }
         val id = intent.getStringExtra(EXTRA_INSTALL)?.takeIf(InstalledApps::isValidId) ?: return
         intent.removeExtra(EXTRA_INSTALL)
         home.requestInstall(id)
@@ -169,7 +194,7 @@ class MainActivity : ComponentActivity() {
         // Flatdroid's icon, on a task that is open already but was started some other way (from a
         // notification, say): Android adds a second window on top. Close it, so the task shows what
         // was open (the viewer of a running app) as the icon would otherwise.
-        if (savedInstanceState == null && !isTaskRoot && isLauncherIntent(intent) && !intent.hasExtra(EXTRA_INSTALL)) {
+        if (savedInstanceState == null && !isTaskRoot && isLauncherIntent(intent) && !intent.hasExtra(EXTRA_INSTALL) && !intent.hasExtra(EXTRA_LAUNCH)) {
             finish()
             return
         }
@@ -228,7 +253,23 @@ class MainActivity : ComponentActivity() {
                                     command = if (SetupStep.ROOTFS in setup.completed) CommandState(output, running, viewModel::run, viewModel::cancel) else null,
                                 )
                             }
-                            AppStage.MAIN -> Main(screen, { screen = it }, languages, modifier)
+                            AppStage.MAIN -> Box {
+                                Main(screen, { screen = it }, languages, modifier)
+                                // A shortcut's app on its way: the window behind isn't seen until its viewer opens.
+                                val cover by home.launchCover.collectAsState()
+                                cover?.let { id ->
+                                    val apps by home.apps.collectAsState()
+                                    val session by SessionController.ui.collectAsState()
+                                    LaunchCover(
+                                        appId = id,
+                                        app = apps?.firstOrNull { it.id == id },
+                                        state = session.state,
+                                        onSkipCheck = { SessionController.skipFileCheck() },
+                                        onStop = { home.clearLaunchCover(); SessionService.stop(this@MainActivity) },
+                                        onBack = home::clearLaunchCover,
+                                    )
+                                }
+                            }
                             AppStage.RESETTING -> ResetScreen(setup.detail, modifier)
                         }
                     }
@@ -298,6 +339,44 @@ class MainActivity : ComponentActivity() {
                 }
             }
             navigate(target)
+        }
+        // A home-screen shortcut's app: started from Home as its row would be, shown when it runs, or
+        // refused (another app or a task came first since the shortcut's own check).
+        val shortcutLaunch by home.shortcutLaunch.collectAsState()
+        LaunchedEffect(shortcutLaunch) {
+            val id = shortcutLaunch ?: return@LaunchedEffect
+            home.clearShortcutLaunch()
+            val decision = ShortcutLaunch.decide(id, sessionState, busy = taskRunning || (terminalRunning && !terminalWithApps))
+            ShortcutActivity.refusal(this@MainActivity, decision)?.let {
+                home.clearLaunchCover()
+                return@LaunchedEffect Toast.makeText(this@MainActivity, it, Toast.LENGTH_LONG).show()
+            }
+            go(Screen.Home)
+            when {
+                upSession?.appId == id -> openViewer(upSession)
+                // Starting (or asking): its viewer opens once it is up.
+                sessionState.appIdOrNull == id -> home.autoOpenApp = id
+                else -> {
+                    home.lastStarted = null
+                    launch(id)
+                    // It stopped to ask something (or was refused): the questions show over Home, uncovered.
+                    if (home.lastStarted != id) home.clearLaunchCover()
+                }
+            }
+        }
+        // The cover goes once the window is hidden behind the app's viewer (its own or an external
+        // one), not while the viewer is still coming in over it; or when the start ended without
+        // one. A start that never got going goes after a few seconds.
+        val cover by home.launchCover.collectAsState()
+        var coverSeenBusy by remember(cover) { mutableStateOf(false) }
+        LaunchedEffect(cover, sessionState.appIdOrNull == cover, upSession?.appId == cover, inFront) {
+            val id = cover ?: return@LaunchedEffect
+            when {
+                upSession?.appId == id && !inFront.isAtLeast(Lifecycle.State.STARTED) -> home.clearLaunchCover()
+                sessionState.appIdOrNull == id -> coverSeenBusy = true
+                coverSeenBusy -> home.clearLaunchCover()
+                else -> { delay(COVER_WAIT_MS); home.clearLaunchCover() }
+            }
         }
         // The drafts go once the settings screens are left and no longer drawn (they stay while one slides out).
         val inSettings = screen.inSettings()
@@ -582,6 +661,7 @@ class MainActivity : ComponentActivity() {
                             FlatpakTaskService.run(this@MainActivity, FlatpakTask.Uninstall(app.id, deleteData, keepRuntimes))
                             go(Screen.Home)
                         },
+                        onAddShortcut = if (shortcutsSupported) ({ addShortcut(app) }) else null,
                         sharedHome = storage.sharedHomeDisplay,
                         broadAccess = storage.broadAccess,
                         onStorage = { action -> storage.storageAction(app.id, action) },
@@ -696,6 +776,7 @@ class MainActivity : ComponentActivity() {
                         onUninstall = { deleteData, keepRuntimes ->
                             FlatpakTaskService.run(this@MainActivity, FlatpakTask.Uninstall(id, deleteData, keepRuntimes))
                         },
+                        onAddShortcut = apps?.firstOrNull { it.id == id }?.takeIf { shortcutsSupported }?.let { app -> { addShortcut(app) } },
                         onTitle = onTitle,
                     )
                 }
@@ -767,21 +848,14 @@ class MainActivity : ComponentActivity() {
     })
 
     private fun start(pending: PendingLaunch, micAnswer: Boolean?) {
+        home.lastStarted = pending.appId
         // Started from this window: when the app is up and this window is in front, its viewer opens.
         home.autoOpenApp = pending.appId
         if (pending.prepareElectron) SessionService.prepareElectronAndLaunch(this, pending.appId, micAnswer)
         else SessionService.launch(this, pending.appId, micAnswer)
     }
 
-    /**
-     * The app's microphone is on but will ask, and Flatdroid can't post the question when the app
-     * records (notifications are off): it is asked before the launch instead, for the session.
-     */
-    private fun needsMicrophoneQuestion(appId: String): Boolean {
-        val settings = AppData.settings(this, appId).load()
-        return !settings.alwaysAllowMicrophone && MicStreamer.hasPermission(this) && !SessionService.canAskInNotification(this) &&
-            settings.microphoneAllowed(InstalledApps(this).sockets(appId))
-    }
+    private fun needsMicrophoneQuestion(appId: String): Boolean = QuietLaunch.needsMicrophoneQuestion(this, appId)
 
     /** Asks Android for the microphone permission; the answer reaches the Permissions page ([SettingsDraftModel.permissionAnswer]). */
     private fun requestMicrophone() = requestPermission(PermissionAsk.MICROPHONE, Manifest.permission.RECORD_AUDIO, MicStreamer.hasPermission(this))
@@ -852,19 +926,27 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         private const val EXTRA_INSTALL = "com.garathon.flatdroid.INSTALL"
+        private const val EXTRA_LAUNCH = "com.garathon.flatdroid.LAUNCH"
+        /** How long a shortcut's cover waits for a start that doesn't begin. */
+        private const val COVER_WAIT_MS = 4_000L
 
         private fun isLauncherIntent(intent: Intent?) = intent?.action == Intent.ACTION_MAIN && intent.hasCategory(Intent.CATEGORY_LAUNCHER)
 
         /**
-         * Brings Flatdroid's window forward, as it was, to ask about installing [appId]. The intent
-         * is the launcher's (extras don't count), so the task it may start is the one the icon
-         * opens later, and the window already open is reused, not stacked again.
+         * Brings Flatdroid's window forward, as it was. The intent is the launcher's (extras don't
+         * count), so the task it may start is the one the icon opens later, and the window already
+         * open is reused, not stacked again.
          */
-        fun installIntent(context: Context, appId: String): Intent = Intent(Intent.ACTION_MAIN)
+        fun windowIntent(context: Context): Intent = Intent(Intent.ACTION_MAIN)
             .addCategory(Intent.CATEGORY_LAUNCHER)
             .setClass(context, MainActivity::class.java)
-            .putExtra(EXTRA_INSTALL, appId)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+
+        /** The window, to ask about installing [appId]. */
+        fun installIntent(context: Context, appId: String): Intent = windowIntent(context).putExtra(EXTRA_INSTALL, appId)
+
+        /** The window, to start [appId] as a tap in its list does (or show it, when it runs). */
+        fun launchIntent(context: Context, appId: String): Intent = windowIntent(context).putExtra(EXTRA_LAUNCH, appId)
     }
 }
 

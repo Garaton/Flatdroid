@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.garathon.flatdroid.alpine.AlpineEnvironment
 import com.garathon.flatdroid.flatpak.catalog.Catalog
+import com.garathon.flatdroid.shortcuts.Shortcuts
 import com.garathon.flatdroid.storage.AppData
 import com.garathon.flatdroid.flatpak.FlatpakInstallation
 import com.garathon.flatdroid.flatpak.tasks.FlatpakTask
@@ -83,6 +84,31 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     fun clearInstallLink() { _installLink.value = null }
 
+    private val _shortcutLaunch = MutableStateFlow<String?>(null)
+
+    /** The app a home-screen shortcut asked to start, until the window has started (or refused) it. */
+    val shortcutLaunch: StateFlow<String?> = _shortcutLaunch.asStateFlow()
+
+    fun requestShortcutLaunch(appId: String) {
+        _shortcutLaunch.value = appId
+        _launchCover.value = appId
+    }
+
+    fun clearShortcutLaunch() { _shortcutLaunch.value = null }
+
+    private val _launchCover = MutableStateFlow<String?>(null)
+
+    /**
+     * The app a shortcut started, while its start covers the window ([LaunchCover]): from the first
+     * frame until its viewer opens, so the window's own moves (back to Home) aren't seen.
+     */
+    val launchCover: StateFlow<String?> = _launchCover.asStateFlow()
+
+    fun clearLaunchCover() { _launchCover.value = null }
+
+    /** The last app handed to the session (set as the launch starts, after any question). */
+    @Volatile var lastStarted: String? = null
+
     /** An uninstall of [appIds] has started (at once, or from the queue): they leave the list now, not when the task ends. */
     private fun uninstallStarted(appIds: List<String>) {
         hiddenSince = FlatpakTasks.ui.value.generation
@@ -123,6 +149,8 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             ensureActive()
             // A failed read keeps the list there was (a half-deployed install must not read as "no apps").
             if (list != null) _apps.value = list else if (_apps.value == null) _apps.value = emptyList()
+            // Home-screen shortcuts follow what is installed (an uninstall from the terminal too).
+            if (list != null) Shortcuts.sync(getApplication(), list)
             // The task is over: what is still installed (an uninstall that was cancelled) is listed again.
             val tasks = FlatpakTasks.ui.value
             if (tasks.running == null && tasks.generation > hiddenSince) uninstalling.value = emptySet()

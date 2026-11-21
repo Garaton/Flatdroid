@@ -85,6 +85,13 @@ fun AppIcon(file: File?, modifier: Modifier = Modifier, decodePx: Int? = null) {
     if (image != null) Image(image, contentDescription = null, modifier = modifier.alpha(alpha.value).clip(RoundedCornerShape(8.dp))) else Box(modifier)
 }
 
+/** The app's icon as a bitmap no larger than [px], outside Compose (a home-screen shortcut's); null when it can't be read. */
+fun appIconBitmap(file: File, cacheDir: File, px: Int): Bitmap? = try {
+    load(file, cacheDir, px)
+} catch (_: Exception) {
+    null
+}
+
 /**
  * From the icon cache when it is there, else decoded and, for an SVG or a big picture, put there
  * (at [ICON_DECODE_PX]); in either case no larger than [px].

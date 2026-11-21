@@ -43,6 +43,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.AddToHomeScreen
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.Download
@@ -176,6 +177,8 @@ fun BrowseAppScreen(
     onOpen: () -> Unit,
     onAppSettings: () -> Unit,
     onUninstall: (deleteData: Boolean, keepRuntimes: Boolean) -> Unit,
+    /** For an installed app: asks the launcher for a home-screen shortcut to it; null when it takes none. */
+    onAddShortcut: (() -> Unit)?,
     /** The title the shared top bar shows for this page ([BrowseAppPager]): the name once the header has scrolled away, else null. */
     onTitle: (String?) -> Unit,
     modifier: Modifier = Modifier,
@@ -242,7 +245,7 @@ fun BrowseAppScreen(
         Box(boxModifier) {
             when (installState) {
                 // Open with its label; settings and uninstall as icons beside it, uninstall in red.
-                InstallState.INSTALLED -> Row(Modifier.height(IntrinsicSize.Min), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                InstallState.INSTALLED -> {
                     val settingsButton = @Composable {
                         OutlinedIconButton(onClick = onAppSettings, modifier = Modifier.alpha(if (open == OpenState.STARTING || open == OpenState.RUNNING) 0.6f else 1f)) {
                             Icon(Icons.Outlined.Settings, contentDescription = stringResource(R.string.settings_title))
@@ -255,16 +258,28 @@ fun BrowseAppScreen(
                             colors = IconButtonDefaults.outlinedIconButtonColors(contentColor = MaterialTheme.colorScheme.error),
                         ) { Icon(Icons.Outlined.Delete, contentDescription = stringResource(R.string.uninstall_button)) }
                     }
-                    // In landscape the icons stay square, one over the other, and Open is as tall as both.
-                    OpenButton(open, onOpen, tallShape, landscape, Modifier.weight(1f).then(if (landscape) Modifier.fillMaxHeight() else Modifier))
-                    if (landscape) {
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            settingsButton()
-                            uninstallButton()
+                    val icons = @Composable {
+                        onAddShortcut?.let { add ->
+                            OutlinedIconButton(onClick = add) {
+                                Icon(Icons.AutoMirrored.Outlined.AddToHomeScreen, contentDescription = stringResource(R.string.shortcut_add))
+                            }
                         }
-                    } else {
                         settingsButton()
                         uninstallButton()
+                    }
+                    // In landscape there is no room beside Open for its label: the icons go under it, and
+                    // Open is as wide as their row (or as its label needs, when that is wider).
+                    if (landscape) {
+                        Column(Modifier.width(IntrinsicSize.Max), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            // Inset by the icons' touch margin, so its edges line up with the outer circles.
+                            OpenButton(open, onOpen, ButtonDefaults.shape, false, Modifier.fillMaxWidth().padding(horizontal = 4.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) { icons() }
+                        }
+                    } else {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OpenButton(open, onOpen, tallShape, false, Modifier.weight(1f))
+                            icons()
+                        }
                     }
                 }
                 // Muted, but as big as Install, with a spinner where its icon was.

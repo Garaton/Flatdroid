@@ -92,6 +92,20 @@
                 <data android:scheme="appstream" />
             </intent-filter>
         </activity>
+        <!-- Home-screen shortcuts to apps: hands the app to the main window, or refuses with a
+             message. Not exported: the launcher starts an app's own shortcuts without it. -->
+        <activity
+            android:name=".shortcuts.ShortcutActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <!-- A shortcut's app on its way when nothing has to be asked: the cover, then the viewer. -->
+        <activity
+            android:name=".shortcuts.LaunchActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Flatdroid.Launch" />
         <!-- Not recreated on rotation or keyboard changes: the connection and zoom stay. -->
         <activity
             android:name=".viewer.ViewerActivity"
