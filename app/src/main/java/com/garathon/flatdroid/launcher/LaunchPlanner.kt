@@ -62,6 +62,11 @@ data class HostDirs(
      */
     val hostCommands: File? = null,
     /**
+     * Where Flatdroid's zypak goes ([Electron.zypakStandIn], written from [LaunchPlan.zypakStandIn]);
+     * null starts Electron apps by their binary, as before the stand-in.
+     */
+    val zypakStandIn: File? = null,
+    /**
      * Writable per-app base for the app's `/etc/ld.so.cache` ([LdCache]), one directory per set of
      * deployments; null for none.
      */
@@ -124,6 +129,8 @@ data class LaunchPlan(
     val usrLinks: List<String>,
     /** Electron or a Chromium browser, started without zypak or cobalt ([Electron]). */
     val isElectron: Boolean,
+    /** Flatdroid's zypak for [HostDirs.zypakStandIn] ([Electron.zypakStandIn]); null when the app starts by its binary. */
+    val zypakStandIn: String? = null,
     /** The app takes Wayland, so its session is Wayland (labwc and wayvnc) instead of Xvnc. */
     val wayland: Boolean = false,
     /** What fdsec refuses for this app. */
@@ -187,6 +194,7 @@ class LaunchPlanner(
         val wayland = context.wayland && !(options.forceX11 && context.waylandAndX11)
         var command = listOf(commandPath)
         var isElectron = false
+        var zypakStandIn: String? = null
         val varApp = "${GuestPaths.HOME}/.var/app/$appId"
         val extraBinds = mutableListOf(
             dirs.fontDirs.path to GuestPaths.FONT_DIRS,
@@ -240,7 +248,16 @@ class LaunchPlanner(
                 }
                 extraBinds += swap.path to appDir
             }
-            command = listOf(electronBinary) + Electron.flags(options.newerElectronFlags, wayland, options.reduceMotion)
+            val flags = Electron.flags(options.newerElectronFlags, wayland, options.reduceMotion)
+            // The app's own command, its zypak replaced by Flatdroid's: its launch script still runs.
+            val standIn = dirs.zypakStandIn
+            val zypak = if (standIn == null) emptyList() else Electron.ZYPAK_FILES.filter { zypakFileHere(app, it) }
+            if (standIn != null && zypak.isNotEmpty()) {
+                for (name in zypak) extraBinds += standIn.path to "/app/bin/$name"
+                zypakStandIn = Electron.zypakStandIn(flags, nodeFlags = Electron.flags(newer = true, wayland, options.reduceMotion))
+            } else {
+                command = listOf(electronBinary) + flags
+            }
         } else if (cobaltBrowser != null) {
             isElectron = true
             val binaryArch = (hostPath(app, cobaltBrowser)?.let(Executable::of) as? Executable.Elf)?.arch
@@ -313,6 +330,7 @@ class LaunchPlanner(
                 ),
                 usrLinks = USR_LINKS.filter { File(runtime.files, it).exists() },
                 isElectron = isElectron,
+                zypakStandIn = zypakStandIn,
                 wayland = wayland,
                 filter = Fdsec.Filter(extraSyscalls = options.extraSyscalls, noInternet = !options.network),
                 ldCache = ldCache,
@@ -359,6 +377,16 @@ class LaunchPlanner(
      * /app, and link2symlink's (into .l2s, a host path). Null for anything else, such as a link
      * to the runtime's /usr (a guest path that means something else on the host), and for loops.
      */
+    /**
+     * Whether the app's `/app/bin/<name>` is a file of its own (a link into link2symlink's store
+     * counts as one); a link elsewhere (`zypak-wrapper` to the script) reaches a bound one anyway.
+     */
+    private fun zypakFileHere(app: Deployment, name: String): Boolean {
+        val file = File(app.files, "bin/$name")
+        val target = readlink(file) ?: return file.isFile
+        return L2s.inStore(target, l2sDir) && File(target).isFile
+    }
+
     private fun hostPath(app: Deployment, guest: String): File? {
         var path = guest
         repeat(MAX_LINKS) {

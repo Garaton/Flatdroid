@@ -292,6 +292,34 @@ class LaunchPlannerTest {
     }
 
     @Test
+    fun electronThroughFlatdroidsZypakWhenTheAppHasZypak() {
+        runtimeWithGl()
+        val files = inst.app("md.obsidian.Obsidian", metadata = appMetadata("md.obsidian.Obsidian", "obsidian"))
+        File(files, "bin").mkdirs()
+        File(files, "obsidian.sh").writeText("#!/bin/sh\nexec zypak-wrapper /app/obsidian \"\$@\"\n")
+        TestInstallation.link(File(files, "bin/obsidian"), "/app/obsidian.sh")
+        File(files, "obsidian").writeBytes(ExecutableTest.elf(0xb7))
+        File(files, "bin/zypak-wrapper.sh").writeText("#!/usr/bin/bash\n")
+        File(files, "bin/zypak-helper").writeBytes(ExecutableTest.elf(0xb7))
+        // zypak's link to its script: reached through the script's bind.
+        TestInstallation.link(File(files, "bin/zypak-wrapper"), "/app/bin/zypak-wrapper.sh")
+        val standIn = File(tmp.root, "zypak")
+
+        val plan = Ready(planner.plan("md.obsidian.Obsidian", dirs.copy(zypakStandIn = standIn), LaunchOptions(extraArgs = listOf("--x"))))
+        assertTrue(plan.isElectron)
+        assertEquals(listOf("/app/bin/obsidian", "--x"), plan.command)
+        assertEquals(
+            listOf(standIn.path to "/app/bin/zypak-wrapper.sh", standIn.path to "/app/bin/zypak-helper"),
+            plan.binds.extra.filter { it.first == standIn.path },
+        )
+        assertTrue("exec \"\$binary\" '--no-sandbox' '--disable-gpu' '--disable-dev-shm-usage' \"\$@\"" in plan.zypakStandIn!!)
+        // Electron as Node: the newer flags from the start, its window's failure being out of sight.
+        assertTrue("'--disable-dev-shm-usage' '--no-zygote' '--disable-gpu-sandbox' '--in-process-gpu' '--ozone-platform=x11'; placed=1" in plan.zypakStandIn!!)
+        // Without a stand-in's place, the binary itself.
+        assertEquals(listOf("/app/obsidian") + Electron.BASE_FLAGS, Ready(planner.plan("md.obsidian.Obsidian", dirs)).command)
+    }
+
+    @Test
     fun electronFlagsNameTheSession() {
         assertEquals(Electron.BASE_FLAGS, Electron.flags(newer = false, wayland = false))
         assertEquals(Electron.BASE_FLAGS + Electron.OZONE_WAYLAND, Electron.flags(newer = false, wayland = true))

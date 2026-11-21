@@ -411,6 +411,8 @@ class FlatpakLauncher(private val context: Context) {
                         ?: throw LaunchException(context.getString(R.string.launch_app_changed))
                     // The app has run, so it may have replaced its own directories with links meanwhile.
                     prepareDirs(appId, plan)
+                    // Flatdroid's zypak carries the flags.
+                    writeHostCommands(plan)
                     checkBindSources(plan)
                     continue
                 }
@@ -426,6 +428,7 @@ class FlatpakLauncher(private val context: Context) {
                         plan = (plan(appId, settings, userSettings) as? PlanResult.Ready)?.plan?.let(::hideHelpers)
                             ?: throw LaunchException(context.getString(R.string.launch_app_changed))
                         prepareDirs(appId, plan)
+                        writeHostCommands(plan)
                         checkBindSources(plan)
                         continue
                     }
@@ -695,13 +698,16 @@ class FlatpakLauncher(private val context: Context) {
         DesktopConfig.kdeglobals(dark, darkScheme)?.let { File(desktopDir, "kdeglobals").writeTextAtomically(it, durable = false) }
     }
 
-    /** The "run on the host" stand-ins, for whether this app may ask for the host. */
+    /** The "run on the host" stand-ins, for whether this app may ask for the host, and Flatdroid's zypak when the plan has it. */
     private fun writeHostCommands(plan: LaunchPlan) {
         val metadata = plan.app.metadata
         val allowed = HostCommands.hostAllowed(metadata.sessionBusPolicy, metadata.context.sockets)
         hostCommandsDir.mkdirs()
         for ((name, text) in listOf(HostCommands.FLATPAK_SPAWN to HostCommands.flatpakSpawn(allowed), HostCommands.HOST_SPAWN to HostCommands.hostSpawn(allowed))) {
             File(hostCommandsDir, name).apply { writeTextAtomically(text, durable = false) }.setExecutable(true, false)
+        }
+        plan.zypakStandIn?.let { text ->
+            File(hostCommandsDir, ZYPAK).apply { writeTextAtomically(text, durable = false) }.setExecutable(true, false)
         }
     }
 
@@ -795,6 +801,7 @@ class FlatpakLauncher(private val context: Context) {
             desktopConfig = desktopDir,
             userDirs = File(etcDir, USER_DIRS),
             hostCommands = hostCommandsDir,
+            zypakStandIn = File(hostCommandsDir, ZYPAK),
             sdcard = SharedHome.storageRoot().takeIf { settings.sdcard && settings.homeMode != HomeMode.ANDROID && SharedHome.broadAccess(context) },
             sessionBus = busProxyDir,
             // Under the app's cache, so clearing caches drops it (fontconfig then regenerates it).
@@ -1073,6 +1080,8 @@ class FlatpakLauncher(private val context: Context) {
         const val HELPERS_POLL_MS = 50L
         const val AUDIO_TIMEOUT_MS = 10_000L
         const val BUS_TIMEOUT_MS = 10_000L
+        /** Flatdroid's zypak, beside the "run on the host" stand-ins. */
+        private const val ZYPAK = "zypak"
         const val CAMERA_TIMEOUT_MS = 20_000L
         const val HELPER_CHECK_MS = 250L
         const val DEFAULT_OUTPUT_RATE = 48_000

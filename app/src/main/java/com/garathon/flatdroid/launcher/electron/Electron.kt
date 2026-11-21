@@ -8,8 +8,10 @@ import com.garathon.flatdroid.util.WHITESPACE
 /**
  * Electron apps on Flathub start through zypak (a Chromium sandbox helper that needs Flatpak's
  * sandbox), and some Chromium browsers through cobalt, which asks Flatpak's portal before
- * handing the browser to zypak. The launcher skips both and runs the binary itself, with
- * Chromium's sandboxes and GPU off.
+ * handing the browser to zypak. Where the app has zypak in `/app/bin`, Flatdroid's own stand-in
+ * ([zypakStandIn]) is bound over it and the app starts through its own command, so its launch
+ * script still sets things up; otherwise, and for cobalt, the launcher runs the binary itself.
+ * Either way Chromium's sandboxes and GPU are off.
  */
 object Electron {
     /** Works for Electron 9 (Homestuck). */
@@ -38,6 +40,70 @@ object Electron {
 
     /** zypak's entry points: the wrapper script, and its helper, which IDE wrappers call directly. */
     private val ZYPAK = listOf("zypak-wrapper", "zypak-helper")
+
+    /** zypak's files in `/app/bin` the stand-in is bound over (`zypak-wrapper` is a link to the script). */
+    val ZYPAK_FILES = listOf("zypak-wrapper.sh", "zypak-wrapper", "zypak-helper")
+
+    /**
+     * Flatdroid's zypak, bound over each of [ZYPAK_FILES]: starts the binary it is handed with
+     * [flags] before the app's own arguments, without zypak's sandbox. Takes zypak's forms:
+     * `zypak-wrapper[.sh] <binary> [args]` and `zypak-helper host|child [descriptors] - <binary> [args]`
+     * (a child is started as it is), `host-latest`/`exec-latest <binary> [args]`, `version`;
+     * `spawn-strategy-test` says no. Electron run as Node (`ELECTRON_RUN_AS_NODE`, VS Code's
+     * `cli.js`, which starts the window itself with its own arguments) gets [nodeFlags] after the
+     * script instead: Node refuses them before it, and the script passes them on to the window.
+     * That window's output is the script's to keep or drop (VS Code's drops it), so a failure
+     * Flatdroid would relaunch for can't be seen: [nodeFlags] are the newer Electron's from the start.
+     */
+    fun zypakStandIn(flags: List<String>, nodeFlags: List<String> = flags): String {
+        require((flags + nodeFlags).all { FLAG.matches(it) }) { "Unusable flag in $flags $nodeFlags" }
+        val quoted = flags.joinToString(" ") { "'$it'" }
+        val nodeQuoted = nodeFlags.joinToString(" ") { "'$it'" }
+        return """
+            |#!/bin/sh
+            |# Flatdroid's zypak: starts the binary itself, without zypak's sandbox.
+            |me=${'$'}{0##*/}
+            |case ${'$'}me in
+            |  zypak-helper*)
+            |    mode=${'$'}{1-}
+            |    [ ${'$'}# -gt 0 ] && shift
+            |    case ${'$'}mode in
+            |      version) echo "Zypak (Flatdroid's stand-in)"; exit 0;;
+            |      spawn-strategy-test) exit 1;;
+            |      host|child)
+            |        while [ ${'$'}# -gt 0 ] && [ "${'$'}1" != - ]; do shift; done
+            |        [ ${'$'}# -gt 0 ] || { echo "zypak-helper: FD map ended too soon" >&2; exit 1; }
+            |        shift
+            |        if [ "${'$'}mode" = child ]; then
+            |          [ ${'$'}# -gt 0 ] || { echo "zypak-helper: Expected a command" >&2; exit 1; }
+            |          exec "${'$'}@"
+            |        fi;;
+            |      host-latest|exec-latest) ;;
+            |      *) echo "zypak-helper: Invalid mode: ${'$'}mode" >&2; exit 1;;
+            |    esac;;
+            |esac
+            |[ ${'$'}# -gt 0 ] || { echo "${'$'}me: Expected a command" >&2; exit 1; }
+            |binary=${'$'}1
+            |shift
+            |if [ -n "${'$'}{ELECTRON_RUN_AS_NODE-}" ]; then
+            |  # After the script, the first argument not starting with '-' (none: Node's prompt, no flags).
+            |  n=${'$'}# placed=0
+            |  while [ "${'$'}n" -gt 0 ]; do
+            |    a=${'$'}1
+            |    shift
+            |    n=${'$'}((n - 1))
+            |    set -- "${'$'}@" "${'$'}a"
+            |    if [ "${'$'}placed" = 0 ]; then
+            |      case ${'$'}a in -*) ;; *) set -- "${'$'}@" $nodeQuoted; placed=1;; esac
+            |    fi
+            |  done
+            |  exec "${'$'}binary" "${'$'}@"
+            |fi
+            |exec "${'$'}binary" $quoted "${'$'}@"
+            |""".trimMargin()
+    }
+
+    private val FLAG = Regex("--[a-z0-9-]+(=[A-Za-z0-9_,.-]*)?")
     private const val COBALT = "cobalt"
 
     /**
