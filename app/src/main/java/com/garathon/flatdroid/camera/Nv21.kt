@@ -4,9 +4,10 @@ import java.nio.ByteBuffer
 
 /**
  * Packs a camera image's YUV 4:2:0 planes into NV21: the Y plane, then V and U interleaved, the
- * format Android's JPEG encoder ([android.graphics.YuvImage]) takes. Android's cameras mostly give
- * interleaved chroma ([Order.VU] as NV21 or [Order.UV] as NV12 in memory), whose rows are copied
- * whole; planar chroma is interleaved here.
+ * format Android's JPEG encoder ([android.graphics.YuvImage]) takes; or into NV12 (U before V), the
+ * raw format apps take. Android's cameras mostly give interleaved chroma ([Order.VU] as NV21 or
+ * [Order.UV] as NV12 in memory), whose rows are copied whole; planar chroma is interleaved here.
+ * The turn ([rotate]) moves chroma pairs whole, so it serves both.
  */
 object Nv21 {
     /** How the U and V planes of a pixel stride of 2 lie in memory. */
@@ -45,14 +46,15 @@ object Nv21 {
     }
 
     /**
-     * Writes [width]×[height] NV21 into [out] ([bytes] long). [order] is [Nv21.order]'s answer
-     * for a pixel stride of 2; [row] is scratch space of at least [width] bytes.
+     * Writes [width]×[height] NV21 (or NV12 with [into] [Order.UV]) into [out] ([bytes] long).
+     * [order] is [Nv21.order]'s answer for a pixel stride of 2; [row] is scratch space of at least
+     * [width] bytes.
      */
     fun pack(
         width: Int, height: Int,
         y: ByteBuffer, yRowStride: Int,
         u: ByteBuffer, v: ByteBuffer, uvRowStride: Int, uvPixelStride: Int, order: Order?,
-        out: ByteArray, row: ByteArray,
+        out: ByteArray, row: ByteArray, into: Order = Order.VU,
     ) {
         for (r in 0 until height) {
             y.position(r * yRowStride)
@@ -72,7 +74,7 @@ object Nv21 {
                     first.position(start)
                     first.get(out, base, n)
                     if (n < width) out[base + width - 1] = second.get(start + 2 * (half - 1))
-                    if (order == Order.UV) {
+                    if (order != into) {
                         for (i in base until base + width step 2) {
                             val swap = out[i]
                             out[i] = out[i + 1]
@@ -81,16 +83,20 @@ object Nv21 {
                     }
                 }
                 uvPixelStride == 1 -> {
-                    v.position(start)
-                    v.get(row, 0, half)
+                    val (first, second) = if (into == Order.VU) v to u else u to v
+                    first.position(start)
+                    first.get(row, 0, half)
                     for (c in 0 until half) out[base + 2 * c] = row[c]
-                    u.position(start)
-                    u.get(row, 0, half)
+                    second.position(start)
+                    second.get(row, 0, half)
                     for (c in 0 until half) out[base + 2 * c + 1] = row[c]
                 }
-                else -> for (c in 0 until half) {
-                    out[base + 2 * c] = v.get(start + c * uvPixelStride)
-                    out[base + 2 * c + 1] = u.get(start + c * uvPixelStride)
+                else -> {
+                    val (first, second) = if (into == Order.VU) v to u else u to v
+                    for (c in 0 until half) {
+                        out[base + 2 * c] = first.get(start + c * uvPixelStride)
+                        out[base + 2 * c + 1] = second.get(start + c * uvPixelStride)
+                    }
                 }
             }
         }

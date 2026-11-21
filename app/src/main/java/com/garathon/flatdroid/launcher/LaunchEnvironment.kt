@@ -37,6 +37,8 @@ object LaunchEnvironment {
         wayland: Boolean = false,
         /** GTK 4 and Qt Quick draw on the CPU instead of through GL ([Rendering]). */
         softwareRendering: Boolean = true,
+        /** Whether the runtime has a folder at a `/usr` path ([multiarchPaths]). */
+        usrHas: (String) -> Boolean = { false },
     ): LinkedHashMap<String, String> {
         val varApp = "${GuestPaths.HOME}/.var/app/$appId"
         val env = linkedMapOf(
@@ -99,7 +101,7 @@ object LaunchEnvironment {
         if (kdePlatformTheme) env["QT_QPA_PLATFORMTHEME"] = "kde"
         if (sessionBus) env["DBUS_SESSION_BUS_ADDRESS"] = "unix:path=${GuestPaths.SESSION_BUS_DIR}/${GuestPaths.SESSION_BUS_SOCKET}"
         for ((key, value) in metadataEnvironment) {
-            if (key != "LD_LIBRARY_PATH" && isName(key)) env[key] = value
+            if (key != "LD_LIBRARY_PATH" && isName(key)) env[key] = if (key in PLUGIN_PATHS) multiarchPaths(value, triplet, usrHas) else value
         }
         val gl = glDefault?.let { "/usr/${it.trim('/')}" }
         val ldPath = listOfNotNull(metadataEnvironment["LD_LIBRARY_PATH"]?.takeIf { it.isNotEmpty() }) +
@@ -113,6 +115,22 @@ object LaunchEnvironment {
         for ((key, value) in overrides) if (isName(key)) env[key] = value
         return env
     }
+
+    /**
+     * [value] (a colon-separated list of folders) with each `/usr/lib/<name>` the runtime lacks
+     * replaced by `/usr/lib/<triplet>/<name>` where the runtime has that instead ([usrHas]): runtimes
+     * keep their libraries' plugins in the multiarch folder, and an app naming the other finds none.
+     */
+    fun multiarchPaths(value: String, triplet: String, usrHas: (String) -> Boolean): String = value.split(':').joinToString(":") { entry ->
+        val folder = entry.trimEnd('/')
+        val name = folder.removePrefix("/usr/lib/")
+        val multiarch = "/usr/lib/$triplet/$name"
+        val candidate = name != folder && name.isNotEmpty() && !name.startsWith("$triplet/") && ".." !in name.split('/')
+        if (candidate && !usrHas(folder) && usrHas(multiarch)) multiarch else entry
+    }
+
+    /** GStreamer's plugin folders, which [multiarchPaths] corrects. */
+    private val PLUGIN_PATHS = setOf("GST_PLUGIN_SYSTEM_PATH", "GST_PLUGIN_SYSTEM_PATH_1_0", "GST_PLUGIN_PATH", "GST_PLUGIN_PATH_1_0")
 
     /** Variables only X11 sessions use, left out of Wayland ones. */
     private val X11_ONLY = listOf("QT_X11_NO_MITSHM", "QT_XCB_GL_INTEGRATION", "SDL_VIDEO_X11_FORCE_EGL")

@@ -97,4 +97,22 @@ class LaunchEnvironmentTest {
         assertEquals(LaunchEnvironment.GENERIC_LOCALE, LaunchEnvironment.locale(listOf("ja-JP"), available))
         assertEquals(LaunchEnvironment.GENERIC_LOCALE, LaunchEnvironment.locale(emptyList(), available))
     }
+
+    @Test
+    fun pluginFoldersTheRuntimeLacksMoveToTheMultiarchOne() {
+        val runtime = setOf("/usr/lib/aarch64-linux-gnu/gstreamer-1.0", "/usr/lib/girepository-1.0", "/usr/lib/aarch64-linux-gnu/girepository-1.0")
+        val env = LaunchEnvironment.build(
+            "org.kde.kamoso", "aarch64-linux-gnu",
+            mapOf(
+                "GST_PLUGIN_SYSTEM_PATH" to "/app/lib/gstreamer-1.0/:/usr/lib/gstreamer-1.0/",
+                "GST_PLUGIN_PATH" to "/usr/lib/girepository-1.0:/usr/lib/../lib/gstreamer-1.0:/usr/lib/aarch64-linux-gnu/gstreamer-1.0",
+                "OTHER_PATH" to "/usr/lib/gstreamer-1.0",
+            ),
+            glDefault = null, usrHas = { it in runtime },
+        )
+        assertEquals("/app/lib/gstreamer-1.0/:/usr/lib/aarch64-linux-gnu/gstreamer-1.0", env["GST_PLUGIN_SYSTEM_PATH"])
+        // Folders the runtime has, or that leave /usr/lib, stay as they are; other variables aren't touched.
+        assertEquals("/usr/lib/girepository-1.0:/usr/lib/../lib/gstreamer-1.0:/usr/lib/aarch64-linux-gnu/gstreamer-1.0", env["GST_PLUGIN_PATH"])
+        assertEquals("/usr/lib/gstreamer-1.0", env["OTHER_PATH"])
+    }
 }

@@ -16,13 +16,15 @@ import java.util.concurrent.TimeUnit
  * The cameras of one session whose camera setting is on: the [streamers] (one per node, by node
  * name), and the [events] pipe the camera's helpers write links and readiness to ([CameraScript]).
  * The pipe sits among the nodes' pipes, in a folder only the camera's helpers have, never in the
- * app's root. An app linked to any node uses the camera: the user is asked ([UseQuestion]) unless
+ * app's root. In device mode ([events] null) there are no helpers: each streamer tells from its
+ * device's pipe whether the app reads it. An app linked to any node (reading any device) uses the
+ * camera: the user is asked ([UseQuestion]) unless
  * [alwaysAllowed]; one answer holds for every camera until the app ends. [initialAnswer] is the
  * answer when the user was asked before the launch (notifications off).
  */
 class CameraSession(
     private val streamers: Map<String, CameraStreamer>,
-    private val events: File,
+    private val events: File?,
     alwaysAllowed: Boolean,
     initialAnswer: Boolean? = null,
 ) {
@@ -31,12 +33,16 @@ class CameraSession(
     }
     private val links = HashMap<String, Int>()
     private val ready = CountDownLatch(1)
-    private val reader = Thread(::read, "camera-events").apply { isDaemon = true }
+    private val reader = events?.let { Thread({ read(it) }, "camera-events").apply { isDaemon = true } }
     @Volatile private var closed = false
 
-    /** Before the camera's helpers start: the reader waits for them to open the pipe. */
+    init {
+        for ((node, streamer) in streamers) if (events == null) streamer.onUsers = { count -> linked(node, count) }
+    }
+
+    /** Before the camera's helpers start: the reader waits for them to open the pipe. In device mode the cameras are ready at once. */
     fun start() {
-        reader.start()
+        reader?.start() ?: ready.countDown()
         streamers.values.forEach { it.open() }
     }
 
@@ -48,12 +54,12 @@ class CameraSession(
         closed = true
         question.stop()
         // A reader still waiting for the helpers to open the pipe (they never got there) stops waiting.
-        runCatching { Os.close(Os.open(events.path, OsConstants.O_WRONLY or OsConstants.O_NONBLOCK, 0)) }
-        reader.join(CLOSE_WAIT_MS)
+        events?.let { pipe -> runCatching { Os.close(Os.open(pipe.path, OsConstants.O_WRONLY or OsConstants.O_NONBLOCK, 0)) } }
+        reader?.join(CLOSE_WAIT_MS)
         streamers.values.forEach { it.close() }
     }
 
-    private fun read() {
+    private fun read(events: File) {
         try {
             FileInputStream(events).use { input ->
                 val line = StringBuilder()
@@ -80,6 +86,12 @@ class CameraSession(
     private fun onLine(line: String) {
         if (line == CameraScript.READY) return ready.countDown()
         val (node, count) = CameraScript.users(line) ?: return
+        linked(node, count)
+    }
+
+    /** [count] apps are linked to [node] (in device mode: read it, 1 or 0). From the reader, or each streamer's thread. */
+    @Synchronized
+    private fun linked(node: String, count: Int) {
         val streamer = streamers[node] ?: return
         links[node] = count
         // The answer first, so a camera allowed already starts as the app links, without a black frame between.

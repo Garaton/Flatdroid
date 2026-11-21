@@ -41,6 +41,10 @@ class CameraScriptTest {
             "--flatdroid-frame\r\nContent-Type: image/jpeg\r\nContent-Length: 1234\r\n\r\n",
             String(CameraScript.frameHeader(1234)),
         )
+        assertEquals(
+            "--flatdroid-frame\r\nContent-Type: video/nv12\r\nContent-Length: 9\r\n\r\n",
+            String(CameraScript.frameHeader(9, "video/nv12")),
+        )
         assertEquals("\r\n", String(CameraScript.FRAME_END))
     }
 

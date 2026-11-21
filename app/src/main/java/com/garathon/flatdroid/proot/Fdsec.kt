@@ -14,12 +14,13 @@ object Fdsec {
     const val LIBRARY = "libfdsec.so"
 
     /**
-     * Where fdsec is bound in a Flatpak's root, and in Alpine's. It is the only file Flatdroid
-     * binds into a Flatpak's root that isn't the app's own data or regenerated every launch, and
-     * its source is read-only to the app (nativeLibraryDir, owned by system), so a Flatpak can't
-     * modify it. It has to run inside the root, before the app, because the seccomp filter lives
-     * on the process that becomes the app; proot itself can't carry the filter (it needs ptrace
-     * and process_vm_*, which the filter blocks). `/.flatdroid/` holds nothing else.
+     * Where fdsec is bound in a Flatpak's root, and in Alpine's. With the camera's library in
+     * device mode ([Fdv4l2]), it is the only file Flatdroid binds into a Flatpak's root that isn't
+     * the app's own data or regenerated every launch, and its source is read-only to the app
+     * (nativeLibraryDir, owned by system), so a Flatpak can't modify it. It has to run inside the
+     * root, before the app, because the seccomp filter lives on the process that becomes the app;
+     * proot itself can't carry the filter (it needs ptrace and process_vm_*, which the filter
+     * blocks). `/.flatdroid/` holds nothing else but that library and its cameras list.
      */
     const val APP_PATH = "/.flatdroid/fdsec"
     const val ALPINE_PATH = "/run/flatdroid/fdsec"

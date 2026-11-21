@@ -27,10 +27,27 @@ class Nv21Test {
         return if (vFirst) second to first else first to second
     }
 
-    private fun pack(u: ByteBuffer, v: ByteBuffer, pixelStride: Int, order: Nv21.Order?): ByteArray {
+    private fun pack(u: ByteBuffer, v: ByteBuffer, pixelStride: Int, order: Nv21.Order?, into: Nv21.Order = Nv21.Order.VU): ByteArray {
         val out = ByteArray(Nv21.bytes(width, height))
-        Nv21.pack(width, height, yPlane(), stride, u, v, stride, pixelStride, order, out, ByteArray(width))
+        Nv21.pack(width, height, yPlane(), stride, u, v, stride, pixelStride, order, out, ByteArray(width), into)
         return out
+    }
+
+    /** What apps that take NV12 get: U before V. */
+    private val expectedNv12 = byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8, 101, -55, 102, -54)
+
+    @Test
+    fun nv12ComesOutOfEveryLayout() {
+        val (u12, v12) = interleaved(vFirst = false)
+        assertArrayEquals(expectedNv12, pack(u12, v12, 2, Nv21.Order.UV, into = Nv21.Order.UV))
+        val (u21, v21) = interleaved(vFirst = true)
+        assertArrayEquals(expectedNv12, pack(u21, v21, 2, Nv21.Order.VU, into = Nv21.Order.UV))
+        // Planar chroma, and the slow path for any other stride.
+        val planarU = ByteBuffer.wrap(byteArrayOf(101, 102, 0, 0, 0, 0))
+        val planarV = ByteBuffer.wrap(byteArrayOf(201.toByte(), 202.toByte(), 0, 0, 0, 0))
+        assertArrayEquals(expectedNv12, pack(planarU, planarV, 1, null, into = Nv21.Order.UV))
+        val (u, v) = interleaved(vFirst = false)
+        assertArrayEquals(expectedNv12, pack(u, v, 2, null, into = Nv21.Order.UV))
     }
 
     @Test

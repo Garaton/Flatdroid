@@ -294,6 +294,7 @@ class LaunchPlanner(
             flatpakContainer = options.flatpakInfo,
             wayland = wayland,
             softwareRendering = options.softwareRendering,
+            usrHas = { path -> path.startsWith("/usr/") && File(runtime.files, path.removePrefix("/usr/")).isDirectory },
         )
         val devices = app.metadata.context.devices
         val binds = FlatpakBinds(

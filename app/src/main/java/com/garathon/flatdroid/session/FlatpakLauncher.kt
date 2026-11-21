@@ -11,6 +11,7 @@ import android.os.SystemClock
 import android.system.Os
 import android.view.Display
 import android.view.Surface
+import com.garathon.flatdroid.BuildConfig
 import com.garathon.flatdroid.R
 import com.garathon.flatdroid.alpine.AlpineEnvironment
 import com.garathon.flatdroid.alpine.dns.ResolvConfRefresher
@@ -51,6 +52,8 @@ import com.garathon.flatdroid.flatpak.InstalledApps
 import com.garathon.flatdroid.proot.AlpineBinds
 import com.garathon.flatdroid.proot.DevNodes
 import com.garathon.flatdroid.proot.Fdsec
+import com.garathon.flatdroid.proot.Fdv4l2
+import com.garathon.flatdroid.proot.FlatpakBinds
 import com.garathon.flatdroid.proot.hostOf
 import com.garathon.flatdroid.proot.GuestPaths
 import com.garathon.flatdroid.proot.processes.HelperProcesses
@@ -119,6 +122,11 @@ class FlatpakLauncher(private val context: Context) {
     private val pipewireDir = File(sessionDir, "pipewire")
     private val cameraPipeDir = File(sessionDir, "camera")
     private val cameraConfigDir = File(sessionDir, "camera-config")
+    /** Device mode: the cameras' pipes, each bound at its /dev/video* in the app's root, and their list ([Fdv4l2]). */
+    private val videoDir = File(sessionDir, "video")
+    private val cameraList = File(sessionDir, "cameras")
+    /** Device mode: the cameras' `/sys` and udev entries ([Fdv4l2.tree]). */
+    private val cameraSysDir = File(sessionDir, "camera-sys")
     /** Bound over the helpers' /proc entries in the app's root, when they are hidden. */
     private val emptyDir = File(sessionDir, "empty")
 
@@ -241,6 +249,19 @@ class FlatpakLauncher(private val context: Context) {
         val displayRotation = displayRotation(landscape = screenWidth > screenHeight)
         val cameraRotations = cameras.map { it.rotation(displayRotation) }
         val cameraNodes = cameraNodes(cameras, cameraRotations)
+        // Device mode (a /dev/video* per camera, no PipeWire) for an app whose metadata asks for all
+        // devices, which is what Flatpak itself requires for /dev/video*; the camera portal for the rest.
+        val cameraDevices = cameraNodes.isNotEmpty() && DevNodes.ALL in appContext.devices
+        val portalNodes = if (cameraDevices) emptyList() else cameraNodes
+        val deviceList = if (!cameraDevices) emptyList() else cameraNodes.mapIndexed { index, node ->
+            Fdv4l2.Device(index, node.width, node.height, node.frameRate, node.description, front = node.location == CameraScript.Location.FRONT)
+        }
+        // With the whole of /sys, Android's classes stay readable by path from the cameras' /sys/class.
+        val androidClasses = if (deviceList.isNotEmpty() && plan.binds.sys == null) Fdv4l2.KNOWN_CLASSES.filter { File("/sys/class/$it").exists() } else emptyList()
+        val cameraBinds = cameraBinds(deviceList, androidClasses.isNotEmpty())
+        if (cameraDevices) {
+            SessionController.log("[flatdroid] camera in device mode: " + cameraNodes.indices.joinToString { "${Fdv4l2.devicePath(it)} (${cameraNodes[it].description})" })
+        }
         val outputRate = outputRate()
         val micRate = MicStreamer.rate()
         writeSessionFiles(
@@ -248,11 +269,14 @@ class FlatpakLauncher(private val context: Context) {
             darkDecorations = isDarkTheme(userSettings),
             pulseScript = if (audio) PulseScript.text(outputRate, microphone, micRate) else null,
             busArgs = SessionBus.proxyArgs(
-                appId, plan.app.metadata.sessionBusPolicy, camera = cameraNodes.isNotEmpty(),
+                appId, plan.app.metadata.sessionBusPolicy, camera = portalNodes.isNotEmpty(),
                 wholeBus = SessionBus.WHOLE_BUS in plan.app.metadata.context.sockets,
             ),
-            cameraNodes = cameraNodes,
+            cameraNodes = portalNodes,
+            cameraDevices = deviceList,
+            androidClasses = androidClasses,
         )
+        createCameraMountPoints(plan.binds.copy(cameraBinds = cameraBinds))
         // After both, which create the directories it checks: they live in the work folder, which a start of Flatdroid empties, or in the cache, which Android may
         // clear at any time, and a fresh install has none yet.
         checkBindSources(plan)
@@ -282,7 +306,7 @@ class FlatpakLauncher(private val context: Context) {
             val helpers = startHelpers(
                 SessionScript.command(
                     "${screenWidth}x$screenHeight", frameRate, audio, resampler, sessionBus = true,
-                    camera = cameraNodes.isNotEmpty(), clipboard = settings.sharesClipboard, wayland = plan.wayland,
+                    camera = portalNodes.isNotEmpty(), clipboard = settings.sharesClipboard, wayland = plan.wayland,
                     externalViewer = externalViewer, interfaceSize = settings.interfaceSize,
                     memfd = SessionScript.kernelHasMemfd(Os.uname().release),
                 ),
@@ -294,12 +318,20 @@ class FlatpakLauncher(private val context: Context) {
             }
             helpersProot = helpers
             for (index in cameraNodes.indices) {
-                streamers[cameraNodes[index].name] =
-                    CameraStreamer(context, cameras[index], File(cameraPipeDir, cameraNodes[index].name), cameraRotations[index])
+                val pipe = if (cameraDevices) File(videoDir, "video$index") else File(cameraPipeDir, cameraNodes[index].name)
+                streamers[cameraNodes[index].name] = CameraStreamer(
+                    context, cameras[index], pipe, cameraRotations[index],
+                    deviceMode = cameraDevices, control = File(videoDir, "control$index").takeIf { cameraDevices },
+                )
             }
-            if (streamers.isNotEmpty()) camera = CameraSession(streamers, File(cameraPipeDir, CameraScript.EVENTS), cameraAlways, answers[Sensor.CAMERA])
-            // The app's display turned with the phone: the pictures turn with it, staying upright.
-            if (streamers.isNotEmpty()) SessionController.onDisplayResized = { width, height ->
+            if (streamers.isNotEmpty()) {
+                camera = CameraSession(streamers, if (cameraDevices) null else File(cameraPipeDir, CameraScript.EVENTS), cameraAlways, answers[Sensor.CAMERA])
+                // Device mode needs no helpers: its frames wait for the app from now.
+                if (cameraDevices) camera.start()
+            }
+            // The app's display turned with the phone: the pictures turn with it, staying upright. Not
+            // in device mode, where the app fixed the size when it started streaming.
+            if (portalNodes.isNotEmpty()) SessionController.onDisplayResized = { width, height ->
                 val rotation = displayRotation(landscape = width > height)
                 cameraNodes.forEachIndexed { index, node -> streamers[node.name]?.turn(cameras[index].rotation(rotation)) }
             }
@@ -318,12 +350,12 @@ class FlatpakLauncher(private val context: Context) {
                 // Before the camera's portal, which asks Flatdroid for the settings, and before the app.
                 portal = SessionPortal.open(
                     context, File(busDaemonDir, SessionBus.SOCKET),
-                    role = if (streamers.isNotEmpty()) Portal.Role.BACKEND else Portal.Role.PORTAL,
+                    role = if (portalNodes.isNotEmpty()) Portal.Role.BACKEND else Portal.Role.PORTAL,
                     appNetwork = settings.networkAllowed(appContext.shared), user = userSettings,
                     hostPath = plan.binds::hostOf, keepScreenOn = SessionController::keepScreenOn,
                     log = SessionController::log,
                 )
-                camera?.let {
+                camera?.takeIf { portalNodes.isNotEmpty() }?.let {
                     cameraHelpers = startCamera(helpers, it, Fdsec.Filter(extraSyscalls = security.extraSyscallFilter, noInternet = true), filterRefused)
                 }
             }
@@ -343,12 +375,18 @@ class FlatpakLauncher(private val context: Context) {
             val hidden = if (security.hideHelperProcesses) HelperProcesses.procPaths(ProotRunner.runningPids()) else emptyList()
             // /proc entries Android doesn't let apps read, where Flatdroid knows the real value (the kernel's version, say).
             val procStandIns = env.realProcStandIns()
-            fun hideHelpers(plan: LaunchPlan) = plan.copy(
-                binds = plan.binds.copy(fakeProc = procStandIns).let { binds ->
+            // Device mode: the cameras' devices, and the library that answers on them, preloaded first.
+            fun forSession(plan: LaunchPlan) = plan.copy(
+                binds = plan.binds.copy(
+                    fakeProc = procStandIns,
+                    cameraBinds = cameraBinds,
+                ).let { binds ->
                     if (hidden.isEmpty()) binds else binds.copy(hiddenProc = hidden, emptyDir = emptyDir.path)
                 },
+                environment = if (cameraBinds.isEmpty()) plan.environment
+                    else plan.environment + Fdv4l2.ENVIRONMENT + (PRELOAD to Fdv4l2.preload(plan.environment[PRELOAD])),
             )
-            plan = hideHelpers(plan)
+            plan = forSession(plan)
             SessionController.log("[flatdroid] " + describeFilter(plan.filter, hidden.size))
             var triedNewerFlags = false
             var triedWithoutFlatpakInfo = false
@@ -406,7 +444,7 @@ class FlatpakLauncher(private val context: Context) {
                     store.update { it.copy(newerElectronFlags = true) }
                     SessionController.log("[flatdroid] relaunching with ${Electron.NEWER_FLAGS.joinToString(" ")}")
                     SessionController.starting(appId, context.getString(R.string.session_relaunching_newer_flags))
-                    plan = (plan(appId, settings, userSettings) as? PlanResult.Ready)?.plan?.let(::hideHelpers)
+                    plan = (plan(appId, settings, userSettings) as? PlanResult.Ready)?.plan?.let(::forSession)
                         ?: throw LaunchException(context.getString(R.string.launch_app_changed))
                     // The app has run, so it may have replaced its own directories with links meanwhile.
                     prepareDirs(appId, plan)
@@ -424,7 +462,7 @@ class FlatpakLauncher(private val context: Context) {
                     if ((code != 0 || killedBySignal.get()) && !triedWithoutFlatpakInfo) {
                         triedWithoutFlatpakInfo = true
                         SessionController.starting(appId, context.getString(R.string.session_relaunching_without_flatpak_info))
-                        plan = (plan(appId, settings, userSettings) as? PlanResult.Ready)?.plan?.let(::hideHelpers)
+                        plan = (plan(appId, settings, userSettings) as? PlanResult.Ready)?.plan?.let(::forSession)
                             ?: throw LaunchException(context.getString(R.string.launch_app_changed))
                         prepareDirs(appId, plan)
                         writeHostCommands(plan)
@@ -820,6 +858,7 @@ class FlatpakLauncher(private val context: Context) {
             if (!guest.startsWith(GuestPaths.HOME + "/")) File(root, guest.removePrefix("/")).mkdirs()
         }
         if (!plan.binds.wholeDev) DevNodes.createMountPoints(root, plan.binds.dev)
+        createCameraMountPoints(plan.binds)
         val links = RootLayout.links(appId, plan.usrLinks, plan.binds.wholeDev)
         for ((path, target) in links) Os.symlink(target, File(root, path).apply { parentFile!!.mkdirs() }.path)
         plan.flatpakInfo?.let { File(root, ".flatpak-info").writeText(it) }
@@ -933,7 +972,8 @@ class FlatpakLauncher(private val context: Context) {
     private fun checkBindSources(plan: LaunchPlan) {
         val b = plan.binds
         val sources = listOfNotNull(b.root, b.runtimeFiles, b.appFiles, "${b.runtimeFiles}/etc", b.tmp, b.shm, b.x11Sockets, b.pulseSockets, b.waylandSockets, b.home, b.emptyDir, env.paths().l2sDir) +
-            b.etc.values + b.extensions.map { it.first } + b.appDirs.map { it.first } + b.privateFiles.map { it.first } + b.extra.map { it.first }
+            b.etc.values + b.extensions.map { it.first } + b.appDirs.map { it.first } + b.privateFiles.map { it.first } + b.extra.map { it.first } +
+            b.cameraBinds.map { it.first }
         for (path in sources) {
             val file = File(path)
             if (!file.exists() || file.canonicalPath != file.absolutePath) {
@@ -950,13 +990,14 @@ class FlatpakLauncher(private val context: Context) {
      */
     private fun writeSessionFiles(
         password: String?, wayvncLogin: Boolean, titleBars: Boolean, darkDecorations: Boolean, pulseScript: String?,
-        busArgs: List<String>, cameraNodes: List<CameraScript.Node>,
+        busArgs: List<String>, cameraNodes: List<CameraScript.Node>, cameraDevices: List<Fdv4l2.Device>,
+        androidClasses: List<String>,
     ) {
         val launcher = AppData.launcherFiles(context)
         launcher.write()
         File(etcDir, "machine-id").writeTextAtomically(launcher.machineId.readText(), durable = false)
         File(etcDir, "resolv.conf").writeTextAtomically(env.resolvConf(), durable = false)
-        for (dir in listOf(x11Dir, pulseDir, vncDir, waylandDir, busDaemonDir, busProxyDir, pipewireDir, cameraPipeDir, cameraConfigDir, emptyDir)) {
+        for (dir in listOf(x11Dir, pulseDir, vncDir, waylandDir, busDaemonDir, busProxyDir, pipewireDir, cameraPipeDir, cameraConfigDir, videoDir, cameraSysDir, emptyDir)) {
             AndroidTarFs.deleteTree(dir)
             dir.mkdirs()
         }
@@ -996,6 +1037,70 @@ class FlatpakLauncher(private val context: Context) {
             for (node in cameraNodes) Os.mkfifo(File(cameraPipeDir, node.name).path, 0x180) // 0600
             Os.mkfifo(File(cameraPipeDir, CameraScript.EVENTS).path, 0x180)
         }
+        if (cameraDevices.isEmpty()) {
+            cameraList.delete()
+        } else {
+            cameraList.writeTextAtomically(Fdv4l2.camerasList(cameraDevices, cameraFormats()), durable = false)
+            for (device in cameraDevices) {
+                for (name in listOf("video", "media", "control")) Os.mkfifo(File(videoDir, "$name${device.index}").path, 0x180)
+            }
+            for ((path, entry) in Fdv4l2.tree(cameraDevices, androidClasses)) {
+                val file = File(cameraSysDir, path)
+                file.parentFile!!.mkdirs()
+                when (entry) {
+                    Fdv4l2.Entry.Dir -> file.mkdirs()
+                    is Fdv4l2.Entry.Text -> file.writeText(entry.text)
+                    is Fdv4l2.Entry.Link -> Os.symlink(entry.target, file.path)
+                }
+            }
+        }
+    }
+
+    /**
+     * Device mode's binds for [devices] ([Fdv4l2]): each camera's video and media device and control
+     * pipe, the cameras list, and the `/sys` and udev entries, with Android's `/sys/class` beside
+     * the cameras' own for [androidClasses]; none without devices.
+     */
+    private fun cameraBinds(devices: List<Fdv4l2.Device>, androidClasses: Boolean): List<Pair<String, String>> {
+        if (devices.isEmpty()) return emptyList()
+        return devices.flatMap { device ->
+            val i = device.index
+            listOf(
+                File(videoDir, "video$i").path to Fdv4l2.devicePath(i),
+                File(videoDir, "media$i").path to Fdv4l2.mediaPath(i),
+                File(videoDir, "control$i").path to Fdv4l2.controlPath(i),
+            )
+        } + (cameraList.path to Fdv4l2.CAMERAS_PATH) +
+            (Fdv4l2.TREE_BINDS + Fdv4l2.charBinds(devices)).map { (relative, guest) -> File(cameraSysDir, relative).path to guest } +
+            listOfNotNull(("/sys/class" to Fdv4l2.ANDROID_CLASSES).takeIf { androidClasses })
+    }
+
+    /**
+     * Entries in the app's root where device mode binds, so apps listing a folder find them (proot
+     * lists only what is there): the devices in /dev, and the `/sys` folders while /sys is limited.
+     * With the whole of /dev or /sys, which come from Android, listing misses them (verify).
+     */
+    private fun createCameraMountPoints(binds: FlatpakBinds) {
+        val root = File(binds.root)
+        for ((_, guest) in binds.cameraBinds) {
+            val target = File(root, guest.removePrefix("/"))
+            when {
+                guest.startsWith("/dev/") -> if (!binds.wholeDev && !target.exists()) target.apply { parentFile?.mkdirs() }.createNewFile()
+                guest.startsWith("/sys/") -> if (binds.sys != null) target.mkdirs()
+                guest.startsWith("/run/") -> target.mkdirs()
+            }
+        }
+    }
+
+    /**
+     * The formats offered, in order: [Fdv4l2.DEFAULT_FORMATS]; debug builds read another order from
+     * `debug-camera-formats` in the cache (comma-separated, for measuring one format at a time).
+     */
+    private fun cameraFormats(): List<Fdv4l2.Format> {
+        if (!BuildConfig.DEBUG) return Fdv4l2.DEFAULT_FORMATS
+        val override = File(context.cacheDir, "debug-camera-formats").takeIf { it.isFile }?.readText()
+            ?.split(',')?.mapNotNull { Fdv4l2.Format.of(it.trim()) }?.takeIf { it.isNotEmpty() }
+        return override ?: Fdv4l2.DEFAULT_FORMATS
     }
 
     /**
@@ -1080,6 +1185,7 @@ class FlatpakLauncher(private val context: Context) {
         /** Flatdroid's zypak, beside the "run on the host" stand-ins. */
         private const val ZYPAK = "zypak"
         const val CAMERA_TIMEOUT_MS = 20_000L
+        const val PRELOAD = "LD_PRELOAD"
         const val HELPER_CHECK_MS = 250L
         const val DEFAULT_OUTPUT_RATE = 48_000
         const val USER_DIRS = "user-dirs.dirs"

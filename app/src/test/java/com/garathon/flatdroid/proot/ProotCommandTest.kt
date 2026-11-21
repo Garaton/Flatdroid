@@ -2,6 +2,7 @@ package com.garathon.flatdroid.proot
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -13,6 +14,7 @@ class ProotCommandTest {
         rootfs = "/files/alpine/rootfs",
         fdsec = "/lib/libfdsec.so",
         fdshm = "/lib/libfdshm.so",
+        fdv4l2 = "/lib/libfdv4l2.so",
     )
     private val binds = AlpineBinds(
         resolvConf = "/files/alpine/generated/resolv.conf",
@@ -218,6 +220,38 @@ class ProotCommandTest {
     fun theFilterRunsBeforeEnv() {
         val argv = ProotCommand.flatpak(paths, flatpakBinds, emptyMap(), listOf("/app/bin/x"), Fdsec.Filter(extraSyscalls = true, noInternet = true)).argv
         assertEquals(listOf("/.flatdroid/fdsec", "--extra", "--no-inet", "--", "/usr/bin/env", "/app/bin/x"), argv.takeLast(6))
+    }
+
+    @Test
+    fun cameraBindsComeAfterDevWithTheLibrary() {
+        val binds = flatpakBinds.copy(
+            wholeDev = true,
+            cameraBinds = listOf(
+                "/cache/session/video/video0" to "/dev/video0", "/cache/session/video/media0" to "/dev/media0",
+                "/cache/session/video/control0" to "/.flatdroid/video0.format", "/cache/session/cameras" to "/.flatdroid/cameras",
+                "/cache/session/camera-sys/devices" to "/sys/devices/flatdroid", "/cache/session/camera-sys/udev" to "/run/udev",
+                "/cache/session/camera-sys/char/media0" to "/sys/dev/char/238:0",
+            ),
+        )
+        val argv = ProotCommand.flatpak(paths, binds, emptyMap(), listOf("/app/bin/x"), Fdsec.Filter()).argv
+        val video = argv.indexOf("--bind=/cache/session/video/video0:/dev/video0")
+        assertTrue(video > argv.indexOf("--bind=/dev"))
+        assertEquals(
+            listOf("--bind=/lib/libfdv4l2.so:/.flatdroid/fdv4l2.so", "--bind=/lib/libfdsec.so:/.flatdroid/fdsec"),
+            argv.subList(video + 7, video + 9),
+        )
+        // None without cameras in device mode.
+        assertTrue(ProotCommand.flatpak(paths, flatpakBinds, emptyMap(), listOf("/app/bin/x"), Fdsec.Filter()).argv.none { "fdv4l2" in it || "/dev/video" in it })
+    }
+
+    @Test
+    fun cameraBindsGoOnlyWhereDeviceModeBindsAndComeWithTheirList() {
+        val list = "/cache/cameras" to "/.flatdroid/cameras"
+        for (guest in listOf("/dev/binder", "/sys/class/net", "/sys/dev/char", "/sys/subsystem", "/.flatdroid/fdsec", "/run/user", "/dev/video0/../binder")) {
+            assertThrows(guest, IllegalArgumentException::class.java) { flatpakBinds.copy(cameraBinds = listOf("/cache/v" to guest, list)) }
+        }
+        assertThrows(IllegalArgumentException::class.java) { flatpakBinds.copy(cameraBinds = listOf("/cache/v" to "/dev/video0")) }
+        flatpakBinds.copy(cameraBinds = listOf("/cache/v" to "/dev/video0", "/cache/m" to "/sys/dev/char/81:0", list))
     }
 
     @Test

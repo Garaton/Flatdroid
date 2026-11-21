@@ -15,12 +15,14 @@ data class ProotPaths(
     val fdsec: String,
     /** nativeLibraryDir/libfdshm.so ([Fdshm]). */
     val fdshm: String,
+    /** nativeLibraryDir/libfdv4l2.so ([Fdv4l2]). */
+    val fdv4l2: String,
 ) {
     /** link2symlink's backing files; Flatpak's hard links end up here. */
     val l2sDir: String get() = "$rootfs/.l2s"
 
     init {
-        for (path in listOf(proot, loader, tmpDir, rootfs, fdsec, fdshm)) {
+        for (path in listOf(proot, loader, tmpDir, rootfs, fdsec, fdshm, fdv4l2)) {
             require(path.startsWith("/") && ':' !in path) { "Unusable path: $path" }
         }
     }
@@ -111,10 +113,17 @@ data class FlatpakBinds(
     val fakeProc: Map<String, String> = emptyMap(),
     /** Further binds, last: host to guest path (e.g. a swapped-in Electron over its app directory). */
     val extra: List<Pair<String, String>> = emptyList(),
+    /**
+     * Cameras in device mode ([Fdv4l2]): each camera's video and media device and control pipe,
+     * the cameras list, and their `/sys` and udev entries, host to guest path; with any, the
+     * library is bound beside fdsec. Empty for none.
+     */
+    val cameraBinds: List<Pair<String, String>> = emptyList(),
 ) {
     init {
         val hosts = listOfNotNull(root, runtimeFiles, appFiles, tmp, shm, x11Sockets, pulseSockets, waylandSockets, home, emptyDir) +
-            etc.values + extensions.map { it.first } + appDirs.map { it.first } + privateFiles.map { it.first } + extra.map { it.first } + fakeProc.values
+            etc.values + extensions.map { it.first } + appDirs.map { it.first } + privateFiles.map { it.first } + extra.map { it.first } + fakeProc.values +
+            cameraBinds.map { it.first }
         for (path in hosts) require(path.startsWith("/") && ':' !in path) { "Unusable host path: $path" }
         val guests = extensions.map { it.second } + appDirs.map { it.second } + privateFiles.map { it.second } + extra.map { it.second }
         for (path in guests) require(path.startsWith("/") && ':' !in path) { "Unusable guest path: $path" }
@@ -124,10 +133,17 @@ data class FlatpakBinds(
         require(hiddenProc.all { HIDDEN_PROC.matches(it) }) { "Unusable /proc path: $hiddenProc" }
         require(hiddenProc.isEmpty() || emptyDir != null) { "Hidden /proc entries need an empty directory" }
         require(fakeProc.keys.all { it.startsWith("/proc/") && ':' !in it && ".." !in it.split('/') }) { "Unusable /proc path: ${fakeProc.keys}" }
+        require(cameraBinds.all { CAMERA_GUEST.matches(it.second) }) { "Unusable camera path: $cameraBinds" }
+        require(cameraBinds.isEmpty() || cameraBinds.any { it.second == Fdv4l2.CAMERAS_PATH }) { "Camera devices need their list" }
     }
 }
 
 private val HIDDEN_PROC = Regex("/proc/[0-9]+")
+/** Where device mode may bind: its devices, its list and control pipes, its `/sys` and udev entries. */
+private val CAMERA_GUEST = Regex(
+    "/dev/(video|media)[0-9]+|/\\.flatdroid/(cameras|video[0-9]+\\.format)|/sys/devices/flatdroid|/sys/class|/sys/class-android|" +
+        "/sys/bus/media|/sys/dev/char/[0-9]+:[0-9]+|/run/udev",
+)
 
 /**
  * The host path behind [guest] in the app's root, among the home and the binds over and beside it
@@ -317,6 +333,10 @@ object ProotCommand {
         for ((host, guest) in binds.appDirs) argv += "--bind=$host:$guest"
         for ((host, guest) in binds.privateFiles) argv += "--bind=$host:$guest"
         for ((host, guest) in binds.extra) argv += "--bind=$host:$guest"
+        if (binds.cameraBinds.isNotEmpty()) {
+            for ((host, guest) in binds.cameraBinds) argv += "--bind=$host:$guest"
+            argv += "--bind=${paths.fdv4l2}:${Fdv4l2.APP_PATH}"
+        }
         argv += "--bind=${paths.fdsec}:${Fdsec.APP_PATH}"
         argv += Fdsec.wrap(Fdsec.APP_PATH, filter, listOf("/usr/bin/env") + environment.map { (key, value) -> "$key=$value" } + command)
 

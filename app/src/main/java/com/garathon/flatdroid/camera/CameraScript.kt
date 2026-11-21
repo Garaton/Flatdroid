@@ -55,11 +55,14 @@ object CameraScript {
     fun nodeName(index: Int) = "flatdroid-camera-$index"
 
     /**
-     * What goes before each JPEG frame of [length] bytes in a pipe: a part of a multipart stream,
-     * as webcams send over HTTP, which the source splits again by its length.
+     * What goes before each frame of [length] bytes in a pipe: a part of a multipart stream, as
+     * webcams send over HTTP, which the source (or, in device mode, the V4L2 library) splits again
+     * by its length. [type]: JPEG, or in device mode also raw NV12 ([com.garathon.flatdroid.proot.Fdv4l2.Format]).
      */
-    fun frameHeader(length: Int): ByteArray =
-        "--$BOUNDARY\r\nContent-Type: image/jpeg\r\nContent-Length: $length\r\n\r\n".toByteArray()
+    fun frameHeader(length: Int, type: String = JPEG_TYPE): ByteArray =
+        "--$BOUNDARY\r\nContent-Type: $type\r\nContent-Length: $length\r\n\r\n".toByteArray()
+
+    const val JPEG_TYPE = "image/jpeg"
 
     /** What goes after each frame. */
     val FRAME_END = "\r\n".toByteArray()

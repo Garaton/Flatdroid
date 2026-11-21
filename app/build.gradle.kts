@@ -24,8 +24,8 @@ android {
         applicationId = "com.garathon.flatdroid"
         minSdk = 24
         targetSdk = 37
-        versionCode = 3
-        versionName = "0.8.1"
+        versionCode = 4
+        versionName = "0.9.0"
 
         buildConfigField("String", "ALPINE_BRANCH", "\"${alpine.getProperty("branch")}\"")
         buildConfigField("String", "ALPINE_VERSION", "\"${alpine.getProperty("version")}\"")
@@ -123,7 +123,7 @@ abstract class BuildProotTask @Inject constructor(private val exec: ExecOperatio
     }
 }
 
-/** Runs a native helper's build script (native/build-fdsec.sh, build-fdshm.sh) for one ABI; output is a jniLibs root (<dir>/<abi>/lib*.so). */
+/** Runs a native helper's build script (native/build-fdsec.sh, build-fdshm.sh, build-fdv4l2.sh) for one ABI; output is a jniLibs root (<dir>/<abi>/lib*.so). */
 abstract class BuildHelperTask @Inject constructor(private val exec: ExecOperations) : DefaultTask() {
     @get:Input abstract val abi: Property<String>
     @get:InputFile abstract val script: RegularFileProperty
@@ -171,6 +171,16 @@ val fdviewTasks = architectures.keys.associateWith { abi ->
     }
 }
 
+val fdv4l2Tasks = architectures.keys.associateWith { abi ->
+    tasks.register<BuildHelperTask>("buildFdv4l2_$abi") {
+        this.abi = abi
+        script = rootProject.file("native/build-fdv4l2.sh")
+        source = rootProject.file("native/fdv4l2.c")
+        ndkDirectory = androidComponents.sdkComponents.ndkDirectory
+        outputDirectory = layout.buildDirectory.dir("generated/fdv4l2/$abi")
+    }
+}
+
 val prootTasks = architectures.keys.associateWith { abi ->
     tasks.register<BuildProotTask>("buildProot_$abi") {
         this.abi = abi
@@ -200,6 +210,7 @@ androidComponents {
             variant.sources.jniLibs?.addGeneratedSourceDirectory(fdsecTasks.getValue(abi), BuildHelperTask::outputDirectory)
             variant.sources.jniLibs?.addGeneratedSourceDirectory(fdshmTasks.getValue(abi), BuildHelperTask::outputDirectory)
             variant.sources.jniLibs?.addGeneratedSourceDirectory(fdviewTasks.getValue(abi), BuildHelperTask::outputDirectory)
+            variant.sources.jniLibs?.addGeneratedSourceDirectory(fdv4l2Tasks.getValue(abi), BuildHelperTask::outputDirectory)
         }
     }
 }
