@@ -97,6 +97,15 @@ class SessionBusTest {
     }
 
     @Test
+    fun theCameraPortalReachesFlatdroidOnlyWhenWatched() {
+        val camera = "--call=org.freedesktop.portal.Desktop=org.freedesktop.portal.Camera.*@/org/freedesktop/portal/desktop"
+        assertFalse(camera in SessionBus.proxyArgs("org.example.App", emptyMap(), camera = false))
+        assertTrue(camera in SessionBus.proxyArgs("org.example.App", emptyMap(), camera = false, watchCamera = true))
+        // With the real portal, once.
+        assertEquals(1, SessionBus.proxyArgs("org.example.App", emptyMap(), camera = true, watchCamera = true).count { it == camera })
+    }
+
+    @Test
     fun argumentsEndInNul() {
         assertEquals("a\u0000--b=c d\u0000", SessionBus.argsFile(listOf("a", "--b=c d")).decodeToString())
     }

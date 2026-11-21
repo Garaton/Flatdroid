@@ -20,18 +20,21 @@ import java.util.concurrent.TimeUnit
  * device's pipe whether the app reads it. An app linked to any node (reading any device) uses the
  * camera: the user is asked ([UseQuestion]) unless
  * [alwaysAllowed]; one answer holds for every camera until the app ends. [initialAnswer] is the
- * answer when the user was asked before the launch (notifications off).
+ * answer when the user was asked before the launch (notifications off). [onFirstUse] is called
+ * the first time the app uses a camera, whatever the answer.
  */
 class CameraSession(
     private val streamers: Map<String, CameraStreamer>,
     private val events: File?,
     alwaysAllowed: Boolean,
     initialAnswer: Boolean? = null,
+    private val onFirstUse: (() -> Unit)? = null,
 ) {
     private val question = UseQuestion(Sensor.CAMERA, alwaysAllowed, initialAnswer) { action ->
         streamers.values.forEach { it.setAllowed(action == UseAction.USE) }
     }
     private val links = HashMap<String, Int>()
+    private var used = false
     private val ready = CountDownLatch(1)
     private val reader = events?.let { Thread({ read(it) }, "camera-events").apply { isDaemon = true } }
     @Volatile private var closed = false
@@ -94,6 +97,10 @@ class CameraSession(
     private fun linked(node: String, count: Int) {
         val streamer = streamers[node] ?: return
         links[node] = count
+        if (count > 0 && !used) {
+            used = true
+            onFirstUse?.invoke()
+        }
         // The answer first, so a camera allowed already starts as the app links, without a black frame between.
         question.inUse(links.values.any { it > 0 })
         streamer.setUsers(count)

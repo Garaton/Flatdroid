@@ -527,7 +527,17 @@
     <string name="app_settings_always_allow_microphone">Always allow microphone</string>
     <string name="app_settings_always_allow_microphone_hint">Uses Android\'s microphone whenever the app records, without asking.</string>
     <string name="app_settings_camera">Camera</string>
-    <string name="app_settings_camera_hint">When the app first uses a camera, you are prompted to allow or deny it until the app is closed. Works with apps that use Flatpak\'s camera portal.</string>
+    <string name="app_settings_camera_hint">When the app first uses a camera, you are prompted to allow or deny it until the app is closed.</string>
+    <string name="app_settings_camera_automatic">Automatic</string>
+    <string name="app_settings_camera_device">Video device</string>
+    <string name="app_settings_camera_portal">Camera portal</string>
+    <string name="app_settings_camera_off">Off</string>
+    <string name="app_settings_camera_automatic_device">\nThis app gets a video device, which uses the least CPU.</string>
+    <string name="app_settings_camera_automatic_portal">\nThis app gets the camera portal.</string>
+    <string name="app_settings_camera_automatic_none">\nThis app gets a camera once it asks for one, from its next launch.</string>
+    <string name="app_settings_camera_device_hint">\nFor apps that open cameras themselves. Uses the least CPU.</string>
+    <string name="app_settings_camera_portal_hint">\nFor apps that use Flatpak\'s camera portal. Runs about 10 more processes.</string>
+    <string name="camera_portal_next_launch">This app asked for a camera. Open it again to use one.</string>
     <string name="app_settings_always_allow_camera">Always allow camera</string>
     <string name="app_settings_always_allow_camera_hint">Uses Android\'s cameras whenever the app wants them, without asking.</string>
     <string name="app_settings_camera_none">This device has no camera Flatdroid can use.</string>
@@ -556,7 +566,7 @@
     <string name="app_settings_rendering_automatic">Automatic</string>
     <string name="app_settings_rendering_software">Software</string>
     <string name="app_settings_rendering_gl">OpenGL</string>
-    <string name="app_settings_rendering_hint">How GTK 4 and Qt Quick apps draw. Software needs less memory and CPU, but sacrifices compatibility, and performs worse with cameras. Automatic turns on OpenGL when camera permissions are on.</string>
+    <string name="app_settings_rendering_hint">How GTK 4 and Qt Quick apps draw. Software needs less memory and CPU, but sacrifices compatibility, and performs worse with cameras. Automatic turns on OpenGL for apps that use a camera.</string>
     <string name="app_settings_interface_size_hint">Draws the app\'s text and controls larger or smaller. Older apps run better at 100% or 200%.</string>
     <string name="app_settings_force_x11">Force X11</string>
     <string name="app_settings_force_x11_hint">Runs the app on X11 instead of Wayland, using more CPU. Try X11 if the app misbehaves.</string>

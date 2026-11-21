@@ -19,6 +19,10 @@ import java.io.FileDescriptor
  * inhibits ([inhibitions], with the portal's or its backend's `Inhibit`), released when the app
  * asks, closes the request, or leaves the bus; and folders shown in Android's Files app
  * ([links], the app's paths mapped to the host's by [hostPath]).
+ *
+ * As [Role.PORTAL], with [cameraAsked], the camera portal is answered too, only to learn that the
+ * app asks for it: a camera is present, and each `AccessCamera` is refused after [cameraAsked]
+ * is called (the real portal runs from the app's next launch).
  */
 class Portal(
     private val role: Role,
@@ -30,6 +34,8 @@ class Portal(
     private val inhibitions: Inhibitions = Inhibitions {},
     /** The host path behind a path in the app's root, or null. */
     private val hostPath: (String) -> String? = { null },
+    /** The app asked for the camera portal; null leaves the portal's camera unanswered. */
+    private val cameraAsked: (() -> Unit)? = null,
 ) {
     enum class Role { PORTAL, BACKEND }
 
@@ -104,6 +110,7 @@ class Portal(
             IMPL_INHIBIT -> implInhibit(call)
             SCREENSAVER_IFACE -> screenSaver(call)
             FILE_MANAGER_IFACE -> fileManager(call)
+            CAMERA -> camera(call, signals)
             null -> call.error(UNKNOWN_METHOD, "No interface")
             else -> unknownInterface(call)
         }
@@ -126,7 +133,8 @@ class Portal(
     /** The interfaces at [path] with their `version` property (0 for those without one), or null for no object there. */
     private fun interfaces(path: String?): Map<String, UInt>? = when (path) {
         PATH -> when (role) {
-            Role.PORTAL -> mapOf(SETTINGS to 2u, NETWORK_MONITOR to 3u, PROXY_RESOLVER to 1u, OPEN_URI to 5u, INHIBIT to 3u)
+            Role.PORTAL -> mapOf(SETTINGS to 2u, NETWORK_MONITOR to 3u, PROXY_RESOLVER to 1u, OPEN_URI to 5u, INHIBIT to 3u) +
+                (if (cameraAsked != null) mapOf(CAMERA to 1u) else emptyMap())
             Role.BACKEND -> mapOf(IMPL_SETTINGS to 1u, IMPL_APP_CHOOSER to 2u, LINKS to 1u, IMPL_INHIBIT to 3u)
         }
         in SCREENSAVER_PATHS -> mapOf(SCREENSAVER_IFACE to 0u)
@@ -138,14 +146,39 @@ class Portal(
         "Get" -> {
             val (iface, name) = call.strings("ss")
             val version = interfaces[iface] ?: return call.error(UNKNOWN_INTERFACE, "No interface $iface")
-            if (name == "version" && version != 0u) call.reply("v", Variant("u", version)) else call.error(UNKNOWN_PROPERTY, "No property $name")
+            val value = if (name == "version" && version != 0u) Variant("u", version) else extraProperties(iface)[name]
+            if (value != null) call.reply("v", value) else call.error(UNKNOWN_PROPERTY, "No property $name")
         }
         "GetAll" -> {
             val (iface) = call.strings("s")
             val version = interfaces[iface] ?: return call.error(UNKNOWN_INTERFACE, "No interface $iface")
-            call.reply("a{sv}", if (version == 0u) emptyMap() else mapOf("version" to Variant("u", version)))
+            call.reply("a{sv}", (if (version == 0u) emptyMap() else mapOf("version" to Variant("u", version))) + extraProperties(iface))
         }
         "Set" -> call.error(PROPERTY_READ_ONLY, "Properties here are read-only")
+        else -> unknown(call)
+    }
+
+    /** Properties beside `version`. */
+    private fun extraProperties(iface: String): Map<String, Variant> =
+        if (iface == CAMERA) mapOf("IsCameraPresent" to Variant("b", true)) else emptyMap()
+
+    /**
+     * The camera portal while it isn't run ([cameraAsked]): each `AccessCamera` gets its request
+     * and a `Response` of 2 (refused), and `OpenPipeWireRemote` an error.
+     */
+    private fun camera(call: Message, signals: MutableList<Message>): Message = when (call.member) {
+        "AccessCamera" -> {
+            val options = call.args("a{sv}")[0] as Map<*, *>
+            cameraAsked?.invoke()
+            val token = ((options["handle_token"] as? Variant)?.value as? String)?.takeIf { TOKEN.matches(it) } ?: "flatdroid${++requests}"
+            val handle = requestPath(call.sender ?: "", token)
+            signals += Message.signal(handle, REQUEST, "Response", "ua{sv}", RESPONSE_OTHER, emptyMap<String, Variant>())
+            call.reply("o", handle)
+        }
+        "OpenPipeWireRemote" -> call.args("a{sv}").let {
+            cameraAsked?.invoke()
+            call.error(NOT_ALLOWED, "No camera in this session")
+        }
         else -> unknown(call)
     }
 
@@ -363,6 +396,7 @@ class Portal(
         const val LINK_HANDLER = "flatdroid-links"
 
         const val INHIBIT = "org.freedesktop.portal.Inhibit"
+        const val CAMERA = "org.freedesktop.portal.Camera"
         const val IMPL_INHIBIT = "org.freedesktop.impl.portal.Inhibit"
         const val SCREENSAVER = "org.freedesktop.ScreenSaver"
         const val SCREENSAVER_IFACE = SCREENSAVER
@@ -418,6 +452,7 @@ class Portal(
         private const val PROPERTY_READ_ONLY = "org.freedesktop.DBus.Error.PropertyReadOnly"
         private const val INVALID_ARGS = "org.freedesktop.DBus.Error.InvalidArgs"
         private const val NOT_FOUND = "org.freedesktop.portal.Error.NotFound"
+        private const val NOT_ALLOWED = "org.freedesktop.portal.Error.NotAllowed"
 
         /**
          * Whether [namespace] is asked for by [patterns]: none, or an empty one, asks for all; a
@@ -498,6 +533,14 @@ class Portal(
             PROXY_RESOLVER to """
                 | <interface name="$PROXY_RESOLVER">
                 |  <method name="Lookup"><arg type="s" name="uri" direction="in"/><arg type="as" direction="out"/></method>
+                |  <property name="version" type="u" access="read"/>
+                | </interface>
+                |""".trimMargin(),
+            CAMERA to """
+                | <interface name="$CAMERA">
+                |  <method name="AccessCamera"><arg type="a{sv}" name="options" direction="in"/><arg type="o" name="handle" direction="out"/></method>
+                |  <method name="OpenPipeWireRemote"><arg type="a{sv}" name="options" direction="in"/><arg type="h" direction="out"/></method>
+                |  <property name="IsCameraPresent" type="b" access="read"/>
                 |  <property name="version" type="u" access="read"/>
                 | </interface>
                 |""".trimMargin(),

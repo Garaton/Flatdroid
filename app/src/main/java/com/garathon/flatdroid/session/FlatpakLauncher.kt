@@ -7,10 +7,13 @@ import android.hardware.display.DisplayManager
 import android.media.AudioManager
 import android.os.Build
 import android.os.FileObserver
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.system.Os
 import android.view.Display
 import android.view.Surface
+import android.widget.Toast
 import com.garathon.flatdroid.BuildConfig
 import com.garathon.flatdroid.R
 import com.garathon.flatdroid.alpine.AlpineEnvironment
@@ -63,7 +66,9 @@ import com.garathon.flatdroid.proot.ProotProcess
 import com.garathon.flatdroid.proot.ProotRunner
 import com.garathon.flatdroid.setup.rootfs.AndroidTarFs
 import com.garathon.flatdroid.settings.AppSettings
+import com.garathon.flatdroid.settings.AppSettingsStore
 import com.garathon.flatdroid.settings.AudioOutputMode
+import com.garathon.flatdroid.settings.CameraMode
 import com.garathon.flatdroid.settings.FlatpakTheme
 import com.garathon.flatdroid.settings.HomeMode
 import com.garathon.flatdroid.settings.Rendering
@@ -236,7 +241,9 @@ class FlatpakLauncher(private val context: Context) {
         val microphone = audio && settings.microphoneAllowed(appContext.sockets)
         val micAlways = settings.alwaysAllowMicrophone && MicStreamer.hasPermission(context)
         if (microphone && settings.alwaysAllowMicrophone && !micAlways) SessionController.log("[flatdroid] Android's microphone permission is off; the app's microphone asks instead")
-        val cameraWanted = settings.cameraAllowed(appContext)
+        // Device, portal or none ([AppSettings.cameraFor]).
+        val cameraMode = settings.cameraFor(appContext)
+        val cameraWanted = cameraMode != null
         val cameraAlways = settings.alwaysAllowCamera && AndroidCameras.hasPermission(context)
         if (cameraWanted && settings.alwaysAllowCamera && !cameraAlways) SessionController.log("[flatdroid] Android's camera permission is off; the app's camera asks instead")
         val cameras = if (cameraWanted) AndroidCameras.list(context, settings.cameraResolution, settings.cameraFrameRate) else emptyList()
@@ -249,10 +256,11 @@ class FlatpakLauncher(private val context: Context) {
         val displayRotation = displayRotation(landscape = screenWidth > screenHeight)
         val cameraRotations = cameras.map { it.rotation(displayRotation) }
         val cameraNodes = cameraNodes(cameras, cameraRotations)
-        // Device mode (a /dev/video* per camera, no PipeWire) for an app whose metadata asks for all
-        // devices, which is what Flatpak itself requires for /dev/video*; the camera portal for the rest.
-        val cameraDevices = cameraNodes.isNotEmpty() && DevNodes.ALL in appContext.devices
+        // Device mode: a /dev/video* per camera, no PipeWire. Portal mode: the camera portal's helpers.
+        val cameraDevices = cameraNodes.isNotEmpty() && cameraMode == CameraMode.DEVICE
         val portalNodes = if (cameraDevices) emptyList() else cameraNodes
+        // Without the real portal, Flatdroid answers its camera to learn that the app wants it.
+        val watchCameraPortal = portalNodes.isEmpty() && settings.watchesCameraPortal(appContext) && AndroidCameras.present(context)
         val deviceList = if (!cameraDevices) emptyList() else cameraNodes.mapIndexed { index, node ->
             Fdv4l2.Device(index, node.width, node.height, node.frameRate, node.description, front = node.location == CameraScript.Location.FRONT)
         }
@@ -271,6 +279,7 @@ class FlatpakLauncher(private val context: Context) {
             busArgs = SessionBus.proxyArgs(
                 appId, plan.app.metadata.sessionBusPolicy, camera = portalNodes.isNotEmpty(),
                 wholeBus = SessionBus.WHOLE_BUS in plan.app.metadata.context.sockets,
+                watchCamera = watchCameraPortal,
             ),
             cameraNodes = portalNodes,
             cameraDevices = deviceList,
@@ -325,7 +334,10 @@ class FlatpakLauncher(private val context: Context) {
                 )
             }
             if (streamers.isNotEmpty()) {
-                camera = CameraSession(streamers, if (cameraDevices) null else File(cameraPipeDir, CameraScript.EVENTS), cameraAlways, answers[Sensor.CAMERA])
+                camera = CameraSession(
+                    streamers, if (cameraDevices) null else File(cameraPipeDir, CameraScript.EVENTS), cameraAlways, answers[Sensor.CAMERA],
+                    onFirstUse = if (!cameraDevices || settings.cameraDeviceUsed) null else ({ cameraDeviceUsed(store) }),
+                )
                 // Device mode needs no helpers: its frames wait for the app from now.
                 if (cameraDevices) camera.start()
             }
@@ -354,6 +366,7 @@ class FlatpakLauncher(private val context: Context) {
                     appNetwork = settings.networkAllowed(appContext.shared), user = userSettings,
                     hostPath = plan.binds::hostOf, keepScreenOn = SessionController::keepScreenOn,
                     log = SessionController::log,
+                    cameraAsked = if (!watchCameraPortal) null else AtomicBoolean().let { seen -> { if (seen.compareAndSet(false, true)) cameraPortalSeen(store) } },
                 )
                 camera?.takeIf { portalNodes.isNotEmpty() }?.let {
                     cameraHelpers = startCamera(helpers, it, Fdsec.Filter(extraSyscalls = security.extraSyscallFilter, noInternet = true), filterRefused)
@@ -775,10 +788,22 @@ class FlatpakLauncher(private val context: Context) {
             softwareRendering = when (settings.rendering) {
                 Rendering.SOFTWARE -> true
                 Rendering.GL -> false
-                // A camera preview needs GL to keep up.
-                Rendering.AUTOMATIC -> !(app != null && settings.cameraAllowed(app.metadata.context) && AndroidCameras.present(context))
+                // A camera preview needs GL to keep up: for an app that uses a camera, or likely does.
+                Rendering.AUTOMATIC -> !(app != null && settings.likelyUsesCamera(app.metadata.context) && AndroidCameras.present(context))
             },
         )
+    }
+
+    /** The app asked for the camera portal in a session without it: the portal runs from its next launch ([AppSettings.cameraFor]). */
+    private fun cameraPortalSeen(store: AppSettingsStore) {
+        runCatching { store.update { it.copy(cameraPortalSeen = true) } }
+        SessionController.log("[flatdroid] the app asked for the camera portal; it gets cameras there from its next launch")
+        Handler(Looper.getMainLooper()).post { Toast.makeText(context, R.string.camera_portal_next_launch, Toast.LENGTH_LONG).show() }
+    }
+
+    /** The app read a camera's device: [AppSettings.cameraFor] keeps it there. */
+    private fun cameraDeviceUsed(store: AppSettingsStore) {
+        runCatching { store.update { it.copy(cameraDeviceUsed = true) } }
     }
 
     private fun hostDirs(appId: String, settings: AppSettings, androidFonts: Boolean): HostDirs {

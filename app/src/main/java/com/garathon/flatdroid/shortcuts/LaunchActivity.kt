@@ -27,12 +27,15 @@ import kotlinx.coroutines.launch
  * all that shows from the tap until the app's viewer, without Flatdroid's window (and whatever it
  * last showed) in between. It starts the app and opens the viewer once the app is up. A question
  * the start runs into (Electron, changed files), a failed start, or an external viewer go to
- * Flatdroid's window, which handles them as for a start from its list.
+ * Flatdroid's window, which handles them as for a start from its list. Stop ends the start and
+ * goes back to where the user was, without the window.
  */
 class LaunchActivity : ComponentActivity() {
     private lateinit var appId: String
     /** The session was seen on this app: going idle afterwards means the start ended. */
     private var seenBusy = false
+    /** The user stopped the start: its end is no failure to show in Flatdroid's window. */
+    private var stopped = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -50,7 +53,11 @@ class LaunchActivity : ComponentActivity() {
                     app = app,
                     state = ui.state,
                     onSkipCheck = { SessionController.skipFileCheck() },
-                    onStop = { SessionService.stop(this); finish() },
+                    onStop = {
+                        stopped = true
+                        SessionService.stop(this)
+                        finish()
+                    },
                     // The app goes on starting; its notification opens it.
                     onBack = ::finish,
                 )
@@ -65,11 +72,12 @@ class LaunchActivity : ComponentActivity() {
         // A start that never got going (the service refused it): Flatdroid's window says why.
         lifecycleScope.launch {
             delay(NO_START_MS)
-            if (!seenBusy && SessionController.ui.value.state == SessionState.Idle) handOver()
+            if (!stopped && !seenBusy && SessionController.ui.value.state == SessionState.Idle) handOver()
         }
     }
 
     private fun follow(state: SessionState) {
+        if (stopped) return
         val ours = state.appIdOrNull == appId
         when {
             ours && state is SessionState.Running -> {

@@ -38,6 +38,8 @@ class SessionPortal private constructor(
     hostPath: (String) -> String?,
     private val keepScreenOn: (Boolean) -> Unit,
     log: (String) -> Unit,
+    /** The app asked for the camera portal, which this session doesn't run ([Portal]); null: not watched. */
+    cameraAsked: (() -> Unit)? = null,
 ) : Closeable {
     @Volatile private var appearance = AndroidAppearance.of(context, user)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -49,7 +51,7 @@ class SessionPortal private constructor(
     private val wakeLock = context.getSystemService(PowerManager::class.java)
         ?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Flatdroid:inhibit")?.apply { setReferenceCounted(false) }
     private val inhibitions = Inhibitions(::inhibited)
-    private val portal = Portal(role, ::settings, ::networkStatus, AndroidLinks(context, log), inhibitions, hostPath)
+    private val portal = Portal(role, ::settings, ::networkStatus, AndroidLinks(context, log), inhibitions, hostPath, cameraAsked)
     private var client: BusClient? = null
 
     private fun settings(): Map<String, Map<String, Variant>> = appearance.settings()
@@ -166,8 +168,9 @@ class SessionPortal private constructor(
         fun open(
             context: Context, socket: File, role: Portal.Role, appNetwork: Boolean, user: UserSettings?,
             hostPath: (String) -> String?, keepScreenOn: (Boolean) -> Unit, log: (String) -> Unit,
+            cameraAsked: (() -> Unit)? = null,
         ): SessionPortal? {
-            val session = SessionPortal(context, role, appNetwork, user, hostPath, keepScreenOn, log)
+            val session = SessionPortal(context, role, appNetwork, user, hostPath, keepScreenOn, log, cameraAsked)
             session.client = BusClient.open(socket, session.portal.names, session.portal::handle, log) ?: return null
             session.watchNetwork()
             session.watchAppearance()

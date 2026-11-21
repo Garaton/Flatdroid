@@ -695,13 +695,15 @@ class MainActivity : ComponentActivity() {
                         lifecycleScope.launch {
                             val failure = withContext(Dispatchers.IO) {
                                 try {
-                                    // Keep what the launcher manages: last opened, the Electron flags and /.flatpak-info.
+                                    // Keep what the launcher manages: last opened, the Electron flags, /.flatpak-info and what the camera was seen used through.
                                     store.update { old ->
                                         new.copy(
                                             lastOpened = old.lastOpened,
                                             launches = old.launches,
                                             usedMillis = old.usedMillis,
                                             newerElectronFlags = old.newerElectronFlags,
+                                            cameraPortalSeen = old.cameraPortalSeen,
+                                            cameraDeviceUsed = old.cameraDeviceUsed,
                                             withoutFlatpakInfo = old.withoutFlatpakInfo,
                                             wholeDev = if (developerOptions) new.wholeDev else old.wholeDev,
                                         )

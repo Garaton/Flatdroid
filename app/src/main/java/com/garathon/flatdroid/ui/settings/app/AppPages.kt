@@ -46,6 +46,7 @@ import com.garathon.flatdroid.audio.MicStreamer
 import com.garathon.flatdroid.camera.AndroidCameras
 import com.garathon.flatdroid.flatpak.AppDetails
 import com.garathon.flatdroid.settings.AppSettings
+import com.garathon.flatdroid.settings.CameraMode
 import com.garathon.flatdroid.settings.HomeMode
 import com.garathon.flatdroid.settings.Rendering
 import com.garathon.flatdroid.settings.Resolution
@@ -219,7 +220,7 @@ private fun PermissionChips(s: AppPageState) {
         if (app.requestsAllDevices) add(stringResource(R.string.permission_all_devices) to (!s.env.limitDevices || settings.wholeDev))
         if (app.requestsFiles) add(stringResource(R.string.permission_files) to files)
         if (settings.microphoneOn(app.requestsAudio)) add(stringResource(R.string.app_settings_microphone) to true)
-        if (settings.cameraOn(app.mayUseCamera) && s.env.hasCamera) add(stringResource(R.string.app_settings_camera) to true)
+        if (settings.cameraFor(app.requestsAllDevices, app.mayUseCamera) != null && s.env.hasCamera) add(stringResource(R.string.app_settings_camera) to true)
     }
     SettingsCard(title = stringResource(R.string.app_overview_asks)) {
         if (chips.isEmpty()) {
@@ -408,15 +409,38 @@ fun AppPermissionsPage(s: AppPageState) = SettingsPageColumn(R.string.app_page_p
             enabled = audio && micOn,
         )
 
-        val cameraDefault = s.settings.defaultOn(app.mayUseCamera)
-        val cameraSet = s.settings.camera
-        val cameraOn = cameraSet ?: cameraDefault
-        SwitchRow(
-            cameraOn && s.env.hasCamera, { on -> s.editSettings { copy(camera = on.takeIf { it != cameraDefault }) } },
-            stringResource(R.string.app_settings_camera),
-            stringResource(if (s.env.hasCamera) R.string.app_settings_camera_hint else R.string.app_settings_camera_none),
+        // Off by default when the security level doesn't grant asked permissions.
+        val cameraDefault = s.settings.copy(cameraModeChoice = null).cameraMode
+        val cameraMode = s.settings.cameraMode
+        val cameraOn = cameraMode != CameraMode.OFF
+        val cameraNames = mapOf(
+            CameraMode.AUTOMATIC to stringResource(R.string.app_settings_camera_automatic),
+            CameraMode.DEVICE to stringResource(R.string.app_settings_camera_device),
+            CameraMode.PORTAL to stringResource(R.string.app_settings_camera_portal),
+            CameraMode.OFF to stringResource(R.string.app_settings_camera_off),
+        )
+        // What Automatic picks for this app, or what the chosen mode is for.
+        val cameraDetail = when (cameraMode) {
+            CameraMode.AUTOMATIC -> when (s.settings.cameraFor(app.requestsAllDevices, app.mayUseCamera)) {
+                CameraMode.DEVICE -> R.string.app_settings_camera_automatic_device
+                CameraMode.PORTAL -> R.string.app_settings_camera_automatic_portal
+                else -> R.string.app_settings_camera_automatic_none
+            }
+            CameraMode.DEVICE -> R.string.app_settings_camera_device_hint
+            CameraMode.PORTAL -> R.string.app_settings_camera_portal_hint
+            CameraMode.OFF -> null
+        }
+        DropdownRow(
+            selected = if (s.env.hasCamera) cameraMode else CameraMode.OFF,
+            options = CameraMode.entries,
+            onSelect = { v -> s.editSettings { copy(cameraModeChoice = v.takeIf { it != cameraDefault }) } },
+            label = { cameraNames.getValue(it) },
+            title = stringResource(R.string.app_settings_camera),
+            hint = if (!s.env.hasCamera) stringResource(R.string.app_settings_camera_none)
+            else stringResource(R.string.app_settings_camera_hint) + cameraDetail?.let { stringResource(it) }.orEmpty(),
             enabled = s.env.hasCamera,
-            onReset = if (cameraSet != null && cameraSet != cameraDefault) ({ s.editSettings { copy(camera = null) } }) else null,
+            onReset = if (s.settings.cameraModeChoice != null) ({ s.editSettings { copy(cameraModeChoice = null) } }) else null,
+            resettable = true,
         )
         fun setCameraAlways(on: Boolean) = s.editSettings { copy(alwaysAllowCamera = on) }
         SwitchRow(
@@ -474,7 +498,7 @@ fun AppOverridesPage(s: AppPageState) = SettingsPageColumn(R.string.app_page_ove
             onReset = if (s.settings.blockExtraSyscalls != null) ({ s.editSettings { copy(blockExtraSyscalls = null) } }) else null,
         )
         // The camera's settings need the app's camera and one on the phone.
-        val cameraOn = s.settings.cameraOn(s.app.mayUseCamera)
+        val cameraOn = s.settings.cameraMode != CameraMode.OFF
         val cameraEnabled = cameraOn && s.env.hasCamera
         CameraRows(
             rate = s.settings.cameraFrameRate,

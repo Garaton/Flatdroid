@@ -50,14 +50,15 @@ object SessionBus {
      * it) and the valid entries of the metadata's [policy], without those naming or covering the
      * services Flatdroid runs on this bus ([RESERVED]). Always the portal's interfaces Flatdroid
      * serves ([Portal]: settings, network monitor, proxy resolver, links and their requests), and
-     * with [camera], where the real portal runs, its camera and its links for addresses only. The
-     * portal's other interfaces stay closed, whoever owns its name.
+     * with [camera], where the real portal runs, its camera and its links for addresses only. With
+     * [watchCamera] (no real portal), the camera's calls reach Flatdroid, which learns from them that
+     * the app asks for it. The portal's other interfaces stay closed, whoever owns its name.
      *
      * The other names Flatdroid owns ([FLATDROID_NAMES]) are reached as in Flatpak: by apps whose
      * metadata lets them talk to one, or that have the whole bus there ([wholeBus], `sockets=session-bus`).
      * The metadata may not own them.
      */
-    fun proxyArgs(appId: String, policy: Map<String, String>, camera: Boolean, wholeBus: Boolean = false): List<String> {
+    fun proxyArgs(appId: String, policy: Map<String, String>, camera: Boolean, wholeBus: Boolean = false, watchCamera: Boolean = false): List<String> {
         val args = mutableListOf(
             "unix:path=$GUEST_DAEMON_DIR/$SOCKET",
             "$GUEST_PROXY_DIR/$SOCKET",
@@ -72,6 +73,7 @@ object SessionBus {
         if (wholeBus) for (name in FLATDROID_NAMES) args += "--talk=$name"
         args += PORTAL_RULES
         args += if (camera) CAMERA_RULES else LINK_RULES
+        if (watchCamera && !camera) args += CAMERA_CALLS
         return args
     }
 
@@ -133,8 +135,9 @@ object SessionBus {
      * The real portal's camera, and its links for addresses only: its OpenFile would look up the
      * app's descriptor from another proot (verify).
      */
+    private const val CAMERA_CALLS = "--call=$PORTAL=${Portal.CAMERA}.*@$PORTAL_PATH"
     private val CAMERA_RULES = listOf(
-        "--call=$PORTAL=org.freedesktop.portal.Camera.*@$PORTAL_PATH",
+        CAMERA_CALLS,
         "--call=$PORTAL=${Portal.OPEN_URI}.OpenURI@$PORTAL_PATH",
         "--call=$PORTAL=${Portal.OPEN_URI}.SchemeSupported@$PORTAL_PATH",
     )

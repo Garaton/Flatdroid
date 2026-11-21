@@ -219,6 +219,27 @@ class PortalTest {
     }
 
     @Test
+    fun theCameraPortalIsAnsweredOnlyToLearnThatTheAppAsks() {
+        // Unwatched: no camera interface.
+        assertEquals("org.freedesktop.DBus.Error.UnknownInterface", ask(call(Portal.CAMERA, "AccessCamera", "a{sv}", emptyMap<String, Variant>())).errorName)
+        var asked = 0
+        val watching = Portal(Portal.Role.PORTAL, { settings }, { status }, links, inhibitions, hostPath, cameraAsked = { asked++ })
+        assertEquals(listOf(Variant("b", true)), ask(call(Portal.PROPERTIES, "Get", "ss", Portal.CAMERA, "IsCameraPresent"), watching).body)
+        assertEquals(0, asked)
+        val sent = all(call(Portal.CAMERA, "AccessCamera", "a{sv}", mapOf("handle_token" to Variant("s", "c1"))), watching)
+        assertEquals(listOf<Any?>("/org/freedesktop/portal/desktop/request/1_9/c1"), sent[0].body)
+        // Refused: the camera comes from the next launch.
+        assertEquals("Response", sent[1].member)
+        assertEquals(Portal.RESPONSE_OTHER, sent[1].body[0])
+        assertEquals(1, asked)
+        assertEquals("org.freedesktop.portal.Error.NotAllowed", ask(call(Portal.CAMERA, "OpenPipeWireRemote", "a{sv}", emptyMap<String, Variant>()), watching).errorName)
+        assertTrue("org.freedesktop.portal.Camera" in ask(call(Portal.INTROSPECTABLE, "Introspect"), watching).body[0] as String)
+        // The backend never answers it.
+        val backendWatching = Portal(Portal.Role.BACKEND, { settings }, { status }, links, inhibitions, hostPath, cameraAsked = { asked++ })
+        assertEquals("org.freedesktop.DBus.Error.UnknownInterface", ask(call(Portal.CAMERA, "AccessCamera", "a{sv}", emptyMap<String, Variant>()), backendWatching).errorName)
+    }
+
+    @Test
     fun theBackendInhibitsForTheRealPortal() {
         val handle = "/org/freedesktop/portal/desktop/request/1_3/x"
         assertEquals(DBusWire.METHOD_RETURN, ask(call(Portal.IMPL_INHIBIT, "Inhibit", "ossua{sv}", handle, "app", "", 8u, emptyMap<String, Variant>()), backend).type)
