@@ -57,6 +57,11 @@ data class HostDirs(
     val runtimeDir: File? = null,
     val userId: Int = 0,
     /**
+     * Holds the "run on the host" stand-ins ([HostCommands]), bound over the runtime's
+     * `flatpak-spawn` and the app's `host-spawn` where those exist; null binds neither.
+     */
+    val hostCommands: File? = null,
+    /**
      * Writable per-app base for the app's `/etc/ld.so.cache` ([LdCache]), one directory per set of
      * deployments; null for none.
      */
@@ -196,6 +201,14 @@ class LaunchPlanner(
         dirs.hostFonts?.let { extraBinds += it.path to GuestPaths.HOST_FONTS }
         dirs.sdcard?.let { extraBinds += it.path to GuestPaths.SDCARD }
         dirs.sessionBus?.let { extraBinds += it.path to GuestPaths.SESSION_BUS_DIR }
+        dirs.hostCommands?.let { dir ->
+            if (File(runtime.files, "bin/${HostCommands.FLATPAK_SPAWN}").isFile) {
+                extraBinds += File(dir, HostCommands.FLATPAK_SPAWN).path to HostCommands.FLATPAK_SPAWN_GUEST
+            }
+            if (File(app.files, "bin/${HostCommands.HOST_SPAWN}").isFile) {
+                extraBinds += File(dir, HostCommands.HOST_SPAWN).path to HostCommands.HOST_SPAWN_GUEST
+            }
+        }
         val runtimeDir = dirs.runtimeDir?.let { host -> GuestPaths.runtimeDir(dirs.userId).also { extraBinds += host.path to it } }
         val scripts = launchScripts(app, commandPath)
         val electronBinary = scripts.firstNotNullOfOrNull(Electron::zypakTarget)
@@ -294,7 +307,10 @@ class LaunchPlanner(
                 binds = binds,
                 environment = environment,
                 command = command,
-                flatpakInfo = if (options.flatpakInfo) flatpakInfo(appId, runtimeRef, options.network) else null,
+                flatpakInfo = if (!options.flatpakInfo) null else flatpakInfo(
+                    appId, runtimeRef, options.network,
+                    hostAllowed = HostCommands.hostAllowed(app.metadata.sessionBusPolicy, app.metadata.context.sockets),
+                ),
                 usrLinks = USR_LINKS.filter { File(runtime.files, it).exists() },
                 isElectron = isElectron,
                 wayland = wayland,
@@ -410,11 +426,14 @@ class LaunchPlanner(
          * `.Devel` and `build=true` turn off old glycin's sandbox (GTK dialogs crash with it); the
          * file's presence also makes GLib use portals, hence GDK_DEBUG=no-portals. GLib then takes
          * the network state and proxies from the portal, and sees a network only where `shared`
-         * names it: written for an app with the [network].
+         * names it: written for an app with the [network]. KDE's frameworks run processes through
+         * `flatpak-spawn --host` (here [HostCommands]) only where the file's session bus policy
+         * lets the app talk to Flatpak: written for an app that may ([hostAllowed]).
          */
-        fun flatpakInfo(appId: String, runtime: FlatpakRef, network: Boolean): String =
+        fun flatpakInfo(appId: String, runtime: FlatpakRef, network: Boolean, hostAllowed: Boolean = false): String =
             "[Application]\nname=$appId.Devel\nruntime=runtime/$runtime\n\n" +
                 (if (network) "[Context]\nshared=network;\n\n" else "") +
+                (if (hostAllowed) "[Session Bus Policy]\n${HostCommands.FLATPAK_NAME}=talk\n\n" else "") +
                 "[Instance]\nbuild=true\n"
 
         /**

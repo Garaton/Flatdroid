@@ -165,6 +165,26 @@ class LaunchPlannerTest {
     }
 
     @Test
+    fun runOnTheHostStandInsOverWhatExists() {
+        val runtime = inst.runtime("org.kde.Platform", "6.10", "[Runtime]\nname=org.kde.Platform\n")
+        val files = inst.app("org.kde.kate", metadata = appMetadata("org.kde.kate", "kate", "org.kde.Platform/aarch64/6.10"))
+        File(files, "bin").mkdirs()
+        File(files, "bin/kate").writeBytes(ExecutableTest.elf(0xb7))
+        val stand = tmp.newFolder("host-commands")
+
+        assertEquals(baseExtra("org.kde.kate"), Ready(planner.plan("org.kde.kate", dirs.copy(hostCommands = stand))).binds.extra)
+        File(runtime, "bin").mkdirs()
+        File(runtime, "bin/flatpak-spawn").writeText("")
+        File(files, "bin/host-spawn").writeText("")
+        val plan = Ready(planner.plan("org.kde.kate", dirs.copy(hostCommands = stand)))
+        assertEquals(
+            listOf(File(stand, "flatpak-spawn").path to "/usr/bin/flatpak-spawn", File(stand, "host-spawn").path to "/app/bin/host-spawn"),
+            plan.binds.extra - baseExtra("org.kde.kate").toSet(),
+        )
+        assertEquals(baseExtra("org.kde.kate"), Ready(planner.plan("org.kde.kate", dirs)).binds.extra)
+    }
+
+    @Test
     fun androidsFontsAreBoundWhereFlatpakPutsTheHosts() {
         runtimeWithGl()
         File(inst.app("a.App", metadata = appMetadata("a.App", "a")), "bin").mkdirs()

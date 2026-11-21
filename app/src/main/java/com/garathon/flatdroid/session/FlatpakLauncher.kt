@@ -36,6 +36,7 @@ import com.garathon.flatdroid.flatpak.integrity.IntegrityGuard
 import com.garathon.flatdroid.launcher.DesktopConfig
 import com.garathon.flatdroid.launcher.electron.Electron
 import com.garathon.flatdroid.launcher.electron.ElectronSwap
+import com.garathon.flatdroid.launcher.HostCommands
 import com.garathon.flatdroid.launcher.HostDirs
 import com.garathon.flatdroid.launcher.LdCache
 import com.garathon.flatdroid.launcher.LaunchOptions
@@ -109,6 +110,7 @@ class FlatpakLauncher(private val context: Context) {
     private val vncDir = File(sessionDir, "vnc")
     private val waylandDir = File(sessionDir, "wayland")
     private val etcDir = File(sessionDir, "etc")
+    private val hostCommandsDir = File(sessionDir, "host-commands")
     private val desktopDir = File(sessionDir, "xdg")
     // The daemon's socket stays among the helpers; the app's root gets only the proxy's directory.
     private val busDaemonDir = File(sessionDir, "dbus")
@@ -210,6 +212,7 @@ class FlatpakLauncher(private val context: Context) {
         val existedBefore = mountPointChains(plan).filter { rel -> File(home, rel).let { it.exists() || AndroidTarFs.isSymlink(it) } }.toSet()
         // Before prepareDirs, which makes the mount points by what they are bound from.
         writeDesktopFiles(home, plan, userSettings)
+        writeHostCommands(plan)
         writeTimeZone(plan, (userSettings?.security ?: SecuritySettings()).shareLocale)
         prepareDirs(appId, plan)
         val security = userSettings?.security ?: SecuritySettings()
@@ -692,6 +695,16 @@ class FlatpakLauncher(private val context: Context) {
         DesktopConfig.kdeglobals(dark, darkScheme)?.let { File(desktopDir, "kdeglobals").writeTextAtomically(it, durable = false) }
     }
 
+    /** The "run on the host" stand-ins, for whether this app may ask for the host. */
+    private fun writeHostCommands(plan: LaunchPlan) {
+        val metadata = plan.app.metadata
+        val allowed = HostCommands.hostAllowed(metadata.sessionBusPolicy, metadata.context.sockets)
+        hostCommandsDir.mkdirs()
+        for ((name, text) in listOf(HostCommands.FLATPAK_SPAWN to HostCommands.flatpakSpawn(allowed), HostCommands.HOST_SPAWN to HostCommands.hostSpawn(allowed))) {
+            File(hostCommandsDir, name).apply { writeTextAtomically(text, durable = false) }.setExecutable(true, false)
+        }
+    }
+
     /** The theme setting; with System, Android's dark mode now. */
     private fun isDarkTheme(user: UserSettings?) =
         (user?.flatpakTheme ?: FlatpakTheme.SYSTEM).isDark(AndroidAppearance.androidDark(context.resources.configuration))
@@ -781,6 +794,7 @@ class FlatpakLauncher(private val context: Context) {
             hostFonts = ANDROID_FONTS.takeIf { androidFonts && it.isDirectory },
             desktopConfig = desktopDir,
             userDirs = File(etcDir, USER_DIRS),
+            hostCommands = hostCommandsDir,
             sdcard = SharedHome.storageRoot().takeIf { settings.sdcard && settings.homeMode != HomeMode.ANDROID && SharedHome.broadAccess(context) },
             sessionBus = busProxyDir,
             // Under the app's cache, so clearing caches drops it (fontconfig then regenerates it).
