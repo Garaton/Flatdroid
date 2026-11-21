@@ -129,19 +129,21 @@ data class AppSettings(
      * app that asks for sound (its metadata can't say more; Grant asked permissions), off
      * otherwise; null follows [defaults] ([microphoneAllowed]). On, the user is asked in a
      * notification the first time the app records in a session, and the answer holds for that
-     * session. It also needs Android's microphone permission.
+     * session. Android's microphone permission is asked at the first Allow.
      */
     val microphone: Boolean? = null,
-    /** With [microphone] on, record whenever the app does, without asking. */
+    /** With [microphone] on, record whenever the app does, without asking (needs Android's permission, asked when turned on). */
     val alwaysAllowMicrophone: Boolean = false,
     /**
      * Android's cameras through Flatpak's camera portal. By default on for an app with a hint that
      * it uses a camera ([FlatpakContext.mayUseCamera]; Grant asked permissions), off otherwise;
-     * null follows [defaults] ([cameraAllowed]). On, the app may use them whenever it runs
-     * (Flatdroid can't ask at the moment of use), and Android's camera runs only while the app
-     * takes its picture. It also needs Android's camera permission.
+     * null follows [defaults] ([cameraAllowed]). On, the user is asked in a notification the first
+     * time the app uses a camera in a session, as for the [microphone], and Android's camera runs
+     * only while the app takes its picture. Android's camera permission is asked at the first Allow.
      */
     val camera: Boolean? = null,
+    /** With [camera] on, use it whenever the app does, without asking (needs Android's permission, asked when turned on). */
+    val alwaysAllowCamera: Boolean = false,
     /**
      * Developer setting: with [camera] on, the frames' short side, one of [AndroidCameras.RESOLUTIONS]
      * or [AndroidCameras.FULL_RESOLUTION] (each camera's largest size; a camera without it takes
@@ -292,6 +294,7 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
             cameraFrameRateOverride = props.getProperty(KEY_CAMERA_FRAME_RATE)?.toIntOrNull()
                 ?.takeIf { it in 1..AndroidCameras.MAX_FRAME_RATE && it != appDefaults.cameraFrameRate },
             alwaysAllowMicrophone = props.getProperty(KEY_MICROPHONE_ALWAYS) == "true",
+            alwaysAllowCamera = props.getProperty(KEY_CAMERA_ALWAYS) == "true",
             environment = props.stringPropertyNames()
                 .filter { it.startsWith(KEY_ENV_PREFIX) }
                 .map { it.removePrefix(KEY_ENV_PREFIX) }
@@ -329,6 +332,7 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
         settings.microphone?.let { props.setProperty(KEY_MICROPHONE, it.toString()) }
         if (settings.alwaysAllowMicrophone) props.setProperty(KEY_MICROPHONE_ALWAYS, "true")
         settings.camera?.let { props.setProperty(KEY_CAMERA, it.toString()) }
+        if (settings.alwaysAllowCamera) props.setProperty(KEY_CAMERA_ALWAYS, "true")
         settings.cameraResolutionOverride?.let { props.setProperty(KEY_CAMERA_RESOLUTION, it.toString()) }
         settings.cameraFrameRateOverride?.let { props.setProperty(KEY_CAMERA_FRAME_RATE, it.toString()) }
         for ((name, value) in settings.environment) props.setProperty(KEY_ENV_PREFIX + name, value)
@@ -352,8 +356,8 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
         /**
          * An app's settings file from an import, [imported], with the settings that widen what the
          * app can reach left as they are on this device ([local], its current file, or null for
-         * none): whole /dev (with Binder), all of shared storage, the microphone without asking,
-         * the camera, the network, the clipboard, the system call filter, its home, its environment and its launch arguments. A shared
+         * none): whole /dev (with Binder), all of shared storage, the microphone and camera without
+         * asking, the network, the clipboard, the system call filter, its home, its environment and its launch arguments. A shared
          * settings file can't turn them on. The usage statistics stay as they are too.
          */
         fun imported(imported: ByteArray, local: ByteArray?): ByteArray {
@@ -381,6 +385,7 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
         private const val KEY_MICROPHONE = "permission.microphone"
         private const val KEY_MICROPHONE_ALWAYS = "permission.microphone.always"
         private const val KEY_CAMERA = "permission.camera"
+        private const val KEY_CAMERA_ALWAYS = "permission.camera.always"
         private const val KEY_CAMERA_RESOLUTION = "camera.resolution"
         private const val KEY_CAMERA_FRAME_RATE = "camera.frameRate"
         private const val KEY_ENV_PREFIX = "env."
@@ -398,7 +403,7 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
         /** Statistics of this device: an import doesn't bring or replace them. */
         private val USAGE_KEYS = setOf(KEY_LAUNCHES, KEY_USED)
         private val WIDENING_KEYS = setOf(
-            KEY_WHOLE_DEV, KEY_SDCARD, KEY_MICROPHONE_ALWAYS, KEY_CAMERA, KEY_NETWORK, KEY_EXTRA_SYSCALLS, KEY_HOME_MODE,
+            KEY_WHOLE_DEV, KEY_SDCARD, KEY_MICROPHONE_ALWAYS, KEY_CAMERA_ALWAYS, KEY_NETWORK, KEY_EXTRA_SYSCALLS, KEY_HOME_MODE,
             KEY_SHARE_HIDDEN_FILES, KEY_CLIPBOARD, KEY_LAUNCH_ARGS,
         )
     }

@@ -1,6 +1,5 @@
 package com.garathon.flatdroid.session.helpers
 
-import com.garathon.flatdroid.audio.MicAction
 import com.garathon.flatdroid.settings.Resampler
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -150,19 +149,6 @@ class SessionAudioTest {
         }
         // Xvnc too, behind the filter chosen for the viewer (no internet sockets, or no connecting for an external viewer).
         assertTrue(lines.single { "Xvnc :1" in it }.startsWith("${'$'}guard /usr/bin/Xvnc "))
-    }
-
-    @Test
-    fun microphoneStreamsOnlyWhileAllowedAndRecording() {
-        // Not recording: nothing, whatever the answer.
-        assertEquals(MicAction.IDLE, MicAction.of(alwaysAllowed = true, answer = null, recording = false))
-        assertEquals(MicAction.IDLE, MicAction.of(alwaysAllowed = false, answer = null, recording = false))
-        // Recording, not answered yet this session: ask; allowed: record; denied: silence, no asking.
-        assertEquals(MicAction.ASK, MicAction.of(alwaysAllowed = false, answer = null, recording = true))
-        assertEquals(MicAction.STREAM, MicAction.of(alwaysAllowed = false, answer = true, recording = true))
-        assertEquals(MicAction.IDLE, MicAction.of(alwaysAllowed = false, answer = false, recording = true))
-        // Always allowed: records without asking.
-        assertEquals(MicAction.STREAM, MicAction.of(alwaysAllowed = true, answer = null, recording = true))
     }
 
     @Test

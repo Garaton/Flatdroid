@@ -22,7 +22,7 @@ class AppSettingsTest {
             Resolution.CUSTOM, 960, 640, newerElectronFlags = true, lastOpened = 1234L, wholeDev = true,
             audio = false, microphone = true, alwaysAllowMicrophone = true, withoutFlatpakInfo = true,
             environment = mapOf("VLC_DATA_PATH" to "/app/share/vlc", "VLC_PLUGIN_PATH" to "/app/lib/vlc/plugins"),
-            homeModeChoice = HomeMode.TEMPORARY, sdcard = true, camera = true, cameraResolutionOverride = 1080, cameraFrameRateOverride = 15,
+            homeModeChoice = HomeMode.TEMPORARY, sdcard = true, camera = true, alwaysAllowCamera = true, cameraResolutionOverride = 1080, cameraFrameRateOverride = 15,
             network = false, blockExtraSyscalls = false, shareHiddenFiles = true, launches = 3, usedMillis = 90_000L,
         )
         store.save(saved)
@@ -161,7 +161,7 @@ class AppSettingsTest {
         fun file(text: String) = File(tmp.root, "a.App.properties").apply { writeText(text) }
         val imported = file(
             "home.mode=shared\ndev.whole=true\nstorage.sdcard=true\npermission.microphone=true\npermission.camera=true\n" +
-                "permission.microphone.always=true\nenv.LD_PRELOAD=/home/user/x.so\npermission.network=true\n" +
+                "permission.microphone.always=true\npermission.camera.always=true\nenv.LD_PRELOAD=/home/user/x.so\npermission.network=true\n" +
                 "filter.blockExtraSyscalls=false\npermission.audio=false\nhome.shareHiddenFiles=true\n" +
                 "permission.clipboard=true\n",
         ).readBytes()
@@ -172,13 +172,14 @@ class AppSettingsTest {
         val loaded = AppSettingsStore(file(AppSettingsStore.imported(imported, local).decodeToString())).load()
         assertEquals(
             AppSettings(
-                homeModeChoice = HomeMode.PRIVATE, microphone = true, network = false, audio = false,
+                homeModeChoice = HomeMode.PRIVATE, microphone = true, camera = true, network = false, audio = false,
                 clipboard = false, environment = mapOf("LANG" to "de_DE.UTF-8"),
             ),
             loaded,
         )
         val alone = AppSettingsStore(file(AppSettingsStore.imported(imported, null).decodeToString())).load()
-        assertEquals(AppSettings(microphone = true, audio = false), alone)
+        // The camera asks at use, as the microphone does: on comes in, "Always allow" doesn't.
+        assertEquals(AppSettings(microphone = true, camera = true, audio = false), alone)
     }
 
     @Test

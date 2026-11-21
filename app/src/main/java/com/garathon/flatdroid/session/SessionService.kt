@@ -1,5 +1,6 @@
 package com.garathon.flatdroid.session
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -75,12 +76,11 @@ class SessionService : Service() {
                 }
                 return START_NOT_STICKY
             }
-            ACTION_ALLOW_MICROPHONE -> {
-                SessionController.answerMicrophone(true)
-                return START_NOT_STICKY
-            }
-            ACTION_DENY_MICROPHONE -> {
-                SessionController.answerMicrophone(false)
+            ACTION_ALLOW, ACTION_DENY -> {
+                val sensor = intent.getStringExtra(EXTRA_SENSOR)?.let { name -> Sensor.entries.firstOrNull { it.name == name } } ?: return START_NOT_STICKY
+                val allow = intent.action == ACTION_ALLOW
+                if (allow) takeType(sensor)
+                SessionController.answer(sensor, allow)
                 return START_NOT_STICKY
             }
             ACTION_RESUME_NO_WINDOW -> {
@@ -112,17 +112,21 @@ class SessionService : Service() {
         }
 
         val prepareElectron = intent.action == ACTION_PREPARE_ELECTRON
-        val micAnswer = if (intent.hasExtra(EXTRA_MIC_ANSWER)) intent.getBooleanExtra(EXTRA_MIC_ANSWER, false) else null
+        val answers = Sensor.entries.filter { intent.hasExtra(answerExtra(it)) }.associateWith { intent.getBooleanExtra(answerExtra(it), false) }
         val notifications = getSystemService(NotificationManager::class.java)
         val updates = scope.launch {
             SessionController.ui.distinctUntilChangedBy { Triple(it.state::class, it.state.appIdOrNull, stage(it.state)) }
                 .filter { it.state !is SessionState.Idle && it.state !is SessionState.Question }
                 .collect { notifications.notify(NOTIFICATION_ID, notification(it.state)) }
         }
-        val micRequests = scope.launch {
-            SessionController.ui.map { it.micRequest }.distinctUntilChanged().collect { request ->
-                if (request == null) notifications.cancel(MIC_NOTIFICATION_ID)
-                else notifications.notify(MIC_NOTIFICATION_ID, micNotification(request))
+        val asks = scope.launch {
+            // Only a new question is posted: posting one already shown again would pop it up again.
+            var shown = emptySet<Sensor>()
+            SessionController.ui.map { ui -> ui.state.appIdOrNull?.let { app -> ui.asks to app } }.distinctUntilChanged().collect { asked ->
+                val now = asked?.first.orEmpty()
+                for (sensor in shown - now) notifications.cancel(askId(sensor))
+                for (sensor in now - shown) notifications.notify(askId(sensor), askNotification(sensor, asked!!.second))
+                shown = now
             }
         }
         // The question about an app with no window goes to a notification only while Flatdroid's viewer, which asks itself, isn't on screen.
@@ -149,7 +153,7 @@ class SessionService : Service() {
                         SessionController.preparingElectron(appId, getString(R.string.electron_preparing), null)
                         launcher.prepareElectron(appId)
                     }
-                    if (!launcher.run(appId, micAnswer)) return@runInterruptible
+                    if (!launcher.run(appId, answers)) return@runInterruptible
                     // A crash, a kill or an error exit is an error, not a plain close.
                     message = when (val ending = launcher.ending) {
                         is AppEnding.Crashed -> getString(R.string.session_crashed, label(appId), ProotExit.signalName(ending.signal))
@@ -170,10 +174,11 @@ class SessionService : Service() {
                 // service has stopped, leaving one nothing removes (its Stop then does nothing).
                 withContext(NonCancellable) {
                     updates.cancelAndJoin()
-                    micRequests.cancelAndJoin()
+                    asks.cancelAndJoin()
                     noWindowAsks.cancelAndJoin()
                 }
                 notifications.cancel(MIC_NOTIFICATION_ID)
+                notifications.cancel(CAMERA_NOTIFICATION_ID)
                 notifications.cancel(NO_WINDOW_NOTIFICATION_ID)
                 removeNotification()
                 SavedSizes.changed(applicationContext, appId)
@@ -222,29 +227,65 @@ class SessionService : Service() {
     }
 
     /**
-     * Asks about the microphone, answered in the notification itself: Allow or Deny holds for the
-     * session; swiping it away denies. Allow needs the device unlocked (Android 12+).
+     * The session may use [sensor] from now on: the foreground service's type for it, which
+     * Android grants only with its permission and while Flatdroid is in front (Allow from
+     * [UsePermissionActivity], or from the notification while the viewer shows). Not taken
+     * otherwise: the app then gets silence or black frames, logged.
      */
-    private fun micNotification(appId: String): Notification {
-        createChannel(MIC_CHANNEL_ID, R.string.session_mic_channel, NotificationManager.IMPORTANCE_HIGH)
-        val allow = PendingIntent.getService(
-            this, 3, Intent(this, SessionService::class.java).setAction(ACTION_ALLOW_MICROPHONE), PendingIntent.FLAG_IMMUTABLE,
-        )
-        val deny = PendingIntent.getService(
-            this, 4, Intent(this, SessionService::class.java).setAction(ACTION_DENY_MICROPHONE), PendingIntent.FLAG_IMMUTABLE,
-        )
-        val allowAction = NotificationCompat.Action.Builder(0, getString(R.string.mic_allow), allow)
+    private fun takeType(sensor: Sensor) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R || job?.isActive != true || hasType(sensor) || !hasPermission(this, sensor)) return
+        when (sensor) {
+            Sensor.MICROPHONE -> microphoneType = true
+            Sensor.CAMERA -> cameraType = true
+        }
+        try {
+            startInForeground(notification(SessionController.ui.value.state))
+        } catch (e: Exception) {
+            when (sensor) {
+                Sensor.MICROPHONE -> microphoneType = false
+                Sensor.CAMERA -> cameraType = false
+            }
+            SessionController.log("[flatdroid] Android didn't let Flatdroid use the ${sensor.name.lowercase()} from the background: $e")
+        }
+    }
+
+    private fun hasType(sensor: Sensor) = when (sensor) {
+        Sensor.MICROPHONE -> microphoneType
+        Sensor.CAMERA -> cameraType
+    }
+
+    /**
+     * Asks about [sensor], answered in the notification itself: Allow or Deny holds for the
+     * session; swiping it away denies. Allow needs the device unlocked (Android 12+). Without
+     * Android's permission, or the service's type for it, Allow opens [UsePermissionActivity],
+     * which asks Android and takes the type with Flatdroid in front.
+     */
+    private fun askNotification(sensor: Sensor, appId: String): Notification {
+        createChannel(ASK_CHANNEL_ID, R.string.session_ask_channel, NotificationManager.IMPORTANCE_HIGH)
+        val code = ASK_REQUEST_CODE + 2 * sensor.ordinal
+        val ready = hasPermission(this, sensor) && (Build.VERSION.SDK_INT < Build.VERSION_CODES.R || hasType(sensor))
+        val allow = if (ready) {
+            PendingIntent.getService(this, code, answerIntent(this, sensor, true), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        } else {
+            PendingIntent.getActivity(this, code, UsePermissionActivity.intent(this, sensor), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        }
+        val deny = PendingIntent.getService(this, code + 1, answerIntent(this, sensor, false), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val allowAction = NotificationCompat.Action.Builder(0, getString(R.string.ask_allow), allow)
             .setAuthenticationRequired(true)
             .build()
-        return NotificationCompat.Builder(this, MIC_CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-            .setContentTitle(getString(R.string.mic_request_title, label(appId)))
-            .setContentText(getString(R.string.mic_request_notification))
+        val (icon, title) = when (sensor) {
+            Sensor.MICROPHONE -> android.R.drawable.ic_btn_speak_now to R.string.mic_request_title
+            Sensor.CAMERA -> android.R.drawable.ic_menu_camera to R.string.camera_request_title
+        }
+        return NotificationCompat.Builder(this, ASK_CHANNEL_ID)
+            .setSmallIcon(icon)
+            .setContentTitle(getString(title, label(appId)))
+            .setContentText(getString(R.string.ask_request_notification))
             .setDeleteIntent(deny)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             // Its own group, so Android doesn't bundle it with the session's and hide its buttons.
-            .setGroup(MIC_CHANNEL_ID)
-            .addAction(0, getString(R.string.mic_deny), deny)
+            .setGroup(askGroup(sensor))
+            .addAction(0, getString(R.string.ask_deny), deny)
             .addAction(allowAction)
             .build()
     }
@@ -326,33 +367,66 @@ class SessionService : Service() {
     companion object {
         private const val CHANNEL_ID = "session"
         private const val NOTIFICATION_ID = 10
-        private const val MIC_CHANNEL_ID = "permissions"
+        /** The questions' channel (its ID is from when only the microphone asked). */
+        private const val ASK_CHANNEL_ID = "permissions"
         private const val MIC_NOTIFICATION_ID = 11
+        private const val CAMERA_NOTIFICATION_ID = 13
+        /** The questions' pending intents: 7 and 8 for the microphone, 9 and 10 for the camera. */
+        private const val ASK_REQUEST_CODE = 7
         private const val NO_WINDOW_CHANNEL_ID = "no_window_alert"
         private const val NO_WINDOW_NOTIFICATION_ID = 12
         private const val EXTRA_APP_ID = "appId"
-        private const val EXTRA_MIC_ANSWER = "micAnswer"
+        private const val EXTRA_SENSOR = "sensor"
         private const val ACTION_LAUNCH = "com.garathon.flatdroid.action.LAUNCH"
         private const val ACTION_PREPARE_ELECTRON = "com.garathon.flatdroid.action.PREPARE_ELECTRON"
         private const val ACTION_STOP = "com.garathon.flatdroid.action.STOP"
-        private const val ACTION_ALLOW_MICROPHONE = "com.garathon.flatdroid.action.ALLOW_MICROPHONE"
-        private const val ACTION_DENY_MICROPHONE = "com.garathon.flatdroid.action.DENY_MICROPHONE"
+        private const val ACTION_ALLOW = "com.garathon.flatdroid.action.ALLOW"
+        private const val ACTION_DENY = "com.garathon.flatdroid.action.DENY"
         private const val ACTION_RESUME_NO_WINDOW = "com.garathon.flatdroid.action.RESUME_NO_WINDOW"
 
-        /** [micAnswer]: the microphone's answer for the session, when asked before the launch. */
-        fun launch(context: Context, appId: String, micAnswer: Boolean? = null) = start(context, ACTION_LAUNCH, appId, micAnswer)
+        /** [answers]: the user's answers about the microphone and camera for the session, when asked before the launch. */
+        fun launch(context: Context, appId: String, answers: Map<Sensor, Boolean> = emptyMap()) = start(context, ACTION_LAUNCH, appId, answers)
 
         /** After the user agreed to download Electron for this device: prepare it, then launch. */
-        fun prepareElectronAndLaunch(context: Context, appId: String, micAnswer: Boolean? = null) =
-            start(context, ACTION_PREPARE_ELECTRON, appId, micAnswer)
+        fun prepareElectronAndLaunch(context: Context, appId: String, answers: Map<Sensor, Boolean> = emptyMap()) =
+            start(context, ACTION_PREPARE_ELECTRON, appId, answers)
 
-        /** Whether the microphone question can be posted: notifications, and their channel, aren't blocked. */
+        /** Whether the microphone and camera questions can be posted: notifications, and their channel, aren't blocked. */
         fun canAskInNotification(context: Context): Boolean {
             val manager = NotificationManagerCompat.from(context)
             if (!manager.areNotificationsEnabled()) return false
-            val channel = manager.getNotificationChannelCompat(MIC_CHANNEL_ID) ?: return true
+            val channel = manager.getNotificationChannelCompat(ASK_CHANNEL_ID) ?: return true
             return channel.importance != NotificationManagerCompat.IMPORTANCE_NONE
         }
+
+        /** Android's permission for [sensor]. */
+        fun hasPermission(context: Context, sensor: Sensor): Boolean = when (sensor) {
+            Sensor.MICROPHONE -> MicStreamer.hasPermission(context)
+            Sensor.CAMERA -> AndroidCameras.hasPermission(context)
+        }
+
+        /** Android's permission [sensor] needs. */
+        fun permission(sensor: Sensor): String = when (sensor) {
+            Sensor.MICROPHONE -> Manifest.permission.RECORD_AUDIO
+            Sensor.CAMERA -> Manifest.permission.CAMERA
+        }
+
+        /** The user's answer about [sensor] for the running session; Allow also takes the service's type for it. */
+        fun answer(context: Context, sensor: Sensor, allow: Boolean) {
+            context.startService(answerIntent(context, sensor, allow))
+        }
+
+        private fun answerIntent(context: Context, sensor: Sensor, allow: Boolean) =
+            Intent(context, SessionService::class.java).setAction(if (allow) ACTION_ALLOW else ACTION_DENY).putExtra(EXTRA_SENSOR, sensor.name)
+
+        private fun answerExtra(sensor: Sensor) = "answer.${sensor.name}"
+
+        private fun askId(sensor: Sensor) = when (sensor) {
+            Sensor.MICROPHONE -> MIC_NOTIFICATION_ID
+            Sensor.CAMERA -> CAMERA_NOTIFICATION_ID
+        }
+
+        private fun askGroup(sensor: Sensor) = "$ASK_CHANNEL_ID.${sensor.name.lowercase()}"
 
         fun stop(context: Context) {
             val state = SessionController.ui.value.state
@@ -362,13 +436,13 @@ class SessionService : Service() {
         }
 
         /** Not while a Flatpak task or a terminal command runs ([AlpineCommands.sessionMayStart]). */
-        private fun start(context: Context, action: String, appId: String, micAnswer: Boolean?) {
+        private fun start(context: Context, action: String, appId: String, answers: Map<Sensor, Boolean>) {
             if (SessionController.isBusy || !AlpineCommands.sessionMayStart(context)) return
             SessionController.starting(appId, context.getString(R.string.session_starting), clearLog = true)
             ContextCompat.startForegroundService(
                 context,
                 Intent(context, SessionService::class.java).setAction(action).putExtra(EXTRA_APP_ID, appId)
-                    .apply { if (micAnswer != null) putExtra(EXTRA_MIC_ANSWER, micAnswer) },
+                    .apply { for ((sensor, allow) in answers) putExtra(answerExtra(sensor), allow) },
             )
         }
     }

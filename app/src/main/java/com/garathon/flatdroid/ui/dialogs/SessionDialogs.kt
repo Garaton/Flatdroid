@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import com.garathon.flatdroid.R
 import com.garathon.flatdroid.flatpak.flathub.FlathubLinkApproval
 import com.garathon.flatdroid.flatpak.InstalledApps
+import com.garathon.flatdroid.session.Sensor
 import com.garathon.flatdroid.session.SessionState
 import com.garathon.flatdroid.ui.common.LogText
 import com.garathon.flatdroid.ui.common.rememberFlathubLinksAllowed
@@ -163,17 +164,22 @@ fun FilesChangedDialog(state: SessionState.FilesChanged, appName: String, onRein
 }
 
 /**
- * Before launching an app whose microphone asks, when Flatdroid can't post the question later
- * (notifications are off): the answer holds for the session. Dismissing it cancels the launch.
+ * Before launching an app whose microphone or camera ([sensor]) asks, when Flatdroid can't post the
+ * question later (notifications are off): the answer holds for the session. Dismissing it cancels
+ * the launch.
  */
 @Composable
-fun MicrophoneLaunchDialog(appName: String, onAnswer: (allow: Boolean) -> Unit, onDismiss: () -> Unit) {
+fun UseLaunchDialog(sensor: Sensor, appName: String, onAnswer: (allow: Boolean) -> Unit, onDismiss: () -> Unit) {
+    val (title, text) = when (sensor) {
+        Sensor.MICROPHONE -> R.string.mic_launch_title to R.string.mic_launch_text
+        Sensor.CAMERA -> R.string.camera_launch_title to R.string.camera_launch_text
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.mic_launch_title, appName)) },
-        text = { Text(stringResource(R.string.mic_launch_text)) },
-        confirmButton = { Button(onClick = { onAnswer(true) }) { Text(stringResource(R.string.mic_allow)) } },
-        dismissButton = { TextButton(onClick = { onAnswer(false) }) { Text(stringResource(R.string.mic_deny)) } },
+        title = { Text(stringResource(title, appName)) },
+        text = { Text(stringResource(text)) },
+        confirmButton = { Button(onClick = { onAnswer(true) }) { Text(stringResource(R.string.ask_allow)) } },
+        dismissButton = { TextButton(onClick = { onAnswer(false) }) { Text(stringResource(R.string.ask_deny)) } },
     )
 }
 

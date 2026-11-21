@@ -31,8 +31,10 @@ import java.io.IOException
 /**
  * One Android camera into its node's pipe ([CameraScript]): JPEG frames at the camera's size and
  * rate, each in one write. [open] writes a black frame, which makes the node appear; Android's
- * camera then runs only while an app is linked to the node ([setUsers]), so Android's camera
- * indicator shows only meanwhile. When Android takes the camera away (another app, a call) or
+ * camera then runs only while an app is linked to the node ([setUsers]) and the user allowed it
+ * ([setAllowed]), so Android's camera indicator shows only meanwhile. Linked but not allowed (not
+ * answered yet, or denied), the app gets black frames at the camera's rate, so its stream goes on
+ * and real frames follow once it is allowed. When Android takes the camera away (another app, a call) or
  * can't open it, it is tried again whenever Android reports a camera available or a change of
  * who may use cameras, while an app is still linked.
  * Everything runs on the camera's own thread; writing to the pipe
@@ -67,6 +69,21 @@ class CameraStreamer(private val context: Context, private val camera: AndroidCa
     private var opening = false
     private var order: Nv21.Order? = null
     private var users = 0
+    private var allowed = false
+    /** A black frame with its part header, at the size it was made for (the size changes when the display turns). */
+    private var black: Triple<Int, Int, ByteArray>? = null
+    private val blackFrames = object : Runnable {
+        override fun run() {
+            val stream = output ?: return
+            try {
+                stream.write(blackFrame())
+            } catch (e: IOException) {
+                if (!closed) DebugLog.w("Camera ${camera.id}: ${e.message}")
+                return
+            }
+            handler.postDelayed(this, 1000L / camera.frameRate)
+        }
+    }
     /** The camera opened but couldn't be set up: closing it makes Android report it available, which isn't a reason to try again. */
     private var failedSetup = false
     /**
@@ -87,7 +104,7 @@ class CameraStreamer(private val context: Context, private val camera: AndroidCa
                 runCatching { Os.fcntlInt(stream.fd, F_SETPIPE_SZ, CameraScript.PIPE_BYTES) }
                     .onFailure { DebugLog.w("Camera ${camera.id}: pipe size: ${it.message}") }
             }
-            writeFrame(stream, Nv21.black(outWidth, outHeight))
+            stream.write(blackFrame())
             meter.reset()
             manager?.registerAvailabilityCallback(availability, handler)
         } catch (e: IOException) {
@@ -102,12 +119,32 @@ class CameraStreamer(private val context: Context, private val camera: AndroidCa
      */
     fun turn(degrees: Int) = handler.post { rotation = degrees }
 
-    /** How many links lead from the node: Android's camera runs while there are any. */
+    /** How many links lead from the node: Android's camera runs while there are any, once allowed. */
     fun setUsers(count: Int) = handler.post {
         if (closed || count == users) return@post
         users = count
         failedSetup = false
-        if (count > 0) start() else stopCamera()
+        update()
+    }
+
+    /** Whether the user allowed the app the camera, for now. */
+    fun setAllowed(on: Boolean) = handler.post {
+        if (closed || on == allowed) return@post
+        allowed = on
+        update()
+    }
+
+    /** Android's camera while linked and allowed, black frames while linked and not, nothing while not linked. */
+    private fun update() {
+        handler.removeCallbacks(blackFrames)
+        when {
+            users > 0 && allowed -> start()
+            users > 0 -> {
+                stopCamera()
+                blackFrames.run()
+            }
+            else -> stopCamera()
+        }
     }
 
     /** After the camera's helpers have stopped, so a write still waiting for the source fails. */
@@ -116,6 +153,7 @@ class CameraStreamer(private val context: Context, private val camera: AndroidCa
         // An open() still waiting for a reader (the source never started) goes on, then fails to write.
         runCatching { Os.close(Os.open(pipe.path, OsConstants.O_RDONLY or OsConstants.O_NONBLOCK, 0)) }
         handler.post {
+            handler.removeCallbacks(blackFrames)
             manager?.unregisterAvailabilityCallback(availability)
             stopCamera()
             runCatching { output?.close() }
@@ -161,7 +199,7 @@ class CameraStreamer(private val context: Context, private val camera: AndroidCa
 
     /** After Android took the camera away or couldn't open it, while an app is still linked. */
     private fun retry() {
-        if (!closed && users > 0 && !failedSetup) start()
+        if (!closed && users > 0 && allowed && !failedSetup) start()
     }
 
     /**
@@ -248,15 +286,27 @@ class CameraStreamer(private val context: Context, private val camera: AndroidCa
 
     /** [nv21] ([outWidth]×[outHeight]) as JPEG, with its part header, in one write. */
     private fun writeFrame(stream: FileOutputStream, nv21: ByteArray) {
+        encode(nv21)
+        meter.step(2)
+        part.writeTo(stream)
+        meter.step(3)
+    }
+
+    /** [nv21] ([outWidth]×[outHeight]) as JPEG with its part header, into [part]. */
+    private fun encode(nv21: ByteArray) {
         jpeg.reset()
         YuvImage(nv21, ImageFormat.NV21, outWidth, outHeight, null).compressToJpeg(Rect(0, 0, outWidth, outHeight), JPEG_QUALITY, jpeg)
-        meter.step(2)
         part.reset()
         part.write(CameraScript.frameHeader(jpeg.size()))
         jpeg.writeTo(part)
         part.write(CameraScript.FRAME_END)
-        part.writeTo(stream)
-        meter.step(3)
+    }
+
+    /** A black frame at the current size, encoded once per size. */
+    private fun blackFrame(): ByteArray {
+        black?.let { (width, height, bytes) -> if (width == outWidth && height == outHeight) return bytes }
+        encode(Nv21.black(outWidth, outHeight))
+        return part.toByteArray().also { black = Triple(outWidth, outHeight, it) }
     }
 
     private fun stopCamera() {

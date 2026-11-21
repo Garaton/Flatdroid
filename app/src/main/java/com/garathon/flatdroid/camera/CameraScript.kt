@@ -12,7 +12,9 @@ import com.garathon.flatdroid.session.helpers.SessionBus
  * WirePlumber, the camera portal, and for each camera a GStreamer source that turns the JPEG
  * frames Flatdroid writes to its pipe ([frameHeader] before each) into a PipeWire camera node. Its
  * node appears with the first frame; Flatdroid writes a black one at the start, and opens Android's
- * camera only while an app is linked to the node ([USERS_PREFIX]). A source never waits for an
+ * camera only while an app is linked to the node ([USERS_PREFIX]) and the user allowed it. Links
+ * and readiness reach Flatdroid through a pipe of their own ([EVENTS]), not the helpers' output,
+ * which a helper logging a string an app chose could fill with a false line. A source never waits for an
  * app: frames an app isn't ready for are dropped (a one-frame leaky queue, and no buffer pool, so
  * an app holding on to buffers can't stall it), as a real camera does. Frames are JPEG because
  * pipewiresink drops the timestamps of raw video frames it copies (still so in PipeWire 1.6), and
@@ -28,9 +30,11 @@ object CameraScript {
     /** WirePlumber's and the portal's configuration ([CONFIG_FILES]), as XDG_CONFIG_DIRS. */
     const val GUEST_CONFIG_DIR = "/run/flatdroid/camera-config"
 
-    /** Printed once the nodes exist and the portal reports a camera. */
+    /** The pipe, among the nodes' in [GUEST_PIPE_DIR], that [READY] and the [USERS_PREFIX] lines go to. */
+    const val EVENTS = "events"
+    /** Written once the nodes exist and the portal reports a camera. */
     const val READY = "flatdroid: camera ready"
-    /** Printed with a node's name and how many links lead from it, whenever links change. */
+    /** Written with a node's name and how many links lead from it, whenever links change. */
     const val USERS_PREFIX = "flatdroid: camera users "
 
     /**
@@ -157,10 +161,13 @@ object CameraScript {
             |  [ "${'$'}i" -gt 100 ] && break
             |  sleep 0.1
             |done
+            |# The events go to Flatdroid's pipe, which only this script and awk hold (opened after the
+            |# helpers started, closed for pw-link).
+            |exec 4>$GUEST_PIPE_DIR/$EVENTS
             |# One process for the users, started now: one started later (for each change) would be
             |# visible to the app. pw-link prints each output port's name ("*" when it changed), then
             |# each of its links as "  |-> <input port>", with "+", "-" or " " in front.
-            |pw-link -m -l 2>/dev/null | awk -v nodes="$names" -v prefix="$USERS_PREFIX" '
+            |pw-link -m -l 2>/dev/null 4>&- | awk -v nodes="$names" -v prefix="$USERS_PREFIX" '
             |  function report(   i, k, c) {
             |    for (i = 1; i <= n; i++) {
             |      c = 0
@@ -177,8 +184,9 @@ object CameraScript {
             |  }
             |  substr(${'$'}0, 2, 6) == "  |<- " { next }
             |  { port = substr(${'$'}0, 2) }
-            |' &
-            |echo "$READY"
+            |' >&4 &
+            |echo "$READY" >&4
+            |exec 4>&-
             |wait
             |""".trimMargin()
     }

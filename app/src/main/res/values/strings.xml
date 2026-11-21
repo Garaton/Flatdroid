@@ -436,13 +436,16 @@
     <string name="session_skip_check">Skip check</string>
     <string name="files_changed_title">%1$s\'s files changed</string>
     
-    <string name="session_mic_channel">Permission requests</string>
+    <string name="session_ask_channel">Permission requests</string>
     <string name="mic_request_title">%1$s wants to use the microphone</string>
-    <string name="mic_request_notification">Your answer holds until the app is closed. Swiping this away denies it.</string>
+    <string name="camera_request_title">%1$s wants to use the camera</string>
+    <string name="ask_request_notification">Your answer holds until the app is closed. Swiping this away denies it.</string>
     <string name="mic_launch_title">Allow %1$s to use the microphone?</string>
     <string name="mic_launch_text">Notifications are off, so Flatdroid can\'t ask when the app records. Your answer holds until the app is closed.</string>
-    <string name="mic_allow">Allow</string>
-    <string name="mic_deny">Deny</string>
+    <string name="camera_launch_title">Allow %1$s to use the camera?</string>
+    <string name="camera_launch_text">Notifications are off, so Flatdroid can\'t ask when the app uses a camera. Your answer holds until the app is closed.</string>
+    <string name="ask_allow">Allow</string>
+    <string name="ask_deny">Deny</string>
     <string name="session_starting">Starting…</string>
     <string name="session_opening">Opening…</string>
     <string name="viewer_opening">Opening %1$s…</string>
@@ -524,7 +527,9 @@
     <string name="app_settings_always_allow_microphone">Always allow microphone</string>
     <string name="app_settings_always_allow_microphone_hint">Uses Android\'s microphone whenever the app records, without asking.</string>
     <string name="app_settings_camera">Camera</string>
-    <string name="app_settings_camera_hint">The app can use the phone\'s cameras whenever it runs, without asking. Works with apps that use Flatpak\'s camera portal.</string>
+    <string name="app_settings_camera_hint">When the app first uses a camera, you are prompted to allow or deny it until the app is closed. Works with apps that use Flatpak\'s camera portal.</string>
+    <string name="app_settings_always_allow_camera">Always allow camera</string>
+    <string name="app_settings_always_allow_camera_hint">Uses Android\'s cameras whenever the app wants them, without asking.</string>
     <string name="app_settings_camera_none">This device has no camera Flatdroid can use.</string>
     <string name="app_settings_camera_android_denied">Android didn\'t allow Flatdroid to use the camera.</string>
     <string name="app_settings_camera_frame_rate">Camera frame rate</string>

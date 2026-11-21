@@ -12,6 +12,7 @@ import com.garathon.flatdroid.flatpak.tasks.FlatpakTask
 import com.garathon.flatdroid.flatpak.tasks.FlatpakTasks
 import com.garathon.flatdroid.flatpak.InstalledApp
 import com.garathon.flatdroid.flatpak.InstalledApps
+import com.garathon.flatdroid.session.Sensor
 import com.garathon.flatdroid.session.SessionController
 import com.garathon.flatdroid.session.SessionState
 import com.garathon.flatdroid.setup.SetupController
@@ -47,6 +48,14 @@ import java.io.File
 /** A launch on hold while the user answers a question. */
 data class PendingLaunch(val appId: String, val prepareElectron: Boolean)
 
+/**
+ * A launch on hold for the microphone and camera questions asked before it (notifications off):
+ * [remaining] to ask, the first now, and the [answers] so far.
+ */
+data class LaunchQuestions(val launch: PendingLaunch, val remaining: List<Sensor>, val answers: Map<Sensor, Boolean>) {
+    val asking: Sensor get() = remaining.first()
+}
+
 /** Installed apps for the home list; reloaded after Flatpak tasks, sessions and setup. */
 class HomeViewModel(app: Application) : AndroidViewModel(app) {
     private val _apps = MutableStateFlow<List<InstalledApp>?>(null)
@@ -69,8 +78,11 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     /** Setup's first Start is waiting for the notification permission's answer. */
     @Volatile var pendingSetup = false
 
-    /** A launch waiting for the microphone question. */
-    var microphoneQuestion by mutableStateOf<PendingLaunch?>(null)
+    /** A launch waiting for the microphone and camera questions. */
+    var launchQuestions by mutableStateOf<LaunchQuestions?>(null)
+
+    /** The same while Android's permission dialog, opened by an Allow, is up. */
+    @Volatile var launchPermission: LaunchQuestions? = null
 
     /** An install or update waiting for the answer to the mobile data question. */
     var meteredQuestion by mutableStateOf<FlatpakTask?>(null)

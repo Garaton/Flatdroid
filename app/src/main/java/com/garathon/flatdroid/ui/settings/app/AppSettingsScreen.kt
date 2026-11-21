@@ -37,9 +37,9 @@ import com.garathon.flatdroid.ui.theme.FlatdroidTheme
 
 /**
  * Everything the pages read besides the draft. [onRequestMicrophone] asks Android for its
- * microphone permission and the answer comes back as [permissionAnswer]: the microphone turns on only with it,
- * so a notification can later allow it for a session, unless it is always allowed. The camera
- * likewise ([onRequestCamera]), when the device has one ([hasCamera]), at a frame rate its cameras
+ * microphone permission and the answer comes back as [permissionAnswer]: "Always allow microphone"
+ * turns on only with it (otherwise Android's permission is asked at the first Allow of a session's
+ * question). The camera likewise ([onRequestCamera]), when the device has one ([hasCamera]), at a frame rate its cameras
  * can run at and a size they give at that rate ([cameraResolutions], by rate; empty while still
  * asked). [sharedHome] is the shared home as the user knows it; with access to all of shared
  * storage ([broadAccess]) an app can also get /sdcard. [storage] is null while measured;

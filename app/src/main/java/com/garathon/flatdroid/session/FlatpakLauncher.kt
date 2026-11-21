@@ -20,6 +20,7 @@ import com.garathon.flatdroid.audio.MicStreamer
 import com.garathon.flatdroid.audio.MicrophoneSession
 import com.garathon.flatdroid.camera.AndroidCameras
 import com.garathon.flatdroid.camera.CameraScript
+import com.garathon.flatdroid.camera.CameraSession
 import com.garathon.flatdroid.camera.CameraStreamer
 import com.garathon.flatdroid.flatpak.integrity.AndroidLinkFs
 import com.garathon.flatdroid.session.helpers.PulseScript
@@ -162,9 +163,10 @@ class FlatpakLauncher(private val context: Context) {
 
     /**
      * Launches [appId] and returns when it exits. Returns false without launching if the user
-     * must first agree to an Electron swap (the offer is then in [SessionController]).
+     * must first agree to an Electron swap (the offer is then in [SessionController]). [answers]:
+     * the user's answers about the microphone and camera when asked before the launch.
      */
-    fun run(appId: String, micAnswer: Boolean? = null): Boolean {
+    fun run(appId: String, answers: Map<Sensor, Boolean> = emptyMap()): Boolean {
         ending = null
         SessionController.starting(appId, context.getString(R.string.session_reading_metadata), clearLog = true)
         // Every Flatpak could otherwise open Flatdroid's memory through /proc (same user).
@@ -221,18 +223,14 @@ class FlatpakLauncher(private val context: Context) {
         val password = if (!externalViewer) null else if (plan.wayland) VncPassword.random(length = WaylandVnc.PASSWORD_LENGTH) else VncPassword.random()
         val audio = plan.binds.pulseSockets != null
         val appContext = plan.app.metadata.context
-        // On by setting or by default, and Android's permission given: the default isn't saved as off when it isn't.
-        var microphoneWanted = settings.microphoneAllowed(appContext.sockets)
-        if (microphoneWanted && !MicStreamer.hasPermission(context)) {
-            microphoneWanted = false
-            SessionController.log("[flatdroid] Android's microphone permission is off; the app's microphone is off")
-        }
-        val microphone = audio && microphoneWanted
-        var cameraWanted = settings.cameraAllowed(appContext)
-        if (cameraWanted && !AndroidCameras.hasPermission(context)) {
-            cameraWanted = false
-            SessionController.log("[flatdroid] Android's camera permission is off; the app's camera is off")
-        }
+        // On by setting or by default. Android's permission is asked at the first Allow; "Always
+        // allow" without it (revoked since) asks instead.
+        val microphone = audio && settings.microphoneAllowed(appContext.sockets)
+        val micAlways = settings.alwaysAllowMicrophone && MicStreamer.hasPermission(context)
+        if (microphone && settings.alwaysAllowMicrophone && !micAlways) SessionController.log("[flatdroid] Android's microphone permission is off; the app's microphone asks instead")
+        val cameraWanted = settings.cameraAllowed(appContext)
+        val cameraAlways = settings.alwaysAllowCamera && AndroidCameras.hasPermission(context)
+        if (cameraWanted && settings.alwaysAllowCamera && !cameraAlways) SessionController.log("[flatdroid] Android's camera permission is off; the app's camera asks instead")
         val cameras = if (cameraWanted) AndroidCameras.list(context, settings.cameraResolution, settings.cameraFrameRate) else emptyList()
         if (cameraWanted && cameras.isEmpty()) SessionController.log("[flatdroid] the app's camera is on, but Android has no camera Flatdroid can use")
         // Upright for the app's display: a landscape display as the device held landscape, a
@@ -276,11 +274,11 @@ class FlatpakLauncher(private val context: Context) {
         var dns: ResolvConfRefresher? = null
         var portal: SessionPortal? = null
         val streamers = LinkedHashMap<String, CameraStreamer>()
+        var camera: CameraSession? = null
         try {
             mic = if (!microphone) null else {
-                MicrophoneSession(context, appId, File(pulseDir, PulseScript.MIC_PIPE), micRate, settings.alwaysAllowMicrophone, micAnswer)
+                MicrophoneSession(context, File(pulseDir, PulseScript.MIC_PIPE), micRate, micAlways, answers[Sensor.MICROPHONE])
             }
-            SessionController.onMicrophoneAnswer = mic?.let { it::answer }
             val helpers = startHelpers(
                 SessionScript.command(
                     "${screenWidth}x$screenHeight", frameRate, audio, resampler, sessionBus = true,
@@ -299,6 +297,7 @@ class FlatpakLauncher(private val context: Context) {
                 streamers[cameraNodes[index].name] =
                     CameraStreamer(context, cameras[index], File(cameraPipeDir, cameraNodes[index].name), cameraRotations[index])
             }
+            if (streamers.isNotEmpty()) camera = CameraSession(streamers, File(cameraPipeDir, CameraScript.EVENTS), cameraAlways, answers[Sensor.CAMERA])
             // The app's display turned with the phone: the pictures turn with it, staying upright.
             if (streamers.isNotEmpty()) SessionController.onDisplayResized = { width, height ->
                 val rotation = displayRotation(landscape = width > height)
@@ -324,8 +323,8 @@ class FlatpakLauncher(private val context: Context) {
                     hostPath = plan.binds::hostOf, keepScreenOn = SessionController::keepScreenOn,
                     log = SessionController::log,
                 )
-                if (streamers.isNotEmpty()) {
-                    cameraHelpers = startCamera(helpers, streamers, Fdsec.Filter(extraSyscalls = security.extraSyscallFilter, noInternet = true), filterRefused)
+                camera?.let {
+                    cameraHelpers = startCamera(helpers, it, Fdsec.Filter(extraSyscalls = security.extraSyscallFilter, noInternet = true), filterRefused)
                 }
             }
             if (!audio) {
@@ -470,8 +469,7 @@ class FlatpakLauncher(private val context: Context) {
             step { mic?.stop() }
             // The helpers first, so a streamer still writing to its pipe fails instead of waiting.
             step { cameraHelpers?.stop() }
-            step { streamers.values.forEach { it.close() } }
-            SessionController.onMicrophoneAnswer = null
+            step { camera?.close() ?: streamers.values.forEach { it.close() } }
             SessionController.onDisplayResized = null
             step { helpersProot?.stop() }
             step { endEscaped() }
@@ -629,15 +627,14 @@ class FlatpakLauncher(private val context: Context) {
 
     /**
      * Starts the camera's helpers ([CameraScript]) in a proot of their own once PipeWire runs, and
-     * the [streamers] writing to their pipes; waits until the nodes exist and the portal has
+     * the [camera]'s streamers writing to their pipes; waits until the nodes exist and the portal has
      * started, so the app sees its cameras from the start. Null when PipeWire didn't start.
      */
-    private fun startCamera(helpers: ProotProcess, streamers: Map<String, CameraStreamer>, filter: Fdsec.Filter, refused: AtomicBoolean): ProotProcess? {
+    private fun startCamera(helpers: ProotProcess, camera: CameraSession, filter: Fdsec.Filter, refused: AtomicBoolean): ProotProcess? {
         if (!waitForFile(File(pipewireDir, CameraScript.PIPEWIRE_SOCKET), helpers, CAMERA_TIMEOUT_MS, null)) {
             SessionController.log("[flatdroid] PipeWire did not start; the app has no camera")
             return null
         }
-        val ready = CountDownLatch(1)
         val binds = listOf(
             File(sessionDir, "camera.sh").path to CameraScript.GUEST_SCRIPT,
             pipewireDir.path to CameraScript.GUEST_PIPEWIRE_DIR,
@@ -647,12 +644,11 @@ class FlatpakLauncher(private val context: Context) {
         )
         val process = env.start(listOf("/bin/sh", CameraScript.GUEST_SCRIPT), binds, asAppUser = true, filter = filter) { line ->
             if (Fdsec.refused(line)) refused.set(true)
-            CameraScript.users(line)?.let { (node, count) -> streamers[node]?.setUsers(count) }
-            if (line == CameraScript.READY) ready.countDown()
             SessionController.log("[camera] $line")
         }
-        streamers.values.forEach { it.open() }
-        if (!ready.await(CAMERA_TIMEOUT_MS, TimeUnit.MILLISECONDS)) SessionController.log("[flatdroid] the camera's helpers did not get ready in time")
+        // Links and readiness come through the events pipe, which the reader opens as the script does.
+        camera.start()
+        if (!camera.awaitReady(CAMERA_TIMEOUT_MS)) SessionController.log("[flatdroid] the camera's helpers did not get ready in time")
         return process
     }
 
@@ -742,7 +738,7 @@ class FlatpakLauncher(private val context: Context) {
                 Rendering.SOFTWARE -> true
                 Rendering.GL -> false
                 // A camera preview needs GL to keep up.
-                Rendering.AUTOMATIC -> !(app != null && settings.cameraAllowed(app.metadata.context) && AndroidCameras.hasPermission(context))
+                Rendering.AUTOMATIC -> !(app != null && settings.cameraAllowed(app.metadata.context) && AndroidCameras.present(context))
             },
         )
     }
@@ -998,6 +994,7 @@ class FlatpakLauncher(private val context: Context) {
                 File(cameraConfigDir, path).apply { parentFile!!.mkdirs() }.writeTextAtomically(text, durable = false)
             }
             for (node in cameraNodes) Os.mkfifo(File(cameraPipeDir, node.name).path, 0x180) // 0600
+            Os.mkfifo(File(cameraPipeDir, CameraScript.EVENTS).path, 0x180)
         }
     }
 

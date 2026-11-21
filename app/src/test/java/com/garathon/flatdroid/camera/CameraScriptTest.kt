@@ -71,8 +71,21 @@ class CameraScriptTest {
         val lines = CameraScript.text(listOf(CameraScript.Node("flatdroid-camera-0", "Back camera", 640, 480, 30))).lines()
         val monitor = lines.indexOfFirst { it.startsWith("pw-link -m -l") }
         assertTrue(monitor >= 0 && "awk -v nodes=\"flatdroid-camera-0\" -v prefix=\"flatdroid: camera users \"" in lines[monitor])
-        assertTrue(monitor < lines.indexOf("echo \"${CameraScript.READY}\""))
+        assertTrue(monitor < lines.indexOf("echo \"${CameraScript.READY}\" >&4"))
         // Nothing runs per change: no shell function that starts pw-link again.
         assertTrue(lines.none { it.startsWith("report") })
+    }
+
+    @Test
+    fun usersAndReadyGoToTheEventsPipeNotTheOutput() {
+        val lines = CameraScript.text(listOf(CameraScript.Node("flatdroid-camera-0", "Back camera", 640, 480, 30))).lines()
+        val open = lines.indexOf("exec 4>${CameraScript.GUEST_PIPE_DIR}/${CameraScript.EVENTS}")
+        // Opened after every helper started, so none of them holds it; pw-link doesn't get it either.
+        assertTrue(open > lines.indexOfLast { it.endsWith(") &") || it.endsWith("portal &") || it == "wireplumber &" })
+        val monitor = lines.indexOfFirst { it.startsWith("pw-link -m -l") }
+        assertTrue(open < monitor && "2>/dev/null 4>&- | awk" in lines[monitor])
+        assertTrue(lines.any { it == "' >&4 &" })
+        assertTrue(lines.indexOf("exec 4>&-") > lines.indexOf("echo \"${CameraScript.READY}\" >&4"))
+        assertTrue(lines.none { it == "echo \"${CameraScript.READY}\"" })
     }
 }

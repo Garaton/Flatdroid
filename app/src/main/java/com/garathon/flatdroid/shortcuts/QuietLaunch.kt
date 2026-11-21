@@ -7,7 +7,9 @@ import android.os.Build
 import androidx.core.content.ContextCompat
 import com.garathon.flatdroid.alpine.AlpineCommands
 import com.garathon.flatdroid.audio.MicStreamer
+import com.garathon.flatdroid.camera.AndroidCameras
 import com.garathon.flatdroid.flatpak.InstalledApps
+import com.garathon.flatdroid.session.Sensor
 import com.garathon.flatdroid.session.SessionService
 import com.garathon.flatdroid.settings.HomeMode
 import com.garathon.flatdroid.storage.AppData
@@ -21,7 +23,7 @@ import com.garathon.flatdroid.storage.tasks.StorageTasks
  * ([LaunchActivity]) without Flatdroid's window. Errs towards the window: anything a launch from
  * the window would stop for (the notification permission, a storage task or one left unfinished,
  * the temporary home's question, the storage permission, the shared home's warning, the
- * microphone question, a terminal command) sends the start there instead.
+ * microphone and camera questions, a terminal command) sends the start there instead.
  */
 object QuietLaunch {
     fun possible(context: Context, appId: String): Boolean {
@@ -35,16 +37,23 @@ object QuietLaunch {
         val shared = settings.homeMode == HomeMode.SHARED
         if ((shared || settings.homeMode == HomeMode.ANDROID || settings.sdcard) && SharedHome.needsLegacyPermission(context)) return false
         if (shared && SharedHome.needsWarning(context)) return false
-        return !needsMicrophoneQuestion(context, appId)
+        return launchQuestions(context, appId).isEmpty()
     }
 
     /**
-     * The app's microphone is on but will ask, and Flatdroid can't post the question when the app
-     * records (notifications are off): it is asked before the launch instead, for the session.
+     * The app's microphone or camera is on but will ask, and Flatdroid can't post the question when
+     * the app uses it (notifications are off): asked before the launch instead, for the session.
      */
-    fun needsMicrophoneQuestion(context: Context, appId: String): Boolean {
+    fun launchQuestions(context: Context, appId: String): List<Sensor> {
+        if (SessionService.canAskInNotification(context)) return emptyList()
         val settings = AppData.settings(context, appId).load()
-        return !settings.alwaysAllowMicrophone && MicStreamer.hasPermission(context) && !SessionService.canAskInNotification(context) &&
-            settings.microphoneAllowed(InstalledApps(context).sockets(appId))
+        val apps = InstalledApps(context)
+        return buildList {
+            if (settings.microphoneAllowed(apps.sockets(appId)) && !(settings.alwaysAllowMicrophone && MicStreamer.hasPermission(context))) {
+                add(Sensor.MICROPHONE)
+            }
+            val camera = apps.context(appId)?.let(settings::cameraAllowed) == true && AndroidCameras.present(context)
+            if (camera && !(settings.alwaysAllowCamera && AndroidCameras.hasPermission(context))) add(Sensor.CAMERA)
+        }
     }
 }

@@ -63,6 +63,7 @@ import com.garathon.flatdroid.shortcuts.Shortcuts
 import com.garathon.flatdroid.ui.home.HomeViewModel
 import com.garathon.flatdroid.ui.storage.StorageFlows
 import com.garathon.flatdroid.viewer.ViewerActivity
+import com.garathon.flatdroid.session.Sensor
 import com.garathon.flatdroid.session.SessionService
 import com.garathon.flatdroid.session.SessionState
 import com.garathon.flatdroid.session.ExternalViewer
@@ -99,7 +100,7 @@ import com.garathon.flatdroid.util.DoneNotice
 import com.garathon.flatdroid.ui.home.rememberHomeListState
 import com.garathon.flatdroid.ui.dialogs.InstallDialog
 import com.garathon.flatdroid.ui.dialogs.LogDialog
-import com.garathon.flatdroid.ui.dialogs.MicrophoneLaunchDialog
+import com.garathon.flatdroid.ui.dialogs.UseLaunchDialog
 import com.garathon.flatdroid.ui.dialogs.MobileDataDialog
 import com.garathon.flatdroid.ui.setup.ResetScreen
 import com.garathon.flatdroid.ui.setup.SetupSettingsScreen
@@ -115,6 +116,7 @@ import com.garathon.flatdroid.ui.settings.global.GlobalSettingsScreen
 import com.garathon.flatdroid.ui.settings.global.GlobalStorageActions
 import com.garathon.flatdroid.ui.settings.SettingsDraftModel
 import com.garathon.flatdroid.ui.theme.FlatdroidTheme
+import com.garathon.flatdroid.ui.home.LaunchQuestions
 import com.garathon.flatdroid.ui.home.PendingLaunch
 import com.garathon.flatdroid.ui.settings.PermissionAnswer
 import com.garathon.flatdroid.ui.settings.PermissionAsk
@@ -151,6 +153,15 @@ class MainActivity : ComponentActivity() {
             val setup = home.pendingSetup
             home.pendingSetup = false
             if (appId != null) continueLaunch(PendingLaunch(appId, prepareElectron = false)) else if (setup) SetupService.start(this)
+        }
+
+    /** Android's answer to the microphone or camera permission an Allow before a launch asked for: the launch goes on either way. */
+    private val launchPermissionRequest =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            val questions = home.launchPermission ?: return@registerForActivityResult
+            home.launchPermission = null
+            if (!granted) Toast.makeText(this, refusedText(questions.asking), Toast.LENGTH_LONG).show()
+            answered(questions, granted)
         }
 
     private val storage = StorageFlows(this, { home }, { viewModel })
@@ -462,11 +473,21 @@ class MainActivity : ComponentActivity() {
                 onDismiss = { SessionController.ended(null) },
             )
         }
-        home.microphoneQuestion?.let { pending ->
-            MicrophoneLaunchDialog(
-                nameOf(pending.appId),
-                onAnswer = { allow -> home.microphoneQuestion = null; start(pending, allow) },
-                onDismiss = { home.microphoneQuestion = null },
+        home.launchQuestions?.let { questions ->
+            UseLaunchDialog(
+                questions.asking,
+                nameOf(questions.launch.appId),
+                onAnswer = { allow ->
+                    home.launchQuestions = null
+                    // Android's own permission, at the first Allow.
+                    if (allow && !SessionService.hasPermission(this, questions.asking)) {
+                        home.launchPermission = questions
+                        launchPermissionRequest.launch(SessionService.permission(questions.asking))
+                    } else {
+                        answered(questions, allow)
+                    }
+                },
+                onDismiss = { home.launchQuestions = null },
             )
         }
         home.meteredQuestion?.let { task ->
@@ -842,20 +863,31 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** The storage checks (StorageFlows.beforeLaunch), then the microphone question when needed, then the session. */
+    /** The storage checks (StorageFlows.beforeLaunch), then the microphone and camera questions when needed, then the session. */
     private fun continueLaunch(pending: PendingLaunch) = storage.beforeLaunch(pending.appId, onReady = {
-        if (needsMicrophoneQuestion(pending.appId)) home.microphoneQuestion = pending else start(pending, micAnswer = null)
+        ask(LaunchQuestions(pending, QuietLaunch.launchQuestions(this, pending.appId), emptyMap()))
     })
 
-    private fun start(pending: PendingLaunch, micAnswer: Boolean?) {
+    /** The next question before the launch, or the launch once none is left. */
+    private fun ask(questions: LaunchQuestions) {
+        if (questions.remaining.isEmpty()) start(questions.launch, questions.answers) else home.launchQuestions = questions
+    }
+
+    private fun answered(questions: LaunchQuestions, allow: Boolean) =
+        ask(questions.copy(remaining = questions.remaining.drop(1), answers = questions.answers + (questions.asking to allow)))
+
+    private fun refusedText(sensor: Sensor) = when (sensor) {
+        Sensor.MICROPHONE -> R.string.app_settings_microphone_android_denied
+        Sensor.CAMERA -> R.string.app_settings_camera_android_denied
+    }
+
+    private fun start(pending: PendingLaunch, answers: Map<Sensor, Boolean>) {
         home.lastStarted = pending.appId
         // Started from this window: when the app is up and this window is in front, its viewer opens.
         home.autoOpenApp = pending.appId
-        if (pending.prepareElectron) SessionService.prepareElectronAndLaunch(this, pending.appId, micAnswer)
-        else SessionService.launch(this, pending.appId, micAnswer)
+        if (pending.prepareElectron) SessionService.prepareElectronAndLaunch(this, pending.appId, answers)
+        else SessionService.launch(this, pending.appId, answers)
     }
-
-    private fun needsMicrophoneQuestion(appId: String): Boolean = QuietLaunch.needsMicrophoneQuestion(this, appId)
 
     /** Asks Android for the microphone permission; the answer reaches the Permissions page ([SettingsDraftModel.permissionAnswer]). */
     private fun requestMicrophone() = requestPermission(PermissionAsk.MICROPHONE, Manifest.permission.RECORD_AUDIO, MicStreamer.hasPermission(this))

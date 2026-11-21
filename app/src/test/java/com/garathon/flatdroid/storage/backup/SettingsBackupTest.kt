@@ -50,7 +50,7 @@ class SettingsBackupTest {
     fun anAppTheZipLacksKeepsWhatWidensItsReach() {
         val local = mapOf(
             "org.kde.kate.properties" to "permission.network=false\nhome.mode=private\ndisplay.x11=true\n".toByteArray(),
-            "org.kde.kmines.properties" to "permission.camera=false\nusage.launches=7\n".toByteArray(),
+            "org.kde.kmines.properties" to "permission.camera.always=true\nusage.launches=7\n".toByteArray(),
         )
         val files = mapOf(
             "settings.properties" to ByteArray(0),
@@ -65,7 +65,7 @@ class SettingsBackupTest {
         assertEquals("false", kate.getProperty("display.x11"))
         // Not in the zip: only the protected keys stay.
         val kmines = props(out.getValue("org.kde.kmines.properties"))
-        assertEquals("false", kmines.getProperty("permission.camera"))
+        assertEquals("true", kmines.getProperty("permission.camera.always"))
         assertEquals("7", kmines.getProperty("usage.launches"))
     }
 

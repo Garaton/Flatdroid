@@ -218,8 +218,8 @@ private fun PermissionChips(s: AppPageState) {
         if (app.requestsAudio) add(stringResource(R.string.app_settings_audio) to audio)
         if (app.requestsAllDevices) add(stringResource(R.string.permission_all_devices) to (!s.env.limitDevices || settings.wholeDev))
         if (app.requestsFiles) add(stringResource(R.string.permission_files) to files)
-        if (settings.microphoneOn(app.requestsAudio) && MicStreamer.hasPermission(context)) add(stringResource(R.string.app_settings_microphone) to true)
-        if (settings.cameraOn(app.mayUseCamera) && AndroidCameras.hasPermission(context)) add(stringResource(R.string.app_settings_camera) to true)
+        if (settings.microphoneOn(app.requestsAudio)) add(stringResource(R.string.app_settings_microphone) to true)
+        if (settings.cameraOn(app.mayUseCamera) && s.env.hasCamera) add(stringResource(R.string.app_settings_camera) to true)
     }
     SettingsCard(title = stringResource(R.string.app_overview_asks)) {
         if (chips.isEmpty()) {
@@ -383,64 +383,59 @@ fun AppPermissionsPage(s: AppPageState) = SettingsPageColumn(R.string.app_page_p
             ),
             onReset = if (s.settings.audio != null) ({ s.editSettings { copy(audio = null) } }) else null,
         )
-        // On by default for an app that asks for sound, and for a hint that it uses a camera; both need Android's permission too.
+        // On by default for an app that asks for sound, and for a hint that it uses a camera. Each
+        // asks when the app uses it; Android's permission is asked at the first Allow, or when
+        // "Always allow" is turned on (which shows off while Android's permission is missing).
         val micDefault = audioDefault
         val micSet = s.settings.microphone
-        val micOn = (micSet ?: micDefault) && MicStreamer.hasPermission(context)
-        fun setMicrophone(on: Boolean) = s.editSettings { copy(microphone = on.takeIf { it != micDefault }) }
+        val micOn = micSet ?: micDefault
         SwitchRow(
-            micOn,
-            { on ->
-                micRefused = false
-                if (!on || MicStreamer.hasPermission(context)) {
-                    setMicrophone(on)
-                } else {
-                    s.env.onRequestMicrophone()
-                }
-            },
+            micOn, { on -> s.editSettings { copy(microphone = on.takeIf { it != micDefault }) } },
             stringResource(R.string.app_settings_microphone),
-            stringResource(if (micRefused) R.string.app_settings_microphone_android_denied else R.string.app_settings_microphone_hint),
+            stringResource(R.string.app_settings_microphone_hint),
             enabled = audio,
             onReset = if (micSet != null && micSet != micDefault) ({ s.editSettings { copy(microphone = null) } }) else null,
         )
+        fun setMicAlways(on: Boolean) = s.editSettings { copy(alwaysAllowMicrophone = on) }
         SwitchRow(
-            s.settings.alwaysAllowMicrophone, { v -> s.editSettings { copy(alwaysAllowMicrophone = v) } },
-            stringResource(R.string.app_settings_always_allow_microphone), stringResource(R.string.app_settings_always_allow_microphone_hint),
+            s.settings.alwaysAllowMicrophone && MicStreamer.hasPermission(context),
+            { on ->
+                micRefused = false
+                if (!on || MicStreamer.hasPermission(context)) setMicAlways(on) else s.env.onRequestMicrophone()
+            },
+            stringResource(R.string.app_settings_always_allow_microphone),
+            stringResource(if (micRefused) R.string.app_settings_microphone_android_denied else R.string.app_settings_always_allow_microphone_hint),
             enabled = audio && micOn,
         )
 
         val cameraDefault = s.settings.defaultOn(app.mayUseCamera)
         val cameraSet = s.settings.camera
-        val cameraOn = (cameraSet ?: cameraDefault) && AndroidCameras.hasPermission(context)
-        fun setCamera(on: Boolean) = s.editSettings { copy(camera = on.takeIf { it != cameraDefault }) }
+        val cameraOn = cameraSet ?: cameraDefault
         SwitchRow(
-            cameraOn,
-            { on ->
-                cameraRefused = false
-                if (!on || AndroidCameras.hasPermission(context)) {
-                    setCamera(on)
-                } else {
-                    s.env.onRequestCamera()
-                }
-            },
+            cameraOn && s.env.hasCamera, { on -> s.editSettings { copy(camera = on.takeIf { it != cameraDefault }) } },
             stringResource(R.string.app_settings_camera),
-            stringResource(
-                when {
-                    !s.env.hasCamera -> R.string.app_settings_camera_none
-                    cameraRefused -> R.string.app_settings_camera_android_denied
-                    else -> R.string.app_settings_camera_hint
-                }
-            ),
+            stringResource(if (s.env.hasCamera) R.string.app_settings_camera_hint else R.string.app_settings_camera_none),
             enabled = s.env.hasCamera,
             onReset = if (cameraSet != null && cameraSet != cameraDefault) ({ s.editSettings { copy(camera = null) } }) else null,
+        )
+        fun setCameraAlways(on: Boolean) = s.editSettings { copy(alwaysAllowCamera = on) }
+        SwitchRow(
+            s.settings.alwaysAllowCamera && AndroidCameras.hasPermission(context),
+            { on ->
+                cameraRefused = false
+                if (!on || AndroidCameras.hasPermission(context)) setCameraAlways(on) else s.env.onRequestCamera()
+            },
+            stringResource(R.string.app_settings_always_allow_camera),
+            stringResource(if (cameraRefused) R.string.app_settings_camera_android_denied else R.string.app_settings_always_allow_camera_hint),
+            enabled = s.env.hasCamera && cameraOn,
         )
         // Android's answer, which may come to a window rebuilt by a rotation meanwhile.
         val answer = s.env.permissionAnswer
         LaunchedEffect(answer) {
             if (answer != null) {
                 when (answer.ask) {
-                    PermissionAsk.MICROPHONE -> if (answer.granted) setMicrophone(true) else micRefused = true
-                    PermissionAsk.CAMERA -> if (answer.granted) setCamera(true) else cameraRefused = true
+                    PermissionAsk.MICROPHONE -> if (answer.granted) setMicAlways(true) else micRefused = true
+                    PermissionAsk.CAMERA -> if (answer.granted) setCameraAlways(true) else cameraRefused = true
                 }
                 s.env.onPermissionHandled()
             }

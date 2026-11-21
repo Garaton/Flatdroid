@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import java.util.concurrent.ConcurrentHashMap
 
 /** What the one Flatpak session is doing. */
 sealed interface SessionState {
@@ -78,8 +79,8 @@ data class SessionUi(
     val message: String? = null,
     /** [message] is an error. */
     val failed: Boolean = false,
-    /** The app that wants the microphone and waits for the user's answer, if any. */
-    val micRequest: String? = null,
+    /** What the running app uses and waits for the user's answer about ([UseQuestion]). */
+    val asks: Set<Sensor> = emptySet(),
 )
 
 /** Process-wide session state: written by [SessionService], read by the UI. */
@@ -90,8 +91,8 @@ object SessionController {
     /** The last session's output: the app's, and the display helpers' (prefixed). */
     val log: StateFlow<List<String>> = logBuffer.lines
 
-    /** Where answers to [SessionUi.micRequest] go: the running session's microphone, while one has it. */
-    @Volatile var onMicrophoneAnswer: ((Boolean) -> Unit)? = null
+    /** Where answers to [SessionUi.asks] go: the running session's question for each sensor, while it has one. */
+    private val answers = ConcurrentHashMap<Sensor, (Boolean) -> Unit>()
 
     val isBusy: Boolean get() = _ui.value.state !is SessionState.Idle && _ui.value.state !is SessionState.Question
 
@@ -156,15 +157,21 @@ object SessionController {
         ViewerConnection.closeOnMain()
         message?.let { DebugLog.i("Session: $it") }
         _keepScreenOn.value = false
-        _ui.update { it.copy(state = SessionState.Idle, message = message, failed = failed && message != null, micRequest = null) }
+        _ui.update { it.copy(state = SessionState.Idle, message = message, failed = failed && message != null, asks = emptySet()) }
     }
 
-    fun requestMicrophone(appId: String?) = _ui.update { it.copy(micRequest = appId) }
+    /** The running app waits for the user's answer about [sensor] ([on]), or no longer does. */
+    fun ask(sensor: Sensor, on: Boolean) = _ui.update { it.copy(asks = if (on) it.asks + sensor else it.asks - sensor) }
 
-    /** The user's answer to [SessionUi.micRequest]. */
-    fun answerMicrophone(allow: Boolean) {
-        val answer = onMicrophoneAnswer
-        if (answer == null) requestMicrophone(null) else answer(allow)
+    /** Where answers about [sensor] go ([handler]); with [handler] null, only [previous] is removed, not a newer session's. */
+    fun onAnswer(sensor: Sensor, handler: ((Boolean) -> Unit)?, previous: ((Boolean) -> Unit)? = null) {
+        if (handler != null) answers[sensor] = handler else if (previous != null) answers.remove(sensor, previous)
+    }
+
+    /** The user's answer about [sensor]; with no session asking, the question just goes. */
+    fun answer(sensor: Sensor, allow: Boolean) {
+        val answer = answers[sensor]
+        if (answer == null) ask(sensor, false) else answer(allow)
     }
 
     fun dismissMessage() = _ui.update { it.copy(message = null, failed = false) }

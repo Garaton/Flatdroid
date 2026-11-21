@@ -101,6 +101,14 @@
             android:noHistory="true"
             android:taskAffinity=""
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <!-- Allow in a microphone or camera question without Android's permission: Android's
+             dialog over whatever is on screen, then back there. Not exported. -->
+        <activity
+            android:name=".session.UsePermissionActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
         <!-- A shortcut's app on its way when nothing has to be asked: the cover, then the viewer. -->
         <activity
             android:name=".shortcuts.LaunchActivity"
