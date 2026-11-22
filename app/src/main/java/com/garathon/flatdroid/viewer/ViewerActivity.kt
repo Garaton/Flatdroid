@@ -207,7 +207,8 @@ class ViewerActivity : ComponentActivity() {
                         // The keyboard and the extra keys lie over the screen, which stays as it was.
                         Box(Modifier.fillMaxWidth().weight(1f)) {
                             AndroidView(factory = { frameHolder() }, modifier = Modifier.fillMaxSize().clipToBounds())
-                            if (opening) Opening(Modifier.align(Alignment.Center))
+                            // Paused before its first window: the card asks instead of the spinner.
+                            if (opening && !noWindow) Opening(Modifier.align(Alignment.Center))
                             if (noWindow) NoWindowCard(onStop = { SessionService.stop(this@ViewerActivity) }, Modifier.align(Alignment.Center))
                         }
                     }

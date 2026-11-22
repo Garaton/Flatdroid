@@ -127,11 +127,14 @@ object AndroidCameras {
     fun rates(rangeTops: List<Int>, hasSizesAt: (Int) -> Boolean): List<Int> =
         rangeTops.filter { it in 1..MAX_FRAME_RATE }.distinct().sorted().filter(hasSizesAt)
 
-    /** Even YUV sizes the camera gives at [rate]. */
+    /**
+     * YUV sizes the camera gives at [rate], its width a multiple of 8 and its height even: GStreamer
+     * lays raw rows out 4-aligned, so a narrower stride makes every frame bigger than the device's buffer.
+     */
     private fun sizes(characteristics: CameraCharacteristics, rate: Int): List<Size> {
         val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP) ?: return emptyList()
         return map.getOutputSizes(ImageFormat.YUV_420_888).orEmpty()
-            .filter { it.width % 2 == 0 && it.height % 2 == 0 }
+            .filter { it.width % 8 == 0 && it.height % 2 == 0 }
             .filter { map.getOutputMinFrameDuration(ImageFormat.YUV_420_888, it) <= 1_000_000_000L / rate }
             .map { Size(it.width, it.height) }
     }

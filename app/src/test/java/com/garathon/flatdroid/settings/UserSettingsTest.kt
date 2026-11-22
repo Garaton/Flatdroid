@@ -44,7 +44,7 @@ class UserSettingsTest {
             "de;en", developerOptions = true, vncViewer = "com.gaurav.avnc", frameRate60 = true, customFrameRate = 45,
             uncappedFrameRate = true, installGpuRuntimes = true, customAudioLatencyMs = 30,
             lowLatencyAudio = true, highQualityAudio = true, sharedHome = "/storage/emulated/0/Download/Home", theme = InterfaceTheme.AMOLED,
-            externalViewer = true, mobileData = MobileData.NEVER, appTime = AppTime.LAST_OPENED, cameraResolution = 480, cameraFrameRate = 15,
+            externalViewer = true, mobileData = MobileData.NEVER, appTime = AppTime.LAST_OPENED, cameraResolution = 480, cameraFrameRate = 15, screenScale = 25,
             appRendering = Rendering.GL, reduceMotion = true,
         )
         store.save(all)

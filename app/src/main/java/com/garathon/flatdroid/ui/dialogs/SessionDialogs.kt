@@ -166,13 +166,14 @@ fun FilesChangedDialog(state: SessionState.FilesChanged, appName: String, onRein
 /**
  * Before launching an app whose microphone or camera ([sensor]) asks, when Flatdroid can't post the
  * question later (notifications are off): the answer holds for the session. Dismissing it cancels
- * the launch.
+ * the launch. Never for the screen, which Android asks about at each share.
  */
 @Composable
 fun UseLaunchDialog(sensor: Sensor, appName: String, onAnswer: (allow: Boolean) -> Unit, onDismiss: () -> Unit) {
     val (title, text) = when (sensor) {
         Sensor.MICROPHONE -> R.string.mic_launch_title to R.string.mic_launch_text
         Sensor.CAMERA -> R.string.camera_launch_title to R.string.camera_launch_text
+        Sensor.SCREEN -> throw IllegalArgumentException("the screen is asked about at each share")
     }
     AlertDialog(
         onDismissRequest = onDismiss,

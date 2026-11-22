@@ -13,25 +13,28 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 /**
- * The cameras of one session whose camera setting is on: the [streamers] (one per node, by node
- * name), and the [events] pipe the camera's helpers write links and readiness to ([CameraScript]).
- * The pipe sits among the nodes' pipes, in a folder only the camera's helpers have, never in the
- * app's root. In device mode ([events] null) there are no helpers: each streamer tells from its
- * device's pipe whether the app reads it. An app linked to any node (reading any device) uses the
- * camera: the user is asked ([UseQuestion]) unless
- * [alwaysAllowed]; one answer holds for every camera until the app ends. [initialAnswer] is the
- * answer when the user was asked before the launch (notifications off). [onFirstUse] is called
- * the first time the app uses a camera, whatever the answer.
+ * The cameras (and the screen) of one session: the [streamers] (one per node, by node name), and
+ * the [events] pipe the camera's helpers write links and readiness to ([CameraScript]). The pipe
+ * sits among the nodes' pipes, in a folder only the camera's helpers have, never in the app's
+ * root. In device mode ([events] null) there are no helpers: each streamer tells from its device's
+ * pipe whether the app reads it. An app linked to a node (reading a device) uses its [Sensor]:
+ * the user is asked ([UseQuestion]) about the cameras unless [alwaysAllowed], and about the screen
+ * every time; one answer holds for every camera until the app ends, the screen's until its share
+ * ends ([screenEnded]). [initialAnswer] is the cameras' answer when the user was asked before the
+ * launch (notifications off). [onFirstUse] is called the first time the app uses either, whatever
+ * the answer.
  */
 class CameraSession(
-    private val streamers: Map<String, CameraStreamer>,
+    private val streamers: Map<String, FrameStreamer>,
     private val events: File?,
     alwaysAllowed: Boolean,
     initialAnswer: Boolean? = null,
     private val onFirstUse: (() -> Unit)? = null,
 ) {
-    private val question = UseQuestion(Sensor.CAMERA, alwaysAllowed, initialAnswer) { action ->
-        streamers.values.forEach { it.setAllowed(action == UseAction.USE) }
+    private val questions = streamers.values.map { it.sensor }.distinct().associateWith { sensor ->
+        UseQuestion(sensor, alwaysAllowed && sensor == Sensor.CAMERA, initialAnswer.takeIf { sensor == Sensor.CAMERA }) { action ->
+            streamers.values.filter { it.sensor == sensor }.forEach { it.setAllowed(action == UseAction.USE) }
+        }
     }
     private val links = HashMap<String, Int>()
     private var used = false
@@ -55,7 +58,7 @@ class CameraSession(
     /** After the camera's helpers have stopped. */
     fun close() {
         closed = true
-        question.stop()
+        questions.values.forEach { it.stop() }
         // A reader still waiting for the helpers to open the pipe (they never got there) stops waiting.
         events?.let { pipe -> runCatching { Os.close(Os.open(pipe.path, OsConstants.O_WRONLY or OsConstants.O_NONBLOCK, 0)) } }
         reader?.join(CLOSE_WAIT_MS)
@@ -102,8 +105,13 @@ class CameraSession(
             onFirstUse?.invoke()
         }
         // The answer first, so a camera allowed already starts as the app links, without a black frame between.
-        question.inUse(links.values.any { it > 0 })
+        questions[streamer.sensor]?.inUse(links.any { (name, links) -> links > 0 && streamers[name]?.sensor == streamer.sensor })
         streamer.setUsers(count)
+    }
+
+    /** The screen's share ended: the next use asks again. */
+    fun screenEnded() {
+        questions[Sensor.SCREEN]?.forget()
     }
 
     private companion object {

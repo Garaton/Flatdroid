@@ -115,7 +115,7 @@ object HiddenPause {
         val now = session ?: return
         val wasEmpty = now.wait.empty
         val deadline = now.wait.windows(count, SystemClock.elapsedRealtime())
-        SessionController.opening(now.wait.empty && !now.wait.opened && !noWindowStop)
+        SessionController.opening(now.wait.empty && !now.wait.opened)
         if (count > 0 && noWindowStop) {
             // Something opened a window anyway (an app that went on by itself): nothing to ask any more.
             noWindowStop = false

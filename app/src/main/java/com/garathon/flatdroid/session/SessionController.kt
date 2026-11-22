@@ -111,12 +111,15 @@ object SessionController {
 
     fun running(state: SessionState.Running) = _ui.update { it.copy(state = state) }
 
-    /** The running app was paused for having no window ([on]), or goes on again. */
+    /**
+     * The running app was paused for having no window ([on]), or goes on again. An app that never
+     * opened one is still opening meanwhile (the home list keeps saying so).
+     */
     fun noWindow(on: Boolean, neverOpened: Boolean = false) = _ui.update {
         val state = it.state as? SessionState.Running
         val never = on && neverOpened
         if (state == null || state.noWindow == on && state.noWindowNeverOpened == never) it
-        else it.copy(state = state.copy(noWindow = on, noWindowNeverOpened = never, opening = state.opening && !on))
+        else it.copy(state = state.copy(noWindow = on, noWindowNeverOpened = never))
     }
 
     /** The app has no window yet and never had one ([on]), or has one now. */

@@ -167,7 +167,7 @@
     <string name="settings_page_overview">Overview</string>
     <string name="settings_page_defaults">Per-app Defaults</string>
     <string name="settings_page_display">Display</string>
-    <string name="settings_page_devices">Audio &#38; Camera</string>
+    <string name="settings_page_devices">Audio &#38; Video</string>
     <string name="settings_page_security">Security &#38; Privacy</string>
     <string name="settings_page_flatpak">Flatpak</string>
     <string name="settings_page_storage">Storage</string>
@@ -438,8 +438,10 @@
     
     <string name="session_ask_channel">Permission requests</string>
     <string name="mic_request_title">%1$s wants to use the microphone</string>
+    <string name="screen_request_title">%1$s wants to share your screen</string>
     <string name="camera_request_title">%1$s wants to use the camera</string>
     <string name="ask_request_notification">Your answer holds until the app is closed. Swiping this away denies it.</string>
+    <string name="ask_screen_notification">Android asks next. Sharing stops when the app stops using the screen. Swiping this away denies it until the app is closed.</string>
     <string name="mic_launch_title">Allow %1$s to use the microphone?</string>
     <string name="mic_launch_text">Notifications are off, so Flatdroid can\'t ask when the app records. Your answer holds until the app is closed.</string>
     <string name="camera_launch_title">Allow %1$s to use the camera?</string>
@@ -528,15 +530,21 @@
     <string name="app_settings_always_allow_microphone_hint">Uses Android\'s microphone whenever the app records, without asking.</string>
     <string name="app_settings_camera">Camera</string>
     <string name="app_settings_camera_hint">When the app first uses a camera, you are prompted to allow or deny it until the app is closed.</string>
-    <string name="app_settings_camera_automatic">Automatic</string>
-    <string name="app_settings_camera_device">Video device</string>
-    <string name="app_settings_camera_portal">Camera portal</string>
-    <string name="app_settings_camera_off">Off</string>
-    <string name="app_settings_camera_automatic_device">\nThis app gets a video device, which uses the least CPU.</string>
-    <string name="app_settings_camera_automatic_portal">\nThis app gets the camera portal.</string>
-    <string name="app_settings_camera_automatic_none">\nThis app gets a camera once it asks for one, from its next launch.</string>
-    <string name="app_settings_camera_device_hint">\nFor apps that open cameras themselves. Uses the least CPU.</string>
-    <string name="app_settings_camera_portal_hint">\nFor apps that use Flatpak\'s camera portal. Runs about 10 more processes.</string>
+    <string name="app_settings_video">Video</string>
+    <string name="app_settings_video_hint">How the camera and the screen reach the app.</string>
+    <string name="app_settings_video_off">Turn on the camera or the screen first.</string>
+    <string name="app_settings_video_automatic">Automatic</string>
+    <string name="app_settings_video_device">Video device</string>
+    <string name="app_settings_video_portal">Camera portal</string>
+    <string name="app_settings_video_automatic_device">\nThis app gets a video device, which uses the least CPU.</string>
+    <string name="app_settings_video_automatic_portal">\nThis app gets the camera portal.</string>
+    <string name="app_settings_video_automatic_none">\nThis app gets video once it asks for it, from its next launch.</string>
+    <string name="app_settings_video_device_hint">\nFor apps that open cameras themselves. Uses the least CPU.</string>
+    <string name="app_settings_video_portal_hint">\nFor apps that use Flatpak\'s camera portal. Runs about 10 more processes.</string>
+    <string name="app_settings_screen">Screen</string>
+    <string name="app_settings_screen_hint">Shares Android\'s screen as a camera. Each time the app uses it, you are prompted, then Android asks too. Sharing stops a few seconds after the app stops using it.</string>
+    <string name="app_settings_screen_needs_hidden">Turn on Continue while hidden first. A share would stop while the app is paused.</string>
+    <string name="app_settings_screen_android_denied">Android didn\'t allow Flatdroid to share the screen.</string>
     <string name="camera_portal_next_launch">This app asked for a camera. Open it again to use one.</string>
     <string name="app_settings_always_allow_camera">Always allow camera</string>
     <string name="app_settings_always_allow_camera_hint">Uses Android\'s cameras whenever the app wants them, without asking.</string>
@@ -546,6 +554,10 @@
     <string name="app_settings_camera_frame_rate_value" tools:ignore="PluralsCandidate">%1$d frames per second</string>
     <string name="app_settings_camera_frame_rate_high">\nSome apps don\'t recognize cameras above 30 frames per second. If a camera is missing, it is likely due to this.</string>
     <string name="app_settings_camera_resolution">Camera resolution</string>
+    <string name="app_settings_screen_resolution">Screen resolution</string>
+    <string name="app_settings_screen_scale_value">%1$d%% (%2$d×%3$d)</string>
+    <string name="app_settings_screen_resolution_hint">The size of the screen when an app uses it as a camera. Larger sizes use more CPU, and an app that records video in software may not keep up.</string>
+    <string name="app_overrides_screen_off">Turn on the app\'s screen under Permissions first.</string>
     <string name="app_settings_camera_resolution_value">%1$dp</string>
     <string name="app_settings_camera_resolution_full">Full camera resolution (%1$s)</string>
     <string name="app_settings_camera_resolution_hint">Larger sizes use more CPU. The sizes listed are the ones the phone\'s cameras give at the chosen frame rate. A camera that can\'t run at the chosen size uses the nearest one it can.</string>
@@ -553,6 +565,7 @@
     <string name="camera_back">Back camera</string>
     <string name="camera_front">Front camera</string>
     <string name="camera_external">External camera</string>
+    <string name="camera_screen">Screen</string>
     <string name="app_settings_microphone_android_denied">Android didn\'t allow Flatdroid to use the microphone.</string>
     <string name="app_settings_whole_dev">All of /dev</string>
     <string name="app_settings_whole_dev_hint">Gives the app every device node the phone has, including Android\'s Binder, through which it can call Android\'s system services as Flatdroid.</string>

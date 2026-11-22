@@ -9,8 +9,13 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.media.projection.MediaProjection
+import android.media.projection.MediaProjectionManager
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
+import androidx.core.content.IntentCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
@@ -22,6 +27,7 @@ import com.garathon.flatdroid.viewer.ViewerActivity
 import com.garathon.flatdroid.alpine.AlpineCommands
 import com.garathon.flatdroid.audio.MicStreamer
 import com.garathon.flatdroid.camera.AndroidCameras
+import com.garathon.flatdroid.camera.ScreenShare
 import com.garathon.flatdroid.storage.AppData
 import com.garathon.flatdroid.launcher.AppEnding
 import com.garathon.flatdroid.launcher.ProotExit
@@ -54,13 +60,17 @@ import kotlinx.coroutines.runInterruptible
  * a day on Android 15. With the microphone type too when the app may use the microphone: Android
  * lets a service record in the background only with that type, given while Flatdroid is in the
  * foreground (at launch, or when the user allows it in Flatdroid). The camera type likewise, at
- * launch, when the app may use the camera.
+ * launch, when the app may use the camera. The media projection type only while the screen is
+ * shared: taken after Android's consent, before the share starts, and dropped when it ends.
  */
 class SessionService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var job: Job? = null
     private var microphoneType = false
     private var cameraType = false
+    private var screenType = false
+    /** The screen share the service took last, while it runs. */
+    private var projection: MediaProjection? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -79,7 +89,9 @@ class SessionService : Service() {
             ACTION_ALLOW, ACTION_DENY -> {
                 val sensor = intent.getStringExtra(EXTRA_SENSOR)?.let { name -> Sensor.entries.firstOrNull { it.name == name } } ?: return START_NOT_STICKY
                 val allow = intent.action == ACTION_ALLOW
-                if (allow) takeType(sensor)
+                // The screen's Allow comes only from UsePermissionActivity, with Android's consent; without a share, no answer, so the question stays.
+                if (allow && sensor == Sensor.SCREEN && !share(intent)) return START_NOT_STICKY
+                if (allow && sensor != Sensor.SCREEN) takeType(sensor)
                 SessionController.answer(sensor, allow)
                 return START_NOT_STICKY
             }
@@ -179,6 +191,9 @@ class SessionService : Service() {
                 }
                 notifications.cancel(MIC_NOTIFICATION_ID)
                 notifications.cancel(CAMERA_NOTIFICATION_ID)
+                notifications.cancel(SCREEN_NOTIFICATION_ID)
+                ScreenShare.clear()
+                projection?.stop()
                 notifications.cancel(NO_WINDOW_NOTIFICATION_ID)
                 removeNotification()
                 SavedSizes.changed(applicationContext, appId)
@@ -223,6 +238,7 @@ class SessionService : Service() {
         var type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0
         if (microphoneType && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
         if (cameraType && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+        if (screenType && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
         ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, type)
     }
 
@@ -237,6 +253,7 @@ class SessionService : Service() {
         when (sensor) {
             Sensor.MICROPHONE -> microphoneType = true
             Sensor.CAMERA -> cameraType = true
+            Sensor.SCREEN -> return
         }
         try {
             startInForeground(notification(SessionController.ui.value.state))
@@ -244,6 +261,7 @@ class SessionService : Service() {
             when (sensor) {
                 Sensor.MICROPHONE -> microphoneType = false
                 Sensor.CAMERA -> cameraType = false
+                Sensor.SCREEN -> Unit
             }
             SessionController.log("[flatdroid] Android didn't let Flatdroid use the ${sensor.name.lowercase()} from the background: $e")
         }
@@ -252,6 +270,53 @@ class SessionService : Service() {
     private fun hasType(sensor: Sensor) = when (sensor) {
         Sensor.MICROPHONE -> microphoneType
         Sensor.CAMERA -> cameraType
+        Sensor.SCREEN -> screenType
+    }
+
+    /**
+     * Allow for the screen, with Android's consent in [intent] ([UsePermissionActivity]): the
+     * media projection type (Android 14 and later want it after the consent and before the share),
+     * then the share, handed to the session ([ScreenShare]). False, logged, when either fails.
+     */
+    private fun share(intent: Intent): Boolean {
+        val data = IntentCompat.getParcelableExtra(intent, EXTRA_RESULT_DATA, Intent::class.java)
+        if (job?.isActive != true || data == null) return false
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            screenType = true
+            try {
+                startInForeground(notification(SessionController.ui.value.state))
+            } catch (e: Exception) {
+                screenType = false
+                SessionController.log("[flatdroid] Android didn't let Flatdroid share the screen: $e")
+                return false
+            }
+        }
+        val started = try {
+            getSystemService(MediaProjectionManager::class.java)?.getMediaProjection(intent.getIntExtra(EXTRA_RESULT_CODE, 0), data)
+        } catch (e: Exception) {
+            SessionController.log("[flatdroid] Android didn't start the screen share: $e")
+            null
+        }
+        if (started == null) {
+            shareEnded(null)
+            return false
+        }
+        projection = started
+        // Before the share is used: Android 14 and later refuse a share without one.
+        started.registerCallback(object : MediaProjection.Callback() {
+            override fun onStop() = shareEnded(started)
+        }, Handler(Looper.getMainLooper()))
+        ScreenShare.offer(started)
+        return true
+    }
+
+    /** The share [ended] (null: none started): the media projection type goes, unless a newer share runs. */
+    private fun shareEnded(ended: MediaProjection?) {
+        if (projection != ended) return
+        projection = null
+        if (!screenType) return
+        screenType = false
+        if (job?.isActive == true) runCatching { startInForeground(notification(SessionController.ui.value.state)) }
     }
 
     /**
@@ -276,11 +341,12 @@ class SessionService : Service() {
         val (icon, title) = when (sensor) {
             Sensor.MICROPHONE -> android.R.drawable.ic_btn_speak_now to R.string.mic_request_title
             Sensor.CAMERA -> android.R.drawable.ic_menu_camera to R.string.camera_request_title
+            Sensor.SCREEN -> android.R.drawable.ic_menu_slideshow to R.string.screen_request_title
         }
         return NotificationCompat.Builder(this, ASK_CHANNEL_ID)
             .setSmallIcon(icon)
             .setContentTitle(getString(title, label(appId)))
-            .setContentText(getString(R.string.ask_request_notification))
+            .setContentText(getString(if (sensor == Sensor.SCREEN) R.string.ask_screen_notification else R.string.ask_request_notification))
             .setDeleteIntent(deny)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             // Its own group, so Android doesn't bundle it with the session's and hide its buttons.
@@ -371,12 +437,15 @@ class SessionService : Service() {
         private const val ASK_CHANNEL_ID = "permissions"
         private const val MIC_NOTIFICATION_ID = 11
         private const val CAMERA_NOTIFICATION_ID = 13
-        /** The questions' pending intents: 7 and 8 for the microphone, 9 and 10 for the camera. */
+        private const val SCREEN_NOTIFICATION_ID = 14
+        /** The questions' pending intents: 7 and 8 for the microphone, 9 and 10 for the camera, 11 and 12 for the screen. */
         private const val ASK_REQUEST_CODE = 7
         private const val NO_WINDOW_CHANNEL_ID = "no_window_alert"
         private const val NO_WINDOW_NOTIFICATION_ID = 12
         private const val EXTRA_APP_ID = "appId"
         private const val EXTRA_SENSOR = "sensor"
+        private const val EXTRA_RESULT_CODE = "resultCode"
+        private const val EXTRA_RESULT_DATA = "resultData"
         private const val ACTION_LAUNCH = "com.garathon.flatdroid.action.LAUNCH"
         private const val ACTION_PREPARE_ELECTRON = "com.garathon.flatdroid.action.PREPARE_ELECTRON"
         private const val ACTION_STOP = "com.garathon.flatdroid.action.STOP"
@@ -399,16 +468,23 @@ class SessionService : Service() {
             return channel.importance != NotificationManagerCompat.IMPORTANCE_NONE
         }
 
-        /** Android's permission for [sensor]. */
+        /** Android's permission for [sensor]; never for the screen, which Android asks about at each share. */
         fun hasPermission(context: Context, sensor: Sensor): Boolean = when (sensor) {
             Sensor.MICROPHONE -> MicStreamer.hasPermission(context)
             Sensor.CAMERA -> AndroidCameras.hasPermission(context)
+            Sensor.SCREEN -> false
         }
 
-        /** Android's permission [sensor] needs. */
-        fun permission(sensor: Sensor): String = when (sensor) {
+        /** Android's permission [sensor] needs; null for the screen, which takes Android's consent instead ([share]). */
+        fun permission(sensor: Sensor): String? = when (sensor) {
             Sensor.MICROPHONE -> Manifest.permission.RECORD_AUDIO
             Sensor.CAMERA -> Manifest.permission.CAMERA
+            Sensor.SCREEN -> null
+        }
+
+        /** Allow for the screen, with Android's consent ([resultCode] and [data] from its dialog). */
+        fun share(context: Context, resultCode: Int, data: Intent) {
+            context.startService(answerIntent(context, Sensor.SCREEN, true).putExtra(EXTRA_RESULT_CODE, resultCode).putExtra(EXTRA_RESULT_DATA, data))
         }
 
         /** The user's answer about [sensor] for the running session; Allow also takes the service's type for it. */
@@ -424,6 +500,7 @@ class SessionService : Service() {
         private fun askId(sensor: Sensor) = when (sensor) {
             Sensor.MICROPHONE -> MIC_NOTIFICATION_ID
             Sensor.CAMERA -> CAMERA_NOTIFICATION_ID
+            Sensor.SCREEN -> SCREEN_NOTIFICATION_ID
         }
 
         private fun askGroup(sensor: Sensor) = "$ASK_CHANNEL_ID.${sensor.name.lowercase()}"

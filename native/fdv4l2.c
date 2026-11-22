@@ -331,13 +331,20 @@ static int camera_at(const char *path, enum kind *kind)
     return -1;
 }
 
-/* Tells Flatdroid which format the app takes from now on (its end keeps the pipe open; none, no harm). */
-static void announce(const struct camera *c)
+/*
+ * Tells Flatdroid what the app does with the camera, a line each (its end keeps the pipe open;
+ * none, no harm): the format's name when the app chooses it, ON when it starts streaming, OFF when
+ * it stops (stream off, or the device closed while streaming). An app that streams uses the
+ * camera, however slowly it reads.
+ */
+#define ON "on"
+#define OFF "off"
+static void announce(const struct camera *c, const char *what)
 {
     long fd = sys4(__NR_openat, AT_FDCWD, c->control, O_WRONLY | O_NONBLOCK | O_CLOEXEC, 0);
     if (failed(fd)) return;
     char line[16];
-    text(line, sizeof(line), FORMATS[c->format].name);
+    text(line, sizeof(line), what);
     unsigned long n = 0;
     while (line[n]) n++;
     line[n++] = '\n';
@@ -465,6 +472,7 @@ static void free_buffers(struct stream *s)
 static void forget_fd(int fd)
 {
     if (__atomic_load_n(&fd_count, __ATOMIC_ACQUIRE) == 0) return;
+    int stopped = -1;
     lock();
     for (int i = 0; i < fd_count; i++) {
         if (fds[i].fd != fd) continue;
@@ -472,6 +480,9 @@ static void forget_fd(int fd)
         fds[i] = fds[fd_count - 1];
         __atomic_store_n(&fd_count, fd_count - 1, __ATOMIC_RELEASE);
         if (--s->refs == 0) {
+            /* Closed while streaming: the app stopped. */
+            if (s->kind == VIDEO && s->streaming) stopped = s->camera;
+            s->streaming = 0;
             if (s->staging) sys2(__NR_munmap, s->staging, s->staging_size);
             free_buffers(s);
             s->used = 0;
@@ -479,6 +490,7 @@ static void forget_fd(int fd)
         break;
     }
     unlock();
+    if (stopped >= 0) announce(&cameras[stopped], OFF);
 }
 
 /*
@@ -511,9 +523,24 @@ static long monotonic_ms(void)
 }
 
 /*
+ * Whether a frame whose body ends at e really ends there: its "\r\n", then the next frame's
+ * boundary or nothing yet. Flatdroid stops writing a frame larger than the pipe when the app stops
+ * reading midway; the next frame then follows the cut one, and its length would take in the next
+ * frame's start.
+ */
+static int frame_ends(const struct stream *s, unsigned long e)
+{
+    if (s->staging[e] != '\r' || s->staging[e + 1] != '\n') return 0;
+    unsigned long rest = s->staged - (e + 2);
+    for (unsigned long i = 0; BOUNDARY[i] && i < rest; i++) if (s->staging[e + 2 + i] != (unsigned char)BOUNDARY[i]) return 0;
+    return 1;
+}
+
+/*
  * Where the newest whole frame of the camera's format in the staging area starts (its body at
  * *data, *len bytes) and where it ends; 0 when there is none. Anything before a frame's boundary,
- * and frames of another format (sent before the app's choice reached Flatdroid), are skipped.
+ * frames cut midway ([frame_ends]) and frames of another format (sent before the app's choice
+ * reached Flatdroid) are skipped.
  */
 static unsigned long newest_frame(struct stream *s, enum format format, unsigned long *data, unsigned long *len, unsigned long *skipped)
 {
@@ -533,6 +560,8 @@ static unsigned long newest_frame(struct stream *s, enum format format, unsigned
         while (*p == ' ') p++;
         while (*p >= '0' && *p <= '9' && n < (1UL << 30)) n = n * 10 + (unsigned long)(*p++ - '0');
         if (body + n + 2 > s->staged) break;
+        /* Cut: what comes after its boundary is looked through for the next one. */
+        if (!frame_ends(s, body + n)) { at = start + 1; continue; }
         long t = find(s->staging + start, (unsigned long)h, TYPE_FIELD);
         int match = 1;
         if (t >= 0) {
@@ -776,7 +805,7 @@ static long v4l2(int fd, struct stream *s, unsigned request, void *arg)
         if (request == VIDIOC_S_FMT) {
             if (s->count && chosen != c->format) return fail(EBUSY);
             c->format = chosen;
-            announce(c);
+            announce(c, FORMATS[c->format].name);
         }
         describe_format(c, chosen, f);
         return 0;
@@ -884,6 +913,7 @@ static long v4l2(int fd, struct stream *s, unsigned request, void *arg)
     case VIDIOC_STREAMOFF: {
         if (arg && *(int *)arg != V4L2_BUF_TYPE_VIDEO_CAPTURE) return fail(EINVAL);
         lock();
+        int was = s->streaming;
         if (request == VIDIOC_STREAMON) {
             if (!s->count) {
                 unlock();
@@ -897,7 +927,12 @@ static long v4l2(int fd, struct stream *s, unsigned request, void *arg)
             s->staged = 0;
         }
         unlock();
-        if (request == VIDIOC_STREAMON) announce(c);
+        if (request == VIDIOC_STREAMON) {
+            announce(c, FORMATS[c->format].name);
+            announce(c, ON);
+        } else if (was) {
+            announce(c, OFF);
+        }
         return 0;
     }
     /* No controls. */

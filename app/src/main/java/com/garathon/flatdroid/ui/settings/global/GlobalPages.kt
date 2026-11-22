@@ -46,6 +46,7 @@ import com.garathon.flatdroid.settings.Rendering
 import com.garathon.flatdroid.settings.UsageStats
 import com.garathon.flatdroid.settings.UserSettings
 import com.garathon.flatdroid.ui.settings.CameraRows
+import com.garathon.flatdroid.ui.settings.ScreenScaleRow
 import com.garathon.flatdroid.ui.settings.GlobalPage
 import com.garathon.flatdroid.ui.settings.GpuRuntimesRow
 import com.garathon.flatdroid.ui.settings.LanguagesRow
@@ -335,6 +336,11 @@ fun GlobalDevicesPage(s: GlobalPageState) = SettingsPageColumn(R.string.settings
             resolutionHint = stringResource(R.string.app_settings_camera_resolution_hint),
             onRate = { rate, size -> s.editSettings { copy(cameraFrameRate = rate, cameraResolution = size) } },
             onResolution = { v -> s.editSettings { copy(cameraResolution = v) } },
+        )
+        ScreenScaleRow(
+            scale = s.settings.screenScale,
+            hint = stringResource(R.string.app_settings_screen_resolution_hint),
+            onSelect = { v -> s.editSettings { copy(screenScale = v) } },
         )
     }
 }

@@ -22,8 +22,8 @@ class AppSettingsTest {
             Resolution.CUSTOM, 960, 640, newerElectronFlags = true, lastOpened = 1234L, wholeDev = true,
             audio = false, microphone = true, alwaysAllowMicrophone = true, withoutFlatpakInfo = true,
             environment = mapOf("VLC_DATA_PATH" to "/app/share/vlc", "VLC_PLUGIN_PATH" to "/app/lib/vlc/plugins"),
-            homeModeChoice = HomeMode.TEMPORARY, sdcard = true, cameraModeChoice = CameraMode.PORTAL, alwaysAllowCamera = true,
-            cameraPortalSeen = true, cameraDeviceUsed = true, cameraResolutionOverride = 1080, cameraFrameRateOverride = 15,
+            homeModeChoice = HomeMode.TEMPORARY, sdcard = true, videoModeChoice = VideoMode.PORTAL, camera = false, alwaysAllowCamera = true, screen = true,
+            cameraPortalSeen = true, cameraDeviceUsed = true, cameraResolutionOverride = 1080, cameraFrameRateOverride = 15, screenScaleOverride = 75,
             network = false, blockExtraSyscalls = false, shareHiddenFiles = true, launches = 3, usedMillis = 90_000L,
         )
         store.save(saved)
@@ -61,7 +61,8 @@ class AppSettingsTest {
         assertFalse(unset.copy(audio = false).audioAllowed(listOf("pulseaudio")))
         assertTrue(unset.copy(audio = true).audioAllowed(emptyList()))
         assertNull(unset.microphone)
-        assertNull(unset.cameraModeChoice)
+        assertNull(unset.videoModeChoice)
+        assertNull(unset.camera)
         // Unset stays unset in the file, so a later default applies.
         val file = File(tmp.root, "p.properties")
         AppSettingsStore(file).save(unset)
@@ -161,7 +162,7 @@ class AppSettingsTest {
     fun anImportLeavesWhatWidensReachAsItIsHere() {
         fun file(text: String) = File(tmp.root, "a.App.properties").apply { writeText(text) }
         val imported = file(
-            "home.mode=shared\ndev.whole=true\nstorage.sdcard=true\npermission.microphone=true\npermission.camera=portal\n" +
+            "home.mode=shared\ndev.whole=true\nstorage.sdcard=true\npermission.microphone=true\npermission.video=portal\npermission.camera=true\npermission.screen=true\n" +
                 "permission.microphone.always=true\npermission.camera.always=true\nenv.LD_PRELOAD=/home/user/x.so\npermission.network=true\n" +
                 "filter.blockExtraSyscalls=false\npermission.audio=false\nhome.shareHiddenFiles=true\n" +
                 "permission.clipboard=true\n",
@@ -173,28 +174,29 @@ class AppSettingsTest {
         val loaded = AppSettingsStore(file(AppSettingsStore.imported(imported, local).decodeToString())).load()
         assertEquals(
             AppSettings(
-                homeModeChoice = HomeMode.PRIVATE, microphone = true, cameraModeChoice = CameraMode.PORTAL, network = false, audio = false,
+                homeModeChoice = HomeMode.PRIVATE, microphone = true, videoModeChoice = VideoMode.PORTAL, camera = true, screen = true, network = false, audio = false,
                 clipboard = false, environment = mapOf("LANG" to "de_DE.UTF-8"),
             ),
             loaded,
         )
         val alone = AppSettingsStore(file(AppSettingsStore.imported(imported, null).decodeToString())).load()
-        // The camera asks at use, as the microphone does: its mode comes in, "Always allow" doesn't.
-        assertEquals(AppSettings(microphone = true, cameraModeChoice = CameraMode.PORTAL, audio = false), alone)
+        // The camera and the screen ask at use, as the microphone does: they come in, "Always allow" doesn't.
+        assertEquals(AppSettings(microphone = true, videoModeChoice = VideoMode.PORTAL, camera = true, screen = true, audio = false), alone)
     }
 
     @Test
     fun theFlagVersionsAgreeWithTheListVersions() {
         // The overview, the Permissions page and the launcher ask the same question in different shapes.
         val hardened = AppSettings(defaults = AppDefaults(permissionsFromMetadata = false))
-        for (settings in listOf(AppSettings(), hardened, AppSettings(audio = false, network = true, microphone = true, cameraModeChoice = CameraMode.DEVICE))) {
+        for (settings in listOf(AppSettings(), hardened, AppSettings(audio = false, network = true, microphone = true, videoModeChoice = VideoMode.DEVICE),
+            hardened.copy(screen = true, continueWhileHidden = true))) {
             for (asks in listOf(true, false)) {
                 assertEquals(settings.audioAllowed(if (asks) listOf("pulseaudio") else emptyList()), settings.audioOn(asks))
                 assertEquals(settings.networkAllowed(if (asks) listOf("network") else emptyList()), settings.networkOn(asks))
                 assertEquals(settings.microphoneAllowed(if (asks) listOf("pulseaudio") else emptyList()), settings.microphoneOn(asks))
                 for (all in listOf(true, false)) {
                     val context = FlatpakContext(devices = if (all) listOf("all") else emptyList(), filesystems = if (asks) listOf("xdg-pictures/Camera:create") else emptyList())
-                    assertEquals(settings.cameraFor(context), settings.cameraFor(all, asks))
+                    assertEquals(settings.videoFor(context), settings.videoFor(all, asks))
                     assertEquals(settings.watchesCameraPortal(context), settings.watchesCameraPortal(all, asks))
                 }
             }
@@ -221,17 +223,17 @@ class AppSettingsTest {
         val unset = AppSettings()
         assertTrue(unset.microphoneAllowed(sound))
         assertFalse(unset.microphoneAllowed(listOf("x11")))
-        assertEquals(CameraMode.PORTAL, unset.cameraFor(camera))
-        assertEquals(CameraMode.DEVICE, unset.cameraFor(allDevices))
-        assertEquals(null, unset.cameraFor(plain))
+        assertEquals(VideoMode.PORTAL, unset.videoFor(camera))
+        assertEquals(VideoMode.DEVICE, unset.videoFor(allDevices))
+        assertEquals(null, unset.videoFor(plain))
         // Sound off turns the microphone off with it.
         assertFalse(unset.copy(audio = false).microphoneAllowed(sound))
         // An override wins either way.
         assertFalse(unset.copy(microphone = false).microphoneAllowed(sound))
         assertTrue(unset.copy(microphone = true).microphoneAllowed(sound))
-        assertEquals(CameraMode.PORTAL, unset.copy(cameraModeChoice = CameraMode.PORTAL).cameraFor(allDevices))
-        assertEquals(CameraMode.DEVICE, unset.copy(cameraModeChoice = CameraMode.DEVICE).cameraFor(plain))
-        assertFalse(unset.copy(cameraModeChoice = CameraMode.OFF).cameraAllowed(camera))
+        assertEquals(VideoMode.PORTAL, unset.copy(videoModeChoice = VideoMode.PORTAL).videoFor(allDevices))
+        assertEquals(VideoMode.DEVICE, unset.copy(videoModeChoice = VideoMode.DEVICE).videoFor(plain))
+        assertFalse(unset.copy(camera = false).cameraAllowed(camera))
         // Hardened's level doesn't grant what apps ask for: both are off until turned on.
         val hardened = AppSettings(defaults = AppDefaults(permissionsFromMetadata = false))
         assertFalse(hardened.microphoneAllowed(sound))
@@ -242,40 +244,43 @@ class AppSettingsTest {
         val file = File(tmp.root, "m.properties")
         AppSettingsStore(file).save(unset)
         assertFalse("permission.microphone" in file.readText() || "permission.camera" in file.readText())
-        AppSettingsStore(file).save(unset.copy(microphone = false, cameraModeChoice = CameraMode.AUTOMATIC))
-        assertEquals(false to CameraMode.AUTOMATIC, AppSettingsStore(file).load().let { it.microphone to it.cameraModeChoice })
-        // A value from before the modes (true or false) follows the default.
-        file.writeText("permission.camera=true\n")
-        assertEquals(null, AppSettingsStore(file).load().cameraModeChoice)
+        AppSettingsStore(file).save(unset.copy(microphone = false, camera = false))
+        assertEquals(false to false, AppSettingsStore(file).load().let { it.microphone to it.camera })
+        // A camera mode from before the switch follows the default.
+        file.writeText("permission.camera=off\n")
+        assertEquals(null, AppSettingsStore(file).load().camera)
     }
 
     @Test
     fun automaticCameraLearnsFromWhatTheAppUsed() {
         val unset = AppSettings()
         // Asks for all devices: the device, until seen asking for the portal instead.
-        assertEquals(CameraMode.DEVICE, unset.cameraFor(allDevices = true, hint = false))
+        assertEquals(VideoMode.DEVICE, unset.videoFor(allDevices = true, hint = false))
         assertTrue(unset.watchesCameraPortal(allDevices = true, hint = false))
-        assertEquals(CameraMode.PORTAL, unset.copy(cameraPortalSeen = true).cameraFor(allDevices = true, hint = false))
+        assertEquals(VideoMode.PORTAL, unset.copy(cameraPortalSeen = true).videoFor(allDevices = true, hint = false))
         // An app known to read the device stays there, and isn't watched.
         val both = unset.copy(cameraPortalSeen = true, cameraDeviceUsed = true)
-        assertEquals(CameraMode.DEVICE, both.cameraFor(allDevices = true, hint = true))
+        assertEquals(VideoMode.DEVICE, both.videoFor(allDevices = true, hint = true))
         assertFalse(both.watchesCameraPortal(allDevices = true, hint = true))
         // Neither: no camera, watched; seen asking: the portal, no longer watched.
-        assertEquals(null, unset.cameraFor(allDevices = false, hint = false))
+        assertEquals(null, unset.videoFor(allDevices = false, hint = false))
         assertTrue(unset.watchesCameraPortal(allDevices = false, hint = false))
-        assertEquals(CameraMode.PORTAL, unset.copy(cameraPortalSeen = true).cameraFor(allDevices = false, hint = false))
+        assertEquals(VideoMode.PORTAL, unset.copy(cameraPortalSeen = true).videoFor(allDevices = false, hint = false))
         assertFalse(unset.copy(cameraPortalSeen = true).watchesCameraPortal(allDevices = false, hint = false))
         // Only Automatic is watched; the hardened level's default is off.
-        assertFalse(unset.copy(cameraModeChoice = CameraMode.DEVICE).watchesCameraPortal(allDevices = true, hint = false))
+        assertFalse(unset.copy(videoModeChoice = VideoMode.DEVICE).watchesCameraPortal(allDevices = true, hint = false))
         val hardened = AppSettings(defaults = AppDefaults(permissionsFromMetadata = false))
-        assertEquals(CameraMode.OFF, hardened.cameraMode)
+        assertFalse(hardened.cameraOn)
+        assertEquals(null, hardened.videoFor(allDevices = true, hint = true))
         assertFalse(hardened.watchesCameraPortal(allDevices = true, hint = true))
-        // GL by default only for an app that uses a camera, or likely does; not one that only asks for all devices.
-        val games = FlatpakContext(devices = listOf("all"))
-        assertFalse(unset.likelyUsesCamera(games))
-        assertTrue(unset.copy(cameraDeviceUsed = true).likelyUsesCamera(games))
-        assertTrue(unset.copy(cameraModeChoice = CameraMode.DEVICE).likelyUsesCamera(games))
-        assertTrue(unset.likelyUsesCamera(FlatpakContext(filesystems = listOf("xdg-pictures/Camera"))))
+        // GL by default for every app that gets a camera, also one only asking for all devices
+        // (a camera app not seen reading one yet); not for the screen alone, nor with the camera off.
+        val allDevices = FlatpakContext(devices = listOf("all"))
+        assertTrue(unset.cameraAllowed(allDevices))
+        assertTrue(unset.cameraAllowed(FlatpakContext(filesystems = listOf("xdg-pictures/Camera"))))
+        assertFalse(unset.cameraAllowed(FlatpakContext()))
+        assertFalse(hardened.copy(screen = true, continueWhileHidden = true).cameraAllowed(allDevices))
+        assertFalse(unset.copy(camera = false).cameraAllowed(allDevices))
     }
 
     @Test
@@ -310,5 +315,27 @@ class AppSettingsTest {
         assertEquals(listOf("--hold", "--x=1"), store.load().launchArgs)
         val imported = File(tmp.root, "appsettings/c.App.properties").apply { writeBytes(AppSettingsStore.imported(f.readBytes(), null)) }
         assertEquals(emptyList<String>(), AppSettingsStore(imported).load().launchArgs)
+    }
+
+    @Test
+    fun theScreenIsOffByDefaultAndNeedsTheAppToRunHidden() {
+        val callApp = FlatpakContext(devices = listOf("all"))
+        // Off at every level until turned on.
+        assertFalse(AppSettings().screenAllowed(callApp))
+        assertFalse(AppSettings(defaults = AppDefaults(permissionsFromMetadata = false)).screenAllowed(callApp))
+        // On, it works only while the app keeps running hidden; the choice stays meanwhile.
+        val on = AppSettings(screen = true)
+        assertFalse(on.screenOn)
+        assertFalse(on.screenAllowed(callApp))
+        assertTrue(on.copy(continueWhileHidden = true).screenAllowed(callApp))
+        // The screen alone brings video, and the watch for the portal, at a level where the camera is off.
+        val hardenedScreen = AppSettings(screen = true, continueWhileHidden = true, defaults = AppDefaults(permissionsFromMetadata = false))
+        assertEquals(VideoMode.DEVICE, hardenedScreen.videoFor(allDevices = true, hint = false))
+        assertTrue(hardenedScreen.watchesCameraPortal(allDevices = false, hint = false))
+        assertFalse(hardenedScreen.cameraAllowed(callApp))
+        // Both off: no video, no watch.
+        val neither = AppSettings(camera = false)
+        assertEquals(null, neither.videoFor(allDevices = true, hint = true))
+        assertFalse(neither.watchesCameraPortal(allDevices = false, hint = false))
     }
 }

@@ -1,6 +1,7 @@
 package com.garathon.flatdroid.settings
 
 import com.garathon.flatdroid.camera.AndroidCameras
+import com.garathon.flatdroid.camera.ScreenStreamer
 import com.garathon.flatdroid.flatpak.FlatpakContext
 import com.garathon.flatdroid.launcher.LaunchEnvironment
 import com.garathon.flatdroid.proot.DevNodes
@@ -38,15 +39,14 @@ enum class Resolution(val percent: Int?) {
  */
 enum class Rendering(val key: String) { AUTOMATIC("automatic"), SOFTWARE("software"), GL("gl") }
 
-/** How an app reaches Android's cameras ([AppSettings.cameraFor]). */
-enum class CameraMode(val key: String) {
+/** How an app's video (its cameras and the screen) reaches it ([AppSettings.videoFor]). */
+enum class VideoMode(val key: String) {
     /** Flatdroid picks [DEVICE], [PORTAL] or none from the metadata and what the app was seen to use. */
     AUTOMATIC("automatic"),
-    /** A `/dev/video*` per camera, answered by a preloaded library; no helper processes. */
+    /** A `/dev/video*` per camera and for the screen, answered by a preloaded library; no helper processes. */
     DEVICE("device"),
     /** Flatpak's camera portal, with PipeWire and the portal among the helpers. */
     PORTAL("portal"),
-    OFF("off"),
 }
 
 /** What an app gets as its home. None of them isolates the app; they change what it can reach. */
@@ -74,6 +74,7 @@ data class AppDefaults(
     val blockExtraSyscalls: Boolean = true,
     val cameraResolution: Int = AndroidCameras.DEFAULT_RESOLUTION,
     val cameraFrameRate: Int = AndroidCameras.DEFAULT_FRAME_RATE,
+    val screenScale: Int = ScreenStreamer.DEFAULT_SCALE,
     /** The screen's size for apps that don't choose their own (a share; never custom). */
     val resolution: Resolution = DEFAULT_RESOLUTION,
     /** How large Wayland apps draw everything, for apps that don't choose their own ([AppSettings.INTERFACE_SIZES]). */
@@ -98,9 +99,9 @@ data class AppSettings(
     val customHeight: Int = CUSTOM_HEIGHT,
     /** Electron needed the flags for newer versions ("GPU process isn't usable" without them). Managed by the launcher. */
     val newerElectronFlags: Boolean = false,
-    /** The app asked for the camera portal in a session without it ([CameraMode.AUTOMATIC]). Managed by the launcher. */
+    /** The app asked for the camera portal in a session without it ([VideoMode.AUTOMATIC]). Managed by the launcher. */
     val cameraPortalSeen: Boolean = false,
-    /** The app read a camera's `/dev/video*`. Managed by the launcher. */
+    /** The app read a camera's or the screen's `/dev/video*`. Managed by the launcher. */
     val cameraDeviceUsed: Boolean = false,
     /**
      * The app's root has no /.flatpak-info: KDE's frameworks reported that they would run
@@ -150,16 +151,23 @@ data class AppSettings(
     val microphone: Boolean? = null,
     /** With [microphone] on, record whenever the app does, without asking (needs Android's permission, asked when turned on). */
     val alwaysAllowMicrophone: Boolean = false,
+    /** How the app's cameras and screen reach it; null is [VideoMode.AUTOMATIC] ([videoMode], [videoFor]). */
+    val videoModeChoice: VideoMode? = null,
     /**
-     * How the app reaches Android's cameras; null follows [defaults]: [CameraMode.AUTOMATIC] with
-     * Grant asked permissions, [CameraMode.OFF] otherwise ([cameraMode], [cameraFor]). Unless off,
-     * the user is asked in a notification the first time the app uses a camera in a session, as
-     * for the [microphone], and Android's camera runs only while the app takes its picture.
-     * Android's camera permission is asked at the first Allow.
+     * Android's cameras. By default on with Grant asked permissions, off otherwise; null follows
+     * [defaults] ([cameraOn]). On, the user is asked in a notification the first time the app uses
+     * a camera in a session, as for the [microphone], and Android's camera runs only while the app
+     * takes its picture. Android's camera permission is asked at the first Allow.
      */
-    val cameraModeChoice: CameraMode? = null,
-    /** Unless the camera is off, use it whenever the app does, without asking (needs Android's permission, asked when turned on). */
+    val camera: Boolean? = null,
+    /** With [camera] on, use it whenever the app does, without asking (needs Android's permission, asked when turned on). */
     val alwaysAllowCamera: Boolean = false,
+    /**
+     * Android's screen as one more camera, off by default at every level, and only with
+     * [continueWhileHidden] ([screenOn]): a share stops while the app is paused. Each use is asked
+     * in a notification, then by Android, and a share ends a few seconds after the app stops using it.
+     */
+    val screen: Boolean = false,
     /**
      * Developer setting: with [camera] on, the frames' short side, one of [AndroidCameras.RESOLUTIONS]
      * or [AndroidCameras.FULL_RESOLUTION] (each camera's largest size; a camera without it takes
@@ -168,6 +176,11 @@ data class AppSettings(
     val cameraResolutionOverride: Int? = null,
     /** Developer setting: with [camera] on, frames per second as the device's cameras offer them, instead of Flatdroid's; null follows [defaults] ([cameraFrameRate]). */
     val cameraFrameRateOverride: Int? = null,
+    /**
+     * Developer setting: with [screen] on, the screen's frames' size in percent of its own
+     * ([ScreenStreamer.SCALES]) instead of Flatdroid's; null follows [defaults] ([screenScale]).
+     */
+    val screenScaleOverride: Int? = null,
     /** Developer setting: variables added to the app's environment, over Flatdroid's own. */
     val environment: Map<String, String> = emptyMap(),
     /** Developer setting: arguments added after the app's command (one argument each; no quoting). */
@@ -202,14 +215,17 @@ data class AppSettings(
     val blocksExtraSyscalls: Boolean get() = blockExtraSyscalls ?: defaults.blockExtraSyscalls
     val cameraResolution: Int get() = cameraResolutionOverride ?: defaults.cameraResolution
     val cameraFrameRate: Int get() = cameraFrameRateOverride ?: defaults.cameraFrameRate
-    val cameraMode: CameraMode get() = cameraModeChoice ?: if (defaults.permissionsFromMetadata) CameraMode.AUTOMATIC else CameraMode.OFF
+    val screenScale: Int get() = screenScaleOverride ?: defaults.screenScale
+    val videoMode: VideoMode get() = videoModeChoice ?: VideoMode.AUTOMATIC
+    val cameraOn: Boolean get() = camera ?: defaults.permissionsFromMetadata
+    val screenOn: Boolean get() = screen && continueWhileHidden
 
     /** Whether the app gets sound: its own setting, else [defaults] and whether its metadata asks for PulseAudio. */
     fun audioAllowed(sockets: List<String>): Boolean = audioOn(PULSEAUDIO_SOCKET in sockets)
 
     /**
      * The three below take what the app's metadata asks for as a flag ([audioOn] and [microphoneOn]:
-     * PulseAudio's socket), as [cameraFor] does, so the launcher, the overview and the Permissions
+     * PulseAudio's socket), as [videoFor] does, so the launcher, the overview and the Permissions
      * page can't work out a permission differently.
      */
     fun networkOn(requested: Boolean): Boolean = network ?: defaultOn(requested)
@@ -219,30 +235,31 @@ data class AppSettings(
     fun microphoneOn(audioRequested: Boolean): Boolean = audioOn(audioRequested) && (microphone ?: defaultOn(audioRequested))
 
     /**
-     * How the app gets cameras at its next launch: [CameraMode.DEVICE], [CameraMode.PORTAL], or
-     * null for none. [allDevices]: its metadata asks for all devices, which Flatpak itself requires
-     * for `/dev/video*`. [hint]: [FlatpakContext.mayUseCamera]. [CameraMode.AUTOMATIC] picks the
-     * device for an app known to read one, or that asks for all devices and wasn't seen asking for
-     * the portal instead; the portal for an app seen asking for it, or with the hint; none
-     * otherwise (Flatdroid then watches for the portal, [watchesCameraPortal]).
+     * How the app gets its cameras and screen at its next launch: [VideoMode.DEVICE],
+     * [VideoMode.PORTAL], or null for none (also when both are off). [allDevices]: its metadata
+     * asks for all devices, which Flatpak itself requires for `/dev/video*`. [hint]:
+     * [FlatpakContext.mayUseCamera]. [VideoMode.AUTOMATIC] picks the device for an app known to
+     * read one, or that asks for all devices and wasn't seen asking for the portal instead; the
+     * portal for an app seen asking for it, or with the hint; none otherwise (Flatdroid then
+     * watches for the portal, [watchesCameraPortal]).
      */
-    fun cameraFor(allDevices: Boolean, hint: Boolean): CameraMode? = when (cameraMode) {
-        CameraMode.OFF -> null
-        CameraMode.DEVICE -> CameraMode.DEVICE
-        CameraMode.PORTAL -> CameraMode.PORTAL
-        CameraMode.AUTOMATIC -> when {
-            cameraDeviceUsed || (allDevices && !cameraPortalSeen) -> CameraMode.DEVICE
-            cameraPortalSeen || hint -> CameraMode.PORTAL
+    fun videoFor(allDevices: Boolean, hint: Boolean): VideoMode? = if (!cameraOn && !screenOn) null else when (videoMode) {
+        VideoMode.DEVICE -> VideoMode.DEVICE
+        VideoMode.PORTAL -> VideoMode.PORTAL
+        VideoMode.AUTOMATIC -> when {
+            cameraDeviceUsed || (allDevices && !cameraPortalSeen) -> VideoMode.DEVICE
+            cameraPortalSeen || hint -> VideoMode.PORTAL
             else -> null
         }
     }
 
     /**
      * Flatdroid answers the camera portal itself, to learn that the app asks for it: in
-     * [CameraMode.AUTOMATIC], when the app doesn't get the portal and isn't known to read a device.
+     * [VideoMode.AUTOMATIC] with the camera or the screen on, when the app doesn't get the portal
+     * and isn't known to read a device.
      */
     fun watchesCameraPortal(allDevices: Boolean, hint: Boolean): Boolean =
-        cameraMode == CameraMode.AUTOMATIC && !cameraDeviceUsed && cameraFor(allDevices, hint) != CameraMode.PORTAL
+        (cameraOn || screenOn) && videoMode == VideoMode.AUTOMATIC && !cameraDeviceUsed && videoFor(allDevices, hint) != VideoMode.PORTAL
 
     /** What a permission the user hasn't set follows: [defaults] and whether the metadata asks for it. */
     fun defaultOn(requested: Boolean): Boolean = defaults.permissionsFromMetadata && requested
@@ -250,25 +267,21 @@ data class AppSettings(
     /** Whether the app's microphone is on, whatever Android's permission: its own setting, else [defaults] and whether it asks for sound. */
     fun microphoneAllowed(sockets: List<String>): Boolean = microphoneOn(PULSEAUDIO_SOCKET in sockets)
 
-    /** [cameraFor] from the app's metadata. */
-    fun cameraFor(context: FlatpakContext): CameraMode? = cameraFor(DevNodes.ALL in context.devices, context.mayUseCamera)
+    /** [videoFor] from the app's metadata. */
+    fun videoFor(context: FlatpakContext): VideoMode? = videoFor(DevNodes.ALL in context.devices, context.mayUseCamera)
 
     /** [watchesCameraPortal] from the app's metadata. */
     fun watchesCameraPortal(context: FlatpakContext): Boolean = watchesCameraPortal(DevNodes.ALL in context.devices, context.mayUseCamera)
 
     /**
-     * The app uses a camera, or likely does (GL keeps a preview up, [Rendering.AUTOMATIC]): in the
-     * portal, or in a device it was set to, read before, or has the hint for. Not an app that
-     * only asks for all devices, as games do for gamepads.
+     * Whether the app gets a camera at its next launch, whatever Android's permission ([videoFor]).
+     * Also when [Rendering.AUTOMATIC] picks GL: a camera preview in GTK 4 or Qt Quick needs it, and
+     * some (Qt's video sink) fail without it, so the app never reads a camera.
      */
-    fun likelyUsesCamera(context: FlatpakContext): Boolean = when (cameraFor(context)) {
-        null -> false
-        CameraMode.PORTAL -> true
-        else -> cameraMode == CameraMode.DEVICE || cameraDeviceUsed || context.mayUseCamera
-    }
+    fun cameraAllowed(context: FlatpakContext): Boolean = cameraOn && videoFor(context) != null
 
-    /** Whether the app gets a camera at its next launch, whatever Android's permission ([cameraFor]). */
-    fun cameraAllowed(context: FlatpakContext): Boolean = cameraFor(context) != null
+    /** Whether the app gets the screen as a camera at its next launch ([videoFor]). */
+    fun screenAllowed(context: FlatpakContext): Boolean = screenOn && videoFor(context) != null
 
     /** Whether the app gets the Internet: its own setting, else [defaults] and whether its metadata asks for the network. */
     fun networkAllowed(shared: List<String>): Boolean = networkOn(NETWORK in shared)
@@ -347,12 +360,16 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
             blockExtraSyscalls = props.getProperty(KEY_EXTRA_SYSCALLS)?.toBooleanStrictOrNull(),
             shareHiddenFiles = props.getProperty(KEY_SHARE_HIDDEN_FILES) == "true",
             microphone = props.getProperty(KEY_MICROPHONE)?.toBooleanStrictOrNull(),
-            cameraModeChoice = CameraMode.entries.firstOrNull { it.key == props.getProperty(KEY_CAMERA) },
+            videoModeChoice = VideoMode.entries.firstOrNull { it.key == props.getProperty(KEY_VIDEO) },
+            camera = props.getProperty(KEY_CAMERA)?.toBooleanStrictOrNull(),
+            screen = props.getProperty(KEY_SCREEN) == "true",
             // A saved value equal to the default is no override (older files saved these always).
             cameraResolutionOverride = props.getProperty(KEY_CAMERA_RESOLUTION)?.toIntOrNull()
                 ?.takeIf { (it in AndroidCameras.RESOLUTIONS || it == AndroidCameras.FULL_RESOLUTION) && it != appDefaults.cameraResolution },
             cameraFrameRateOverride = props.getProperty(KEY_CAMERA_FRAME_RATE)?.toIntOrNull()
                 ?.takeIf { it in 1..AndroidCameras.MAX_FRAME_RATE && it != appDefaults.cameraFrameRate },
+            screenScaleOverride = props.getProperty(KEY_SCREEN_SCALE)?.toIntOrNull()
+                ?.takeIf { it in ScreenStreamer.SCALES && it != appDefaults.screenScale },
             alwaysAllowMicrophone = props.getProperty(KEY_MICROPHONE_ALWAYS) == "true",
             alwaysAllowCamera = props.getProperty(KEY_CAMERA_ALWAYS) == "true",
             environment = props.stringPropertyNames()
@@ -391,12 +408,15 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
         if (settings.shareHiddenFiles) props.setProperty(KEY_SHARE_HIDDEN_FILES, "true")
         settings.microphone?.let { props.setProperty(KEY_MICROPHONE, it.toString()) }
         if (settings.alwaysAllowMicrophone) props.setProperty(KEY_MICROPHONE_ALWAYS, "true")
-        settings.cameraModeChoice?.let { props.setProperty(KEY_CAMERA, it.key) }
+        settings.videoModeChoice?.let { props.setProperty(KEY_VIDEO, it.key) }
+        settings.camera?.let { props.setProperty(KEY_CAMERA, it.toString()) }
+        if (settings.screen) props.setProperty(KEY_SCREEN, "true")
         if (settings.cameraPortalSeen) props.setProperty(KEY_CAMERA_PORTAL_SEEN, "true")
         if (settings.cameraDeviceUsed) props.setProperty(KEY_CAMERA_DEVICE_USED, "true")
         if (settings.alwaysAllowCamera) props.setProperty(KEY_CAMERA_ALWAYS, "true")
         settings.cameraResolutionOverride?.let { props.setProperty(KEY_CAMERA_RESOLUTION, it.toString()) }
         settings.cameraFrameRateOverride?.let { props.setProperty(KEY_CAMERA_FRAME_RATE, it.toString()) }
+        settings.screenScaleOverride?.let { props.setProperty(KEY_SCREEN_SCALE, it.toString()) }
         for ((name, value) in settings.environment) props.setProperty(KEY_ENV_PREFIX + name, value)
         if (settings.launchArgs.isNotEmpty()) props.setProperty(KEY_LAUNCH_ARGS, LaunchArgs.format(settings.launchArgs))
         if (settings.forceX11) props.setProperty(KEY_FORCE_X11, "true")
@@ -446,12 +466,15 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
         private const val KEY_AUDIO = "permission.audio"
         private const val KEY_MICROPHONE = "permission.microphone"
         private const val KEY_MICROPHONE_ALWAYS = "permission.microphone.always"
+        private const val KEY_VIDEO = "permission.video"
         private const val KEY_CAMERA = "permission.camera"
+        private const val KEY_SCREEN = "permission.screen"
         private const val KEY_CAMERA_PORTAL_SEEN = "camera.portalSeen"
         private const val KEY_CAMERA_DEVICE_USED = "camera.deviceUsed"
         private const val KEY_CAMERA_ALWAYS = "permission.camera.always"
         private const val KEY_CAMERA_RESOLUTION = "camera.resolution"
         private const val KEY_CAMERA_FRAME_RATE = "camera.frameRate"
+        private const val KEY_SCREEN_SCALE = "screen.scale"
         private const val KEY_ENV_PREFIX = "env."
         private const val KEY_LAUNCH_ARGS = "launch.args"
         private const val KEY_FORCE_X11 = "display.x11"

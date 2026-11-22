@@ -5,10 +5,12 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import com.garathon.flatdroid.R
 import com.garathon.flatdroid.camera.AndroidCameras
+import com.garathon.flatdroid.camera.ScreenStreamer
 import com.garathon.flatdroid.settings.HomeMode
 import com.garathon.flatdroid.settings.SecurityLevel
 import com.garathon.flatdroid.settings.SecuritySettings
@@ -71,7 +73,7 @@ fun homeModeNames(): Map<HomeMode, String> = mapOf(
 )
 
 /**
- * The camera's frame rate and size, which Flatdroid sets for every app (the Audio and camera page)
+ * The camera's frame rate and size, which Flatdroid sets for every app (the Audio and video page)
  * and an app can override (its Overrides page, with [onResetRate] and [onResetResolution] to remove an
  * override). [resolutions] are the sizes the cameras give at each rate; choosing a rate that doesn't
  * give the current size moves it to the largest that it does below it.
@@ -131,6 +133,39 @@ fun CameraRows(
         enabled = enabled,
         developer = developer,
         onReset = onResetResolution,
+        resettable = resettable,
+    )
+}
+
+/**
+ * The screen-as-a-camera frames' size in percent of the screen's, which Flatdroid sets for every
+ * app (the Audio and video page) and an app can override (its Overrides page, with [onReset]).
+ */
+@Composable
+fun ScreenScaleRow(
+    scale: Int,
+    hint: String,
+    onSelect: (Int) -> Unit,
+    enabled: Boolean = true,
+    developer: Boolean = false,
+    onReset: (() -> Unit)? = null,
+    resettable: Boolean = false,
+) {
+    val resources = LocalResources.current
+    val (width, height) = ScreenStreamer.screenSize(LocalContext.current)
+    DropdownRow(
+        selected = scale,
+        options = ScreenStreamer.SCALES,
+        onSelect = onSelect,
+        label = { percent ->
+            val (w, h) = ScreenStreamer.fit(width, height, percent)
+            resources.getString(R.string.app_settings_screen_scale_value, percent, w, h)
+        },
+        title = stringResource(R.string.app_settings_screen_resolution),
+        hint = hint,
+        enabled = enabled,
+        developer = developer,
+        onReset = onReset,
         resettable = resettable,
     )
 }

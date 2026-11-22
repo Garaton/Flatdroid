@@ -2,6 +2,7 @@ package com.garathon.flatdroid.settings
 
 import com.garathon.flatdroid.alpine.GuestFiles
 import com.garathon.flatdroid.camera.AndroidCameras
+import com.garathon.flatdroid.camera.ScreenStreamer
 import com.garathon.flatdroid.flatpak.tasks.FlatpakCommands
 import com.garathon.flatdroid.util.io.writeTextAtomically
 import java.io.File
@@ -101,6 +102,8 @@ data class UserSettings(
     /** The camera's frames' short side and rate for apps that don't override them (see [AppSettings]). */
     val cameraResolution: Int = AndroidCameras.DEFAULT_RESOLUTION,
     val cameraFrameRate: Int = AndroidCameras.DEFAULT_FRAME_RATE,
+    /** The screen-as-a-camera frames' size in percent of the screen's for apps that don't override it ([ScreenStreamer.SCALES]). */
+    val screenScale: Int = ScreenStreamer.DEFAULT_SCALE,
     /** The screen's size and the interface size for apps that don't choose their own (see [AppSettings]). */
     val appResolution: Resolution = AppDefaults.DEFAULT_RESOLUTION,
     val appInterfaceSize: Int = AppDefaults.DEFAULT_INTERFACE_SIZE,
@@ -146,7 +149,8 @@ data class UserSettings(
 
     /** What an app's own settings start as. */
     val appDefaults: AppDefaults get() = security.appDefaults.copy(
-        cameraResolution = cameraResolution, cameraFrameRate = cameraFrameRate, resolution = appResolution, interfaceSize = appInterfaceSize,
+        cameraResolution = cameraResolution, cameraFrameRate = cameraFrameRate, screenScale = screenScale,
+        resolution = appResolution, interfaceSize = appInterfaceSize,
         rendering = appRendering,
     )
 
@@ -222,6 +226,7 @@ class UserSettingsStore(private val file: File) {
                 ?.takeIf { it in AndroidCameras.RESOLUTIONS || it == AndroidCameras.FULL_RESOLUTION } ?: AndroidCameras.DEFAULT_RESOLUTION,
             cameraFrameRate = props.getProperty(KEY_CAMERA_FRAME_RATE)?.toIntOrNull()?.takeIf { it in 1..AndroidCameras.MAX_FRAME_RATE }
                 ?: AndroidCameras.DEFAULT_FRAME_RATE,
+            screenScale = props.getProperty(KEY_SCREEN_SCALE)?.toIntOrNull()?.takeIf { it in ScreenStreamer.SCALES } ?: ScreenStreamer.DEFAULT_SCALE,
             appResolution = AppDefaults.DEFAULT_RESOLUTIONS.firstOrNull { it.percent.toString() == props.getProperty(KEY_APP_RESOLUTION) }
                 ?: AppDefaults.DEFAULT_RESOLUTION,
             appInterfaceSize = props.getProperty(KEY_APP_INTERFACE_SIZE)?.toIntOrNull()?.takeIf { it in AppSettings.INTERFACE_SIZES }
@@ -278,6 +283,7 @@ class UserSettingsStore(private val file: File) {
         if (settings.appTime != AppTime.TIME_USED) props.setProperty(KEY_APP_TIME, settings.appTime.key)
         if (settings.cameraResolution != AndroidCameras.DEFAULT_RESOLUTION) props.setProperty(KEY_CAMERA_RESOLUTION, settings.cameraResolution.toString())
         if (settings.cameraFrameRate != AndroidCameras.DEFAULT_FRAME_RATE) props.setProperty(KEY_CAMERA_FRAME_RATE, settings.cameraFrameRate.toString())
+        if (settings.screenScale != ScreenStreamer.DEFAULT_SCALE) props.setProperty(KEY_SCREEN_SCALE, settings.screenScale.toString())
         if (settings.appResolution != AppDefaults.DEFAULT_RESOLUTION) props.setProperty(KEY_APP_RESOLUTION, settings.appResolution.percent.toString())
         if (settings.appInterfaceSize != AppDefaults.DEFAULT_INTERFACE_SIZE) props.setProperty(KEY_APP_INTERFACE_SIZE, settings.appInterfaceSize.toString())
         if (settings.reduceMotion) props.setProperty(KEY_REDUCE_MOTION, "true")
@@ -352,6 +358,7 @@ class UserSettingsStore(private val file: File) {
         private const val KEY_APP_RENDERING = "apps.rendering"
         private const val KEY_REDUCE_MOTION = "display.reduceMotion"
         private const val KEY_CAMERA_FRAME_RATE = "camera.frameRate"
+        private const val KEY_SCREEN_SCALE = "screen.scale"
     }
 }
 

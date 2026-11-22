@@ -48,6 +48,11 @@ class Fdv4l2Test {
         assertEquals(Fdv4l2.Format.MJPEG, Fdv4l2.chosenFormat("nv12\nmjpeg"))
         assertEquals(Fdv4l2.Format.NV12, Fdv4l2.chosenFormat("nv12\nyuyv\njunk\n"))
         assertNull(Fdv4l2.chosenFormat(""))
+        // Streaming as the library said last.
+        assertEquals(true, Fdv4l2.streaming("nv12\non\n"))
+        assertEquals(false, Fdv4l2.streaming("nv12\non\noff\n"))
+        assertEquals(true, Fdv4l2.streaming("off\nmjpeg\non"))
+        assertNull(Fdv4l2.streaming("nv12\n"))
     }
 
     @Test

@@ -26,6 +26,8 @@ import com.garathon.flatdroid.camera.AndroidCameras
 import com.garathon.flatdroid.camera.CameraScript
 import com.garathon.flatdroid.camera.CameraSession
 import com.garathon.flatdroid.camera.CameraStreamer
+import com.garathon.flatdroid.camera.FrameStreamer
+import com.garathon.flatdroid.camera.ScreenStreamer
 import com.garathon.flatdroid.flatpak.integrity.AndroidLinkFs
 import com.garathon.flatdroid.session.helpers.PulseScript
 import com.garathon.flatdroid.session.bus.AndroidAppearance
@@ -68,7 +70,7 @@ import com.garathon.flatdroid.setup.rootfs.AndroidTarFs
 import com.garathon.flatdroid.settings.AppSettings
 import com.garathon.flatdroid.settings.AppSettingsStore
 import com.garathon.flatdroid.settings.AudioOutputMode
-import com.garathon.flatdroid.settings.CameraMode
+import com.garathon.flatdroid.settings.VideoMode
 import com.garathon.flatdroid.settings.FlatpakTheme
 import com.garathon.flatdroid.settings.HomeMode
 import com.garathon.flatdroid.settings.Rendering
@@ -241,9 +243,12 @@ class FlatpakLauncher(private val context: Context) {
         val microphone = audio && settings.microphoneAllowed(appContext.sockets)
         val micAlways = settings.alwaysAllowMicrophone && MicStreamer.hasPermission(context)
         if (microphone && settings.alwaysAllowMicrophone && !micAlways) SessionController.log("[flatdroid] Android's microphone permission is off; the app's microphone asks instead")
-        // Device, portal or none ([AppSettings.cameraFor]).
-        val cameraMode = settings.cameraFor(appContext)
-        val cameraWanted = cameraMode != null
+        // Device, portal or none ([AppSettings.videoFor]).
+        val videoMode = settings.videoFor(appContext)
+        val cameraWanted = videoMode != null && settings.cameraOn
+        // The screen asks at each use, in a notification only: Android's consent can't be asked before the launch.
+        val screenWanted = videoMode != null && settings.screenOn && SessionService.canAskInNotification(context)
+        if (videoMode != null && settings.screenOn && !screenWanted) SessionController.log("[flatdroid] notifications are off, so the app doesn't get the screen: Flatdroid couldn't ask when it uses it")
         val cameraAlways = settings.alwaysAllowCamera && AndroidCameras.hasPermission(context)
         if (cameraWanted && settings.alwaysAllowCamera && !cameraAlways) SessionController.log("[flatdroid] Android's camera permission is off; the app's camera asks instead")
         val cameras = if (cameraWanted) AndroidCameras.list(context, settings.cameraResolution, settings.cameraFrameRate) else emptyList()
@@ -255,12 +260,17 @@ class FlatpakLauncher(private val context: Context) {
         val (screenWidth, screenHeight) = settings.size(viewWidth, viewHeight)
         val displayRotation = displayRotation(landscape = screenWidth > screenHeight)
         val cameraRotations = cameras.map { it.rotation(displayRotation) }
-        val cameraNodes = cameraNodes(cameras, cameraRotations)
+        // The cameras, then the screen: an app's first camera stays a real one.
+        val cameraNodes = cameraNodes(cameras, cameraRotations) + listOfNotNull(
+            if (!screenWanted) null else ScreenStreamer.size(context, landscape = screenWidth > screenHeight, settings.screenScale).let { (width, height) ->
+                CameraScript.Node(CameraScript.nodeName(cameras.size), context.getString(R.string.camera_screen), width, height, ScreenStreamer.FRAME_RATE)
+            },
+        )
         // Device mode: a /dev/video* per camera, no PipeWire. Portal mode: the camera portal's helpers.
-        val cameraDevices = cameraNodes.isNotEmpty() && cameraMode == CameraMode.DEVICE
+        val cameraDevices = cameraNodes.isNotEmpty() && videoMode == VideoMode.DEVICE
         val portalNodes = if (cameraDevices) emptyList() else cameraNodes
         // Without the real portal, Flatdroid answers its camera to learn that the app wants it.
-        val watchCameraPortal = portalNodes.isEmpty() && settings.watchesCameraPortal(appContext) && AndroidCameras.present(context)
+        val watchCameraPortal = portalNodes.isEmpty() && settings.watchesCameraPortal(appContext) && (settings.screenOn || AndroidCameras.present(context))
         val deviceList = if (!cameraDevices) emptyList() else cameraNodes.mapIndexed { index, node ->
             Fdv4l2.Device(index, node.width, node.height, node.frameRate, node.description, front = node.location == CameraScript.Location.FRONT)
         }
@@ -306,7 +316,7 @@ class FlatpakLauncher(private val context: Context) {
         var helpersProot: ProotProcess? = null
         var dns: ResolvConfRefresher? = null
         var portal: SessionPortal? = null
-        val streamers = LinkedHashMap<String, CameraStreamer>()
+        val streamers = LinkedHashMap<String, FrameStreamer>()
         var camera: CameraSession? = null
         try {
             mic = if (!microphone) null else {
@@ -327,11 +337,18 @@ class FlatpakLauncher(private val context: Context) {
             }
             helpersProot = helpers
             for (index in cameraNodes.indices) {
-                val pipe = if (cameraDevices) File(videoDir, "video$index") else File(cameraPipeDir, cameraNodes[index].name)
-                streamers[cameraNodes[index].name] = CameraStreamer(
-                    context, cameras[index], pipe, cameraRotations[index],
-                    deviceMode = cameraDevices, control = File(videoDir, "control$index").takeIf { cameraDevices },
-                )
+                val node = cameraNodes[index]
+                val pipe = if (cameraDevices) File(videoDir, "video$index") else File(cameraPipeDir, node.name)
+                val control = File(videoDir, "control$index").takeIf { cameraDevices }
+                val media = File(videoDir, "media$index").takeIf { cameraDevices }
+                streamers[node.name] = if (index < cameras.size) {
+                    CameraStreamer(context, cameras[index], pipe, cameraRotations[index], deviceMode = cameraDevices, control = control, media = media)
+                } else {
+                    ScreenStreamer(
+                        context, pipe, node.width, node.height, settings.screenScale, deviceMode = cameraDevices, control = control, media = media,
+                        onEnded = { camera?.screenEnded() },
+                    )
+                }
             }
             if (streamers.isNotEmpty()) {
                 camera = CameraSession(
@@ -345,7 +362,7 @@ class FlatpakLauncher(private val context: Context) {
             // in device mode, where the app fixed the size when it started streaming.
             if (portalNodes.isNotEmpty()) SessionController.onDisplayResized = { width, height ->
                 val rotation = displayRotation(landscape = width > height)
-                cameraNodes.forEachIndexed { index, node -> streamers[node.name]?.turn(cameras[index].rotation(rotation)) }
+                cameras.forEachIndexed { index, it -> (streamers[cameraNodes[index].name] as? CameraStreamer)?.turn(it.rotation(rotation)) }
             }
             // A network change during the session (Wi-Fi to mobile data, Private DNS) reaches the app's resolv.conf.
             dns = ResolvConfRefresher(context, listOf(File(etcDir, "resolv.conf"))).apply { start() }
@@ -788,20 +805,20 @@ class FlatpakLauncher(private val context: Context) {
             softwareRendering = when (settings.rendering) {
                 Rendering.SOFTWARE -> true
                 Rendering.GL -> false
-                // A camera preview needs GL to keep up: for an app that uses a camera, or likely does.
-                Rendering.AUTOMATIC -> !(app != null && settings.likelyUsesCamera(app.metadata.context) && AndroidCameras.present(context))
+                // A camera preview needs GL to keep up, and some fail without it: for every app that gets a camera.
+                Rendering.AUTOMATIC -> !(app != null && settings.cameraAllowed(app.metadata.context) && AndroidCameras.present(context))
             },
         )
     }
 
-    /** The app asked for the camera portal in a session without it: the portal runs from its next launch ([AppSettings.cameraFor]). */
+    /** The app asked for the camera portal in a session without it: the portal runs from its next launch ([AppSettings.videoFor]). */
     private fun cameraPortalSeen(store: AppSettingsStore) {
         runCatching { store.update { it.copy(cameraPortalSeen = true) } }
         SessionController.log("[flatdroid] the app asked for the camera portal; it gets cameras there from its next launch")
         Handler(Looper.getMainLooper()).post { Toast.makeText(context, R.string.camera_portal_next_launch, Toast.LENGTH_LONG).show() }
     }
 
-    /** The app read a camera's device: [AppSettings.cameraFor] keeps it there. */
+    /** The app read a camera's or the screen's device: [AppSettings.videoFor] keeps it there. */
     private fun cameraDeviceUsed(store: AppSettingsStore) {
         runCatching { store.update { it.copy(cameraDeviceUsed = true) } }
     }
@@ -1103,14 +1120,19 @@ class FlatpakLauncher(private val context: Context) {
     /**
      * Entries in the app's root where device mode binds, so apps listing a folder find them (proot
      * lists only what is there): the devices in /dev, and the `/sys` folders while /sys is limited.
-     * With the whole of /dev or /sys, which come from Android, listing misses them (verify).
+     * With the whole of /dev or /sys, which come from Android, listing misses them (verify). The
+     * devices' entries are pipes, as what is bound there: a listing gives each entry's own type, and
+     * apps that list only special files (not regular ones) in /dev would skip an empty file.
      */
     private fun createCameraMountPoints(binds: FlatpakBinds) {
         val root = File(binds.root)
         for ((_, guest) in binds.cameraBinds) {
             val target = File(root, guest.removePrefix("/"))
             when {
-                guest.startsWith("/dev/") -> if (!binds.wholeDev && !target.exists()) target.apply { parentFile?.mkdirs() }.createNewFile()
+                guest.startsWith("/dev/") -> if (!binds.wholeDev && !target.exists()) {
+                    target.parentFile?.mkdirs()
+                    Os.mkfifo(target.path, 0x180) // 0600
+                }
                 guest.startsWith("/sys/") -> if (binds.sys != null) target.mkdirs()
                 guest.startsWith("/run/") -> target.mkdirs()
             }

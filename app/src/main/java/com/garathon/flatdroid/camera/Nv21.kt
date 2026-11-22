@@ -1,13 +1,15 @@
 package com.garathon.flatdroid.camera
 
 import java.nio.ByteBuffer
+import java.nio.ByteOrder
 
 /**
  * Packs a camera image's YUV 4:2:0 planes into NV21: the Y plane, then V and U interleaved, the
  * format Android's JPEG encoder ([android.graphics.YuvImage]) takes; or into NV12 (U before V), the
  * raw format apps take. Android's cameras mostly give interleaved chroma ([Order.VU] as NV21 or
  * [Order.UV] as NV12 in memory), whose rows are copied whole; planar chroma is interleaved here.
- * The turn ([rotate]) moves chroma pairs whole, so it serves both.
+ * The turn ([rotate]) moves chroma pairs whole, so it serves both. The screen's RGBA pixels are
+ * turned into either by [fromRgba].
  */
 object Nv21 {
     /** How the U and V planes of a pixel stride of 2 lie in memory. */
@@ -101,6 +103,49 @@ object Nv21 {
             }
         }
     }
+
+    /**
+     * [width]×[height] RGBA pixels (4 bytes each, rows [rowStride] apart in [rgba]; even sizes) as
+     * NV21, or NV12 with [into] [Order.UV], into [out] ([bytes] long), in JPEG's full range
+     * (BT.601), as Android's cameras give: each pixel's Y, and each 2×2 block's U and V from its
+     * average. [rows] is scratch space of at least 2 × [width] pixels. Pixels are read as whole
+     * little-endian ints (R in the low byte), a row at a time.
+     */
+    fun fromRgba(rgba: ByteBuffer, rowStride: Int, width: Int, height: Int, out: ByteArray, rows: IntArray, into: Order = Order.VU) {
+        val pixels = rgba.duplicate().order(ByteOrder.LITTLE_ENDIAN)
+        val chroma = width * height
+        val (vAt, uAt) = if (into == Order.VU) 0 to 1 else 1 to 0
+        for (r in 0 until height step 2) {
+            pixels.position(r * rowStride)
+            pixels.asIntBuffer().get(rows, 0, width)
+            pixels.position((r + 1) * rowStride)
+            pixels.asIntBuffer().get(rows, width, width)
+            val top = r * width
+            val uv = chroma + (r / 2) * width
+            var c = 0
+            while (c < width) {
+                val a = rows[c]
+                val b = rows[c + 1]
+                val d = rows[width + c]
+                val e = rows[width + c + 1]
+                out[top + c] = luma(a)
+                out[top + c + 1] = luma(b)
+                out[top + width + c] = luma(d)
+                out[top + width + c + 1] = luma(e)
+                val red = (a and 0xFF) + (b and 0xFF) + (d and 0xFF) + (e and 0xFF)
+                val green = (a shr 8 and 0xFF) + (b shr 8 and 0xFF) + (d shr 8 and 0xFF) + (e shr 8 and 0xFF)
+                val blue = (a shr 16 and 0xFF) + (b shr 16 and 0xFF) + (d shr 16 and 0xFF) + (e shr 16 and 0xFF)
+                val u = ((-43 * red - 85 * green + 128 * blue + 512) shr 10) + 128
+                val v = ((128 * red - 107 * green - 21 * blue + 512) shr 10) + 128
+                out[uv + c + vAt] = (if (v > 255) 255 else if (v < 0) 0 else v).toByte()
+                out[uv + c + uAt] = (if (u > 255) 255 else if (u < 0) 0 else u).toByte()
+                c += 2
+            }
+        }
+    }
+
+    private fun luma(pixel: Int): Byte =
+        ((77 * (pixel and 0xFF) + 150 * (pixel shr 8 and 0xFF) + 29 * (pixel shr 16 and 0xFF) + 128) shr 8).toByte()
 
     /**
      * [src] ([width]×[height] NV21) turned clockwise by [degrees] (90, 180 or 270) into [dst], which

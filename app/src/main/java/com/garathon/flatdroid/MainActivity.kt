@@ -480,9 +480,10 @@ class MainActivity : ComponentActivity() {
                 onAnswer = { allow ->
                     home.launchQuestions = null
                     // Android's own permission, at the first Allow.
-                    if (allow && !SessionService.hasPermission(this, questions.asking)) {
+                    val permission = SessionService.permission(questions.asking)
+                    if (allow && permission != null && !SessionService.hasPermission(this, questions.asking)) {
                         home.launchPermission = questions
-                        launchPermissionRequest.launch(SessionService.permission(questions.asking))
+                        launchPermissionRequest.launch(permission)
                     } else {
                         answered(questions, allow)
                     }
@@ -881,6 +882,7 @@ class MainActivity : ComponentActivity() {
     private fun refusedText(sensor: Sensor) = when (sensor) {
         Sensor.MICROPHONE -> R.string.app_settings_microphone_android_denied
         Sensor.CAMERA -> R.string.app_settings_camera_android_denied
+        Sensor.SCREEN -> R.string.app_settings_screen_android_denied
     }
 
     private fun start(pending: PendingLaunch, answers: Map<Sensor, Boolean>) {

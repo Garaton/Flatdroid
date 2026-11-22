@@ -64,6 +64,16 @@ object Fdv4l2 {
     /** The format the library last reported on a control pipe ([read]: its text since last time), or null. */
     fun chosenFormat(read: String): Format? = read.lines().mapNotNull { Format.of(it.trim()) }.lastOrNull()
 
+    /**
+     * Whether the app streams from the device, as the library last reported on a control pipe
+     * ([read]: its text since last time): "on" at stream-on, "off" at stream-off or when the device
+     * is closed while streaming; null when it said neither.
+     */
+    fun streaming(read: String): Boolean? = read.lines().map { it.trim() }.lastOrNull { it == ON || it == OFF }?.let { it == ON }
+
+    private const val ON = "on"
+    private const val OFF = "off"
+
     /** LD_PRELOAD with the library first and the app's own [current] value, if any, after it. */
     fun preload(current: String?): String = listOfNotNull(APP_PATH, current?.trim()?.takeIf { it.isNotEmpty() }).joinToString(":")
 

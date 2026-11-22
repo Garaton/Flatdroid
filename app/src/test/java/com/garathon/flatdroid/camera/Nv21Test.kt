@@ -89,6 +89,22 @@ class Nv21Test {
     }
 
     @Test
+    fun screenPixelsBecomeFullRangeYuv() {
+        // 4×2 RGBA, rows 20 bytes apart (4 bytes of padding): a white 2×2 block, then a red one.
+        val white = byteArrayOf(-1, -1, -1, -1)
+        val red = byteArrayOf(-1, 0, 0, -1)
+        val row = white + white + red + red + ByteArray(4)
+        val rgba = ByteBuffer.wrap(row + row)
+        val out = ByteArray(Nv21.bytes(4, 2))
+        Nv21.fromRgba(rgba, 20, 4, 2, out, IntArray(8))
+        val luma = byteArrayOf(-1, -1, 77, 77, -1, -1, 77, 77)
+        // White: neutral chroma. Red: V at the top, U low.
+        assertArrayEquals(luma + byteArrayOf(128.toByte(), 128.toByte(), 255.toByte(), 85), out)
+        Nv21.fromRgba(rgba, 20, 4, 2, out, IntArray(8), Nv21.Order.UV)
+        assertArrayEquals(luma + byteArrayOf(128.toByte(), 128.toByte(), 85, 255.toByte()), out)
+    }
+
+    @Test
     fun blackIsZeroLumaAndNeutralChroma() {
         val black = Nv21.black(4, 2)
         assertEquals(12, black.size)

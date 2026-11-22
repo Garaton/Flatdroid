@@ -124,7 +124,8 @@ int main(int argc, char **argv)
     int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     CHECK(ioctl(fd, VIDIOC_STREAMON, &type) == 0);
     memset(said, 0, sizeof(said));
-    CHECK(read(control, said, sizeof(said) - 1) > 0 && strcmp(said, "nv12\n") == 0);
+    /* Streaming in the chosen format: what Flatdroid takes as the camera's use. */
+    CHECK(read(control, said, sizeof(said) - 1) > 0 && strcmp(said, "nv12\non\n") == 0);
 
     /* Frames waiting: the newest of the chosen format comes, one of the other format is skipped. */
     frame(writer, "video/nv12", "first");
@@ -160,6 +161,12 @@ int main(int argc, char **argv)
     frame(writer, "video/nv12", "after");
     CHECK(ioctl(fd, VIDIOC_DQBUF, &b) == 0 && b.bytesused == 5 && memcmp(maps[b.index], "after", 5) == 0);
 
+    /* A frame cut midway (the writer stopped while the app didn't read) is dropped, not joined to the next. */
+    const char *cut = "--flatdroid-frame\r\nContent-Type: video/nv12\r\nContent-Length: 40\r\n\r\ncut";
+    CHECK(write(writer, cut, strlen(cut)) == (ssize_t)strlen(cut));
+    frame(writer, "video/nv12", "whole frame after a cut one, longer than its length");
+    CHECK(ioctl(fd, VIDIOC_DQBUF, &b) == 0 && b.bytesused == 51 && memcmp(maps[b.index], "whole frame after a cut one", 27) == 0);
+
     /* A buffer exported as a descriptor (as libcamera does) is the same memory. */
     struct v4l2_exportbuffer e = { .type = V4L2_BUF_TYPE_VIDEO_CAPTURE, .index = 1, .flags = O_CLOEXEC };
     CHECK(ioctl(fd, VIDIOC_EXPBUF, &e) == 0 && e.fd >= 0);
@@ -168,6 +175,11 @@ int main(int argc, char **argv)
 
     CHECK(ioctl(fd, VIDIOC_STREAMOFF, &type) == 0);
     CHECK(ioctl(fd, VIDIOC_DQBUF, &b) < 0 && errno == EINVAL);
+    /* Stopping says so; a second stop doesn't. */
+    memset(said, 0, sizeof(said));
+    CHECK(read(control, said, sizeof(said) - 1) > 0 && strcmp(said, "off\n") == 0);
+    CHECK(ioctl(fd, VIDIOC_STREAMOFF, &type) == 0);
+    CHECK(read(control, said, sizeof(said) - 1) < 0 && errno == EAGAIN);
     for (unsigned i = 0; i < 4; i++) munmap(maps[i], length);
 
     /* The exported descriptors imported again (libcamera's way after exporting). */
@@ -192,6 +204,19 @@ int main(int argc, char **argv)
     close(copy);
     CHECK(ioctl(fd, VIDIOC_QUERYCAP, &cap) == 0);
     close(fd);
+    /* The DMABUF stream started and stopped. */
+    memset(said, 0, sizeof(said));
+    CHECK(read(control, said, sizeof(said) - 1) > 0 && strcmp(said, "nv12\non\noff\n") == 0);
+
+    /* Closed while streaming: stopped too. */
+    int again = open(path, O_RDWR);
+    struct v4l2_requestbuffers one = { .count = 1, .type = V4L2_BUF_TYPE_VIDEO_CAPTURE, .memory = V4L2_MEMORY_MMAP };
+    CHECK(again >= 0 && ioctl(again, VIDIOC_REQBUFS, &one) == 0);
+    struct v4l2_buffer qb = { .index = 0, .type = V4L2_BUF_TYPE_VIDEO_CAPTURE, .memory = V4L2_MEMORY_MMAP };
+    CHECK(ioctl(again, VIDIOC_QBUF, &qb) == 0 && ioctl(again, VIDIOC_STREAMON, &type) == 0);
+    close(again);
+    memset(said, 0, sizeof(said));
+    CHECK(read(control, said, sizeof(said) - 1) > 0 && strcmp(said, "nv12\non\noff\n") == 0);
 
     /* Opened with a raw system call (libcamera does): known by its inode at the first V4L2 call. */
     int raw = (int)syscall(SYS_openat, AT_FDCWD, path, O_RDWR | O_NONBLOCK);

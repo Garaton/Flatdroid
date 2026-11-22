@@ -6,7 +6,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /** What Flatdroid asks about at the moment an app uses it. */
-enum class Sensor { MICROPHONE, CAMERA }
+enum class Sensor { MICROPHONE, CAMERA, SCREEN }
 
 /** What a [Sensor] does for a session right now. */
 enum class UseAction {
@@ -49,6 +49,8 @@ class UseQuestion(
     private var answer: Boolean? = initialAnswer
     private var action: UseAction? = null
     private var pendingAsk: Job? = null
+    /** [forget] came while the app used the sensor: the answer goes once it stops. */
+    private var forgetWhenUnused = false
     private var stopped = false
     /** One instance, so stop() removes this question's handler and not a newer session's. */
     private val handler: (Boolean) -> Unit = ::answer
@@ -62,6 +64,25 @@ class UseQuestion(
     fun inUse(now: Boolean) {
         if (stopped) return
         inUse = now
+        if (!now && forgetWhenUnused) {
+            forgetWhenUnused = false
+            answer = null
+        }
+        update()
+    }
+
+    /**
+     * An Allow stops holding: the next use asks again, or, while the app still uses the sensor,
+     * the one after it stops. A Deny still holds for the session.
+     */
+    @Synchronized
+    fun forget() {
+        if (stopped || answer != true) return
+        if (inUse) {
+            forgetWhenUnused = true
+            return
+        }
+        answer = null
         update()
     }
 
@@ -70,7 +91,8 @@ class UseQuestion(
     fun answer(allow: Boolean) {
         if (stopped || answer != null) return
         answer = allow
-        SessionController.log("[flatdroid] ${sensor.name.lowercase()} ${if (allow) "allowed" else "denied"} for this session")
+        val until = if (allow && sensor == Sensor.SCREEN) "until the share ends" else "for this session"
+        SessionController.log("[flatdroid] ${sensor.name.lowercase()} ${if (allow) "allowed" else "denied"} $until")
         update()
     }
 
