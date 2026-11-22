@@ -135,7 +135,8 @@ object ProotRunner {
      * Blocks until the process exits. [onLine] is called for each output line as it arrives, on a
      * background thread. An interrupt of the calling thread (cancelling) stops the process and is
      * rethrown as [RunInterruptedException]. The timeout stops it too and returns a result with
-     * [ProcessResult.timedOut].
+     * [ProcessResult.timedOut]; time [pausedMillis] counts (a caller that pauses the process, its
+     * total so far) doesn't count toward it. [onStarted] gets the process once it runs.
      */
     fun run(
         invocation: ProotInvocation,
@@ -144,6 +145,8 @@ object ProotRunner {
         stdin: ByteArray? = null,
         signals: Signals = AndroidSignals,
         interruptGraceMillis: Long = ProcessStopper.SHORT_GRACE_MS,
+        pausedMillis: () -> Long = { 0L },
+        onStarted: (ProotProcess) -> Unit = {},
         onLine: (String) -> Unit = {},
     ): ProcessResult {
         val output = StringBuilder()
@@ -156,12 +159,20 @@ object ProotRunner {
             }
             onLine(it)
         }
+        onStarted(proc)
         // Process.waitFor(timeout) needs API 26; minSdk is 24.
         val timedOut = AtomicBoolean(false)
         val killed = AtomicBoolean(false)
+        val began = System.nanoTime()
+        val pausedBefore = pausedMillis()
         val watchdog = thread(name = "proot-timeout", isDaemon = true) {
             try {
-                Thread.sleep(TimeUnit.SECONDS.toMillis(timeoutSeconds))
+                while (true) {
+                    val ran = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - began) - (pausedMillis() - pausedBefore)
+                    val left = TimeUnit.SECONDS.toMillis(timeoutSeconds) - ran
+                    if (left <= 0) break
+                    Thread.sleep(left)
+                }
                 timedOut.set(true)
                 killed.set(proc.stop(interruptGraceMillis))
             } catch (_: InterruptedException) {

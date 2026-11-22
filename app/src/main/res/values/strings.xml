@@ -80,6 +80,9 @@
     <string name="mobile_data_text">This connection is metered. Installing or updating can download hundreds of MB.</string>
     <string name="mobile_data_download">Download</string>
     <string name="mobile_data_blocked">Downloads on mobile data are off. Change this in Flatdroid\'s settings under Flatpak.</string>
+    <string name="metered_pause_title">Continue on mobile data?</string>
+    <string name="metered_pause_text">The connection is metered now, so the download is paused. It goes on by itself on Wi-Fi.</string>
+    <string name="metered_continue">Continue on mobile data</string>
     <string name="settings_use_default">Use the default</string>
     <string name="settings_logline">Install, update, and launch Flatpaks on Android.</string>
     <string name="overview_time_used">Time in apps</string>
@@ -378,6 +381,10 @@
     <string name="task_extra_data_failed">%1$s couldn\'t unpack its extra data (exit %2$d). Reinstalling may help.</string>
     <string name="task_cleaning_up">Cleaning up Flatpak\'s storage</string>
     <string name="task_cancelling">Cancelling… (letting Flatpak stop cleanly)</string>
+    <string name="task_paused_metered">Paused on mobile data</string>
+    <string name="task_waiting_wifi">Waiting for Wi-Fi</string>
+    <string name="task_log_metered_paused">(paused: the connection is metered)</string>
+    <string name="task_log_metered_goes_on">(going on)</string>
     <string name="task_timed_out">Timed out</string>
     <string name="task_log_done">(done)</string>
     <string name="task_log_failed">(%1$s)</string>

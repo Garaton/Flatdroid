@@ -1,11 +1,8 @@
 package com.garathon.flatdroid.session
 
 import android.os.SystemClock
-import android.system.ErrnoException
-import android.system.Os
-import android.system.OsConstants
 import com.garathon.flatdroid.audio.AudioPlayer
-import com.garathon.flatdroid.proot.processes.ProcTable
+import com.garathon.flatdroid.proot.processes.ProotFreeze
 import com.garathon.flatdroid.util.debug.DebugLog
 import com.garathon.flatdroid.util.appScope
 import kotlinx.coroutines.Dispatchers
@@ -27,10 +24,7 @@ import kotlinx.coroutines.launch
  * that hasn't opened its first window yet keeps running until the question comes (two minutes). Where
  * nobody counts the windows (the viewer never connected), that time passes before the hidden pause.
  *
- * The pause is two signals: SIGSTOP to the app's proot first, then to every process it traces. A
- * traced process that gets a signal waits for its tracer, which, stopped, can't let it go (SIGSTOP
- * to the processes alone does nothing: proot gets the signal first and lets them run on). SIGCONT to
- * proot lets every one of them go on; they get one too, in case.
+ * The pause is [ProotFreeze]'s.
  */
 object HiddenPause {
     /** How long the viewer stays hidden before the app is paused: switching to another app and back for a moment doesn't pause it. */
@@ -196,30 +190,16 @@ object HiddenPause {
 
     private fun stop(now: Session): Boolean {
         if (stopped) return true
-        if (!signal(now.prootPid, OsConstants.SIGSTOP)) return false
-        val traced = tracedBy(now.prootPid)
-        traced.forEach { signal(it, OsConstants.SIGSTOP) }
+        val traced = ProotFreeze.stop(now.prootPid) ?: return false
         stopped = true
-        DebugLog.i("Paused: the app is stopped (${traced.size} processes)")
+        DebugLog.i("Paused: the app is stopped ($traced processes)")
         return true
     }
 
     private fun go(now: Session) {
         if (!stopped) return
         stopped = false
-        signal(now.prootPid, OsConstants.SIGCONT)
-        tracedBy(now.prootPid).forEach { signal(it, OsConstants.SIGCONT) }
+        ProotFreeze.go(now.prootPid)
         DebugLog.i("Shown: the app goes on")
     }
-
-    private fun signal(pid: Int, signal: Int): Boolean = try {
-        Os.kill(pid, signal)
-        true
-    } catch (e: ErrnoException) {
-        DebugLog.w("Signal $signal to $pid: $e")
-        false
-    }
-
-    /** The processes [tracer] traces (`TracerPid:` in `/proc/<pid>/status`): the app's, however they were started. */
-    private fun tracedBy(tracer: Int): List<Int> = ProcTable.read().filterValues { it.tracer == tracer }.keys.toList()
 }

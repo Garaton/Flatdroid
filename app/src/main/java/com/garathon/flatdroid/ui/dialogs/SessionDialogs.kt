@@ -55,6 +55,21 @@ fun MobileDataDialog(onDownload: () -> Unit, onDismiss: () -> Unit) {
 }
 
 /**
+ * A running download found itself on a metered connection and is paused (FlatpakTaskUi.meteredWait):
+ * it goes on here on mobile data, or on Wi-Fi by itself. Only its buttons close it.
+ */
+@Composable
+fun MeteredPauseDialog(onContinue: () -> Unit, onCancel: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = {},
+        title = { Text(stringResource(R.string.metered_pause_title)) },
+        text = { Text(stringResource(R.string.metered_pause_text)) },
+        confirmButton = { Button(onClick = onContinue) { Text(stringResource(R.string.metered_continue)) } },
+        dismissButton = { TextButton(onClick = onCancel) { Text(stringResource(R.string.cancel)) } },
+    )
+}
+
+/**
  * Typed app IDs to install. Install checks them first and names the ones that can't work: not an
  * app ID at all, or (when Flathub's catalog for this phone is loaded, [inCatalog]) not in it, which
  * would fail the whole install, other apps waiting with it included; or installed already

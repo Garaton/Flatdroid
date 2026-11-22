@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.garathon.flatdroid.alpine.AlpineCommands
 import com.garathon.flatdroid.alpine.AlpineEnvironment
+import com.garathon.flatdroid.flatpak.tasks.FlatpakTaskService
 import com.garathon.flatdroid.storage.AppData
 import com.garathon.flatdroid.proot.Fdsec
 import com.garathon.flatdroid.proot.ProotProcess
@@ -120,6 +121,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 SetupController.settings(app).save(settings)
                 alsoWrite?.invoke()
+                // A download paused on mobile data follows the new setting.
+                if (before?.mobileData != settings.mobileData) FlatpakTaskService.mobileDataChanged()
                 // Off, the file check's baselines aren't kept up (installs and updates record none), so
                 // they are dropped; turning it on again asks how to record them.
                 if (before?.security?.checkFilesBeforeLaunch == true && !settings.security.checkFilesBeforeLaunch) {

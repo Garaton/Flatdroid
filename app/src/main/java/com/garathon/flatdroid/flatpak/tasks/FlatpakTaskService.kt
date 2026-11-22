@@ -30,8 +30,10 @@ import com.garathon.flatdroid.flatpak.integrity.IntegrityGuard
 import com.garathon.flatdroid.setup.SetupController
 import com.garathon.flatdroid.launcher.electron.ElectronSwap
 import com.garathon.flatdroid.proot.processes.LeftoverProcesses
+import com.garathon.flatdroid.proot.ProotProcess
 import com.garathon.flatdroid.proot.RunInterruptedException
 import com.garathon.flatdroid.session.SessionController
+import com.garathon.flatdroid.settings.MeteredWait
 import com.garathon.flatdroid.setup.AlpineSetup
 import com.garathon.flatdroid.setup.PackageGroup
 import com.garathon.flatdroid.setup.rootfs.AndroidTarFs
@@ -42,6 +44,7 @@ import com.garathon.flatdroid.storage.sizes.SavedSizes
 import com.garathon.flatdroid.storage.TempHomes
 import com.garathon.flatdroid.util.debug.DebugLog
 import com.garathon.flatdroid.util.DoneNotice
+import com.garathon.flatdroid.util.appScope
 import com.garathon.flatdroid.util.startDataSyncForeground
 import com.garathon.flatdroid.util.io.writeTextAtomically
 import kotlinx.coroutines.CancellationException
@@ -87,10 +90,18 @@ class FlatpakTaskService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         lastStartId = startId
+        if (intent?.action == ACTION_CONTINUE_METERED) {
+            continueOnMobileData()
+            if (job?.isActive != true && FlatpakTasks.ui.value.running == null) stopSelf(startId)
+            return START_NOT_STICKY
+        }
         if (intent?.action == ACTION_CANCEL) {
             // flatpak gets time to stop by itself (see ProcessStopper), which can take a while.
             if (job?.isActive == true) FlatpakTasks.cancelling(getString(R.string.task_cancelling))
             job?.cancel()
+            // After the cancel, so a task waiting to start a command doesn't start it: a paused command
+            // goes on, and gets the stop it would ignore while stopped.
+            gate?.close()
             // A cancel from an old notification, with nothing running: nothing keeps the service.
             if (job?.isActive != true && FlatpakTasks.ui.value.running == null) stopSelf(startId)
             return START_NOT_STICKY
@@ -122,7 +133,7 @@ class FlatpakTaskService : Service() {
         // backs those up: it matches Android 15's dataSync limit.
         val lock = getSystemService(PowerManager::class.java)
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Flatdroid:flatpak")
-            .apply { acquire(WAKE_LOCK_TIMEOUT_MS) }
+            .apply { setReferenceCounted(false); acquire(WAKE_LOCK_TIMEOUT_MS) }
         wakeLock = lock
         // Installs are left out: an interrupted download is already safe (see cleanUpAfter); so is a
         // baseline, which changes no Flatpak files.
@@ -149,6 +160,13 @@ class FlatpakTaskService : Service() {
                 requireFreeSpace(task)
                 began = true
                 following = followInNotification(task)
+                // Checked now too: a task that waited in the queue may start on mobile data.
+                if (task.downloads) gate = MeteredGate(applicationContext) { wait, closed ->
+                    FlatpakTasks.meteredWait(wait)
+                    if (!closed) FlatpakTasks.log(getString(if (wait == null) R.string.task_log_metered_goes_on else R.string.task_log_metered_paused), status = false)
+                    // No CPU is needed while paused; the network's next change wakes Flatdroid (verify).
+                    if (wait != null) { if (lock.isHeld) lock.release() } else lock.acquire(WAKE_LOCK_TIMEOUT_MS)
+                }.apply { open() }
                 // A download can outlast a switch between networks: keep Alpine's resolv.conf current.
                 dns = ResolvConfRefresher(applicationContext, listOf(AlpineEnvironment.get(applicationContext).resolvConfFile)).apply { start() }
                 // Before the task's file checks; see LeftoverProcesses.killEscaped.
@@ -163,17 +181,22 @@ class FlatpakTaskService : Service() {
                 runInterruptible { performRelinking(task) }
                 baselineMarker?.delete()
             } catch (e: CancellationException) {
+                gate?.close()
                 error = getString(if (timedOut) R.string.task_time_limit else R.string.task_cancelled)
                 // The user's Cancel: the baselines this task didn't record aren't started again at its
                 // end (each app's is recorded when it next starts). Android's time limit keeps them pending.
                 if (began && !timedOut && baselineMarker?.delete() == true) FlatpakTasks.log(getString(R.string.task_log_baselines_at_launch))
                 if (began) withContext(NonCancellable) { runInterruptible { cleanUpAfter(task) } }
             } catch (e: Exception) {
+                // The clean-up's commands don't wait for the network.
+                gate?.close()
                 error = e.message ?: e.toString()
                 // As after a cancel: a Cancel pressed now must not cut the clean-up short (the marker goes either way).
                 if (began) withContext(NonCancellable) { runInterruptible { cleanUpAfter(task) } }
             } finally {
                 // Each step on its own: none of them may keep the task from ending (it would stay "running" until a restart).
+                runCatching { gate?.close() }
+                gate = null
                 // Only for a task that began: otherwise they would touch the previous task's marker and processes.
                 if (began) {
                     runCatching { dns?.stop() }
@@ -186,24 +209,29 @@ class FlatpakTaskService : Service() {
                 }
                 runCatching { if (lock.isHeld) lock.release() }
                 FlatpakTasks.log(error?.let { getString(R.string.task_log_failed, it) } ?: getString(R.string.task_log_done))
-                // Not after the end: it would post this task's notification over the next one's.
-                withContext(NonCancellable) { following?.cancelAndJoin() }
-                // Before the end: once nothing runs, a new start must not look like a duplicate of this one.
-                launched = null
-                FlatpakTasks.end(task, error)
-                // An update that ended before its catalog step: a refresh that joined it runs on its own.
-                if (task == FlatpakTask.UpdateAll && FlatpakTasks.takeCatalogWithUpdate()) FlatpakTasks.enqueue(FlatpakTask.RefreshCatalog)
-                // What waited for this task starts now, unless Android's limit ended it (the next would be refused
-                // too): Flatdroid starts it when it comes to the front. On the main thread, where a launch is also
-                // checked against tasks, so both claims can't pass their checks at once. Without a claimed task, the
-                // service stops by the newest start it was given: a cancel's, say. A start Android
-                // hasn't delivered yet is newer still, so it isn't stopped under that one.
-                if (!timedOut) withContext(NonCancellable + Dispatchers.Main) { startNext(applicationContext) }
-                // A cancel is the user's own doing: not told again.
-                synchronized(results) { if (error != getString(R.string.task_cancelled)) results += task to error }
-                if (FlatpakTasks.ui.value.running == null) {
-                    tellFinished()
-                    stopSelf(lastStartId)
+                // The rest in one non-cancellable block: a cancelled job coming back from the main thread would
+                // get a CancellationException there (withContext resumes promptly cancelled) and never stop the
+                // service, so its notification would stay.
+                withContext(NonCancellable) {
+                    // Not after the end: it would post this task's notification over the next one's.
+                    following?.cancelAndJoin()
+                    // Before the end: once nothing runs, a new start must not look like a duplicate of this one.
+                    launched = null
+                    FlatpakTasks.end(task, error)
+                    // An update that ended before its catalog step: a refresh that joined it runs on its own.
+                    if (task == FlatpakTask.UpdateAll && FlatpakTasks.takeCatalogWithUpdate()) FlatpakTasks.enqueue(FlatpakTask.RefreshCatalog)
+                    // What waited for this task starts now, unless Android's limit ended it (the next would be refused
+                    // too): Flatdroid starts it when it comes to the front. On the main thread, where a launch is also
+                    // checked against tasks, so both claims can't pass their checks at once. Without a claimed task, the
+                    // service stops by the newest start it was given: a cancel's, say. A start Android
+                    // hasn't delivered yet is newer still, so it isn't stopped under that one.
+                    if (!timedOut) withContext(Dispatchers.Main) { startNext(applicationContext) }
+                    // A cancel is the user's own doing: not told again.
+                    synchronized(results) { if (error != getString(R.string.task_cancelled)) results += task to error }
+                    if (FlatpakTasks.ui.value.running == null) {
+                        tellFinished()
+                        stopSelf(lastStartId)
+                    }
                 }
             }
         }
@@ -250,6 +278,7 @@ class FlatpakTaskService : Service() {
     override fun onTimeout(startId: Int, fgsType: Int) {
         timedOut = true
         job?.cancel()
+        gate?.close()
         stopSelf()
     }
 
@@ -303,7 +332,12 @@ class FlatpakTaskService : Service() {
                 val command = AlpineSetup.apkCommand(args)
                 FlatpakTasks.newCommand(getString(R.string.task_updating_alpine))
                 FlatpakTasks.log("$ ${command.joinToString(" ")}", status = false)
-                val result = env.run(command, ALPINE_TIMEOUT_SECONDS, extraBinds = listOf(cache.path to AlpineSetup.APK_CACHE), onLine = FlatpakTasks::output)
+                val result = gated { pausedMillis, onStarted ->
+                    env.run(
+                        command, ALPINE_TIMEOUT_SECONDS, extraBinds = listOf(cache.path to AlpineSetup.APK_CACHE),
+                        pausedMillis = pausedMillis, onStarted = onStarted, onLine = FlatpakTasks::output,
+                    )
+                }
                 if (result.timedOut || result.exitCode != 0) {
                     FlatpakTasks.log(getString(R.string.task_alpine_failed, result.output.lineSequence().lastOrNull { it.isNotBlank() } ?: "exit ${result.exitCode}"))
                     return
@@ -620,7 +654,9 @@ class FlatpakTaskService : Service() {
         FlatpakTasks.newCommand(phase)
         FlatpakTasks.log("$ ${command.joinToString(" ")}", status = false)
         val result = try {
-            env.run(command, timeoutSeconds = TIMEOUT_SECONDS, onLine = FlatpakTasks::output)
+            gated { pausedMillis, onStarted ->
+                env.run(command, timeoutSeconds = TIMEOUT_SECONDS, pausedMillis = pausedMillis, onStarted = onStarted, onLine = FlatpakTasks::output)
+            }
         } catch (e: RunInterruptedException) {
             if (e.killed) killed = true
             throw e
@@ -631,6 +667,21 @@ class FlatpakTaskService : Service() {
             result.exitCode != 0 -> throw IOException(
                 result.output.lines().lastOrNull { it.isNotBlank() } ?: "exit ${result.exitCode}"
             )
+        }
+    }
+
+    /**
+     * Runs a command of the task behind its [MeteredGate], when it has one: it starts once the task
+     * may download, and is paused with the task.
+     */
+    private fun <T> gated(command: (pausedMillis: () -> Long, onStarted: (ProotProcess) -> Unit) -> T): T {
+        val gate = gate ?: return command({ 0L }, {})
+        gate.await()
+        var started: ProotProcess? = null
+        try {
+            return command(gate::pausedMillis) { started = it; gate.started(it) }
+        } finally {
+            started?.let(gate::ended)
         }
     }
 
@@ -657,7 +708,7 @@ class FlatpakTaskService : Service() {
      * status under it, and a progress bar that fills when the task can say how far it is (a
      * download's percent, baselines and checks), moving without an end otherwise.
      */
-    private fun notification(task: FlatpakTask, title: String? = null, detail: String? = null, fraction: Float? = null): Notification {
+    private fun notification(task: FlatpakTask, title: String? = null, detail: String? = null, fraction: Float? = null, wait: MeteredWait? = null): Notification {
         createChannel()
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         val cancel = PendingIntent.getService(
@@ -671,6 +722,15 @@ class FlatpakTaskService : Service() {
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setProgress(PROGRESS_MAX, fraction?.let { (it * PROGRESS_MAX).toInt() } ?: 0, fraction == null)
+            .apply {
+                if (wait == MeteredWait.ASK) {
+                    val go = PendingIntent.getService(
+                        this@FlatpakTaskService, 2, Intent(this@FlatpakTaskService, FlatpakTaskService::class.java).setAction(ACTION_CONTINUE_METERED),
+                        PendingIntent.FLAG_IMMUTABLE,
+                    )
+                    addAction(0, getString(R.string.metered_continue), go)
+                }
+            }
             .addAction(0, getString(R.string.cancel), cancel)
             .build()
     }
@@ -684,14 +744,16 @@ class FlatpakTaskService : Service() {
         val manager = getSystemService(NotificationManager::class.java)
         FlatpakTasks.ui
             .filter { it.running == task }
-            .map { ui -> Triple(ui.phase ?: describe(this@FlatpakTaskService, task), ui.detail(this@FlatpakTaskService), ui.fraction?.let { (it * 100).toInt() }) }
+            .map { ui -> Shown(ui.phase ?: describe(this@FlatpakTaskService, task), ui.detail(this@FlatpakTaskService), ui.fraction?.let { (it * 100).toInt() }, ui.meteredWait) }
             .distinctUntilChanged()
             .conflate()
-            .collect { (title, detail, percent) ->
-                manager.notify(NOTIFICATION_ID, notification(task, title, detail, percent?.let { it / 100f }))
+            .collect { (title, detail, percent, wait) ->
+                manager.notify(NOTIFICATION_ID, notification(task, title, detail, percent?.let { it / 100f }, wait))
                 delay(NOTIFICATION_INTERVAL_MS)
             }
     }
+
+    private data class Shown(val title: String, val detail: String?, val percent: Int?, val wait: MeteredWait?)
 
     private fun createChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -709,6 +771,22 @@ class FlatpakTaskService : Service() {
         private const val NOTIFICATION_INTERVAL_MS = 500L
         private const val WAKE_LOCK_TIMEOUT_MS = 6 * 60 * 60 * 1000L
         private const val ACTION_CANCEL = "com.garathon.flatdroid.action.CANCEL_TASK"
+        private const val ACTION_CONTINUE_METERED = "com.garathon.flatdroid.action.CONTINUE_ON_MOBILE_DATA"
+
+        /** The running task's, when it downloads. */
+        @Volatile private var gate: MeteredGate? = null
+
+        /** The user lets the paused task download on mobile data (its question, or the notification's button). */
+        fun continueOnMobileData() {
+            val now = gate ?: return
+            appScope.launch(Dispatchers.Default) { now.allowMobileData() }
+        }
+
+        /** The mobile data setting changed: a running download follows it now. */
+        fun mobileDataChanged() {
+            val now = gate ?: return
+            appScope.launch(Dispatchers.Default) { now.recheck() }
+        }
         private const val TIMEOUT_SECONDS = 2 * 60 * 60L
         /**
          * Least free storage for a task that downloads: Android's own low-storage mark on most

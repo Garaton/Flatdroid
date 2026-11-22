@@ -70,7 +70,9 @@ import com.garathon.flatdroid.session.SessionService
 import com.garathon.flatdroid.session.SessionState
 import com.garathon.flatdroid.session.ExternalViewer
 import com.garathon.flatdroid.settings.AppTime
+import com.garathon.flatdroid.settings.MeteredWait
 import com.garathon.flatdroid.settings.MobileData
+import com.garathon.flatdroid.settings.MobileDataConsent
 import com.garathon.flatdroid.settings.mobileDataPolicy
 import com.garathon.flatdroid.settings.UserSettings
 import com.garathon.flatdroid.storage.tasks.ImportTarget
@@ -105,6 +107,7 @@ import com.garathon.flatdroid.ui.home.rememberHomeListState
 import com.garathon.flatdroid.ui.dialogs.InstallDialog
 import com.garathon.flatdroid.ui.dialogs.LogDialog
 import com.garathon.flatdroid.ui.dialogs.UseLaunchDialog
+import com.garathon.flatdroid.ui.dialogs.MeteredPauseDialog
 import com.garathon.flatdroid.ui.dialogs.MobileDataDialog
 import com.garathon.flatdroid.ui.setup.ResetScreen
 import com.garathon.flatdroid.ui.setup.SetupSettingsScreen
@@ -513,9 +516,12 @@ class MainActivity : ComponentActivity() {
         }
         home.meteredQuestion?.let { task ->
             MobileDataDialog(
-                onDownload = { home.meteredQuestion = null; startTask(task) },
+                onDownload = { home.meteredQuestion = null; MobileDataConsent.allowNow(this); startTask(task) },
                 onDismiss = { home.meteredQuestion = null },
             )
+        }
+        if (task.meteredWait == MeteredWait.ASK) {
+            MeteredPauseDialog(onContinue = FlatpakTaskService::continueOnMobileData, onCancel = { FlatpakTaskService.cancel(this) })
         }
         val installedIds = remember(apps) { apps?.map { it.id }?.toSet() }
         // As the catalog names them (`<ID>/<branch>`), for the browser's filter; read again when the apps change.

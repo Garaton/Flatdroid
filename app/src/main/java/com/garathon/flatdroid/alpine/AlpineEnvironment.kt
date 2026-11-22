@@ -81,7 +81,8 @@ class AlpineEnvironment private constructor(private val context: Context) {
      * Runs [command] in Alpine as fake root. Generated files are refreshed first, since the
      * network (and so its DNS servers) may have changed since the last run. Cancelled or timed
      * out, it gets [interruptGraceMillis] to end on SIGINT; the default is long, since most
-     * commands change Alpine or Flatpak's files (see ProcessStopper).
+     * commands change Alpine or Flatpak's files (see ProcessStopper). [pausedMillis] and
+     * [onStarted] are [ProotRunner.run]'s.
      */
     fun run(
         command: List<String>,
@@ -89,11 +90,16 @@ class AlpineEnvironment private constructor(private val context: Context) {
         stdin: ByteArray? = null,
         extraBinds: List<Pair<String, String>> = emptyList(),
         interruptGraceMillis: Long = ProcessStopper.LENIENT_GRACE_MS,
+        pausedMillis: () -> Long = { 0L },
+        onStarted: (ProotProcess) -> Unit = {},
         onLine: (String) -> Unit = {},
     ): ProcessResult {
         check(isInstalled()) { "The Alpine rootfs is not installed" }
         val invocation = ProotCommand.alpine(paths(), prepareBinds(extraBinds), command)
-        return ProotRunner.run(invocation, alpineDir, timeoutSeconds, stdin, interruptGraceMillis = interruptGraceMillis, onLine = onLine)
+        return ProotRunner.run(
+            invocation, alpineDir, timeoutSeconds, stdin, interruptGraceMillis = interruptGraceMillis,
+            pausedMillis = pausedMillis, onStarted = onStarted, onLine = onLine,
+        )
     }
 
     /**

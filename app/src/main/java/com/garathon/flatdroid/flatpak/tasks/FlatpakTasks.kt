@@ -2,8 +2,8 @@ package com.garathon.flatdroid.flatpak.tasks
 
 import android.content.Context
 import com.garathon.flatdroid.R
-
 import com.garathon.flatdroid.session.SessionController
+import com.garathon.flatdroid.settings.MeteredWait
 import com.garathon.flatdroid.util.debug.DebugLog
 import com.garathon.flatdroid.util.io.LineBuffer
 import com.garathon.flatdroid.util.appScope
@@ -38,6 +38,9 @@ sealed interface FlatpakTask {
     data object ReinstallAll : FlatpakTask
     /** Records the file baseline of every installed app that has none yet (with the file check on). */
     data object BaselineAll : FlatpakTask
+
+    /** Downloads from Flathub, so the mobile data setting holds while it runs ([MeteredGate]). */
+    val downloads: Boolean get() = this is Install || this == UpdateAll || this is Reinstall || this == ReinstallAll || this == RefreshCatalog
 }
 
 data class FlatpakTaskUi(
@@ -54,6 +57,8 @@ data class FlatpakTaskUi(
     val phase: String? = null,
     /** Cancel was pressed; the task is stopping. */
     val cancelling: Boolean = false,
+    /** The running task is paused on a metered network ([MeteredGate]); null while it runs. */
+    val meteredWait: MeteredWait? = null,
     /** The last task and whether it succeeded, until dismissed. */
     val finished: FlatpakTask? = null,
     val error: String? = null,
@@ -75,6 +80,8 @@ data class FlatpakTaskUi(
     fun detail(context: Context): String? {
         val step = step
         return when {
+            meteredWait == MeteredWait.ASK -> context.getString(R.string.task_paused_metered)
+            meteredWait == MeteredWait.WIFI -> context.getString(R.string.task_waiting_wifi)
             step != null -> context.getString(if (step.deploying) R.string.task_step_deploying else R.string.task_step, step.verb, step.index, step.total, step.ref ?: "")
             finishing -> context.getString(R.string.task_finishing)
             else -> status
@@ -182,7 +189,7 @@ object FlatpakTasks {
         _ui.update {
             if (it.running != null) it else {
                 started = true
-                it.copy(running = task, step = null, finishing = false, status = null, progress = null, finished = null, error = null, cancelling = false)
+                it.copy(running = task, step = null, finishing = false, status = null, progress = null, finished = null, error = null, cancelling = false, meteredWait = null)
             }
         }
         if (started) logBuffer.clear()
@@ -204,7 +211,9 @@ object FlatpakTasks {
     /** The running task's progress, 0 to 1; null when it can't say. */
     internal fun progress(fraction: Float?) = _ui.update { it.copy(progress = fraction?.coerceIn(0f, 1f)) }
 
-    internal fun cancelling(phase: String) = _ui.update { it.copy(phase = phase, cancelling = true) }
+    internal fun cancelling(phase: String) = _ui.update { it.copy(phase = phase, cancelling = true, meteredWait = null) }
+
+    internal fun meteredWait(wait: MeteredWait?) = _ui.update { if (it.running == null || it.cancelling) it else it.copy(meteredWait = wait) }
 
     /** Starts following a new flatpak command's output; [phase] describes it, if not the task itself. */
     internal fun newCommand(phase: String?) {
@@ -213,10 +222,10 @@ object FlatpakTasks {
     }
 
     /** [task] was claimed ([begin]) but its service couldn't start: nothing ran, so nothing is reported. */
-    internal fun abandon(task: FlatpakTask) = _ui.update { if (it.running == task) it.copy(running = null, step = null, cancelling = false) else it }
+    internal fun abandon(task: FlatpakTask) = _ui.update { if (it.running == task) it.copy(running = null, step = null, cancelling = false, meteredWait = null) else it }
 
     internal fun end(task: FlatpakTask, error: String?) =
-        _ui.update { it.copy(running = null, step = null, phase = null, progress = null, cancelling = false, finished = task, error = error, generation = it.generation + 1) }
+        _ui.update { it.copy(running = null, step = null, phase = null, progress = null, cancelling = false, meteredWait = null, finished = task, error = error, generation = it.generation + 1) }
 
     /** Queues [task] behind what runs ([TaskQueue.add]), or lets the update do it ([TaskQueue.joinsUpdate]). */
     internal fun enqueue(task: FlatpakTask) = _ui.update {

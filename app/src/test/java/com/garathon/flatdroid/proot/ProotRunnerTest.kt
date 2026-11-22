@@ -48,6 +48,21 @@ class ProotRunnerTest {
     }
 
     @Test
+    fun pausedTimeDoesNotCountTowardTheTimeout() {
+        // Paused from the start: the 1 s limit only begins to count after the pause, so a 2 s command finishes.
+        val began = System.nanoTime()
+        val paused = { minOf(System.nanoTime() - began, 3_000_000_000L) / 1_000_000 }
+        var started: ProotProcess? = null
+        val result = ProotRunner.run(
+            ProotInvocation(listOf("/bin/sleep", "2"), emptyMap()), dir, timeoutSeconds = 1, signals = HostSignals,
+            pausedMillis = paused, onStarted = { started = it },
+        )
+        assertEquals(false, result.timedOut)
+        assertEquals(0, result.exitCode)
+        assertTrue(started != null)
+    }
+
+    @Test
     fun stdinIsWrittenAndLinesArriveAsTheyComeOut() {
         val lines = mutableListOf<String>()
         val result = ProotRunner.run(
