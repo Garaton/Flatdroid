@@ -190,7 +190,9 @@ object ProotCommand {
      *
      * [command] runs behind [filter] ([Fdsec], bound at [Fdsec.ALPINE_PATH] either way, so a
      * helper script can put a stricter one in front of its own commands). Null runs it without:
-     * only for the terminal, when its developer setting says so.
+     * only for the terminal, when its developer setting says so. With [tty], fdsec gives the
+     * command that terminal ([Fdsec.wrap]); it needs a [filter]. [environment] is added to the
+     * guest's own.
      */
     fun alpine(
         paths: ProotPaths,
@@ -199,7 +201,11 @@ object ProotCommand {
         cwd: String = "/root",
         ids: String = "0:0",
         filter: Fdsec.Filter? = Fdsec.Filter(),
+        tty: String? = null,
+        environment: Map<String, String> = emptyMap(),
     ): ProotInvocation {
+        require(tty == null || filter != null) { "A terminal is given through fdsec" }
+        require(environment.keys.all { ENV_NAME.matches(it) }) { "Bad variable name in $environment" }
         require(command.isNotEmpty() && command[0].startsWith("/")) {
             "Guest command must start with an absolute path: $command"
         }
@@ -230,7 +236,7 @@ object ProotCommand {
         for ((host, guest) in binds.extra) argv += "--bind=$host:$guest"
         argv += "--bind=${paths.fdshm}:${Fdshm.ALPINE_PATH}"
         argv += "--bind=${paths.fdsec}:${Fdsec.ALPINE_PATH}"
-        argv += if (filter != null) Fdsec.wrap(Fdsec.ALPINE_PATH, filter, command) else command
+        argv += if (filter != null) Fdsec.wrap(Fdsec.ALPINE_PATH, filter, command, tty) else command
 
         val env = linkedMapOf(
             "PROOT_LOADER" to paths.loader,
@@ -241,6 +247,7 @@ object ProotCommand {
             "LANG" to "C.UTF-8",
             "FLATPAK_BWRAP" to GuestPaths.BWRAP_STAND_IN,
         )
+        env.putAll(environment)
         return ProotInvocation(argv, env)
     }
 
@@ -295,6 +302,8 @@ object ProotCommand {
         environment: Map<String, String>,
         command: List<String>,
         filter: Fdsec.Filter,
+        /** A terminal app's terminal ([Fdsec.wrap]). */
+        tty: String? = null,
     ): ProotInvocation {
         require(command.isNotEmpty() && command[0].startsWith("/")) {
             "Guest command must start with an absolute path: $command"
@@ -338,7 +347,7 @@ object ProotCommand {
             argv += "--bind=${paths.fdv4l2}:${Fdv4l2.APP_PATH}"
         }
         argv += "--bind=${paths.fdsec}:${Fdsec.APP_PATH}"
-        argv += Fdsec.wrap(Fdsec.APP_PATH, filter, listOf("/usr/bin/env") + environment.map { (key, value) -> "$key=$value" } + command)
+        argv += Fdsec.wrap(Fdsec.APP_PATH, filter, listOf("/usr/bin/env") + environment.map { (key, value) -> "$key=$value" } + command, tty)
 
         val env = linkedMapOf(
             "PROOT_LOADER" to paths.loader,

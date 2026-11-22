@@ -2,7 +2,8 @@
  * fdsec: installs Flatdroid's seccomp filter on itself, checks that it is in effect, then
  * executes a command, which inherits the filter and can't remove it.
  *
- *   fdsec [--extra] [--no-inet] [--no-connect] [--] /absolute/command args...
+ *   fdsec [--extra] [--no-inet] [--no-connect] [--tty /dev/pts/N] [--] /absolute/command args...
+ *   fdsec [filter options] --hold-tty FILE
  *
  * Always blocked: io_uring and openat2 (ENOSYS, so programs fall back to what proot
  * translates), fanotify_init, fanotify_mark and quotactl (ENOSYS: their paths aren't translated
@@ -18,6 +19,15 @@
  *   --no-inet  socket(AF_INET or AF_INET6) fails with EACCES; Unix and netlink sockets stay
  *   --no-connect  connect fails with EACCES, for a server that only accepts connections
  *
+ * A terminal app's terminal, held by a terminal emulator in another root that shares /dev/pts:
+ *   --hold-tty FILE  run as the emulator's command (which must stay open after it exits): leaves the
+ *                    terminal to a child and exits, which releases it as controlling terminal (a
+ *                    terminal belongs to one session); the child writes the terminal's name to FILE
+ *                    (whole, through a rename) and keeps it open until it hangs up. No command. A
+ *                    failure is also written to FILE.error.
+ *   --tty PATH       a new session, with PATH (under /dev/pts/) as its controlling terminal and as
+ *                    standard input, output and error, before the command is executed.
+ *
  * The check: a rule only this filter has answers getpriority(CHECK_WHICH, 0) with CHECK_ERRNO
  * (the kernel itself would say EINVAL); where the kernel reports Seccomp_filters (5.9 and
  * later), the count must also have gone up by one. If either fails, nothing is executed and a
@@ -27,6 +37,8 @@
  * and stays a few KB (a static bionic binary is about 900 KB). It runs only once Flatdroid has
  * built its arguments, and reads nothing else but /proc/self/status.
  */
+#include <asm/ioctls.h>
+#include <asm/signal.h>
 #include <asm/unistd.h>
 #include <linux/audit.h>
 #include <linux/errno.h>
@@ -73,6 +85,7 @@
 #define AF_NETLINK 16
 #define CHECK_WHICH 0x66647365 /* "fdse" */
 #define CHECK_ERRNO ENOTRECOVERABLE
+#define EXIT_TTY 124
 #define EXIT_REFUSED 125
 #define EXIT_USAGE 126
 #define EXIT_EXEC 127
@@ -115,6 +128,12 @@ static int equal(const char *a, const char *b)
 {
 	while (*a && *a == *b) a++, b++;
 	return *a == *b;
+}
+
+static int starts_with(const char *s, const char *prefix)
+{
+	while (*prefix && *s == *prefix) s++, prefix++;
+	return !*prefix;
 }
 
 static void say(const char *a, const char *b)
@@ -258,6 +277,146 @@ static unsigned build(struct sock_filter *f, int extra, int no_inet, int no_conn
 	return n;
 }
 
+/* ---- the terminal */
+
+#define PTS_PREFIX "/dev/pts/"
+#define PATH_MAX_LEN 4096
+#define POLLHUP_ERR_NVAL (0x010 | 0x008 | 0x020)
+
+/* The kernel's sigaction (not the C library's). */
+struct kernel_sigaction { void *handler; unsigned long flags; void *restorer; unsigned long mask; };
+struct kernel_timespec { long sec; long nsec; };
+struct kernel_pollfd { int fd; short events; short revents; };
+
+/* --hold-tty's FILE, where a failure is also written (its output is the terminal nobody may see yet). */
+static const char *hold_file;
+
+static void set_hangup(void *handler)
+{
+	struct kernel_sigaction action = { .handler = handler };
+	sys6(__NR_rt_sigaction, SIGHUP, (long)&action, 0, sizeof action.mask, 0, 0);
+}
+
+/* [file] with [suffix] in [out] (PATH_MAX_LEN), or 0 when too long. */
+static char *suffixed(const char *file, const char *suffix, char *out)
+{
+	unsigned long len = length(file), more = length(suffix);
+	if (len + more + 1 > PATH_MAX_LEN) return 0;
+	for (unsigned long i = 0; i < len; i++) out[i] = file[i];
+	for (unsigned long i = 0; i <= more; i++) out[len + i] = suffix[i];
+	return out;
+}
+
+/* Writes [text] to [file] whole: to FILE.new, then renamed. */
+static int write_whole(const char *file, const char *text, unsigned long n)
+{
+	char partial[PATH_MAX_LEN];
+	if (!suffixed(file, ".new", partial)) return -1;
+	long fd = sys6(__NR_openat, AT_FDCWD, (long)partial, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600, 0, 0);
+	if (fd < 0) return -1;
+	long written = sys3(__NR_write, fd, text, n);
+	sys3(__NR_close, fd, 0, 0);
+	if (written != (long)n) return -1;
+	return sys6(__NR_renameat2, AT_FDCWD, (long)partial, AT_FDCWD, (long)file, 0, 0) == 0 ? 0 : -1;
+}
+
+static __attribute__((noreturn)) void tty_failed(const char *what, const char *path)
+{
+	say(what, path);
+	char error[PATH_MAX_LEN], text[512];
+	if (hold_file && suffixed(hold_file, ".error", error)) {
+		unsigned long n = 0;
+		for (const char *p = what; *p && n < sizeof text - 1; p++) text[n++] = *p;
+		for (const char *p = path ? path : ""; *p && n < sizeof text - 1; p++) text[n++] = *p;
+		write_whole(error, text, n);
+	}
+	leave(EXIT_TTY);
+}
+
+static void nap(long ms)
+{
+	struct kernel_timespec ts = { 0, ms * 1000000L };
+	sys6(__NR_ppoll, 0, 0, (long)&ts, 0, 0, 0);
+}
+
+/*
+ * --hold-tty: the emulator's end, which never returns. Its process leads the terminal's session;
+ * a child, in the same session, keeps the terminal open while the leader exits, which releases the
+ * terminal as anyone's controlling terminal (the ioctl that would release it, TIOCNOTTY, Android
+ * refuses to apps). The child then names it and waits until the terminal hangs up (the emulator
+ * closed). The emulator must stay open when its first process exits (foot's --hold).
+ */
+static __attribute__((noreturn)) void hold_tty(const char *file)
+{
+	hold_file = file;
+	char name[256];
+	long n = sys6(__NR_readlinkat, AT_FDCWD, (long)"/proc/self/fd/0", (long)name, sizeof name - 1, 0, 0);
+	if (n <= 0) tty_failed("fdsec: no terminal on standard input", 0);
+	name[n] = 0;
+	if (!starts_with(name, PTS_PREFIX)) tty_failed("fdsec: standard input is not a pseudo-terminal: ", name);
+	/* The leader's exit hangs up the terminal's foreground process group: the child's too. */
+	set_hangup(SIG_IGN);
+	long leader = sys3(__NR_getpid, 0, 0, 0);
+	long child = sys6(__NR_clone, SIGCHLD, 0, 0, 0, 0, 0);
+	if (child < 0) tty_failed("fdsec: could not start the terminal's holder for ", name);
+	if (child > 0) leave(0);
+	/* Once the leader is gone (its child reparented), the terminal is released. */
+	for (int i = 0; sys3(__NR_getppid, 0, 0, 0) == leader; i++) {
+		if (i > 500) tty_failed("fdsec: the terminal's session leader did not end: ", name);
+		nap(10);
+	}
+	set_hangup(SIG_DFL);
+	if (write_whole(file, name, n) != 0) tty_failed("fdsec: cannot write ", file);
+	struct kernel_pollfd terminal = { 0, 0, 0 };
+	for (;;) {
+		if (sys6(__NR_ppoll, (long)&terminal, 1, 0, 0, 0, 0) > 0 && (terminal.revents & POLLHUP_ERR_NVAL)) leave(0);
+	}
+}
+
+/* The controlling terminal's device number (/proc/self/stat's tty_nr), 0 for none, -1 unreadable. */
+static long controlling_tty(void)
+{
+	char buf[1024];
+	long fd = sys6(__NR_openat, AT_FDCWD, (long)"/proc/self/stat", O_RDONLY | O_CLOEXEC, 0, 0, 0);
+	if (fd < 0) return -1;
+	long n = sys3(__NR_read, fd, buf, sizeof buf - 1);
+	sys3(__NR_close, fd, 0, 0);
+	if (n <= 0) return -1;
+	buf[n] = 0;
+	/* After the name's closing parenthesis: state, ppid, pgrp, session, tty_nr. */
+	long close = -1;
+	for (long i = 0; i < n; i++) if (buf[i] == ')') close = i;
+	if (close < 0) return -1;
+	const char *p = buf + close + 1;
+	for (int field = 0; field < 4; field++) {
+		while (*p == ' ') p++;
+		while (*p && *p != ' ') p++;
+	}
+	while (*p == ' ') p++;
+	long value = 0;
+	if (*p < '0' || *p > '9') return -1;
+	while (*p >= '0' && *p <= '9') value = value * 10 + (*p++ - '0');
+	return value;
+}
+
+/*
+ * --tty: the app's end. A session leader opening a terminal without O_NOCTTY makes it its
+ * controlling terminal; TIOCSCTTY is asked too, where allowed, and the result is checked in /proc.
+ */
+static void take_tty(const char *path)
+{
+	if (!starts_with(path, PTS_PREFIX)) tty_failed("fdsec: not a pseudo-terminal: ", path);
+	if (sys3(__NR_setsid, 0, 0, 0) < 0) tty_failed("fdsec: could not start a session for ", path);
+	long fd = sys6(__NR_openat, AT_FDCWD, (long)path, O_RDWR, 0, 0, 0);
+	if (fd < 0) tty_failed("fdsec: cannot open ", path);
+	sys3(__NR_ioctl, fd, TIOCSCTTY, 0);
+	if (controlling_tty() == 0) tty_failed("fdsec: could not take the terminal ", path);
+	for (int std = 0; std < 3; std++) {
+		if (fd != std && sys3(__NR_dup3, fd, std, 0) < 0) tty_failed("fdsec: could not use the terminal ", path);
+	}
+	if (fd > 2) sys3(__NR_close, fd, 0, 0);
+}
+
 /* ---- entry */
 
 __attribute__((used)) static void start(long *sp)
@@ -266,16 +425,20 @@ __attribute__((used)) static void start(long *sp)
 	char **argv = (char **)(sp + 1);
 	char **envp = argv + argc + 1;
 	int extra = 0, no_inet = 0, no_connect = 0;
+	const char *tty = 0, *hold = 0;
 	int i = 1;
 	for (; i < argc && argv[i][0] == '-'; i++) {
 		if (equal(argv[i], "--extra")) extra = 1;
 		else if (equal(argv[i], "--no-inet")) no_inet = 1;
 		else if (equal(argv[i], "--no-connect")) no_connect = 1;
+		else if (equal(argv[i], "--tty") && i + 1 < argc) tty = argv[++i];
+		else if (equal(argv[i], "--hold-tty") && i + 1 < argc) hold = argv[++i];
 		else if (equal(argv[i], "--")) { i++; break; }
 		else { say("fdsec: unknown option ", argv[i]); leave(EXIT_USAGE); }
 	}
-	if (i >= argc || argv[i][0] != '/') {
-		say("fdsec: usage: fdsec [--extra] [--no-inet] [--no-connect] [--] /absolute/command args...", 0);
+	if (hold ? (tty || i < argc) : (i >= argc || argv[i][0] != '/')) {
+		say("fdsec: usage: fdsec [--extra] [--no-inet] [--no-connect] [--tty /dev/pts/N] [--] /absolute/command args..."
+		    " | fdsec [options] --hold-tty FILE", 0);
 		leave(EXIT_USAGE);
 	}
 
@@ -300,6 +463,8 @@ __attribute__((used)) static void start(long *sp)
 		leave(EXIT_REFUSED);
 	}
 
+	if (hold) hold_tty(hold);
+	if (tty) take_tty(tty);
 	sys3(__NR_execve, argv[i], argv + i, envp);
 	say("fdsec: cannot execute ", argv[i]);
 	leave(EXIT_EXEC);

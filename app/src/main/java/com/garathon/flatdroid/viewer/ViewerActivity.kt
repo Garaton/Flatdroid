@@ -77,6 +77,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.garathon.flatdroid.session.AlpineShell
 import com.garathon.flatdroid.viewer.frames.NativeFrames
 import com.garathon.flatdroid.viewer.input.Keysyms
 import kotlin.math.roundToInt
@@ -156,6 +157,7 @@ class ViewerActivity : ComponentActivity() {
         followHideScreen()
         view = ViewerView(this, ViewerConnection).apply {
             followPercent = session.followPercent
+            fitAboveCover = session.fitAboveKeyboard
             // Wayland has no server option for it: the app's copies stop here. Android's text
             // reaches the app only with the setting too, whatever the display server would do.
             if (session.shareClipboard) {
@@ -238,8 +240,8 @@ class ViewerActivity : ComponentActivity() {
         view.requestFocus()
         ViewerConnection.attach(view)
         ViewerConnection.open(socket, cacheDir, session.waylandSocket, session.shareClipboard, session.outputRefresh, session.appId)
-        appLabel = session.appId
-        lifecycleScope.launch(Dispatchers.IO) {
+        appLabel = if (session.appId == AlpineShell.ID) getString(R.string.alpine_shell) else session.appId
+        if (session.appId != AlpineShell.ID) lifecycleScope.launch(Dispatchers.IO) {
             InstalledApps(applicationContext).name(session.appId)?.let { name -> withContext(Dispatchers.Main) { appLabel = name } }
         }
         // On only while the app holds an inhibit (a video, a presentation); else Android's timeout.

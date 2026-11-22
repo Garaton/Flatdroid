@@ -107,6 +107,9 @@ class AlpineEnvironment private constructor(private val context: Context) {
         /** As the app's own user IDs instead of root ([ProotCommand.alpine]'s ids). */
         asAppUser: Boolean = false,
         filter: Fdsec.Filter? = Fdsec.Filter(),
+        /** A terminal for the command ([ProotCommand.alpine]). */
+        tty: String? = null,
+        environment: Map<String, String> = emptyMap(),
         onLine: (String) -> Unit = {},
     ): ProotProcess {
         check(isInstalled()) { "The Alpine rootfs is not installed" }
@@ -117,7 +120,7 @@ class AlpineEnvironment private constructor(private val context: Context) {
             write("passwd", GuestFiles.passwdWith(rootfsFile("etc/passwd"), uid, gid)).path to "/etc/passwd",
             write("group", GuestFiles.groupWith(rootfsFile("etc/group"), gid)).path to "/etc/group",
         )
-        val invocation = ProotCommand.alpine(paths(), prepareBinds(binds), command, ids = ids, filter = filter)
+        val invocation = ProotCommand.alpine(paths(), prepareBinds(binds), command, ids = ids, filter = filter, tty = tty, environment = environment)
         return ProotRunner.start(invocation, alpineDir, onLine = onLine)
     }
 

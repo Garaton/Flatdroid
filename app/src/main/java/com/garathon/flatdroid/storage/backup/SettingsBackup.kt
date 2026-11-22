@@ -1,6 +1,7 @@
 package com.garathon.flatdroid.storage.backup
 
 import com.garathon.flatdroid.flatpak.InstalledApps
+import com.garathon.flatdroid.session.AlpineShellUser
 import com.garathon.flatdroid.settings.AppSettingsStore
 import com.garathon.flatdroid.settings.UserSettings
 import com.garathon.flatdroid.util.io.copyWithProgress
@@ -94,6 +95,7 @@ object SettingsBackup {
         security = device?.security ?: settings.security,
         terminalFilter = device?.terminalFilter ?: settings.terminalFilter,
         terminalDuringSession = device?.terminalDuringSession ?: false,
+        alpineShellUser = device?.alpineShellUser ?: AlpineShellUser.ROOT,
         flatpakLanguages = device?.flatpakLanguages ?: settings.flatpakLanguages,
     )
 

@@ -37,9 +37,32 @@ object Fdsec {
         val noConnect: Boolean = false,
     )
 
-    /** [command] behind the filter, with fdsec at [guestPath]. */
-    fun wrap(guestPath: String, filter: Filter, command: List<String>): List<String> =
-        listOf(guestPath) + flags(filter) + "--" + command
+    /**
+     * [command] behind the filter, with fdsec at [guestPath]. With [tty] (a [isTerminal] path), the
+     * command runs in a session of its own with that terminal as its controlling terminal and as its
+     * standard input, output and error.
+     */
+    fun wrap(guestPath: String, filter: Filter, command: List<String>, tty: String? = null): List<String> {
+        require(tty == null || isTerminal(tty)) { "Not a pseudo-terminal: $tty" }
+        return listOf(guestPath) + flags(filter) + listOfNotNull(TTY.takeIf { tty != null }, tty) + "--" + command
+    }
+
+    /**
+     * A terminal emulator's command (in Alpine's root, behind [filter]): it gives up its terminal as
+     * controlling terminal, so another root sharing /dev/pts can take it ([wrap]'s tty), writes the
+     * terminal's name to [file] and waits until it is ended.
+     */
+    fun holdTerminal(filter: Filter, file: String): List<String> = listOf(ALPINE_PATH) + flags(filter) + listOf(HOLD_TTY, file)
+
+    /** A pseudo-terminal's path as [holdTerminal] writes it: `/dev/pts/` and a number. */
+    fun isTerminal(path: String): Boolean = TERMINAL.matches(path)
+
+    /** fdsec's exit code when a terminal step failed (with a line saying which). */
+    const val EXIT_TTY = 124
+
+    private const val TTY = "--tty"
+    private const val HOLD_TTY = "--hold-tty"
+    private val TERMINAL = Regex("/dev/pts/[0-9]{1,9}")
 
     fun flags(filter: Filter): List<String> =
         listOfNotNull("--extra".takeIf { filter.extraSyscalls }, "--no-inet".takeIf { filter.noInternet }, "--no-connect".takeIf { filter.noConnect })

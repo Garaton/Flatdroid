@@ -317,8 +317,8 @@ fun AppDisplayPage(s: AppPageState) = SettingsPageColumn(R.string.app_page_displ
                 )
             }
         }
-        // The compositor scales; Xvnc can't.
-        if (app.wayland) {
+        // The compositor scales; Xvnc can't. A terminal app's terminal is a Wayland window.
+        if (app.wayland || app.terminal) {
             DropdownRow(
                 selected = s.settings.interfaceSize,
                 options = AppSettings.INTERFACE_SIZES,
@@ -326,7 +326,7 @@ fun AppDisplayPage(s: AppPageState) = SettingsPageColumn(R.string.app_page_displ
                 label = { percentLabel.format(it) },
                 title = stringResource(R.string.app_settings_interface_size),
                 hint = stringResource(R.string.app_settings_interface_size_hint),
-                enabled = !s.settings.forceX11
+                enabled = !s.settings.forceX11 || app.terminal
             )
         }
         val renderingNames = renderingNames()
@@ -338,8 +338,8 @@ fun AppDisplayPage(s: AppPageState) = SettingsPageColumn(R.string.app_page_displ
             title = stringResource(R.string.app_settings_rendering),
             hint = stringResource(R.string.app_settings_rendering_hint),
         )
-        // Only for apps that ask for Wayland as well as X11.
-        if (app.waylandAndX11) {
+        // Only for apps that ask for Wayland as well as X11, and not in a terminal (always Wayland).
+        if (app.waylandAndX11 && !app.terminal) {
             SwitchRow(
                 s.settings.forceX11 && app.waylandAndX11, { v -> s.editSettings { copy(forceX11 = v) } },
                 stringResource(R.string.app_settings_force_x11),

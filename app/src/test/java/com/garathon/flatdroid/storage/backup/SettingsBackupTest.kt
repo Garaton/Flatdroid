@@ -1,5 +1,6 @@
 package com.garathon.flatdroid.storage.backup
 
+import com.garathon.flatdroid.session.AlpineShellUser
 import com.garathon.flatdroid.settings.MobileData
 import com.garathon.flatdroid.settings.SecuritySettings
 import com.garathon.flatdroid.settings.UserSettings
@@ -91,6 +92,7 @@ class SettingsBackupTest {
         val device = UserSettings(
             flatpakLanguages = "de;en", vncViewer = "com.example.viewer", externalViewer = true,
             security = SecuritySettings(extraSyscallFilter = false), terminalFilter = false, terminalDuringSession = true,
+            alpineShellUser = AlpineShellUser.APP_USER,
         )
         val zip = UserSettings(
             flatpakLanguages = "--install-everything", vncViewer = "com.other.viewer", externalViewer = false,
@@ -107,6 +109,7 @@ class SettingsBackupTest {
         assertEquals(zip.copy(
             flatpakLanguages = device.flatpakLanguages, vncViewer = device.vncViewer, externalViewer = true,
             security = device.security, terminalFilter = false, terminalDuringSession = true,
+            alpineShellUser = AlpineShellUser.APP_USER,
         ), kept)
     }
 }

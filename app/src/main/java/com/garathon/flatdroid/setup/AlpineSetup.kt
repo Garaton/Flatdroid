@@ -255,26 +255,30 @@ class AlpineSetup(
 
     companion object {
         /**
-         * Xvnc is Alpine's tigervnc (an own build would save little: the camera stack needs Mesa
-         * too), Openbox its window manager; labwc, wayvnc and wlr-randr are the Wayland session:
-         * the compositor, its VNC server and what sets the output's size. Openbox needs a font:
-         * without one its title bars collapse to a few pixels. ostree repairs the Flatpak repository after
+         * labwc, wayvnc and wlr-randr are the Wayland session: the compositor, its VNC server and
+         * what sets the output's size. X11's (Xvnc, Openbox) and a terminal app's (foot) are added
+         * at first use ([PackageGroup]). labwc and Openbox need a font: without one their title bars
+         * collapse to a few pixels. ostree repairs the Flatpak repository after
          * an interrupted removal (FlatpakTaskService). dbus and xdg-dbus-proxy give apps their session bus
          * (SessionBus); PipeWire, WirePlumber, the portal and GStreamer's PipeWire elements carry
          * the camera (gst-plugins-good to split its JPEG frames), and pipewire-tools tells when an app uses it.
          */
         val PACKAGES = listOf(
-            "flatpak", "ostree", "tigervnc", "openbox", "labwc", "wayvnc", "wlr-randr", "font-cantarell", "pulseaudio", "ca-certificates",
+            "flatpak", "ostree", "labwc", "wayvnc", "wlr-randr", "font-cantarell", "pulseaudio", "ca-certificates",
             "dbus", "xdg-dbus-proxy", "pipewire", "wireplumber", "xdg-desktop-portal", "gst-plugin-pipewire", "gstreamer-tools", "gst-plugins-good",
             "pipewire-tools",
         )
 
         /** What the packages must have left in the rootfs (relative to it): the programs setup's later steps and every launch run. */
         val PACKAGE_FILES = listOf(
-            "usr/bin/flatpak", "usr/bin/ostree", "usr/bin/Xvnc", "usr/bin/openbox", "usr/bin/labwc", "usr/bin/wayvnc", "usr/bin/wlr-randr",
+            "usr/bin/flatpak", "usr/bin/ostree", "usr/bin/labwc", "usr/bin/wayvnc", "usr/bin/wlr-randr",
             "usr/bin/pulseaudio", "usr/bin/dbus-daemon", "usr/bin/xdg-dbus-proxy", "usr/bin/pipewire", "usr/bin/wireplumber",
             "usr/bin/gst-launch-1.0", "usr/bin/pw-cli",
         )
+
+        /** What Alpine's updates make sure is installed: setup's packages and the groups added since ([PackageGroup]). */
+        fun updateList(rootfs: File, androidMonospace: Boolean): List<String> =
+            PACKAGES + PackageGroup.entries.filter { it.addedIn(rootfs) }.flatMap { it.packages(androidMonospace) }
 
         /** Where apk's package cache is bound: a directory in Flatdroid's cache, deleted afterwards. */
         const val APK_CACHE = "/var/cache/apk"

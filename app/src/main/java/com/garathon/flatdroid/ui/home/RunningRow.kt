@@ -17,6 +17,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material3.Icon
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Link
@@ -37,6 +40,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.garathon.flatdroid.session.AlpineShell
 import com.garathon.flatdroid.R
 import com.garathon.flatdroid.flatpak.InstalledApp
 import com.garathon.flatdroid.session.SessionState
@@ -76,13 +80,23 @@ fun RunningRow(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            AppIcon(app?.icon, Modifier.size(48.dp))
+            // Alpine's shell has no app icon: a terminal's, on a tile of the theme's colors.
+            if (appId == AlpineShell.ID) {
+                Box(
+                    Modifier.size(48.dp).background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(8.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Filled.Terminal, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(32.dp))
+                }
+            } else {
+                AppIcon(app?.icon, Modifier.size(48.dp))
+            }
             Column(Modifier.weight(1f)) {
-                Text(app?.name ?: appId, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(app?.name ?: if (appId == AlpineShell.ID) stringResource(R.string.alpine_shell) else appId, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
                     when (state) {
                         is SessionState.Starting -> state.detail
-                        is SessionState.PreparingElectron -> state.detail
+                        is SessionState.Preparing -> state.detail
                         is SessionState.Stopping -> stringResource(R.string.session_stopping_short)
                         is SessionState.Running -> if (state.opening) stringResource(R.string.session_opening) else appId
                         else -> appId
@@ -93,9 +107,9 @@ fun RunningRow(
                 )
             }
             when (state) {
-                is SessionState.Starting, is SessionState.PreparingElectron, is SessionState.Stopping -> {
+                is SessionState.Starting, is SessionState.Preparing, is SessionState.Stopping -> {
                     Dial(
-                        fraction = (state as? SessionState.PreparingElectron)?.fraction ?: (state as? SessionState.Starting)?.fraction,
+                        fraction = (state as? SessionState.Preparing)?.fraction ?: (state as? SessionState.Starting)?.fraction,
                         onClick = onLog.takeIf { developerOptions },
                     )
                     if (state is SessionState.Starting && state.skippable) IconAction(Icons.Filled.SkipNext, R.string.session_skip_check, onSkipCheck, size = ICON)

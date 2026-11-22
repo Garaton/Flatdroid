@@ -113,6 +113,8 @@ data class LaunchOptions(
     val softwareRendering: Boolean = true,
     /** Electron and Chromium apps are told to reduce motion ([Electron.REDUCED_MOTION]). */
     val reduceMotion: Boolean = false,
+    /** The app's desktop file says `Terminal=true`: it runs in a terminal ([LaunchPlan.terminal]). */
+    val terminal: Boolean = false,
 )
 
 /** Everything needed to start an app: its proot binds, environment and command, and its root's layout. */
@@ -131,8 +133,13 @@ data class LaunchPlan(
     val isElectron: Boolean,
     /** Flatdroid's zypak for [HostDirs.zypakStandIn] ([Electron.zypakStandIn]); null when the app starts by its binary. */
     val zypakStandIn: String? = null,
-    /** The app takes Wayland, so its session is Wayland (labwc and wayvnc) instead of Xvnc. */
+    /** The session is Wayland (labwc and wayvnc) instead of Xvnc: the app takes Wayland, or runs in a terminal. */
     val wayland: Boolean = false,
+    /**
+     * The app runs in a terminal, a Wayland window of the session's: it gets the Wayland socket only
+     * if it takes Wayland itself, and never X11.
+     */
+    val terminal: Boolean = false,
     /** What fdsec refuses for this app. */
     val filter: Fdsec.Filter,
     /** The app's ld.so.cache; null when there is none (no [HostDirs.ldCache], or no `ldconfig` in the runtime). */
@@ -190,8 +197,10 @@ class LaunchPlanner(
 
         // Electron apps start through zypak, and some Chromium browsers through cobalt: both skipped.
         // Wayland for every app that takes it, unless one that also takes X11 is set to Force X11.
+        // A terminal app's session is Wayland whatever it takes: the terminal is a Wayland window.
         val context = app.metadata.context
-        val wayland = context.wayland && !(options.forceX11 && context.waylandAndX11)
+        val wayland = context.wayland && !(options.forceX11 && context.waylandAndX11 && !options.terminal)
+        val waylandSession = wayland || options.terminal
         var command = listOf(commandPath)
         var isElectron = false
         var zypakStandIn: String? = null
@@ -294,6 +303,7 @@ class LaunchPlanner(
             flatpakContainer = options.flatpakInfo,
             wayland = wayland,
             softwareRendering = options.softwareRendering,
+            terminal = if (!options.terminal) null else if (File(runtime.files, FOOT_TERMINFO).isFile) FOOT_TERM else FALLBACK_TERM,
             usrHas = { path -> path.startsWith("/usr/") && File(runtime.files, path.removePrefix("/usr/")).isDirectory },
         )
         val devices = app.metadata.context.devices
@@ -306,7 +316,7 @@ class LaunchPlanner(
             extensions = extensions.map { (base, ext) -> ext.deployment.files.path to "$base/${ext.guestPath}" },
             tmp = dirs.tmp.path,
             shm = dirs.shm.path,
-            x11Sockets = dirs.x11Sockets.path.takeIf { !wayland },
+            x11Sockets = dirs.x11Sockets.path.takeIf { !waylandSession },
             waylandSockets = dirs.waylandSockets?.path?.takeIf { wayland },
             pulseSockets = dirs.pulseSockets?.takeIf { options.audio }?.path,
             home = dirs.home.path,
@@ -332,7 +342,8 @@ class LaunchPlanner(
                 usrLinks = USR_LINKS.filter { File(runtime.files, it).exists() },
                 isElectron = isElectron,
                 zypakStandIn = zypakStandIn,
-                wayland = wayland,
+                wayland = waylandSession,
+                terminal = options.terminal,
                 filter = Fdsec.Filter(extraSyscalls = options.extraSyscalls, noInternet = !options.network),
                 ldCache = ldCache,
             )
@@ -427,6 +438,11 @@ class LaunchPlanner(
         )
 
         const val GL_DEFAULT = "org.freedesktop.Platform.GL.default"
+        /** A terminal app's TERM: the terminal's own name where the runtime describes it, else what it is compatible with. */
+        const val FOOT_TERM = "foot"
+        const val FALLBACK_TERM = "xterm-256color"
+        /** The runtime's description of [FOOT_TERM] (relative to its files). */
+        const val FOOT_TERMINFO = "share/terminfo/f/foot"
         const val RESOLV_CONF = "resolv.conf"
         /** The `/etc` files every launch binds Flatdroid's own over (the runtime's are never read). */
         val ETC_OVERRIDES = listOf(RESOLV_CONF, "hosts", "machine-id", "passwd", "group", LOCALTIME, TIMEZONE)

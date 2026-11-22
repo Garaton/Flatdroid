@@ -34,6 +34,7 @@ import com.garathon.flatdroid.R
 import com.garathon.flatdroid.camera.AndroidCameras
 import com.garathon.flatdroid.flatpak.flathub.FlathubLinkApproval
 import com.garathon.flatdroid.session.helpers.SessionScript
+import com.garathon.flatdroid.session.AlpineShellUser
 import com.garathon.flatdroid.settings.AppDefaults
 import com.garathon.flatdroid.settings.AppSettings
 import com.garathon.flatdroid.settings.AppTime
@@ -438,9 +439,26 @@ fun GlobalDeveloperPage(s: GlobalPageState) = SettingsPageColumn(R.string.settin
             stringResource(R.string.settings_terminal_during_session), stringResource(R.string.settings_terminal_during_session_hint),
             developer = true,
         )
+        val rootLabel = stringResource(R.string.settings_alpine_shell_root)
+        val appUserLabel = stringResource(R.string.settings_alpine_shell_app_user)
+        DropdownRow(
+            selected = s.settings.alpineShellUser,
+            options = AlpineShellUser.entries,
+            onSelect = { v -> s.editSettings { copy(alpineShellUser = v) } },
+            label = { if (it == AlpineShellUser.ROOT) rootLabel else appUserLabel },
+            title = stringResource(R.string.settings_alpine_shell_user),
+            hint = stringResource(R.string.settings_alpine_shell_user_hint),
+            developer = true,
+        )
     }
     SettingsCard(title = stringResource(R.string.settings_section_tools)) {
         OutlinedButton(onClick = s.env.onTerminal, enabled = s.env.canOpenTerminal) { Text(stringResource(R.string.terminal_title)) }
+        // Starts a session: only with developer options on, and while nothing else runs.
+        if (s.settings.developerOptions) {
+            OutlinedButton(onClick = { s.env.onAlpineShell(s.settings.alpineShellUser) }, enabled = s.env.canStartSession) {
+                Text(stringResource(R.string.settings_open_alpine_shell))
+            }
+        }
     }
 }
 

@@ -39,6 +39,8 @@ object LaunchEnvironment {
         softwareRendering: Boolean = true,
         /** Whether the runtime has a folder at a `/usr` path ([multiarchPaths]). */
         usrHas: (String) -> Boolean = { false },
+        /** A terminal app's TERM; null for an app that isn't one. Without Wayland it has no display at all. */
+        terminal: String? = null,
     ): LinkedHashMap<String, String> {
         val varApp = "${GuestPaths.HOME}/.var/app/$appId"
         val env = linkedMapOf(
@@ -90,6 +92,14 @@ object LaunchEnvironment {
             env["GDK_BACKEND"] = "wayland"
             env["QT_QPA_PLATFORM"] = "wayland"
             env["SDL_VIDEODRIVER"] = "wayland"
+        }
+        if (terminal != null) {
+            env["TERM"] = terminal
+            env["COLORTERM"] = "truecolor"
+            if (!wayland) {
+                env.remove("DISPLAY")
+                for (key in X11_ONLY) env.remove(key)
+            }
         }
         // Qt Quick has the same choice: its software backend leaves out shader effects, Qt Quick 3D
         // and GL items, and costs a fraction of the processor time of Mesa's.

@@ -31,6 +31,8 @@ data class InstalledApp(
     val waylandAndX11: Boolean = false,
     /** Its metadata asks for Wayland, so it runs there unless X11 is forced. */
     val wayland: Boolean = false,
+    /** Its desktop file says it runs in a terminal: its session is Wayland whatever it asks for. */
+    val terminal: Boolean = false,
     /** How many times it was launched, and for how long it ran in all (milliseconds). */
     val launches: Int = 0,
     val usedMillis: Long = 0,
@@ -65,9 +67,10 @@ class InstalledApps(private val context: Context) {
         val app = installation.app(id) ?: return@mapNotNull null
         // Only its usage is read here, which follows no defaults: Flatdroid's settings aren't read again for each app.
         val settings = AppSettingsStore(AppData.settingsFile(context, id)).load()
+        val desktop = desktop(app, id)
         InstalledApp(
             id = id,
-            name = desktopName(app, id) ?: id,
+            name = desktop?.let { localizedName(it, Locale.getDefault()) } ?: id,
             icon = icon(app, id),
             lastOpened = settings.lastOpened,
             launches = settings.launches,
@@ -78,6 +81,7 @@ class InstalledApps(private val context: Context) {
             requestsNetwork = AppSettings.NETWORK in app.metadata.context.shared,
             waylandAndX11 = app.metadata.context.waylandAndX11,
             wayland = app.metadata.context.wayland,
+            terminal = desktop?.let(::runsInTerminal) == true,
             mayUseCamera = app.metadata.context.mayUseCamera,
             requestsFiles = app.metadata.context.filesystems.any { it.substringBefore(':') in FILE_ACCESS },
         )
@@ -128,8 +132,8 @@ class InstalledApps(private val context: Context) {
     /** The `sockets=` the app's metadata asks for; empty if it isn't installed. */
     fun sockets(id: String): List<String> = installation.app(id)?.metadata?.context?.sockets.orEmpty()
 
-    /** The app is made for a terminal, which Flatdroid doesn't have. */
-    fun needsTerminal(id: String): Boolean = installation.app(id)?.let { desktop(it, id) }?.let(::runsInTerminal) == true
+    /** The app is made for a terminal (its desktop file says `Terminal=true`). */
+    fun runsInTerminal(id: String): Boolean = installation.app(id)?.let { desktop(it, id) }?.let(::runsInTerminal) == true
 
     private fun desktopName(app: Deployment, id: String): String? = desktop(app, id)?.let { localizedName(it, Locale.getDefault()) }
 

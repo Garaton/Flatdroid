@@ -27,7 +27,7 @@ class SessionAudioTest {
     @Test
     fun helpersGetSoundAndResampler() {
         assertEquals(
-            listOf("/bin/sh", SessionScript.GUEST_SCRIPT, "1000x1400", "14400", "30", "on", "speex-float-0", "on", "on", "on", "off", "off", "1.00", "on"),
+            listOf("/bin/sh", SessionScript.GUEST_SCRIPT, "1000x1400", "14400", "30", "on", "speex-float-0", "on", "on", "on", "off", "off", "1.00", "on", "off"),
             SessionScript.command("1000x1400", 30, sound = true, Resampler.FAST, sessionBus = true, camera = true),
         )
         assertEquals(
@@ -48,6 +48,20 @@ class SessionAudioTest {
         assertTrue(SessionScript.kernelHasMemfd("unreadable"))
         assertEquals("off", SessionScript.command("1000x1400", 30, sound = true, Resampler.FAST, sessionBus = true, memfd = false)[13])
         assertTrue("memfd=${'$'}{12}" in SessionScript.TEXT.lines().map { it.trim() })
+    }
+
+    @Test
+    fun aTerminalAppsTerminalStartsOnlyInAWaylandSession() {
+        assertEquals("on", SessionScript.command("1000x1400", 30, sound = false, Resampler.FAST, sessionBus = true, wayland = true, terminal = true)[14])
+        assertEquals("off", SessionScript.command("1000x1400", 30, sound = false, Resampler.FAST, sessionBus = true, terminal = true)[14])
+        val lines = SessionScript.TEXT.lines().map { it.trim() }
+        assertTrue("terminal=${'$'}{13}" in lines)
+        // foot behind the second filter; its command gives the terminal up and names it, behind one more.
+        val foot = lines.single { "/usr/bin/foot " in it }
+        assertTrue(foot.startsWith("FONTCONFIG_FILE=/run/flatdroid/vnc/fonts.conf /run/flatdroid/fdsec --no-inet -- /usr/bin/foot --hold -c /run/flatdroid/vnc/foot.ini -- "))
+        assertTrue(foot.endsWith("-- /run/flatdroid/fdsec --no-inet --hold-tty /run/flatdroid/vnc/tty &"))
+        // Only once the compositor and wayvnc are up.
+        assertTrue(lines.indexOfFirst { "/usr/bin/foot " in it } > lines.indexOf("wait_socket /run/flatdroid/vnc/wayvncctl wayvnc"))
     }
 
     @Test

@@ -89,6 +89,11 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
 
     /** The screen is this share of the view's size and follows it ([Resolution]); null for a fixed size. */
     var followPercent: Int? = null
+    /**
+     * With [followPercent], the screen follows only the part of the view above the keyboard and the
+     * extra keys (a terminal app, used through the keyboard): it gets smaller instead of being panned.
+     */
+    var fitAboveCover = false
     /** The size last asked of the server, so a refused one isn't asked again. */
     private var requestedSize: Pair<Int, Int>? = null
     /** The server's size changes so far, and their count when [requestedSize] was asked. */
@@ -105,7 +110,7 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
     private val resizeCheck = Runnable {
         val percent = followPercent ?: return@Runnable
         if (frameWidth == 0 || width == 0 || height == 0) return@Runnable
-        val wanted = Resolution.entries.first { it.percent == percent }.scaled(width, height)
+        val wanted = Resolution.entries.first { it.percent == percent }.scaled(width, if (fitAboveCover) height - covered else height)
         if (wanted == frameWidth to frameHeight) return@Runnable
         if (wanted == requestedSize) {
             if (sizeChanges == sizeChangesAtRequest || requestTries >= RESIZE_TRIES) return@Runnable
@@ -128,6 +133,10 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
     private val coverSettled = Runnable {
         covered = coverHeight
         reportVisible()
+        if (fitAboveCover) {
+            removeCallbacks(resizeCheck)
+            postDelayed(resizeCheck, RESIZE_DELAY_MS)
+        }
     }
 
     /** How the frame lay before the keyboard came up. */
@@ -556,7 +565,7 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
         offsetY = when {
             h > height -> offsetY.coerceIn(room - h, 0f)
             moved -> offsetY.coerceIn(min(0f, room - h), height - h)
-            zoom < 1f -> (room - h) / 2
+            zoom < 1f || fitAboveCover -> (room - h) / 2
             else -> (height - h) / 2
         }
         // Unscaled, on whole pixels: half a pixel off (a frame one pixel narrower than the view, centred)

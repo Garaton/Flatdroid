@@ -147,7 +147,7 @@ fun HomeScreen(
 ) {
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val query = listState.query
-    val runningState = session.state.takeIf { it is SessionState.Starting || it is SessionState.PreparingElectron || it is SessionState.Running || it is SessionState.Stopping }
+    val runningState = session.state.takeIf { it is SessionState.Starting || it is SessionState.Preparing || it is SessionState.Running || it is SessionState.Stopping }
     val runningAppId = runningState?.appIdOrNull
 
     ScrollToTopOnNewOrder(query, listState.list)

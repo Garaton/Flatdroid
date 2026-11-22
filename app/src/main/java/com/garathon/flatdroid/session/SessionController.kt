@@ -2,6 +2,7 @@ package com.garathon.flatdroid.session
 
 import com.garathon.flatdroid.flatpak.tasks.FlatpakTasks
 import com.garathon.flatdroid.session.helpers.SessionScript
+import com.garathon.flatdroid.setup.PackageGroup
 import com.garathon.flatdroid.session.helpers.WaylandVnc
 import com.garathon.flatdroid.util.debug.DebugLog
 import com.garathon.flatdroid.util.io.LineBuffer
@@ -32,6 +33,8 @@ sealed interface SessionState {
         val socket: String? = null,
         val wayland: Boolean = false,
         val followPercent: Int? = null,
+        /** The screen follows only the viewer's part above the keyboard (a terminal app: [com.garathon.flatdroid.viewer.ViewerView.fitAboveCover]). */
+        val fitAboveKeyboard: Boolean = false,
         /** The compositor's socket for [com.garathon.flatdroid.viewer.WaylandClient]; null on X11. */
         val waylandSocket: String? = null,
         val shareClipboard: Boolean = true,
@@ -50,8 +53,13 @@ sealed interface SessionState {
      * downloads one for this device. [problem] is set when a swap can't work.
      */
     data class ElectronOffer(val appId: String, val version: String?, val fromArch: String, val problem: String?) : SessionState, Question
-    /** The agreed Electron swap is being downloaded and put in place. */
-    data class PreparingElectron(val appId: String, val detail: String, val fraction: Float?) : SessionState
+    /**
+     * The app's session needs [group] in Alpine, which isn't there yet; the user is asked before
+     * Flatdroid downloads it.
+     */
+    data class PackagesOffer(val appId: String, val group: PackageGroup) : SessionState, Question
+    /** What the user agreed to (an Electron swap, Alpine packages) is being downloaded and put in place. */
+    data class Preparing(val appId: String, val detail: String, val fraction: Float?) : SessionState
     /**
      * The file check found changed files before launch; [detail] lists the affected packages and
      * the launch was refused. The reinstall path restores them by [appId] (see FlatpakTask.Reinstall).
@@ -68,7 +76,8 @@ sealed interface SessionState {
             is Running -> appId
             is Stopping -> appId
             is ElectronOffer -> appId
-            is PreparingElectron -> appId
+            is PackagesOffer -> appId
+            is Preparing -> appId
             is FilesChanged -> appId
         }
 }
@@ -150,10 +159,12 @@ object SessionController {
 
     fun offerElectron(offer: SessionState.ElectronOffer) = _ui.update { it.copy(state = offer) }
 
+    fun offerPackages(offer: SessionState.PackagesOffer) = _ui.update { it.copy(state = offer) }
+
     fun filesChanged(state: SessionState.FilesChanged) = _ui.update { it.copy(state = state, message = null) }
 
-    fun preparingElectron(appId: String, detail: String, fraction: Float?) =
-        _ui.update { it.copy(state = SessionState.PreparingElectron(appId, detail, fraction), message = null) }
+    fun preparing(appId: String, detail: String, fraction: Float?) =
+        _ui.update { it.copy(state = SessionState.Preparing(appId, detail, fraction), message = null) }
 
     /** Back to idle, with [message] describing the outcome (null for a plain stop). */
     fun ended(message: String?, failed: Boolean = false) {

@@ -33,6 +33,7 @@ import com.garathon.flatdroid.proot.processes.LeftoverProcesses
 import com.garathon.flatdroid.proot.RunInterruptedException
 import com.garathon.flatdroid.session.SessionController
 import com.garathon.flatdroid.setup.AlpineSetup
+import com.garathon.flatdroid.setup.PackageGroup
 import com.garathon.flatdroid.setup.rootfs.AndroidTarFs
 import com.garathon.flatdroid.setup.rootfs.deleteTree
 import com.garathon.flatdroid.flatpak.catalog.Catalog
@@ -280,20 +281,21 @@ class FlatpakTaskService : Service() {
     }
 
     /**
-     * Alpine's packages: upgraded, then setup's list installed when one of them is missing (setup
-     * gained a package since this Alpine was set up). Whether one is missing is asked while the
+     * Alpine's packages: upgraded, then setup's list and the groups added since ([PackageGroup])
+     * installed when one of them is missing (setup gained a package since this Alpine was set up). Whether one is missing is asked while the
      * upgrade runs: `apk info` only reads the package database, which the upgrade replaces whole,
      * and an upgrade removes none of them. A failure is only logged: Flatpak's update doesn't
      * depend on it.
      */
     private fun updateAlpine(env: AlpineEnvironment) {
         val cache = env.apkCacheDir.apply { mkdirs() }
+        val packages = AlpineSetup.updateList(env.installer.rootfs, PackageGroup.ANDROID_MONOSPACE.isFile)
         var allInstalled = false
         val check = thread(name = "apk-info") {
-            allInstalled = runCatching { env.run(listOf("/sbin/apk", "info", "-e") + AlpineSetup.PACKAGES).exitCode == 0 }.getOrDefault(false)
+            allInstalled = runCatching { env.run(listOf("/sbin/apk", "info", "-e") + packages).exitCode == 0 }.getOrDefault(false)
         }
         try {
-            for (args in listOf(listOf("upgrade"), listOf("add") + AlpineSetup.PACKAGES)) {
+            for (args in listOf(listOf("upgrade"), listOf("add") + packages)) {
                 if (args.first() == "add") {
                     check.join()
                     if (allInstalled) return

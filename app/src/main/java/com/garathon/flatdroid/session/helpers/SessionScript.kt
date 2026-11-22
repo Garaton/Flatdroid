@@ -30,6 +30,9 @@ object SessionScript {
     /** In front of a helper's command: fdsec again, adding no Internet sockets to the filter it already has. */
     private val NO_INTERNET = (listOf(Fdsec.ALPINE_PATH) + Fdsec.flags(Fdsec.Filter(noInternet = true)) + "--").joinToString(" ")
 
+    /** foot's command: [Fdsec.holdTerminal] writing to [GUEST_TTY] (a failure to `GUEST_TTY.error`), again without Internet sockets. */
+    private val HOLD_TERMINAL = Fdsec.holdTerminal(Fdsec.Filter(noInternet = true), GUEST_TTY).joinToString(" ")
+
     /**
      * In front of a display server that external viewers reach on [VNC_PORT]: no outgoing
      * connections, so an app can't have it connect out (TigerVNC's reverse connections, which any
@@ -48,13 +51,13 @@ object SessionScript {
     fun command(
         geometry: String, frameRate: Int, sound: Boolean, resampler: Resampler, sessionBus: Boolean,
         camera: Boolean = false, clipboard: Boolean = true, wayland: Boolean = false, externalViewer: Boolean = false,
-        interfaceSize: Int = 100, memfd: Boolean = true,
+        interfaceSize: Int = 100, memfd: Boolean = true, terminal: Boolean = false,
     ): List<String> =
         listOf(
             "/bin/sh", GUEST_SCRIPT, geometry, VNC_PORT.toString(), frameRate.toString(),
             onOff(sound), resampler.pulseName, onOff(sessionBus), onOff(sessionBus && camera),
             onOff(clipboard), onOff(wayland), onOff(externalViewer), scale(interfaceSize),
-            onOff(memfd),
+            onOff(memfd), onOff(wayland && terminal),
         )
 
     /**
@@ -76,6 +79,13 @@ object SessionScript {
     const val GUEST_WAYVNC_CONFIG = "$GUEST_VNC_DIR/wayvnc.conf"
     /** labwc's configuration directory ([com.garathon.flatdroid.alpine.GuestFiles.labwcRc]). */
     const val GUEST_LABWC_DIR = "$GUEST_VNC_DIR/labwc"
+    /** A terminal app's terminal: foot's configuration, its fonts, and where its command writes the terminal's name ([Fdsec.holdTerminal]). */
+    const val GUEST_FOOT_CONFIG = "$GUEST_VNC_DIR/foot.ini"
+    const val GUEST_TERMINAL_FONTS = "$GUEST_VNC_DIR/fonts.conf"
+    const val GUEST_TTY = "$GUEST_VNC_DIR/tty"
+    /** Android's fonts, read by the terminal ([com.garathon.flatdroid.alpine.GuestFiles.terminalFonts]). */
+    const val GUEST_ANDROID_FONTS = "/run/flatdroid/android-fonts"
+
     /** Above this frame rate (uncapped) the output keeps the headless backend's refresh. */
     const val MAX_OUTPUT_REFRESH = 240
 
@@ -86,7 +96,8 @@ object SessionScript {
      * starts only then), PulseAudio's resample method, "on" for the session bus, "on" for PipeWire, "on" when the clipboard is shared ([command]
      * builds them; off adds `-AcceptCutText=0 -SendCutText=0` to Xvnc), "on" for a Wayland session (labwc and wayvnc instead of
      * Xvnc and Openbox), "on" for an external viewer (the TCP port and login; else the viewer's Unix
-     * socket), the Wayland output's scale ([scale]), and "on" when PulseAudio may share memory through memfd ([kernelHasMemfd]); title bars come from Openbox's and labwc's configurations. Exits when the display does; Flatdroid ends the session by stopping this proot.
+     * socket), the Wayland output's scale ([scale]), "on" when PulseAudio may share memory through memfd ([kernelHasMemfd]), and "on"
+     * for a terminal app's terminal (foot, in a Wayland session only); title bars come from Openbox's and labwc's configurations. Exits when the display does; Flatdroid ends the session by stopping this proot.
      * `-extension GLX` turns GLX off in Alpine's Xvnc, which has it (apps use EGL). `-nolisten local` drops the abstract socket
      * `@/tmp/.X11-unix/X1`: proot doesn't translate abstract names, so it would be open to other
      * users of the device, with no authentication; clients use the socket file in private storage
@@ -120,6 +131,7 @@ object SessionScript {
         |external=${'$'}{10}
         |scale=${'$'}{11}
         |memfd=${'$'}{12}
+        |terminal=${'$'}{13}
         |clipboard_args=
         |[ "${'$'}clipboard" = on ] || clipboard_args="-AcceptCutText=0 -SendCutText=0"
         |rm -f /tmp/.X1-lock ${GuestPaths.X11_DIR}/$X_SOCKET ${GuestPaths.PULSE_DIR}/* $GUEST_VNC_DIR/$VNC_SOCKET
@@ -181,6 +193,14 @@ object SessionScript {
         |    wait_socket ${GuestPaths.WAYLAND_DIR}/${GuestPaths.WAYLAND_SOCKET} "the Wayland compositor"
         |  fi
         |  wait_socket $GUEST_VNC_DIR/wayvncctl wayvnc
+        |  # A terminal app's terminal: foot, whose command gives the terminal up and names it for the
+        |  # app's root, which takes it over; --hold, since that command's first process exits to give it
+        |  # up. foot parses what the app writes, so it runs behind the second filter.
+        |  if [ "${'$'}terminal" = on ]; then
+        |    rm -f $GUEST_TTY $GUEST_TTY.new
+        |    LD_PRELOAD=${Fdshm.ALPINE_PATH} XDG_RUNTIME_DIR=${GuestPaths.WAYLAND_DIR} WAYLAND_DISPLAY=${GuestPaths.WAYLAND_SOCKET} \
+        |      FONTCONFIG_FILE=$GUEST_TERMINAL_FONTS $NO_INTERNET /usr/bin/foot --hold -c $GUEST_FOOT_CONFIG -- $HOLD_TERMINAL &
+        |  fi
         |else
         |  if [ "${'$'}external" = on ]; then
         |    guard="$NO_CONNECT"

@@ -68,6 +68,54 @@ object GuestFiles {
     fun fontDirs(): String =
         "<?xml version=\"1.0\"?>\n<!DOCTYPE fontconfig SYSTEM \"urn:fontconfig:fonts.dtd\">\n<fontconfig>\n</fontconfig>\n"
 
+    /**
+     * The terminal's configuration (foot's `foot.ini`) for a terminal app: nothing the app writes
+     * makes it start a program or open anything. URLs, desktop notifications and the bell run no
+     * command, no utmp helper runs, and no key opens another terminal (it would be a shell among the
+     * helpers). The app may set the clipboard by escape sequence only when it shares the
+     * [clipboard], and never read it. Android's monospace font with Android's others as fallbacks
+     * ([terminalFonts]); [title] is the window's until the app sets its own.
+     */
+    fun footIni(title: String, clipboard: Boolean, fontSize: Int = TERMINAL_FONT_SIZE): String = """
+        |[main]
+        |font=monospace:size=$fontSize
+        |title=${title.filter { it >= ' ' && it != '\u007f' }.take(200)}
+        |utmp-helper=none
+        |
+        |[security]
+        |osc52=${if (clipboard) "copy-enabled" else "disabled"}
+        |
+        |[url]
+        |launch=/bin/true
+        |
+        |[desktop-notifications]
+        |command=/bin/true
+        |
+        |[bell]
+        |system=no
+        |
+        |[key-bindings]
+        |spawn-terminal=none
+        |show-urls-launch=none
+        |""".trimMargin()
+
+    /** The terminal's font size in points, scaled by the output's scale (the app's Interface size). */
+    const val TERMINAL_FONT_SIZE = 10
+
+    /**
+     * Fontconfig for the terminal: Alpine's own, Android's fonts at [androidFonts], and monospace
+     * as Android's (DejaVu on a device without it, [com.garathon.flatdroid.setup.PackageGroup.TERMINAL]).
+     */
+    fun terminalFonts(androidFonts: String): String = """
+        |<?xml version="1.0"?>
+        |<!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">
+        |<fontconfig>
+        |  <include ignore_missing="yes">/etc/fonts/fonts.conf</include>
+        |  <dir>$androidFonts</dir>
+        |  <alias binding="strong"><family>monospace</family><prefer><family>Droid Sans Mono</family><family>DejaVu Sans Mono</family></prefer></alias>
+        |</fontconfig>
+        |""".trimMargin()
+
     /** A new random machine-id: 32 lowercase hex digits. */
     fun machineId(random: java.util.Random = java.security.SecureRandom()): String =
         (1..16).joinToString("", postfix = "\n") { "%02x".format(random.nextInt(256)) }

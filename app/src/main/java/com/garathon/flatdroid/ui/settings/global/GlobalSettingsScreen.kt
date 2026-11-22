@@ -21,6 +21,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import com.garathon.flatdroid.session.AlpineShellUser
 import com.garathon.flatdroid.ui.home.FlatdroidStorage
 import com.garathon.flatdroid.R
 import com.garathon.flatdroid.camera.AndroidCameras
@@ -92,6 +93,10 @@ class GlobalSettingsEnv(
     val onReset: (ResetMode) -> Unit,
     val onResetSettings: () -> Unit,
     val onTerminal: () -> Unit,
+    /** No session or Flatpak task runs: Alpine's shell can start (a developer option). */
+    val canStartSession: Boolean,
+    /** Starts Alpine's shell as that user; the setting is saved first by the caller if needed. */
+    val onAlpineShell: (AlpineShellUser) -> Unit,
     /** The installed apps, for the Overview's usage numbers. */
     val apps: List<InstalledApp>,
     /** What the running Flatpak task is doing (an uninstall started from the Storage lists, say); null when none runs. */
@@ -224,7 +229,7 @@ private fun GlobalSettingsScreenPreview() {
                 ),
                 storageBusy = false, canReset = true, runningAppId = null, canOpenTerminal = true,
                 actions = GlobalStorageActions({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, { _, _ -> }, {}, { _, _, _ -> }, {}),
-                onReset = {}, onResetSettings = {}, onTerminal = {},
+                onReset = {}, onResetSettings = {}, onTerminal = {}, canStartSession = true, onAlpineShell = {},
                 apps = emptyList(), taskText = null, hasCamera = true, cameraResolutions = emptyMap(),
             ),
             onSave = {}, onSaveAndReinstallAll = {}, onSaveAndBaselineAll = {}, onDiscard = {},

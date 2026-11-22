@@ -119,4 +119,18 @@ class GuestFilesTest {
         org.junit.Assert.assertEquals("0.75", com.garathon.flatdroid.session.helpers.SessionScript.scale(75))
         org.junit.Assert.assertEquals("0.50", com.garathon.flatdroid.session.helpers.SessionScript.scale(50))
     }
+
+    @Test
+    fun theTerminalRunsNothingTheAppAsksFor() {
+        val ini = GuestFiles.footIni("Pokete\n[url]\nlaunch=/bin/sh", clipboard = false).lines()
+        // A title can't add lines (or sections) of its own.
+        assertTrue("title=Pokete[url]launch=/bin/sh" in ini)
+        assertEquals(1, ini.count { it == "[url]" })
+        for (line in listOf("utmp-helper=none", "osc52=disabled", "launch=/bin/true", "command=/bin/true", "spawn-terminal=none")) assertTrue(line, line in ini)
+        // With the clipboard shared, the app may copy to it, never read it.
+        assertTrue("osc52=copy-enabled" in GuestFiles.footIni("x", clipboard = true).lines())
+        val fonts = GuestFiles.terminalFonts("/run/flatdroid/android-fonts")
+        assertTrue("<dir>/run/flatdroid/android-fonts</dir>" in fonts)
+        assertTrue("<family>Droid Sans Mono</family>" in fonts)
+    }
 }

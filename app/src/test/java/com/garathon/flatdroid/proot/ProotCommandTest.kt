@@ -59,6 +59,17 @@ class ProotCommandTest {
     }
 
     @Test
+    fun alpineTakesATerminalThroughFdsecAndAddsTheEnvironment() {
+        val inv = ProotCommand.alpine(paths, binds, listOf("/bin/sh", "-l"), tty = "/dev/pts/4", environment = mapOf("TERM" to "foot"))
+        assertEquals(listOf("/run/flatdroid/fdsec", "--tty", "/dev/pts/4", "--", "/bin/sh", "-l"), inv.argv.takeLast(6))
+        assertEquals("foot", inv.env["TERM"])
+        assertEquals("/root", inv.env["HOME"])
+        // Without fdsec nothing could hand the command the terminal.
+        assertThrows(IllegalArgumentException::class.java) { ProotCommand.alpine(paths, binds, listOf("/bin/sh"), filter = null, tty = "/dev/pts/4") }
+        assertThrows(IllegalArgumentException::class.java) { ProotCommand.alpine(paths, binds, listOf("/bin/sh"), environment = mapOf("A B" to "x")) }
+    }
+
+    @Test
     fun fakeProcAndExtraBindsComeBeforeTheCommand() {
         val inv = ProotCommand.alpine(
             paths,

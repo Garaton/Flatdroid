@@ -15,6 +15,7 @@ import com.garathon.flatdroid.flatpak.InstalledApps
 import com.garathon.flatdroid.session.Sensor
 import com.garathon.flatdroid.session.SessionController
 import com.garathon.flatdroid.session.SessionState
+import com.garathon.flatdroid.setup.PackageGroup
 import com.garathon.flatdroid.setup.SetupController
 import com.garathon.flatdroid.setup.rootfs.AndroidTarFs
 import com.garathon.flatdroid.setup.rootfs.deleteTree
@@ -46,7 +47,12 @@ import kotlinx.coroutines.launch
 import java.io.File
 
 /** A launch on hold while the user answers a question. */
-data class PendingLaunch(val appId: String, val prepareElectron: Boolean)
+data class PendingLaunch(
+    val appId: String,
+    val prepareElectron: Boolean,
+    /** The Alpine packages the user agreed to add before this launch ([SessionState.PackagesOffer]). */
+    val addPackages: PackageGroup? = null,
+)
 
 /**
  * A launch on hold for the microphone and camera questions asked before it (notifications off):

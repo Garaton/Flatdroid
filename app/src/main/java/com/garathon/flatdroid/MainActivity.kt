@@ -64,6 +64,8 @@ import com.garathon.flatdroid.ui.home.HomeViewModel
 import com.garathon.flatdroid.ui.storage.StorageFlows
 import com.garathon.flatdroid.viewer.ViewerActivity
 import com.garathon.flatdroid.session.Sensor
+import com.garathon.flatdroid.session.AlpineShell
+import com.garathon.flatdroid.session.AlpineShellUser
 import com.garathon.flatdroid.session.SessionService
 import com.garathon.flatdroid.session.SessionState
 import com.garathon.flatdroid.session.ExternalViewer
@@ -74,6 +76,7 @@ import com.garathon.flatdroid.settings.UserSettings
 import com.garathon.flatdroid.storage.tasks.ImportTarget
 import com.garathon.flatdroid.storage.sizes.SavedSizes
 import com.garathon.flatdroid.storage.tasks.StorageTasks
+import com.garathon.flatdroid.setup.PackageGroup
 import com.garathon.flatdroid.setup.ResetMode
 import com.garathon.flatdroid.setup.SetupController
 import com.garathon.flatdroid.setup.SetupService
@@ -81,6 +84,7 @@ import com.garathon.flatdroid.setup.SetupStep
 import com.garathon.flatdroid.ui.setup.CommandState
 import com.garathon.flatdroid.ui.dialogs.ElectronDialog
 import com.garathon.flatdroid.ui.dialogs.FilesChangedDialog
+import com.garathon.flatdroid.ui.dialogs.PackagesDialog
 import com.garathon.flatdroid.ui.home.HomeScreen
 import com.garathon.flatdroid.ui.home.LaunchCover
 import com.garathon.flatdroid.ui.home.InstallLinkDialog
@@ -466,6 +470,22 @@ class MainActivity : ComponentActivity() {
                 onDismiss = { SessionController.ended(null) },
             )
         }
+        (session.state as? SessionState.PackagesOffer)?.let { offer ->
+            val monospace = remember { PackageGroup.ANDROID_MONOSPACE.isFile }
+            val policy = mobileDataPolicy()
+            PackagesDialog(
+                offer, nameOf(offer.appId), offer.group.downloadMb(monospace), metered = policy != MobileData.ALWAYS,
+                onAccept = {
+                    SessionController.ended(null)
+                    when {
+                        mobileDataPolicy() == MobileData.NEVER -> Toast.makeText(this, R.string.mobile_data_blocked, Toast.LENGTH_LONG).show()
+                        offer.appId == AlpineShell.ID -> openAlpineShell(null, offer.group)
+                        else -> continueLaunch(PendingLaunch(offer.appId, prepareElectron = false, addPackages = offer.group))
+                    }
+                },
+                onDismiss = { SessionController.ended(null) },
+            )
+        }
         (session.state as? SessionState.FilesChanged)?.let { changed ->
             FilesChangedDialog(
                 changed, nameOf(changed.appId),
@@ -612,6 +632,8 @@ class MainActivity : ComponentActivity() {
                         onReset = { mode -> go(Screen.Home); resetAlpine(mode) },
                         onResetSettings = { viewModel.applySettings(UserSettings.defaults(languages), MainViewModel.AfterApply.HOME) },
                         onTerminal = { go(Screen.Terminal) },
+                        canStartSession = !sessionBusy && !taskRunning,
+                        onAlpineShell = { user -> go(Screen.Home); openAlpineShell(user) },
                         apps = apps.orEmpty(),
                         taskText = task.running?.let { task.phase ?: FlatpakTaskService.describe(this@MainActivity, it) },
                         hasCamera = remember { AndroidCameras.present(this@MainActivity) },
@@ -889,8 +911,20 @@ class MainActivity : ComponentActivity() {
         home.lastStarted = pending.appId
         // Started from this window: when the app is up and this window is in front, its viewer opens.
         home.autoOpenApp = pending.appId
-        if (pending.prepareElectron) SessionService.prepareElectronAndLaunch(this, pending.appId, answers)
-        else SessionService.launch(this, pending.appId, answers)
+        when {
+            pending.prepareElectron -> SessionService.prepareElectronAndLaunch(this, pending.appId, answers)
+            pending.addPackages != null -> SessionService.addPackagesAndLaunch(this, pending.appId, pending.addPackages, answers)
+            else -> SessionService.launch(this, pending.appId, answers)
+        }
+    }
+
+    /**
+     * Alpine's shell in a window, as [user] (null: the saved setting), after adding [packages] when
+     * the user agreed to; its viewer opens when it is up, as an app's does.
+     */
+    private fun openAlpineShell(user: AlpineShellUser?, packages: PackageGroup? = null) {
+        home.autoOpenApp = AlpineShell.ID
+        SessionService.alpineShell(this, user, packages)
     }
 
     /** Asks Android for the microphone permission; the answer reaches the Permissions page ([SettingsDraftModel.permissionAnswer]). */

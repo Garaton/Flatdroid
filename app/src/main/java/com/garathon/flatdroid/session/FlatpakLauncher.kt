@@ -5,11 +5,8 @@ import android.content.Context
 import android.content.res.Configuration
 import android.hardware.display.DisplayManager
 import android.media.AudioManager
-import android.os.Build
-import android.os.FileObserver
 import android.os.Handler
 import android.os.Looper
-import android.os.SystemClock
 import android.system.Os
 import android.view.Display
 import android.view.Surface
@@ -18,7 +15,6 @@ import com.garathon.flatdroid.BuildConfig
 import com.garathon.flatdroid.R
 import com.garathon.flatdroid.alpine.AlpineEnvironment
 import com.garathon.flatdroid.alpine.dns.ResolvConfRefresher
-import com.garathon.flatdroid.alpine.GuestFiles
 import com.garathon.flatdroid.audio.AudioPlayer
 import com.garathon.flatdroid.audio.MicStreamer
 import com.garathon.flatdroid.audio.MicrophoneSession
@@ -54,7 +50,6 @@ import com.garathon.flatdroid.launcher.ProotExit
 import com.garathon.flatdroid.launcher.PlanResult
 import com.garathon.flatdroid.launcher.RootLayout
 import com.garathon.flatdroid.flatpak.InstalledApps
-import com.garathon.flatdroid.proot.AlpineBinds
 import com.garathon.flatdroid.proot.DevNodes
 import com.garathon.flatdroid.proot.Fdsec
 import com.garathon.flatdroid.proot.Fdv4l2
@@ -77,6 +72,10 @@ import com.garathon.flatdroid.settings.Rendering
 import com.garathon.flatdroid.settings.Resampler
 import com.garathon.flatdroid.settings.SecuritySettings
 import com.garathon.flatdroid.settings.UserSettings
+import com.garathon.flatdroid.setup.AlpineSetup
+import com.garathon.flatdroid.setup.ApkProgress
+import com.garathon.flatdroid.setup.ApkSummary
+import com.garathon.flatdroid.setup.PackageGroup
 import com.garathon.flatdroid.setup.SetupController
 import com.garathon.flatdroid.setup.rootfs.deleteTree
 import com.garathon.flatdroid.setup.rootfs.hasLinkBelow
@@ -96,8 +95,6 @@ import com.garathon.flatdroid.util.io.writeTextAtomically
 import java.io.File
 import java.io.IOException
 import java.util.TimeZone
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -115,18 +112,12 @@ class FlatpakLauncher(private val context: Context) {
     private val arch = env.arch
     private val installation = FlatpakInstallation(env.flatpakDir, arch)
     private val planner = LaunchPlanner(installation, arch, File(env.paths().l2sDir), AndroidLinkFs::readlink, DevNodes::hostHas)
-    private val sessionDir = AppData.sessionDir(context)
-    private val x11Dir = File(sessionDir, "x11")
-    private val pulseDir = File(sessionDir, "pulse")
-    private val vncDir = File(sessionDir, "vnc")
-    private val waylandDir = File(sessionDir, "wayland")
+    /** The helpers of the session [run] starts. */
+    private val helpers = SessionHelpers(context, env)
+    private val sessionDir = helpers.sessionDir
     private val etcDir = File(sessionDir, "etc")
     private val hostCommandsDir = File(sessionDir, "host-commands")
     private val desktopDir = File(sessionDir, "xdg")
-    // The daemon's socket stays among the helpers; the app's root gets only the proxy's directory.
-    private val busDaemonDir = File(sessionDir, "dbus")
-    private val busProxyDir = File(sessionDir, "bus")
-    private val pipewireDir = File(sessionDir, "pipewire")
     private val cameraPipeDir = File(sessionDir, "camera")
     private val cameraConfigDir = File(sessionDir, "camera-config")
     /** Device mode: the cameras' pipes, each bound at its /dev/video* in the app's root, and their list ([Fdv4l2]). */
@@ -164,7 +155,7 @@ class FlatpakLauncher(private val context: Context) {
             val now = detail to fraction?.let { (it * 100).toInt() }
             if (now != last) {
                 last = now
-                SessionController.preparingElectron(appId, detail, fraction)
+                SessionController.preparing(appId, detail, fraction)
             }
         }
     }
@@ -178,7 +169,7 @@ class FlatpakLauncher(private val context: Context) {
 
     /**
      * Launches [appId] and returns when it exits. Returns false without launching if the user
-     * must first agree to an Electron swap (the offer is then in [SessionController]). [answers]:
+     * must first agree to an Electron swap or to Alpine packages (the offer is then in [SessionController]). [answers]:
      * the user's answers about the microphone and camera when asked before the launch.
      */
     fun run(appId: String, answers: Map<Sensor, Boolean> = emptyMap()): Boolean {
@@ -201,7 +192,6 @@ class FlatpakLauncher(private val context: Context) {
         if (StorageTasks.busyWith(appId) || (settings.homeMode == HomeMode.TEMPORARY && StorageTasks.exportingTempHome(StorageTaskService.pendingTasks(context)))) {
             throw LaunchException(context.getString(R.string.launch_storage_busy))
         }
-        if (InstalledApps(context).needsTerminal(appId)) throw LaunchException(context.getString(R.string.launch_needs_terminal))
         var plan = when (val result = plan(appId, settings, userSettings)) {
             is PlanResult.Ready -> result.plan
             is PlanResult.ElectronSwapNeeded -> {
@@ -218,6 +208,11 @@ class FlatpakLauncher(private val context: Context) {
                 return false
             }
             else -> throw LaunchException(describe(result))
+        }
+        // X11, or a terminal app's terminal, the first time an app needs them: the user is asked first.
+        SessionPackages.missing(context, PackageGroup.needed(plan.wayland, plan.terminal))?.let { group ->
+            SessionController.offerPackages(SessionState.PackagesOffer(appId, group))
+            return false
         }
         store.update { it.copy(lastOpened = System.currentTimeMillis()) }
 
@@ -282,19 +277,21 @@ class FlatpakLauncher(private val context: Context) {
         }
         val outputRate = outputRate()
         val micRate = MicStreamer.rate()
-        writeSessionFiles(
-            password, wayvncLogin = plan.wayland && externalViewer, titleBars = userSettings?.windowTitleBars ?: true,
-            darkDecorations = isDarkTheme(userSettings),
-            pulseScript = if (audio) PulseScript.text(outputRate, microphone, micRate) else null,
-            busArgs = SessionBus.proxyArgs(
-                appId, plan.app.metadata.sessionBusPolicy, camera = portalNodes.isNotEmpty(),
-                wholeBus = SessionBus.WHOLE_BUS in plan.app.metadata.context.sockets,
-                watchCamera = watchCameraPortal,
+        helpers.writeFiles(
+            SessionHelpers.Files(
+                password, wayvncLogin = plan.wayland && externalViewer, titleBars = userSettings?.windowTitleBars ?: true,
+                darkDecorations = isDarkTheme(userSettings),
+                pulseScript = if (audio) PulseScript.text(outputRate, microphone, micRate) else null,
+                busArgs = SessionBus.proxyArgs(
+                    appId, plan.app.metadata.sessionBusPolicy, camera = portalNodes.isNotEmpty(),
+                    wholeBus = SessionBus.WHOLE_BUS in plan.app.metadata.context.sockets,
+                    watchCamera = watchCameraPortal,
+                ),
+                terminalTitle = if (plan.terminal) InstalledApps(context).name(appId) ?: appId else null,
+                clipboard = settings.sharesClipboard,
             ),
-            cameraNodes = portalNodes,
-            cameraDevices = deviceList,
-            androidClasses = androidClasses,
         )
+        writeSessionFiles(cameraNodes = portalNodes, cameraDevices = deviceList, androidClasses = androidClasses)
         createCameraMountPoints(plan.binds.copy(cameraBinds = cameraBinds))
         // After both, which create the directories it checks: they live in the work folder, which a start of Flatdroid empties, or in the cache, which Android may
         // clear at any time, and a fresh install has none yet.
@@ -303,9 +300,6 @@ class FlatpakLauncher(private val context: Context) {
         SessionController.starting(appId, context.getString(R.string.session_starting_display))
         val frameRate = userSettings?.frameRate ?: UserSettings.DEFAULT_FRAME_RATE
         val resampler = userSettings?.resampler ?: Resampler.FAST
-        // Any of the proots below: fdsec refused to start its command, so nothing ran in it.
-        val filterRefused = AtomicBoolean(false)
-        val helpersStarted = CountDownLatch(1)
         var app: ProotProcess? = null
         // When the app first started running, for the time it was used.
         var runningSince: Long? = null
@@ -313,29 +307,25 @@ class FlatpakLauncher(private val context: Context) {
         var cameraHelpers: ProotProcess? = null
         // What each of these starts is stopped in the finally, whichever of the later ones fails.
         var mic: MicrophoneSession? = null
-        var helpersProot: ProotProcess? = null
         var dns: ResolvConfRefresher? = null
         var portal: SessionPortal? = null
         val streamers = LinkedHashMap<String, FrameStreamer>()
         var camera: CameraSession? = null
         try {
             mic = if (!microphone) null else {
-                MicrophoneSession(context, File(pulseDir, PulseScript.MIC_PIPE), micRate, micAlways, answers[Sensor.MICROPHONE])
+                MicrophoneSession(context, File(helpers.pulseDir, PulseScript.MIC_PIPE), micRate, micAlways, answers[Sensor.MICROPHONE])
             }
-            val helpers = startHelpers(
+            helpers.start(
                 SessionScript.command(
                     "${screenWidth}x$screenHeight", frameRate, audio, resampler, sessionBus = true,
                     camera = portalNodes.isNotEmpty(), clipboard = settings.sharesClipboard, wayland = plan.wayland,
                     externalViewer = externalViewer, interfaceSize = settings.interfaceSize,
-                    memfd = SessionScript.kernelHasMemfd(Os.uname().release),
+                    memfd = SessionScript.kernelHasMemfd(Os.uname().release), terminal = plan.terminal,
                 ),
                 audio,
                 Fdsec.Filter(extraSyscalls = security.extraSyscallFilter),
-            ) { line ->
-                if (Fdsec.refused(line)) filterRefused.set(true)
-                if (line == SessionScript.DISPLAY_READY) helpersStarted.countDown()
-            }
-            helpersProot = helpers
+                terminal = plan.terminal,
+            )
             for (index in cameraNodes.indices) {
                 val node = cameraNodes[index]
                 val pipe = if (cameraDevices) File(videoDir, "video$index") else File(cameraPipeDir, node.name)
@@ -366,19 +356,15 @@ class FlatpakLauncher(private val context: Context) {
             }
             // A network change during the session (Wi-Fi to mobile data, Private DNS) reaches the app's resolv.conf.
             dns = ResolvConfRefresher(context, listOf(File(etcDir, "resolv.conf"))).apply { start() }
-            try {
-                val display = if (plan.wayland) File(waylandDir, GuestPaths.WAYLAND_SOCKET) else File(x11Dir, SessionScript.X_SOCKET)
-                waitForFile(display, helpers, DISPLAY_TIMEOUT_MS, context.getString(R.string.launch_display_failed))
-                if (!helpersRunning(helpersStarted, helpers)) throw LaunchException(context.getString(R.string.launch_display_failed))
-            } catch (e: LaunchException) {
-                throw if (filterRefused.get()) LaunchException(context.getString(R.string.launch_filter_refused)) else e
-            }
-            if (!waitForFile(File(busProxyDir, SessionBus.SOCKET), helpers, BUS_TIMEOUT_MS, null)) {
+            helpers.awaitDisplay(plan.wayland)
+            // A terminal app's terminal, which foot's command names once it has given it up.
+            val tty = if (plan.terminal) helpers.awaitTerminal() else null
+            if (!helpers.waitForFile(File(helpers.busProxyDir, SessionBus.SOCKET), BUS_TIMEOUT_MS, null)) {
                 SessionController.log("[flatdroid] the session bus did not start; the app has none")
             } else {
                 // Before the camera's portal, which asks Flatdroid for the settings, and before the app.
                 portal = SessionPortal.open(
-                    context, File(busDaemonDir, SessionBus.SOCKET),
+                    context, File(helpers.busDaemonDir, SessionBus.SOCKET),
                     role = if (portalNodes.isNotEmpty()) Portal.Role.BACKEND else Portal.Role.PORTAL,
                     appNetwork = settings.networkAllowed(appContext.shared), user = userSettings,
                     hostPath = plan.binds::hostOf, keepScreenOn = SessionController::keepScreenOn,
@@ -386,16 +372,16 @@ class FlatpakLauncher(private val context: Context) {
                     cameraAsked = if (!watchCameraPortal) null else AtomicBoolean().let { seen -> { if (seen.compareAndSet(false, true)) cameraPortalSeen(store) } },
                 )
                 camera?.takeIf { portalNodes.isNotEmpty() }?.let {
-                    cameraHelpers = startCamera(helpers, it, Fdsec.Filter(extraSyscalls = security.extraSyscallFilter, noInternet = true), filterRefused)
+                    cameraHelpers = startCamera(it, Fdsec.Filter(extraSyscalls = security.extraSyscallFilter, noInternet = true))
                 }
             }
             if (!audio) {
                 SessionController.log("[flatdroid] sound is off for this app; PulseAudio isn't started")
-            } else if (!waitForFile(File(pulseDir, PulseScript.NATIVE_SOCKET), helpers, AUDIO_TIMEOUT_MS, null)) {
+            } else if (!helpers.waitForFile(File(helpers.pulseDir, PulseScript.NATIVE_SOCKET), AUDIO_TIMEOUT_MS, null)) {
                 SessionController.log("[flatdroid] PulseAudio did not start; the app has no audio")
             } else {
                 player = AudioPlayer(
-                    File(pulseDir, PulseScript.SIMPLE_SOCKET), outputRate,
+                    File(helpers.pulseDir, PulseScript.SIMPLE_SOCKET), outputRate,
                     latencyMs = userSettings?.audioLatencyMs ?: UserSettings.DEFAULT_AUDIO_LATENCY_MS,
                     outputMode = userSettings?.audioOutputMode ?: AudioOutputMode.POWER_SAVING,
                 )
@@ -431,7 +417,7 @@ class FlatpakLauncher(private val context: Context) {
                 // The app's own: a helper's fdsec refusing later (sound, say) doesn't make the app's exit a failure.
                 val appRefused = AtomicBoolean(false)
                 app = ProotRunner.start(
-                    ProotCommand.flatpak(env.paths(), plan.binds, plan.environment, plan.command, plan.filter),
+                    ProotCommand.flatpak(env.paths(), plan.binds, plan.environment, plan.command, plan.filter, tty),
                     File(plan.binds.root),
                 ) { line ->
                     if (Fdsec.refused(line)) appRefused.set(true)
@@ -454,9 +440,10 @@ class FlatpakLauncher(private val context: Context) {
                 SessionController.running(
                     if (externalViewer) SessionState.Running(appId, password, username = WaylandVnc.USERNAME.takeIf { plan.wayland })
                     else SessionState.Running(
-                        appId, password, socket = File(vncDir, SessionScript.VNC_SOCKET).path, wayland = plan.wayland,
+                        appId, password, socket = File(helpers.vncDir, SessionScript.VNC_SOCKET).path, wayland = plan.wayland,
                         followPercent = settings.resolution.percent,
-                        waylandSocket = File(waylandDir, GuestPaths.WAYLAND_SOCKET).path.takeIf { plan.wayland },
+                        fitAboveKeyboard = plan.terminal,
+                        waylandSocket = File(helpers.waylandDir, GuestPaths.WAYLAND_SOCKET).path.takeIf { plan.wayland },
                         shareClipboard = settings.sharesClipboard,
                         outputRefresh = frameRate.takeIf { plan.wayland && it <= SessionScript.MAX_OUTPUT_REFRESH },
                     ),
@@ -509,6 +496,10 @@ class FlatpakLauncher(private val context: Context) {
                 // Here the app ended by itself (a Stop cancels the session before this). proot exits 0
                 // when the app was killed by a signal, so its report decides; otherwise the exit code does.
                 ending = ProotExit.ending(signal, code)
+                // A terminal app that failed keeps its window until a key, so what it printed can be
+                // read. One whose window was closed (its terminal hung up, which apps end on in their
+                // own ways) closed as the user asked, whatever it exited with.
+                if (tty != null && ending != null && !helpers.holdTerminal(tty, ending!!)) ending = null
                 return true
             }
         } finally {
@@ -539,7 +530,7 @@ class FlatpakLauncher(private val context: Context) {
             step { cameraHelpers?.stop() }
             step { camera?.close() ?: streamers.values.forEach { it.close() } }
             SessionController.onDisplayResized = null
-            step { helpersProot?.stop() }
+            step { helpers.stop() }
             step { endEscaped() }
             // proot leaves the private binds' mount points behind in the shared home, where the
             // user sees them (empty .ssh, .bashrc, .config and the rest). Remove the empty ones.
@@ -698,35 +689,26 @@ class FlatpakLauncher(private val context: Context) {
      * the [camera]'s streamers writing to their pipes; waits until the nodes exist and the portal has
      * started, so the app sees its cameras from the start. Null when PipeWire didn't start.
      */
-    private fun startCamera(helpers: ProotProcess, camera: CameraSession, filter: Fdsec.Filter, refused: AtomicBoolean): ProotProcess? {
-        if (!waitForFile(File(pipewireDir, CameraScript.PIPEWIRE_SOCKET), helpers, CAMERA_TIMEOUT_MS, null)) {
+    private fun startCamera(camera: CameraSession, filter: Fdsec.Filter): ProotProcess? {
+        if (!helpers.waitForFile(File(helpers.pipewireDir, CameraScript.PIPEWIRE_SOCKET), CAMERA_TIMEOUT_MS, null)) {
             SessionController.log("[flatdroid] PipeWire did not start; the app has no camera")
             return null
         }
         val binds = listOf(
             File(sessionDir, "camera.sh").path to CameraScript.GUEST_SCRIPT,
-            pipewireDir.path to CameraScript.GUEST_PIPEWIRE_DIR,
+            helpers.pipewireDir.path to CameraScript.GUEST_PIPEWIRE_DIR,
             cameraPipeDir.path to CameraScript.GUEST_PIPE_DIR,
             cameraConfigDir.path to CameraScript.GUEST_CONFIG_DIR,
-            busDaemonDir.path to SessionBus.GUEST_DAEMON_DIR,
+            helpers.busDaemonDir.path to SessionBus.GUEST_DAEMON_DIR,
         )
         val process = env.start(listOf("/bin/sh", CameraScript.GUEST_SCRIPT), binds, asAppUser = true, filter = filter) { line ->
-            if (Fdsec.refused(line)) refused.set(true)
+            if (Fdsec.refused(line)) helpers.filterRefused.set(true)
             SessionController.log("[camera] $line")
         }
         // Links and readiness come through the events pipe, which the reader opens as the script does.
         camera.start()
         if (!camera.awaitReady(CAMERA_TIMEOUT_MS)) SessionController.log("[flatdroid] the camera's helpers did not get ready in time")
         return process
-    }
-
-    /** Waits for the helpers' script to have started them all; false if it ended first, or never gets there. */
-    private fun helpersRunning(started: CountDownLatch, helpers: ProotProcess): Boolean {
-        val end = SystemClock.uptimeMillis() + DISPLAY_TIMEOUT_MS
-        while (!started.await(HELPERS_POLL_MS, TimeUnit.MILLISECONDS)) {
-            if (!helpers.isAlive || SystemClock.uptimeMillis() > end) return false
-        }
-        return true
     }
 
     /** The rate Android's mixer runs at, so PulseAudio's output needs no second resampling. */
@@ -802,6 +784,7 @@ class FlatpakLauncher(private val context: Context) {
             extraSyscalls = if (developerOptions) settings.blocksExtraSyscalls else security.extraSyscallFilter,
             limitDevices = security.limitDevices,
             reduceMotion = user?.reduceMotion == true,
+            terminal = InstalledApps(context).runsInTerminal(appId),
             softwareRendering = when (settings.rendering) {
                 Rendering.SOFTWARE -> true
                 Rendering.GL -> false
@@ -869,17 +852,17 @@ class FlatpakLauncher(private val context: Context) {
                     else -> File(etcDir, name) // resolv.conf and the machine-id's copy, written per launch
                 }
             },
-            x11Sockets = x11Dir,
-            waylandSockets = waylandDir,
-            pulseSockets = pulseDir,
+            x11Sockets = helpers.x11Dir,
+            waylandSockets = helpers.waylandDir,
+            pulseSockets = helpers.pulseDir,
             fontDirs = launcher.fontDirs,
-            hostFonts = ANDROID_FONTS.takeIf { androidFonts && it.isDirectory },
+            hostFonts = SessionHelpers.ANDROID_FONTS.takeIf { androidFonts && it.isDirectory },
             desktopConfig = desktopDir,
             userDirs = File(etcDir, USER_DIRS),
             hostCommands = hostCommandsDir,
             zypakStandIn = File(hostCommandsDir, ZYPAK),
             sdcard = SharedHome.storageRoot().takeIf { settings.sdcard && settings.homeMode != HomeMode.ANDROID && SharedHome.broadAccess(context) },
-            sessionBus = busProxyDir,
+            sessionBus = helpers.busProxyDir,
             // Under the app's cache, so clearing caches drops it (fontconfig then regenerates it).
             runtimeCache = File(cache, RUNTIME_CACHE_DIR),
             runtimeDir = File(tmpBase, "run"),
@@ -1025,49 +1008,19 @@ class FlatpakLauncher(private val context: Context) {
     }
 
     /**
-     * Files every launch gets fresh: the shared /etc files (an app could have changed them, since
-     * binds are writable), a copy of the machine-id, resolv.conf for the current network, and the
-     * VNC password file, and the helpers' scripts ([pulseScript] only with sound) and the session
-     * bus's configuration and proxy arguments ([busArgs]). Old sockets are removed.
+     * The app's side of the session's files, fresh for every launch: the shared /etc files (an app
+     * could have changed them, since binds are writable), a copy of the machine-id, resolv.conf for
+     * the current network, and the camera's script, pipes and device-mode entries.
      */
-    private fun writeSessionFiles(
-        password: String?, wayvncLogin: Boolean, titleBars: Boolean, darkDecorations: Boolean, pulseScript: String?,
-        busArgs: List<String>, cameraNodes: List<CameraScript.Node>, cameraDevices: List<Fdv4l2.Device>,
-        androidClasses: List<String>,
-    ) {
+    private fun writeSessionFiles(cameraNodes: List<CameraScript.Node>, cameraDevices: List<Fdv4l2.Device>, androidClasses: List<String>) {
         val launcher = AppData.launcherFiles(context)
         launcher.write()
         File(etcDir, "machine-id").writeTextAtomically(launcher.machineId.readText(), durable = false)
         File(etcDir, "resolv.conf").writeTextAtomically(env.resolvConf(), durable = false)
-        for (dir in listOf(x11Dir, pulseDir, vncDir, waylandDir, busDaemonDir, busProxyDir, pipewireDir, cameraPipeDir, cameraConfigDir, videoDir, cameraSysDir, emptyDir)) {
+        for (dir in listOf(cameraPipeDir, cameraConfigDir, videoDir, cameraSysDir, emptyDir)) {
             AndroidTarFs.deleteTree(dir)
             dir.mkdirs()
         }
-        // The compositor's XDG_RUNTIME_DIR: wlroots wants it private.
-        Os.chmod(waylandDir.path, 0x1c0) // 0700
-        if (password != null) {
-            File(vncDir, "passwd").apply {
-                writeBytes(VncPassword.file(password))
-                Os.chmod(path, 0x180) // 0600
-            }
-        }
-        val wayvncConfig = File(vncDir, File(SessionScript.GUEST_WAYVNC_CONFIG).name)
-        // Only an external viewer logs in; Flatdroid's own uses the private socket.
-        if (wayvncLogin && password != null) {
-            wayvncConfig.writeText(WaylandVnc.config(password))
-            Os.chmod(wayvncConfig.path, 0x180) // 0600
-        }
-        File(sessionDir, "session.sh").writeTextAtomically(SessionScript.TEXT, durable = false)
-        File(sessionDir, "openbox-rc.xml").writeTextAtomically(GuestFiles.openboxRc(titleBars), durable = false)
-        val themerc = GuestFiles.themerc(darkDecorations)
-        File(sessionDir, "openbox-themerc").writeTextAtomically(themerc, durable = false)
-        val labwcDir = File(vncDir, File(SessionScript.GUEST_LABWC_DIR).name).apply { mkdirs() }
-        File(labwcDir, "rc.xml").writeTextAtomically(GuestFiles.labwcRc(titleBars), durable = false)
-        File(labwcDir, GuestFiles.LABWC_THEME_OVERRIDE).writeTextAtomically(themerc, durable = false)
-        val pulseFile = File(sessionDir, "pulse.pa")
-        if (pulseScript != null) pulseFile.writeTextAtomically(pulseScript, durable = false) else pulseFile.delete()
-        File(sessionDir, "dbus.conf").writeTextAtomically(SessionBus.CONFIG, durable = false)
-        File(sessionDir, "proxy.args").writeAtomically(durable = false) { it.write(SessionBus.argsFile(busArgs)) }
         val cameraScript = File(sessionDir, "camera.sh")
         if (cameraNodes.isEmpty()) {
             cameraScript.delete()
@@ -1150,70 +1103,6 @@ class FlatpakLauncher(private val context: Context) {
         return override ?: Fdv4l2.DEFAULT_FORMATS
     }
 
-    /**
-     * Starts [command] ([SessionScript.command]) behind [filter], with PulseAudio's script bound
-     * when there is [sound]; [onLine] also gets each line of the helpers' output, before it is logged.
-     */
-    private fun startHelpers(command: List<String>, sound: Boolean, filter: Fdsec.Filter, onLine: (String) -> Unit): ProotProcess {
-        val binds = listOf(
-            x11Dir.path to GuestPaths.X11_DIR,
-            pulseDir.path to GuestPaths.PULSE_DIR,
-            vncDir.path to SessionScript.GUEST_VNC_DIR,
-            waylandDir.path to GuestPaths.WAYLAND_DIR,
-            File(sessionDir, "session.sh").path to SessionScript.GUEST_SCRIPT,
-            File(sessionDir, "openbox-rc.xml").path to SessionScript.GUEST_OPENBOX_RC,
-            File(sessionDir, "openbox-themerc").path to SessionScript.GUEST_OPENBOX_THEMERC,
-            busDaemonDir.path to SessionBus.GUEST_DAEMON_DIR,
-            busProxyDir.path to SessionBus.GUEST_PROXY_DIR,
-            pipewireDir.path to CameraScript.GUEST_PIPEWIRE_DIR,
-            File(sessionDir, "dbus.conf").path to SessionBus.GUEST_CONFIG,
-            File(sessionDir, "proxy.args").path to SessionBus.GUEST_PROXY_ARGS,
-        ) + if (sound) listOf(File(sessionDir, "pulse.pa").path to SessionScript.GUEST_PULSE_SCRIPT) else emptyList()
-        return env.start(command, binds, asAppUser = true, filter = filter) { line ->
-            onLine(line)
-            SessionController.log("[display] $line")
-        }
-    }
-
-    /**
-     * Waits until [file] exists, woken by a [FileObserver] on its directory as soon as it is
-     * created. Fails with [error] (or returns false when it is null) on timeout or when the
-     * helpers have exited, which is checked every [HELPER_CHECK_MS].
-     */
-    private fun waitForFile(file: File, helpers: ProotProcess, timeoutMs: Long, error: String?): Boolean {
-        val created = CountDownLatch(1)
-        val observer = directoryObserver(file.parentFile!!) { name -> if (name == file.name) created.countDown() }
-        observer.startWatching()
-        try {
-            val deadline = System.currentTimeMillis() + timeoutMs
-            while (!file.exists()) {
-                if (!helpers.isAlive || System.currentTimeMillis() > deadline) {
-                    if (error != null) throw LaunchException(error)
-                    return false
-                }
-                created.await(HELPER_CHECK_MS, TimeUnit.MILLISECONDS)
-            }
-            return true
-        } finally {
-            observer.stopWatching()
-        }
-    }
-
-    /** Calls [onCreated] with the name of each entry created in [dir]. */
-    private fun directoryObserver(dir: File, onCreated: (String) -> Unit): FileObserver {
-        val mask = FileObserver.CREATE or FileObserver.MOVED_TO
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            object : FileObserver(dir, mask) {
-                override fun onEvent(event: Int, path: String?) { path?.let(onCreated) }
-            }
-        } else {
-            @Suppress("DEPRECATION")
-            object : FileObserver(dir.path, mask) {
-                override fun onEvent(event: Int, path: String?) { path?.let(onCreated) }
-            }
-        }
-    }
-
     private fun describe(result: PlanResult): String = when (result) {
         is PlanResult.NotInstalled -> context.getString(R.string.launch_not_installed, result.appId)
         is PlanResult.RuntimeMissing -> context.getString(R.string.launch_runtime_missing, result.runtime)
@@ -1223,17 +1112,12 @@ class FlatpakLauncher(private val context: Context) {
     }
 
     private companion object {
-        /** Android's own fonts, readable by every app. */
-        val ANDROID_FONTS = File("/system/fonts")
-        const val DISPLAY_TIMEOUT_MS = 30_000L
-        const val HELPERS_POLL_MS = 50L
         const val AUDIO_TIMEOUT_MS = 10_000L
         const val BUS_TIMEOUT_MS = 10_000L
         /** Flatdroid's zypak, beside the "run on the host" stand-ins. */
         private const val ZYPAK = "zypak"
         const val CAMERA_TIMEOUT_MS = 20_000L
         const val PRELOAD = "LD_PRELOAD"
-        const val HELPER_CHECK_MS = 250L
         const val DEFAULT_OUTPUT_RATE = 48_000
         const val USER_DIRS = "user-dirs.dirs"
         const val UTC = "UTC"

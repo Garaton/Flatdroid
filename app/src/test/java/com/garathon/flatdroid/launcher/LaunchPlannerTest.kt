@@ -225,6 +225,39 @@ class LaunchPlannerTest {
     }
 
     @Test
+    fun aTerminalAppGetsAWaylandSessionWithoutX11() {
+        val runtime = runtimeWithGl()
+        val wayland = tmp.newFolder("wayland")
+        fun plan(id: String, sockets: String, force: Boolean = false): LaunchPlan {
+            val files = inst.app(id, metadata = appMetadata(id, "app", extra = "[Context]\nsockets=$sockets\n"))
+            File(files, "bin").mkdirs()
+            File(files, "bin/app").writeBytes(ExecutableTest.elf(0xb7))
+            return Ready(planner.plan(id, dirs.copy(waylandSockets = wayland), LaunchOptions(forceX11 = force, terminal = true)))
+        }
+        // No display of its own: the session is Wayland for its terminal, and the app gets no display at all.
+        val plain = plan("org.example.Game", "pulseaudio;")
+        assertTrue(plain.wayland)
+        assertTrue(plain.terminal)
+        assertEquals(null, plain.binds.x11Sockets)
+        assertEquals(null, plain.binds.waylandSockets)
+        assertEquals(null, plain.environment["DISPLAY"])
+        assertEquals(null, plain.environment["WAYLAND_DISPLAY"])
+        assertEquals(LaunchPlanner.FALLBACK_TERM, plain.environment["TERM"])
+        assertEquals("truecolor", plain.environment["COLORTERM"])
+        // One that takes X11 only gets none (no X server runs); one that takes Wayland keeps it, Force X11 or not.
+        assertEquals(null, plan("org.example.X11Only", "x11;").binds.x11Sockets)
+        val both = plan("org.example.Both", "x11;wayland;", force = true)
+        assertTrue(both.wayland)
+        assertEquals(wayland.path, both.binds.waylandSockets)
+        assertEquals(null, both.binds.x11Sockets)
+        // The terminal's own name where the runtime describes it.
+        File(runtime, LaunchPlanner.FOOT_TERMINFO).apply { parentFile!!.mkdirs() }.writeText("")
+        assertEquals(LaunchPlanner.FOOT_TERM, plan("org.example.Game2", "pulseaudio;").environment["TERM"])
+        // Not a terminal app: no TERM.
+        assertEquals(null, Ready(planner.plan("org.example.Game", dirs)).environment["TERM"])
+    }
+
+    @Test
     fun theSessionBusIsBoundWithItsAddress() {
         inst.runtime("org.kde.Platform", "6.10", "[Runtime]\nname=org.kde.Platform\n")
         val files = inst.app("org.kde.kmines", metadata = appMetadata("org.kde.kmines", "kmines", "org.kde.Platform/aarch64/6.10"))

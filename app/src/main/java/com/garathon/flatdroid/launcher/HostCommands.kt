@@ -153,9 +153,15 @@ object HostCommands {
         |""".trimMargin()
 
     /**
-     * As Flatpak's host helper starts a command: in a session of its own, with the terminal on its
-     * standard input (if any) as its controlling terminal, so a shell has job control. `-w` waits
-     * when setsid has to fork (the caller leads its process group) and passes the exit status on.
+     * As Flatpak's host helper starts a command: with the terminal on its standard input (if any)
+     * as its controlling terminal, so a shell has job control. A caller without a controlling
+     * terminal gets a session of its own with it (`-w` waits when setsid has to fork, as for a
+     * process group leader, and passes the exit status on). A caller that has one keeps it (the
+     * seventh field of `/proc/<pid>/stat`, after the name, is not 0): a terminal belongs to one
+     * session, and a new one couldn't take it (setsid would fail and run nothing), as for a
+     * terminal emulator running the stand-in as its shell, or a shell running it as a command.
      */
-    private val NEW_SESSION = "if [ -t 0 ] && [ -x /usr/bin/setsid ]; then set -- /usr/bin/setsid -w -c \"${'$'}@\"; fi"
+    private val NEW_SESSION = "if [ -t 0 ] && [ -x /usr/bin/setsid ]; then fd_ctty() { fd_ctty=${'$'}5; }; fd_ctty=0; " +
+        "read -r fd_stat < /proc/${'$'}${'$'}/stat && fd_ctty ${'$'}{fd_stat##*) }; " +
+        "[ \"${'$'}fd_ctty\" = 0 ] && set -- /usr/bin/setsid -w -c \"${'$'}@\"; fi"
 }

@@ -4,6 +4,7 @@ import com.garathon.flatdroid.alpine.GuestFiles
 import com.garathon.flatdroid.camera.AndroidCameras
 import com.garathon.flatdroid.camera.ScreenStreamer
 import com.garathon.flatdroid.flatpak.tasks.FlatpakCommands
+import com.garathon.flatdroid.session.AlpineShellUser
 import com.garathon.flatdroid.util.io.writeTextAtomically
 import java.io.File
 import java.io.StringWriter
@@ -116,6 +117,8 @@ data class UserSettings(
     val terminalFilter: Boolean = true,
     /** Developer setting: the terminal runs commands while an app runs, and apps start while it does. */
     val terminalDuringSession: Boolean = false,
+    /** Developer setting: who Alpine's shell in a window runs as. */
+    val alpineShellUser: AlpineShellUser = AlpineShellUser.ROOT,
 ) {
     /** The level [security] matches; null for Custom. */
     val securityLevel: SecurityLevel? get() = SecurityLevel.of(security)
@@ -246,6 +249,7 @@ class UserSettingsStore(private val file: File) {
             security = security(props),
             terminalFilter = props.getProperty(KEY_TERMINAL_FILTER) != "false",
             terminalDuringSession = props.getProperty(KEY_TERMINAL_DURING_SESSION) == "true",
+            alpineShellUser = AlpineShellUser.entries.firstOrNull { it.key == props.getProperty(KEY_ALPINE_SHELL_USER) } ?: AlpineShellUser.ROOT,
         )
     }
 
@@ -315,6 +319,7 @@ class UserSettingsStore(private val file: File) {
         }
         if (!settings.terminalFilter) props.setProperty(KEY_TERMINAL_FILTER, "false")
         if (settings.terminalDuringSession) props.setProperty(KEY_TERMINAL_DURING_SESSION, "true")
+        if (settings.alpineShellUser != AlpineShellUser.ROOT) props.setProperty(KEY_ALPINE_SHELL_USER, settings.alpineShellUser.key)
         file.writeTextAtomically(StringWriter().also { props.store(it, null) }.toString())
         LiveSettings.theme.value = settings.theme
         LiveSettings.hideScreen.value = settings.security.hideScreen
@@ -336,6 +341,7 @@ class UserSettingsStore(private val file: File) {
         private const val KEY_SHARE_LOCALE = "security.shareLocale"
         private const val KEY_TERMINAL_FILTER = "terminal.filter"
         private const val KEY_TERMINAL_DURING_SESSION = "terminal.duringSession"
+        private const val KEY_ALPINE_SHELL_USER = "terminal.shellUser"
         private const val KEY_LANGUAGES = "flatpak.languages"
         private const val KEY_DEVELOPER = "ui.developerOptions"
         private const val KEY_VNC_VIEWER = "vnc.viewer"

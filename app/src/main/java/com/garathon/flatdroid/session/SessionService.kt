@@ -34,6 +34,7 @@ import com.garathon.flatdroid.launcher.ProotExit
 import com.garathon.flatdroid.flatpak.tasks.FlatpakTaskService
 import com.garathon.flatdroid.flatpak.InstalledApps
 import com.garathon.flatdroid.settings.HomeMode
+import com.garathon.flatdroid.setup.PackageGroup
 import com.garathon.flatdroid.setup.SetupController
 import com.garathon.flatdroid.storage.sizes.SavedSizes
 import com.garathon.flatdroid.storage.TempHomePrompt
@@ -99,7 +100,7 @@ class SessionService : Service() {
                 HiddenPause.resumeNoWindow()
                 return START_NOT_STICKY
             }
-            ACTION_LAUNCH, ACTION_PREPARE_ELECTRON -> Unit
+            ACTION_LAUNCH, ACTION_PREPARE_ELECTRON, ACTION_ADD_PACKAGES, ACTION_ALPINE_SHELL -> Unit
             else -> {
                 stopSelf()
                 return START_NOT_STICKY
@@ -117,13 +118,17 @@ class SessionService : Service() {
         }
         startInForeground(notification(SessionController.ui.value.state))
         if (job?.isActive == true) return START_NOT_STICKY
-        if (appId == null || !InstalledApps.isValidId(appId)) {
+        // An app, or Alpine's shell (whose ID no app can have).
+        val alpineShell = appId == AlpineShell.ID
+        if (appId == null || !(InstalledApps.isValidId(appId) || alpineShell)) {
             SessionController.ended(null)
             stopSelf()
             return START_NOT_STICKY
         }
 
         val prepareElectron = intent.action == ACTION_PREPARE_ELECTRON
+        val packages = if (intent.action != ACTION_ADD_PACKAGES) null else PackageGroup.entries.firstOrNull { it.name == intent.getStringExtra(EXTRA_PACKAGES) }
+        val shellUser = AlpineShellUser.entries.firstOrNull { it.key == intent.getStringExtra(EXTRA_SHELL_USER) }
         val answers = Sensor.entries.filter { intent.hasExtra(answerExtra(it)) }.associateWith { intent.getBooleanExtra(answerExtra(it), false) }
         val notifications = getSystemService(NotificationManager::class.java)
         val updates = scope.launch {
@@ -157,23 +162,31 @@ class SessionService : Service() {
             var message: String? = null
             var failed = false
             // The app changes its own files, and an Electron swap may be prepared.
-            SavedSizes.forget(applicationContext, appId)
+            if (!alpineShell) SavedSizes.forget(applicationContext, appId)
             try {
                 runInterruptible {
-                    val launcher = FlatpakLauncher(applicationContext)
-                    if (prepareElectron) {
-                        SessionController.preparingElectron(appId, getString(R.string.electron_preparing), null)
-                        launcher.prepareElectron(appId)
+                    packages?.let { SessionPackages.add(applicationContext, appId, it) }
+                    val ending = if (alpineShell) {
+                        val alpine = AlpineShell(applicationContext)
+                        if (!alpine.run(shellUser)) return@runInterruptible
+                        alpine.ending
+                    } else {
+                        val launcher = FlatpakLauncher(applicationContext)
+                        if (prepareElectron) {
+                            SessionController.preparing(appId, getString(R.string.electron_preparing), null)
+                            launcher.prepareElectron(appId)
+                        }
+                        if (!launcher.run(appId, answers)) return@runInterruptible
+                        launcher.ending
                     }
-                    if (!launcher.run(appId, answers)) return@runInterruptible
                     // A crash, a kill or an error exit is an error, not a plain close.
-                    message = when (val ending = launcher.ending) {
+                    message = when (ending) {
                         is AppEnding.Crashed -> getString(R.string.session_crashed, label(appId), ProotExit.signalName(ending.signal))
                         is AppEnding.Ended -> getString(R.string.session_signal_ended, label(appId), ProotExit.signalName(ending.signal))
                         is AppEnding.Failed -> getString(R.string.session_exit_error, label(appId), ending.code)
                         null -> getString(R.string.session_ended, label(appId))
                     }
-                    failed = launcher.ending != null
+                    failed = ending != null
                 }
             } catch (e: CancellationException) {
                 message = null
@@ -196,9 +209,9 @@ class SessionService : Service() {
                 projection?.stop()
                 notifications.cancel(NO_WINDOW_NOTIFICATION_ID)
                 removeNotification()
-                SavedSizes.changed(applicationContext, appId)
+                if (!alpineShell) SavedSizes.changed(applicationContext, appId)
                 // Before the session counts as ended, so Flatdroid's window doesn't ask as well.
-                if (AppData.settings(applicationContext, appId).load().homeMode == HomeMode.TEMPORARY) {
+                if (!alpineShell && AppData.settings(applicationContext, appId).load().homeMode == HomeMode.TEMPORARY) {
                     TempHomePrompt.sessionEnded(applicationContext, appId)
                 }
                 // A question (an Electron offer, a files-changed report) stays up for the UI to answer.
@@ -228,11 +241,12 @@ class SessionService : Service() {
     /** What the notification's text says: a new stage reaches it, an unchanged one (the file check's progress goes on) doesn't repost it. */
     private fun stage(state: SessionState): String? = when (state) {
         is SessionState.Starting -> state.detail
-        is SessionState.PreparingElectron -> state.detail
+        is SessionState.Preparing -> state.detail
         else -> null
     }
 
-    private fun label(appId: String) = InstalledApps(applicationContext).name(appId) ?: appId
+    private fun label(appId: String) =
+        if (appId == AlpineShell.ID) getString(R.string.alpine_shell) else InstalledApps(applicationContext).name(appId) ?: appId
 
     private fun startInForeground(notification: Notification) {
         var type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0
@@ -393,7 +407,7 @@ class SessionService : Service() {
                 if (state.socket != null) getString(R.string.session_notification_viewer)
                 else getString(R.string.session_notification_running, SessionScript.VNC_PORT)
             is SessionState.Starting -> state.detail
-            is SessionState.PreparingElectron -> state.detail
+            is SessionState.Preparing -> state.detail
             else -> ""
         }
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
@@ -448,6 +462,10 @@ class SessionService : Service() {
         private const val EXTRA_RESULT_DATA = "resultData"
         private const val ACTION_LAUNCH = "com.garathon.flatdroid.action.LAUNCH"
         private const val ACTION_PREPARE_ELECTRON = "com.garathon.flatdroid.action.PREPARE_ELECTRON"
+        private const val ACTION_ADD_PACKAGES = "com.garathon.flatdroid.action.ADD_PACKAGES"
+        private const val ACTION_ALPINE_SHELL = "com.garathon.flatdroid.action.ALPINE_SHELL"
+        private const val EXTRA_PACKAGES = "packages"
+        private const val EXTRA_SHELL_USER = "shellUser"
         private const val ACTION_STOP = "com.garathon.flatdroid.action.STOP"
         private const val ACTION_ALLOW = "com.garathon.flatdroid.action.ALLOW"
         private const val ACTION_DENY = "com.garathon.flatdroid.action.DENY"
@@ -456,9 +474,20 @@ class SessionService : Service() {
         /** [answers]: the user's answers about the microphone and camera for the session, when asked before the launch. */
         fun launch(context: Context, appId: String, answers: Map<Sensor, Boolean> = emptyMap()) = start(context, ACTION_LAUNCH, appId, answers)
 
+        /** Alpine's shell in a terminal window (a developer option), after adding [packages] when the user agreed to. */
+        fun alpineShell(context: Context, user: AlpineShellUser?, packages: PackageGroup? = null) =
+            start(context, if (packages != null) ACTION_ADD_PACKAGES else ACTION_ALPINE_SHELL, AlpineShell.ID, emptyMap()) {
+                packages?.let { putExtra(EXTRA_PACKAGES, it.name) }
+                user?.let { putExtra(EXTRA_SHELL_USER, it.key) }
+            }
+
         /** After the user agreed to download Electron for this device: prepare it, then launch. */
         fun prepareElectronAndLaunch(context: Context, appId: String, answers: Map<Sensor, Boolean> = emptyMap()) =
             start(context, ACTION_PREPARE_ELECTRON, appId, answers)
+
+        /** After the user agreed to add [group] to Alpine: add it, then launch. */
+        fun addPackagesAndLaunch(context: Context, appId: String, group: PackageGroup, answers: Map<Sensor, Boolean> = emptyMap()) =
+            start(context, ACTION_ADD_PACKAGES, appId, answers) { putExtra(EXTRA_PACKAGES, group.name) }
 
         /** Whether the microphone and camera questions can be posted: notifications, and their channel, aren't blocked. */
         fun canAskInNotification(context: Context): Boolean {
@@ -513,13 +542,13 @@ class SessionService : Service() {
         }
 
         /** Not while a Flatpak task or a terminal command runs ([AlpineCommands.sessionMayStart]). */
-        private fun start(context: Context, action: String, appId: String, answers: Map<Sensor, Boolean>) {
+        private fun start(context: Context, action: String, appId: String, answers: Map<Sensor, Boolean>, extras: Intent.() -> Unit = {}) {
             if (SessionController.isBusy || !AlpineCommands.sessionMayStart(context)) return
             SessionController.starting(appId, context.getString(R.string.session_starting), clearLog = true)
             ContextCompat.startForegroundService(
                 context,
                 Intent(context, SessionService::class.java).setAction(action).putExtra(EXTRA_APP_ID, appId)
-                    .apply { for ((sensor, allow) in answers) putExtra(answerExtra(sensor), allow) },
+                    .apply { for ((sensor, allow) in answers) putExtra(answerExtra(sensor), allow) }.apply(extras),
             )
         }
     }

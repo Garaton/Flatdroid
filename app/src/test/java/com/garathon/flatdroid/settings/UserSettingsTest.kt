@@ -1,5 +1,6 @@
 package com.garathon.flatdroid.settings
 
+import com.garathon.flatdroid.session.AlpineShellUser
 import com.garathon.flatdroid.flatpak.tasks.FlatpakCommands
 import com.garathon.flatdroid.alpine.GuestFiles
 import org.junit.Assert.assertEquals
@@ -45,7 +46,7 @@ class UserSettingsTest {
             uncappedFrameRate = true, installGpuRuntimes = true, customAudioLatencyMs = 30,
             lowLatencyAudio = true, highQualityAudio = true, sharedHome = "/storage/emulated/0/Download/Home", theme = InterfaceTheme.AMOLED,
             externalViewer = true, mobileData = MobileData.NEVER, appTime = AppTime.LAST_OPENED, cameraResolution = 480, cameraFrameRate = 15, screenScale = 25,
-            appRendering = Rendering.GL, reduceMotion = true,
+            appRendering = Rendering.GL, reduceMotion = true, alpineShellUser = AlpineShellUser.APP_USER,
         )
         store.save(all)
         assertEquals(all, store.load())

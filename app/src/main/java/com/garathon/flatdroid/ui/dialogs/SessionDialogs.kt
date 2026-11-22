@@ -37,6 +37,7 @@ import com.garathon.flatdroid.flatpak.flathub.FlathubLinkApproval
 import com.garathon.flatdroid.flatpak.InstalledApps
 import com.garathon.flatdroid.session.Sensor
 import com.garathon.flatdroid.session.SessionState
+import com.garathon.flatdroid.setup.PackageGroup
 import com.garathon.flatdroid.ui.common.LogText
 import com.garathon.flatdroid.ui.common.rememberFlathubLinksAllowed
 import kotlinx.coroutines.launch
@@ -148,6 +149,27 @@ fun ElectronDialog(offer: SessionState.ElectronOffer, appName: String, deviceArc
             else TextButton(onClick = onDismiss) { Text(stringResource(R.string.dismiss)) }
         },
         dismissButton = { if (offer.problem == null) TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
+    )
+}
+
+/**
+ * Asks before downloading X11 or a terminal into Alpine for [appName], each with its own text.
+ * [metered]: on mobile data, which the text says.
+ */
+@Composable
+fun PackagesDialog(offer: SessionState.PackagesOffer, appName: String, downloadMb: Int, metered: Boolean, onAccept: () -> Unit, onDismiss: () -> Unit) {
+    val (title, text) = when (offer.group) {
+        PackageGroup.X11 -> R.string.packages_x11_title to R.string.packages_x11_text
+        PackageGroup.TERMINAL -> R.string.packages_terminal_title to R.string.packages_terminal_text
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(title)) },
+        text = {
+            Text(stringResource(text, appName, downloadMb) + if (metered) "\n\n" + stringResource(R.string.packages_metered) else "")
+        },
+        confirmButton = { Button(onClick = onAccept) { Text(stringResource(R.string.electron_download)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
     )
 }
 
