@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.SaveAlt
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -169,6 +170,15 @@ fun GlobalOverviewPage(s: GlobalPageState) = SettingsPageColumn(null) {
                 Icon(Icons.Filled.SaveAlt, contentDescription = null, modifier = Modifier.size(18.dp))
                 Text(stringResource(R.string.settings_backup_export), modifier = Modifier.padding(start = Spacing.small))
             }
+        }
+    }
+
+    // Starts a session: only while nothing else runs.
+    SettingsCard(title = stringResource(R.string.settings_section_tools)) {
+        Text(stringResource(R.string.settings_alpine_shell_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        OutlinedButton(onClick = { s.env.onAlpineShell(s.settings.alpineShellUser) }, enabled = s.env.canStartSession) {
+            Icon(Icons.Filled.Terminal, contentDescription = null, modifier = Modifier.size(18.dp))
+            Text(stringResource(R.string.settings_open_alpine_shell), modifier = Modifier.padding(start = Spacing.small))
         }
     }
 
@@ -363,6 +373,12 @@ fun GlobalSecurityPage(s: GlobalPageState) = SettingsPageColumn(R.string.setting
             security.checkFilesBeforeLaunch, { v -> s.editSettings { copy(security = security.copy(checkFilesBeforeLaunch = v)) } },
             stringResource(R.string.security_check_files), stringResource(R.string.security_check_files_hint),
         )
+        // Not part of the level: on at every one.
+        SwitchRow(
+            s.settings.alpineSafeLaunch, { v -> s.editSettings { copy(alpineSafeLaunch = v) } },
+            stringResource(R.string.security_alpine_safe_launch), stringResource(R.string.security_alpine_safe_launch_hint),
+            developer = true,
+        )
     }
     SettingsCard {
         SwitchRow(
@@ -430,13 +446,8 @@ fun GlobalDeveloperPage(s: GlobalPageState) = SettingsPageColumn(R.string.settin
             stringResource(R.string.settings_developer_options), stringResource(R.string.settings_developer_options_hint),
         )
         SwitchRow(
-            s.settings.terminalFilter, { v -> s.editSettings { copy(terminalFilter = v) } },
-            stringResource(R.string.settings_terminal_filter), stringResource(R.string.settings_terminal_filter_hint),
-            developer = true,
-        )
-        SwitchRow(
-            s.settings.terminalDuringSession, { v -> s.editSettings { copy(terminalDuringSession = v) } },
-            stringResource(R.string.settings_terminal_during_session), stringResource(R.string.settings_terminal_during_session_hint),
+            s.settings.shellFilter, { v -> s.editSettings { copy(shellFilter = v) } },
+            stringResource(R.string.settings_shell_filter), stringResource(R.string.settings_shell_filter_hint),
             developer = true,
         )
         val rootLabel = stringResource(R.string.settings_alpine_shell_root)
@@ -450,15 +461,6 @@ fun GlobalDeveloperPage(s: GlobalPageState) = SettingsPageColumn(R.string.settin
             hint = stringResource(R.string.settings_alpine_shell_user_hint),
             developer = true,
         )
-    }
-    SettingsCard(title = stringResource(R.string.settings_section_tools)) {
-        OutlinedButton(onClick = s.env.onTerminal, enabled = s.env.canOpenTerminal) { Text(stringResource(R.string.terminal_title)) }
-        // Starts a session: only with developer options on, and while nothing else runs.
-        if (s.settings.developerOptions) {
-            OutlinedButton(onClick = { s.env.onAlpineShell(s.settings.alpineShellUser) }, enabled = s.env.canStartSession) {
-                Text(stringResource(R.string.settings_open_alpine_shell))
-            }
-        }
     }
 }
 

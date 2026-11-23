@@ -162,7 +162,8 @@ class SessionService : Service() {
             var message: String? = null
             var failed = false
             // The app changes its own files, and an Electron swap may be prepared.
-            if (!alpineShell) SavedSizes.forget(applicationContext, appId)
+            // The shell may change anything in Alpine, Flatpak's installation included.
+            if (alpineShell) SavedSizes.forgetAll(applicationContext) else SavedSizes.forget(applicationContext, appId)
             try {
                 runInterruptible {
                     packages?.let { SessionPackages.add(applicationContext, appId, it) }
@@ -209,7 +210,7 @@ class SessionService : Service() {
                 projection?.stop()
                 notifications.cancel(NO_WINDOW_NOTIFICATION_ID)
                 removeNotification()
-                if (!alpineShell) SavedSizes.changed(applicationContext, appId)
+                if (alpineShell) SavedSizes.changedAll(applicationContext, measureNow = false) else SavedSizes.changed(applicationContext, appId)
                 // Before the session counts as ended, so Flatdroid's window doesn't ask as well.
                 if (!alpineShell && AppData.settings(applicationContext, appId).load().homeMode == HomeMode.TEMPORARY) {
                     TempHomePrompt.sessionEnded(applicationContext, appId)
@@ -541,9 +542,9 @@ class SessionService : Service() {
             context.startService(Intent(context, SessionService::class.java).setAction(ACTION_STOP))
         }
 
-        /** Not while a Flatpak task or a terminal command runs ([AlpineCommands.sessionMayStart]). */
+        /** Not while a Flatpak task runs ([AlpineCommands.sessionMayStart]). */
         private fun start(context: Context, action: String, appId: String, answers: Map<Sensor, Boolean>, extras: Intent.() -> Unit = {}) {
-            if (SessionController.isBusy || !AlpineCommands.sessionMayStart(context)) return
+            if (SessionController.isBusy || !AlpineCommands.sessionMayStart()) return
             SessionController.starting(appId, context.getString(R.string.session_starting), clearLog = true)
             ContextCompat.startForegroundService(
                 context,

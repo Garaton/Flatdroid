@@ -20,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Input
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
@@ -109,8 +110,8 @@ fun rememberBrowseListState(): BrowseListState {
  * ([BrowseOrder]s, verified and installed-runtime filters; [installedRuntimes] as `<ID>/<branch>`),
  * the categories, and a row per app (icon,
  * name with the verified check, summary; installed or waiting to install). The top bar has Back,
- * typing app IDs directly ([onInstallById]) and refreshing the catalog ([onRefresh], a download
- * that follows the mobile data setting). Nothing is downloaded by just opening it.
+ * typing app IDs directly ([onInstallById]), Alpine packages ([onAlpineInstall]) and refreshing
+ * the catalog ([onRefresh], a download that follows the mobile data setting). Nothing is downloaded by just opening it.
  */
 @Composable
 fun BrowseScreen(
@@ -125,6 +126,7 @@ fun BrowseScreen(
     onOpenApp: (String) -> Unit,
     onRefresh: () -> Unit,
     onInstallById: () -> Unit,
+    onAlpineInstall: () -> Unit,
     onRetry: () -> Unit,
     bottomBar: @Composable () -> Unit,
     modifier: Modifier = Modifier,
@@ -158,6 +160,7 @@ fun BrowseScreen(
         val back = @Composable { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back)) } }
         val actions = @Composable {
             IconButton(onClick = onInstallById) { Icon(Icons.AutoMirrored.Filled.Input, contentDescription = stringResource(R.string.browse_install_by_id)) }
+            IconButton(onClick = onAlpineInstall) { Icon(Icons.Filled.Terminal, contentDescription = stringResource(R.string.alpine_install_title)) }
             IconButton(onClick = onRefresh, enabled = canRefresh) { Icon(Icons.Filled.Refresh, contentDescription = stringResource(R.string.browse_refresh)) }
         }
         val search = @Composable { mod: Modifier ->

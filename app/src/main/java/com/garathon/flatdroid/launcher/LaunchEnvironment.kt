@@ -41,6 +41,8 @@ object LaunchEnvironment {
         usrHas: (String) -> Boolean = { false },
         /** A terminal app's TERM; null for an app that isn't one. Without Wayland it has no display at all. */
         terminal: String? = null,
+        /** An Alpine program ([alpineAdjusted]). */
+        alpine: Boolean = false,
     ): LinkedHashMap<String, String> {
         val varApp = "${GuestPaths.HOME}/.var/app/$appId"
         val env = linkedMapOf(
@@ -122,8 +124,23 @@ object LaunchEnvironment {
             env["LIBGL_DRIVERS_PATH"] = "$gl/lib/dri"
             env["__EGL_VENDOR_LIBRARY_DIRS"] = "$gl/share/glvnd/egl_vendor.d"
         }
+        if (alpine) alpineAdjusted(env)
         for ((key, value) in overrides) if (isName(key)) env[key] = value
         return env
+    }
+
+    /**
+     * An Alpine program's differences: Alpine's PATH (busybox is in /bin), no FLATPAK_ID (it isn't
+     * one), Mesa in software as a Flatpak's GL.default runs, settings in a file, and no Python byte
+     * code: Python would write it into Alpine's /usr, which Alpine safe launch reports as a change.
+     */
+    private fun alpineAdjusted(env: LinkedHashMap<String, String>) {
+        env["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
+        env.remove("FLATPAK_ID")
+        env["LIBGL_ALWAYS_SOFTWARE"] = "1"
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        // GLib's keyfile backend in XDG_CONFIG_HOME: there is no dconf service on the session bus.
+        env["GSETTINGS_BACKEND"] = "keyfile"
     }
 
     /**

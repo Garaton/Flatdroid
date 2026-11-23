@@ -85,16 +85,16 @@ object SettingsBackup {
 
     /**
      * An imported [settings] with what stays this device's: the viewer (it gets every session's
-     * VNC password), the security level and the terminal's settings (they decide how far apps
-     * reach), and the Flatpak languages (a zip's value would go to Flatpak as it is). Without
-     * saved settings of its own ([device] null) the zip's are kept.
+     * VNC password), the security level and the Alpine shell's and Alpine programs' settings
+     * (they decide how far apps reach), and the Flatpak languages (a zip's value would go to
+     * Flatpak as it is). Without saved settings of its own ([device] null) the zip's are kept.
      */
     fun keepingDevice(settings: UserSettings, device: UserSettings?): UserSettings = settings.copy(
         vncViewer = device?.vncViewer,
         externalViewer = device?.externalViewer ?: false,
         security = device?.security ?: settings.security,
-        terminalFilter = device?.terminalFilter ?: settings.terminalFilter,
-        terminalDuringSession = device?.terminalDuringSession ?: false,
+        shellFilter = device?.shellFilter ?: settings.shellFilter,
+        alpineSafeLaunch = device?.alpineSafeLaunch ?: true,
         alpineShellUser = device?.alpineShellUser ?: AlpineShellUser.ROOT,
         flatpakLanguages = device?.flatpakLanguages ?: settings.flatpakLanguages,
     )

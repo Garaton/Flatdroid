@@ -65,5 +65,16 @@ if command -v ffmpeg >/dev/null; then
         echo "FAIL: ffmpeg"; fail=1
     fi
     kill $(jobs -p) 2>/dev/null || true
+    # libv4l2 makes its calls through syscall() (OBS's way to cameras).
+    if ffmpeg -hide_banner -h demuxer=v4l2 2>/dev/null | grep -q use_libv4l2; then
+        echo "== ffmpeg through libv4l2, Motion-JPEG"
+        feed image/jpeg "$WORK/frame.jpg"
+        if LD_PRELOAD=$L timeout 20 ffmpeg -loglevel error -f v4l2 -use_libv4l2 1 -input_format mjpeg -i "$WORK/video0" -frames:v 10 -f null -; then
+            echo "ok"
+        else
+            echo "FAIL: ffmpeg through libv4l2"; fail=1
+        fi
+        kill $(jobs -p) 2>/dev/null || true
+    fi
 fi
 [ $fail -eq 0 ] && echo "all passed" || { echo "FAILED"; exit 1; }

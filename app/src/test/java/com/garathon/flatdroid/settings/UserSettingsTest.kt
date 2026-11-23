@@ -173,24 +173,24 @@ class UserSettingsTest {
     }
 
     @Test
-    fun theTerminalIsFilteredUnlessTheDeveloperSettingSaysOtherwise() {
-        assertTrue(UserSettings("en").filterTerminal)
-        assertTrue(UserSettings("en", terminalFilter = false).filterTerminal)
-        assertFalse(UserSettings("en", developerOptions = true, terminalFilter = false).filterTerminal)
+    fun theShellIsFilteredUnlessTheDeveloperSettingSaysOtherwise() {
+        assertTrue(UserSettings("en").filterShell)
+        assertTrue(UserSettings("en", shellFilter = false).filterShell)
+        assertFalse(UserSettings("en", developerOptions = true, shellFilter = false).filterShell)
         val store = UserSettingsStore(File(tmp.root, "t.properties"))
-        store.save(UserSettings("en", terminalFilter = false))
-        assertFalse(store.load()!!.terminalFilter)
+        store.save(UserSettings("en", shellFilter = false))
+        assertFalse(store.load()!!.shellFilter)
     }
 
     @Test
-    fun theTerminalOverlapsAppsOnlyByTheDeveloperSetting() {
-        assertFalse(UserSettings("en").terminalWithApps)
-        assertFalse(UserSettings("en", terminalDuringSession = true).terminalWithApps)
-        assertTrue(UserSettings("en", developerOptions = true, terminalDuringSession = true).terminalWithApps)
+    fun alpineIsCheckedUnlessTheDeveloperSettingSaysOtherwise() {
+        assertTrue(UserSettings("en").checkAlpine)
+        assertTrue(UserSettings("en", alpineSafeLaunch = false).checkAlpine)
+        assertFalse(UserSettings("en", developerOptions = true, alpineSafeLaunch = false).checkAlpine)
         val store = UserSettingsStore(File(tmp.root, "s.properties"))
-        store.save(UserSettings("en", developerOptions = true, terminalDuringSession = true))
-        assertTrue(store.load()!!.terminalWithApps)
+        store.save(UserSettings("en", alpineSafeLaunch = false))
+        assertFalse(store.load()!!.alpineSafeLaunch)
         store.save(UserSettings("en"))
-        assertFalse(store.load()!!.terminalDuringSession)
+        assertTrue(store.load()!!.alpineSafeLaunch)
     }
 }

@@ -44,6 +44,18 @@ object GuestFiles {
         |exec /usr/bin/bwrap "$@"
         |""".trimMargin()
 
+    /**
+     * `/usr/bin/bwrap` in an Alpine program's root: bwrap can't run under proot, so this refuses as
+     * bwrap does on a kernel without user namespaces. Programs that try a sandbox first (GTK's image
+     * loaders through glycin) know that refusal and go on without one; real bwrap's failure there is
+     * one they don't know, and GTK aborts.
+     */
+    val NO_NAMESPACES_BWRAP = """
+        |#!/bin/sh
+        |echo "bwrap: No permissions to create new namespace, likely because the kernel does not allow non-privileged user namespaces." >&2
+        |exit 1
+        |""".trimMargin()
+
     fun hosts(): String = "127.0.0.1 localhost\n::1 localhost\n"
 
     /**

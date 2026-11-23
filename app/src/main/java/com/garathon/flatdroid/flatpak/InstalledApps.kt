@@ -1,12 +1,18 @@
 package com.garathon.flatdroid.flatpak
 
 import android.content.Context
+import android.system.Os
+import com.garathon.flatdroid.BuildConfig
 import com.garathon.flatdroid.alpine.AlpineEnvironment
+import com.garathon.flatdroid.alpine.programs.AlpineProgram
+import com.garathon.flatdroid.alpine.programs.AlpineProgramIds
+import com.garathon.flatdroid.alpine.programs.AlpinePrograms
 import com.garathon.flatdroid.launcher.electron.Electron
 import com.garathon.flatdroid.launcher.Executable
 import com.garathon.flatdroid.proot.DevNodes
 import com.garathon.flatdroid.settings.AppSettings
 import com.garathon.flatdroid.settings.AppSettingsStore
+import com.garathon.flatdroid.setup.rootfs.AndroidTarFs
 import com.garathon.flatdroid.storage.AppData
 import com.garathon.flatdroid.util.WHITESPACE
 import com.garathon.flatdroid.util.io.readTextUpTo
@@ -40,7 +46,12 @@ data class InstalledApp(
     val mayUseCamera: Boolean = false,
     /** Its metadata asks for the home or the whole host file system (`filesystems=home`, `host` or `host-os`). */
     val requestsFiles: Boolean = false,
-)
+    /** An Alpine program's package ([AlpineProgram]); null for a Flatpak. */
+    val alpinePackage: String? = null,
+) {
+    /** Automatic video gives it `/dev/video*` ([FlatpakContext.readsVideoDevices]): it asks for all devices, or reads them itself. */
+    val takesVideoDevices: Boolean get() = requestsAllDevices || alpinePackage != null
+}
 
 /** What an app's metadata says (see [InstalledApps.details]). */
 data class AppDetails(
@@ -58,12 +69,45 @@ data class AppDetails(
     enum class Display { WAYLAND_AND_X11, WAYLAND, X11, NONE }
 }
 
-/** Installed apps with their names and icons, read from what each app exports. */
+/**
+ * Installed apps with their names and icons, read from what each app exports, and Alpine
+ * programs ([AlpinePrograms]) with what their metadata would say.
+ */
 class InstalledApps(private val context: Context) {
     private val env = AlpineEnvironment.get(context)
     private val installation = FlatpakInstallation(env.flatpakDir, env.arch)
+    private val alpine = AlpinePrograms(
+        File(env.paths().rootfs),
+        exists = { it.exists() || AndroidTarFs.isSymlink(it) },
+        changedAt = { file -> runCatching { Os.lstat(file.path).st_ctime * 1000 }.getOrNull() },
+    )
 
-    fun list(): List<InstalledApp> = installation.appIds().mapNotNull { id ->
+    private fun alpineProgram(id: String): AlpineProgram? = if (AlpineProgramIds.isId(id)) alpine.program(id) else null
+
+    private fun alpineMetadata(program: AlpineProgram) = program.metadata(env.arch, BuildConfig.ALPINE_BRANCH)
+
+    fun list(): List<InstalledApp> = flatpaks() + alpine.list().map { program ->
+        val settings = AppSettingsStore(AppData.settingsFile(context, program.id)).load()
+        val metadata = alpineMetadata(program).context
+        InstalledApp(
+            id = program.id,
+            name = program.name,
+            icon = program.icon,
+            lastOpened = settings.lastOpened,
+            launches = settings.launches,
+            usedMillis = settings.usedMillis,
+            // As a Flatpak's: never opened, it sorts by when it came.
+            installed = program.installed,
+            requestsAudio = true,
+            requestsNetwork = true,
+            waylandAndX11 = metadata.waylandAndX11,
+            wayland = metadata.wayland,
+            terminal = program.terminal,
+            alpinePackage = program.packageName,
+        )
+    }
+
+    private fun flatpaks(): List<InstalledApp> = installation.appIds().mapNotNull { id ->
         val app = installation.app(id) ?: return@mapNotNull null
         // Only its usage is read here, which follows no defaults: Flatdroid's settings aren't read again for each app.
         val settings = AppSettingsStore(AppData.settingsFile(context, id)).load()
@@ -94,6 +138,7 @@ class InstalledApps(private val context: Context) {
      * WebKitGTK apps can't be told this way (a script may load it).
      */
     fun showsWebContent(id: String): Boolean {
+        if (AlpineProgramIds.isId(id)) return false
         val app = installation.app(id) ?: return false
         val command = app.metadata.command?.takeIf { it.isNotBlank() && !it.startsWith("/") } ?: return false
         val script = (Executable.of(File(app.files, "bin/$command")) as? Executable.Script)?.text ?: return false
@@ -102,6 +147,15 @@ class InstalledApps(private val context: Context) {
 
     /** What the app's metadata says, for its Overview; null if it isn't installed. */
     fun details(id: String): AppDetails? {
+        alpineProgram(id)?.let { program ->
+            val context = alpineMetadata(program).context
+            return AppDetails(
+                runtime = "Alpine ${BuildConfig.ALPINE_VERSION}",
+                display = if (context.waylandAndX11) AppDetails.Display.WAYLAND_AND_X11 else AppDetails.Display.X11,
+                sockets = context.sockets, devices = context.devices, filesystems = context.filesystems, shared = context.shared,
+                installed = program.installed,
+            )
+        }
         val app = installation.app(id) ?: return null
         val context = app.metadata.context
         val display = when {
@@ -121,19 +175,21 @@ class InstalledApps(private val context: Context) {
         )
     }
 
-    fun name(id: String): String? = installation.app(id)?.let { desktopName(it, id) }
+    fun name(id: String): String? = alpineProgram(id)?.name ?: installation.app(id)?.let { desktopName(it, id) }
 
     /** [id]'s name and icon, as the list has them (without its use and metadata); null if it isn't installed. */
-    fun brief(id: String): InstalledApp? = installation.app(id)?.let { InstalledApp(id, desktopName(it, id) ?: id, icon(it, id), lastOpened = null) }
+    fun brief(id: String): InstalledApp? = alpineProgram(id)?.let { InstalledApp(id, it.name, it.icon, lastOpened = null, alpinePackage = it.packageName) }
+        ?: installation.app(id)?.let { InstalledApp(id, desktopName(it, id) ?: id, icon(it, id), lastOpened = null) }
 
     /** The app's metadata permissions; null if it isn't installed. */
-    fun context(id: String): FlatpakContext? = installation.app(id)?.metadata?.context
+    fun context(id: String): FlatpakContext? = alpineProgram(id)?.let { alpineMetadata(it).context } ?: installation.app(id)?.metadata?.context
 
     /** The `sockets=` the app's metadata asks for; empty if it isn't installed. */
-    fun sockets(id: String): List<String> = installation.app(id)?.metadata?.context?.sockets.orEmpty()
+    fun sockets(id: String): List<String> = context(id)?.sockets.orEmpty()
 
     /** The app is made for a terminal (its desktop file says `Terminal=true`). */
-    fun runsInTerminal(id: String): Boolean = installation.app(id)?.let { desktop(it, id) }?.let(::runsInTerminal) == true
+    fun runsInTerminal(id: String): Boolean =
+        alpineProgram(id)?.terminal ?: (installation.app(id)?.let { desktop(it, id) }?.let(::runsInTerminal) == true)
 
     private fun desktopName(app: Deployment, id: String): String? = desktop(app, id)?.let { localizedName(it, Locale.getDefault()) }
 
@@ -155,16 +211,22 @@ class InstalledApps(private val context: Context) {
         private val FILE_ACCESS = setOf("home", "host", "host-os")
 
         /** PNG sizes to try, best first. */
-        private val ICON_SIZES = listOf("128x128", "256x256", "96x96", "64x64", "512x512", "48x48")
+        val ICON_SIZES = listOf("128x128", "256x256", "96x96", "64x64", "512x512", "48x48")
+
+        /**
+         * An app ID Flatdroid keeps data for: a Flatpak's ([isFlatpakId]) or an Alpine program's
+         * ([AlpineProgramIds]). Flatpak, Flathub and the catalog take only [isFlatpakId].
+         */
+        fun isValidId(id: String): Boolean = isFlatpakId(id) || AlpineProgramIds.isId(id)
 
         /** A Flatpak app ID: at least two dot-separated parts of letters, digits, `_` and `-`. */
-        fun isValidId(id: String): Boolean =
+        fun isFlatpakId(id: String): Boolean =
             id.length <= 255 && ID.matches(id)
 
         private val ID = Regex("[A-Za-z_][A-Za-z0-9_-]*(\\.[A-Za-z0-9_-]+)+")
 
         /** The app IDs in [text], separated by whitespace, each once; null if there are none or any isn't valid. */
-        fun parseIds(text: String): List<String>? = splitIds(text).takeIf { ids -> ids.isNotEmpty() && ids.all(::isValidId) }
+        fun parseIds(text: String): List<String>? = splitIds(text).takeIf { ids -> ids.isNotEmpty() && ids.all(::isFlatpakId) }
 
         /** The words of [text] (IDs separated by spaces), each once, valid or not. */
         fun splitIds(text: String): List<String> = text.split(WHITESPACE).filter { it.isNotEmpty() }.distinct()

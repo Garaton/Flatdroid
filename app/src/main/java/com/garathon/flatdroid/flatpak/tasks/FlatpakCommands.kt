@@ -54,7 +54,7 @@ object FlatpakCommands {
         "sh",
     ) + patterns
 
-    // Each ID must pass InstalledApps.isValidId, so it can't be read as an option.
+    // Each ID must pass InstalledApps.isFlatpakId, so it can't be read as an option.
     fun install(ids: List<String>) = listOf(FLATPAK, "--user", "install", "-y", "flathub") + ids.map(::checked)
     fun uninstall(id: String) = uninstall(listOf(id))
     /** Several apps in one transaction. */
@@ -92,7 +92,7 @@ object FlatpakCommands {
     )
 
     private fun checked(id: String): String {
-        require(InstalledApps.isValidId(id)) { "Not a Flatpak app ID: $id" }
+        require(InstalledApps.isFlatpakId(id)) { "Not a Flatpak app ID: $id" }
         return id
     }
 }

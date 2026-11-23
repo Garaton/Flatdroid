@@ -21,9 +21,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.createBitmap
 import com.caverock.androidsvg.SVG
+import com.garathon.flatdroid.R
+import com.garathon.flatdroid.flatpak.InstalledApp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -169,3 +172,7 @@ private fun renderSvg(file: File, px: Int): Bitmap? {
 
 private const val ICON_DECODE_PX = 192
 private const val MAX_SVG_BYTES = 1L shl 20
+
+/** The line under an app's name: its ID, or an Alpine program's package. */
+@Composable
+fun appSubtitle(app: InstalledApp): String = app.alpinePackage?.let { stringResource(R.string.alpine_package_label, it) } ?: app.id

@@ -5,6 +5,7 @@
  *
  *   fdv4l2-test <dir>
  */
+#include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/media.h>
@@ -13,7 +14,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <linux/netlink.h>
 #include <sys/mman.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/sysmacros.h>
@@ -29,6 +32,14 @@ static void frame(int fd, const char *type, const char *body)
     CHECK(write(fd, all, len) == len);
 }
 
+/* The C library's own syscall(), past the preload's (which answers libv4l2's calls). */
+static long kernel(long n, long a, long b, long c, long d)
+{
+    static long (*real)(long, ...);
+    if (!real) real = (long (*)(long, ...))dlsym(dlopen("libc.so.6", RTLD_NOW | RTLD_NOLOAD), "syscall");
+    return real(n, a, b, c, d);
+}
+
 /* Flatdroid's ends: read and write, so neither side waits for the other to open; not through the preload. */
 static int pipe_at(const char *dir, const char *name)
 {
@@ -36,7 +47,7 @@ static int pipe_at(const char *dir, const char *name)
     snprintf(path, sizeof(path), "%s/%s", dir, name);
     unlink(path);
     CHECK(mkfifo(path, 0600) == 0);
-    return (int)syscall(SYS_openat, AT_FDCWD, path, O_RDWR | O_NONBLOCK);
+    return (int)kernel(SYS_openat, AT_FDCWD, (long)path, O_RDWR | O_NONBLOCK, 0);
 }
 
 static int format_request(int fd, unsigned fourcc, struct v4l2_format *f)
@@ -218,10 +229,28 @@ int main(int argc, char **argv)
     memset(said, 0, sizeof(said));
     CHECK(read(control, said, sizeof(said) - 1) > 0 && strcmp(said, "nv12\non\noff\n") == 0);
 
-    /* Opened with a raw system call (libcamera does): known by its inode at the first V4L2 call. */
-    int raw = (int)syscall(SYS_openat, AT_FDCWD, path, O_RDWR | O_NONBLOCK);
+    /* Opened past the C library's open() (libcamera does): known by its inode at the first V4L2 call. */
+    int raw = (int)kernel(SYS_openat, AT_FDCWD, (long)path, O_RDWR | O_NONBLOCK, 0);
     CHECK(raw >= 0 && ioctl(raw, VIDIOC_QUERYCAP, &cap) == 0 && strcmp((char *)cap.driver, "uvcvideo") == 0);
     close(raw);
+
+    /* Through the C library's syscall(), as libv4l2 makes its calls (OBS): the same answers. */
+    int v4l = (int)syscall(SYS_openat, AT_FDCWD, path, O_RDWR | O_NONBLOCK, 0);
+    memset(&cap, 0, sizeof(cap));
+    CHECK(v4l >= 0 && syscall(SYS_ioctl, v4l, VIDIOC_QUERYCAP, &cap) == 0 && strcmp((char *)cap.driver, "uvcvideo") == 0);
+    struct v4l2_fmtdesc desc = { .index = 0, .type = V4L2_BUF_TYPE_VIDEO_CAPTURE };
+    CHECK(syscall(SYS_ioctl, v4l, VIDIOC_ENUM_FMT, &desc) == 0 && desc.pixelformat == V4L2_PIX_FMT_MJPEG);
+    CHECK(syscall(SYS_fstat, v4l, &st) == 0 && major(st.st_rdev) == 81);
+    CHECK(syscall(SYS_close, v4l) == 0);
+    /* A device event socket the kernel allows stays one (the stand-in is only for Android's refusal). */
+    int ue = socket(AF_NETLINK, SOCK_RAW | SOCK_CLOEXEC, NETLINK_KOBJECT_UEVENT);
+    int proto = -1;
+    socklen_t plen = sizeof(proto);
+    CHECK(ue >= 0 && getsockopt(ue, SOL_SOCKET, SO_PROTOCOL, &proto, &plen) == 0 && proto == NETLINK_KOBJECT_UEVENT);
+    close(ue);
+    /* Every other call reaches the kernel. */
+    CHECK(syscall(SYS_getpid) == getpid());
+    CHECK(syscall(SYS_ioctl, 12345, VIDIOC_QUERYCAP, &cap) == -1 && errno == EBADF);
 
     /* The media device: one USB camera whose default entity is the video node 81:0. */
     int m = open(media_path, O_RDWR);

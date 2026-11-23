@@ -74,7 +74,7 @@ class GlobalStorageActions(
  * Everything the pages read besides the draft. [deviceLanguages] is Flatpak's value for the
  * device's languages (e.g. "de;en"); [viewers] are the installed VNC viewers; [allFilesAccess] is
  * null where Android has no such setting; [storage] is null while measured. Resetting and the
- * terminal are not offered while an app or a Flatpak task runs ([canReset], [canOpenTerminal]).
+ * Alpine shell are not offered while an app or a Flatpak task runs ([canReset], [canStartSession]).
  */
 class GlobalSettingsEnv(
     val deviceLanguages: String,
@@ -88,12 +88,10 @@ class GlobalSettingsEnv(
     val canReset: Boolean,
     /** The app that runs or starts, if any: its own home and files can't be copied or replaced meanwhile. */
     val runningAppId: String?,
-    val canOpenTerminal: Boolean,
     val actions: GlobalStorageActions,
     val onReset: (ResetMode) -> Unit,
     val onResetSettings: () -> Unit,
-    val onTerminal: () -> Unit,
-    /** No session or Flatpak task runs: Alpine's shell can start (a developer option). */
+    /** No session or Flatpak task runs: Alpine's shell can start. */
     val canStartSession: Boolean,
     /** Starts Alpine's shell as that user; the setting is saved first by the caller if needed. */
     val onAlpineShell: (AlpineShellUser) -> Unit,
@@ -227,9 +225,9 @@ private fun GlobalSettingsScreenPreview() {
                     runtimes = 800L shl 20, apps = 200L shl 20, appData = 5L shl 20, privateHomes = 30L shl 20, cache = 3L shl 20,
                     other = 150L shl 20, unusedAppData = Unused(1, 1L shl 20), unusedHomes = Unused(0, 0), sharedDotfiles = 0,
                 ),
-                storageBusy = false, canReset = true, runningAppId = null, canOpenTerminal = true,
+                storageBusy = false, canReset = true, runningAppId = null,
                 actions = GlobalStorageActions({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, { _, _ -> }, {}, { _, _, _ -> }, {}),
-                onReset = {}, onResetSettings = {}, onTerminal = {}, canStartSession = true, onAlpineShell = {},
+                onReset = {}, onResetSettings = {}, canStartSession = true, onAlpineShell = {},
                 apps = emptyList(), taskText = null, hasCamera = true, cameraResolutions = emptyMap(),
             ),
             onSave = {}, onSaveAndReinstallAll = {}, onSaveAndBaselineAll = {}, onDiscard = {},

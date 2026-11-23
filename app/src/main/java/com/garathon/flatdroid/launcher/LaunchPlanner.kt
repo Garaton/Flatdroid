@@ -1,5 +1,6 @@
 package com.garathon.flatdroid.launcher
 
+import com.garathon.flatdroid.alpine.programs.AlpineRoot
 import com.garathon.flatdroid.flatpak.Deployment
 import com.garathon.flatdroid.flatpak.FlatpakInstallation
 import com.garathon.flatdroid.flatpak.FlatpakRef
@@ -115,6 +116,8 @@ data class LaunchOptions(
     val reduceMotion: Boolean = false,
     /** The app's desktop file says `Terminal=true`: it runs in a terminal ([LaunchPlan.terminal]). */
     val terminal: Boolean = false,
+    /** An Alpine program's root instead of the installation's deployments: no extensions, ld cache, run-on-the-host stand-ins or /.flatpak-info. */
+    val alpine: AlpineRoot? = null,
 )
 
 /** Everything needed to start an app: its proot binds, environment and command, and its root's layout. */
@@ -181,14 +184,15 @@ class LaunchPlanner(
     private val devExists: (String) -> Boolean = { File(it).exists() },
 ) {
     fun plan(appId: String, dirs: HostDirs, options: LaunchOptions = LaunchOptions()): PlanResult {
-        val app = installation.app(appId) ?: return PlanResult.NotInstalled(appId)
+        val alpine = options.alpine
+        val app = alpine?.app ?: installation.app(appId) ?: return PlanResult.NotInstalled(appId)
         val runtimeRef = app.metadata.runtime ?: return PlanResult.RuntimeMissing("(none in metadata)")
-        val runtime = installation.runtime(runtimeRef) ?: return PlanResult.RuntimeMissing(runtimeRef.toString())
+        val runtime = alpine?.runtime ?: installation.runtime(runtimeRef) ?: return PlanResult.RuntimeMissing(runtimeRef.toString())
         val commandName = app.metadata.command?.takeIf { it.isNotBlank() } ?: return PlanResult.NoCommand(appId)
         val commandPath = if (commandName.startsWith("/")) commandName else "/app/bin/$commandName"
 
         // Runtime extension points mount under /usr, the app's under /app.
-        val extensions = installation.extensions(runtime.metadata.extensionPoints, runtimeRef.branch).map { "/usr" to it } +
+        val extensions = if (alpine != null) emptyList() else installation.extensions(runtime.metadata.extensionPoints, runtimeRef.branch).map { "/usr" to it } +
             installation.extensions(app.metadata.extensionPoints, app.ref.branch).map { "/app" to it }
         val glDefault = extensions.firstOrNull { (base, ext) ->
             base == "/usr" && ext.deployment.ref.name == GL_DEFAULT
@@ -214,11 +218,17 @@ class LaunchPlanner(
         )
         // A writable scratch over each runtime cache a tool rewrites at launch, so the deployment
         // (what the file check baselines) isn't changed by the app's own normal operation.
-        for (guest in RUNTIME_CACHE_DIRS) extraBinds += runtimeCacheScratch(dirs.runtimeCache, guest).path to guest
+        // Alpine's fontconfig keeps its cache in /var, which isn't in an Alpine program's root.
+        if (alpine == null) for (guest in RUNTIME_CACHE_DIRS) extraBinds += runtimeCacheScratch(dirs.runtimeCache, guest).path to guest
+        if (alpine != null) {
+            extraBinds += alpine.binds
+            extraBinds += alpine.l2sBinds
+            alpine.bwrap?.let { extraBinds += it to AlpineRoot.BWRAP }
+        }
         dirs.hostFonts?.let { extraBinds += it.path to GuestPaths.HOST_FONTS }
         dirs.sdcard?.let { extraBinds += it.path to GuestPaths.SDCARD }
         dirs.sessionBus?.let { extraBinds += it.path to GuestPaths.SESSION_BUS_DIR }
-        dirs.hostCommands?.let { dir ->
+        dirs.hostCommands?.takeIf { alpine == null }?.let { dir ->
             if (File(runtime.files, "bin/${HostCommands.FLATPAK_SPAWN}").isFile) {
                 extraBinds += File(dir, HostCommands.FLATPAK_SPAWN).path to HostCommands.FLATPAK_SPAWN_GUEST
             }
@@ -276,9 +286,9 @@ class LaunchPlanner(
             val binaryArch = (hostPath(app, commandPath)?.let(Executable::of) as? Executable.Elf)?.arch
             if (binaryArch != null && binaryArch != arch) return PlanResult.WrongArchitecture(commandPath, binaryArch)
         }
-        command = command + options.extraArgs
+        command = command + alpine?.args.orEmpty() + options.extraArgs
 
-        val ldCache = ldCache(dirs.ldCache, runtime, listOf(app, runtime) + extensions.map { it.second.deployment }, extensions)
+        val ldCache = ldCache(dirs.ldCache.takeIf { alpine == null }, runtime, listOf(app, runtime) + extensions.map { it.second.deployment }, extensions)
         if (ldCache != null) {
             extraBinds += ldCache.cache.path to "/etc/$LD_CACHE"
             if (ldCache.generate) {
@@ -305,14 +315,26 @@ class LaunchPlanner(
             softwareRendering = options.softwareRendering,
             terminal = if (!options.terminal) null else if (File(runtime.files, FOOT_TERMINFO).isFile) FOOT_TERM else FALLBACK_TERM,
             usrHas = { path -> path.startsWith("/usr/") && File(runtime.files, path.removePrefix("/usr/")).isDirectory },
+            alpine = alpine != null,
         )
+        // Nothing is bound where Alpine has nothing: proot would make a stand-in in Alpine's own folder.
+        // The time zone goes beside the root's other files instead, named by TZ.
+        val etc = dirs.etc.filterKeys { options.network || it != RESOLV_CONF }.filterKeys { alpine == null || !alpine.bindWouldChangeAlpine("/etc/$it") }
+        if (alpine != null) {
+            dirs.etc[LOCALTIME]?.takeIf { LOCALTIME !in etc }?.let { file ->
+                extraBinds += file.path to GuestPaths.ALPINE_LOCALTIME
+                environment["TZ"] = GuestPaths.ALPINE_LOCALTIME
+            }
+            extraBinds.removeAll { (_, guest) -> alpine.bindWouldChangeAlpine(guest) }
+        }
         val devices = app.metadata.context.devices
         val binds = FlatpakBinds(
             root = dirs.root.path,
             runtimeFiles = runtime.files.path,
             appFiles = app.files.path,
+            etcFiles = alpine?.etc,
             // Without the network, no DNS: the runtime's resolv.conf is a link that leads nowhere here.
-            etc = dirs.etc.filterKeys { options.network || it != RESOLV_CONF }.mapValues { it.value.path },
+            etc = etc.mapValues { it.value.path },
             extensions = extensions.map { (base, ext) -> ext.deployment.files.path to "$base/${ext.guestPath}" },
             tmp = dirs.tmp.path,
             shm = dirs.shm.path,
@@ -335,11 +357,12 @@ class LaunchPlanner(
                 binds = binds,
                 environment = environment,
                 command = command,
-                flatpakInfo = if (!options.flatpakInfo) null else flatpakInfo(
+                flatpakInfo = if (!options.flatpakInfo || alpine != null) null else flatpakInfo(
                     appId, runtimeRef, options.network,
                     hostAllowed = HostCommands.hostAllowed(app.metadata.sessionBusPolicy, app.metadata.context.sockets),
                 ),
-                usrLinks = USR_LINKS.filter { File(runtime.files, it).exists() },
+                // Alpine's /bin, /lib and /sbin are folders of their own, bound beside /usr.
+                usrLinks = if (alpine != null) emptyList() else USR_LINKS.filter { File(runtime.files, it).exists() },
                 isElectron = isElectron,
                 zypakStandIn = zypakStandIn,
                 wayland = waylandSession,

@@ -3,7 +3,6 @@ package com.garathon.flatdroid.ui.terminal
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -30,7 +29,7 @@ import com.garathon.flatdroid.ui.common.keepInViewWhileFocused
 
 /**
  * The single command field: one command for Alpine with an ✕ beside it for the running command
- * (first press Ctrl-C, second press force-stop), and a Run button below; [buttons] go beside Run.
+ * (first press Ctrl-C, second press force-stop), and a Run button below.
  */
 @Composable
 fun CommandInput(
@@ -38,7 +37,6 @@ fun CommandInput(
     onRun: (String) -> Unit,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
-    buttons: @Composable RowScope.() -> Unit = {},
 ) {
     var command by rememberSaveable { mutableStateOf("") }
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -59,11 +57,8 @@ fun CommandInput(
                 Text("✕", style = MaterialTheme.typography.titleLarge)
             }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { onRun(command) }, enabled = !running && command.isNotBlank()) {
-                Text(stringResource(if (running) R.string.ready_running else R.string.ready_run))
-            }
-            buttons()
+        Button(onClick = { onRun(command) }, enabled = !running && command.isNotBlank()) {
+            Text(stringResource(if (running) R.string.ready_running else R.string.ready_run))
         }
     }
 }

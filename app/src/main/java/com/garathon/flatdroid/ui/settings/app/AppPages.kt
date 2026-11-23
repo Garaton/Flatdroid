@@ -66,6 +66,7 @@ import com.garathon.flatdroid.ui.common.SwitchRow
 import com.garathon.flatdroid.ui.common.renderingNames
 import com.garathon.flatdroid.ui.common.TextRow
 import com.garathon.flatdroid.ui.home.AppIcon
+import com.garathon.flatdroid.ui.home.appSubtitle
 import com.garathon.flatdroid.ui.storage.StorageBar
 import com.garathon.flatdroid.ui.storage.StorageConfirm
 import com.garathon.flatdroid.ui.storage.StorageConfirmDialog
@@ -83,6 +84,7 @@ fun AppOverviewPage(s: AppPageState) = SettingsPageColumn(null) {
     if (confirmUninstall) {
         UninstallDialog(
             s.app.name,
+            runtimes = s.app.alpinePackage == null,
             onConfirm = { data, runtimes -> confirmUninstall = false; s.env.onUninstall(data, runtimes) },
             onDismiss = { confirmUninstall = false },
         )
@@ -100,7 +102,7 @@ fun AppOverviewPage(s: AppPageState) = SettingsPageColumn(null) {
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
         AppIcon(s.app.icon, Modifier.size(96.dp))
         Text(s.app.name, style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 8.dp))
-        Text(s.app.id, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+        Text(appSubtitle(s.app), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
         s.env.onAddShortcut?.let { add ->
             OutlinedButton(onClick = add, modifier = Modifier.padding(top = 12.dp)) {
                 Icon(Icons.AutoMirrored.Outlined.AddToHomeScreen, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -221,7 +223,7 @@ private fun PermissionChips(s: AppPageState) {
         if (app.requestsAllDevices) add(stringResource(R.string.permission_all_devices) to (!s.env.limitDevices || settings.wholeDev))
         if (app.requestsFiles) add(stringResource(R.string.permission_files) to files)
         if (settings.microphoneOn(app.requestsAudio)) add(stringResource(R.string.app_settings_microphone) to true)
-        val video = settings.videoFor(app.requestsAllDevices, app.mayUseCamera) != null
+        val video = settings.videoFor(app.takesVideoDevices, app.mayUseCamera) != null
         if (video && settings.cameraOn && s.env.hasCamera) add(stringResource(R.string.app_settings_camera) to true)
         if (video && settings.screenOn) add(stringResource(R.string.app_settings_screen) to true)
     }
@@ -423,7 +425,7 @@ fun AppPermissionsPage(s: AppPageState) = SettingsPageColumn(R.string.app_page_p
         )
         // What Automatic picks for this app, or what the chosen mode is for.
         val videoDetail = when (videoMode) {
-            VideoMode.AUTOMATIC -> when (s.settings.videoFor(app.requestsAllDevices, app.mayUseCamera)) {
+            VideoMode.AUTOMATIC -> when (s.settings.videoFor(app.takesVideoDevices, app.mayUseCamera)) {
                 VideoMode.DEVICE -> R.string.app_settings_video_automatic_device
                 VideoMode.PORTAL -> R.string.app_settings_video_automatic_portal
                 else -> R.string.app_settings_video_automatic_none
@@ -633,17 +635,23 @@ private fun SizeField(value: String, label: String, isError: Boolean, modifier: 
 }
 
 @Composable
-internal fun UninstallDialog(name: String, onConfirm: (deleteData: Boolean, keepRuntimes: Boolean) -> Unit, onDismiss: () -> Unit) {
+internal fun UninstallDialog(
+    name: String,
+    onConfirm: (deleteData: Boolean, keepRuntimes: Boolean) -> Unit,
+    onDismiss: () -> Unit,
+    /** A Flatpak's runtimes may stay; an Alpine program's package removes only what nothing else needs. */
+    runtimes: Boolean = true,
+) {
     var deleteData by rememberSaveable { mutableStateOf(false) }
     var keepRuntimes by rememberSaveable { mutableStateOf(false) }
     ConfirmDialog(
         title = stringResource(R.string.uninstall_title, name),
-        text = stringResource(R.string.uninstall_text),
+        text = stringResource(if (runtimes) R.string.uninstall_text else R.string.uninstall_alpine_text),
         confirm = stringResource(R.string.uninstall_confirm),
         onConfirm = { onConfirm(deleteData, keepRuntimes) },
         onDismiss = onDismiss,
     ) {
         CheckboxRow(deleteData, { deleteData = it }, stringResource(R.string.uninstall_delete_data))
-        CheckboxRow(keepRuntimes, { keepRuntimes = it }, stringResource(R.string.uninstall_keep_runtimes))
+        if (runtimes) CheckboxRow(keepRuntimes, { keepRuntimes = it }, stringResource(R.string.uninstall_keep_runtimes))
     }
 }

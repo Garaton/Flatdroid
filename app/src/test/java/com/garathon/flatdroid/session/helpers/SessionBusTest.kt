@@ -25,6 +25,8 @@ class SessionBusTest {
             args.filter { "portal" !in it },
         )
         assertTrue(args.none { "Camera" in it })
+        // An Alpine program's desktop file name that isn't a bus name owns nothing.
+        assertTrue(SessionBus.proxyArgs("htop", emptyMap(), camera = false).none { it.startsWith("--own=") })
     }
 
     @Test

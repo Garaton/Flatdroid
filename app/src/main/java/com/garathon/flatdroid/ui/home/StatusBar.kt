@@ -153,6 +153,8 @@ private fun queuedLabel(task: FlatpakTask, name: (String) -> String): String = w
     FlatpakTask.ReinstallAll -> stringResource(R.string.queued_reinstall_all)
     FlatpakTask.BaselineAll -> stringResource(R.string.queued_baseline_all)
     FlatpakTask.Repair -> stringResource(R.string.queued_repair)
+    is FlatpakTask.AlpineInstall -> stringResource(R.string.queued_alpine_install, task.packages.joinToString(", "))
+    is FlatpakTask.AlpineRemove -> stringResource(R.string.queued_alpine_remove, task.packageName)
 }
 
 @Composable

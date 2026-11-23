@@ -113,25 +113,24 @@ data class UserSettings(
     val reduceMotion: Boolean = false,
     /** What the security level sets ([SecurityLevel]). */
     val security: SecuritySettings = SecuritySettings(),
-    /** Developer setting: the terminal's commands run behind fdsec's filter. */
-    val terminalFilter: Boolean = true,
-    /** Developer setting: the terminal runs commands while an app runs, and apps start while it does. */
-    val terminalDuringSession: Boolean = false,
+    /** Developer setting: the Alpine shell (and the setup screen's commands) run behind fdsec's filter. */
+    val shellFilter: Boolean = true,
+    /**
+     * Developer setting, on at every level: Alpine's files are checked for changes around each
+     * Alpine program's session ([com.garathon.flatdroid.alpine.programs.AlpineChanges]).
+     */
+    val alpineSafeLaunch: Boolean = true,
     /** Developer setting: who Alpine's shell in a window runs as. */
     val alpineShellUser: AlpineShellUser = AlpineShellUser.ROOT,
 ) {
     /** The level [security] matches; null for Custom. */
     val securityLevel: SecurityLevel? get() = SecurityLevel.of(security)
 
-    /** Whether the terminal filters its commands; the developer setting counts only while developer options are on. */
-    val filterTerminal: Boolean get() = !developerOptions || terminalFilter
+    /** Whether the shell is filtered; the developer setting counts only while developer options are on. */
+    val filterShell: Boolean get() = !developerOptions || shellFilter
 
-    /**
-     * Whether the terminal and a running app may overlap; the developer setting counts only while
-     * developer options are on. A command started during a session isn't hidden from the app,
-     * which could take it over (see [com.garathon.flatdroid.alpine.AlpineCommands]).
-     */
-    val terminalWithApps: Boolean get() = developerOptions && terminalDuringSession
+    /** Whether Alpine's files are checked around an Alpine program; the developer setting counts only while developer options are on. */
+    val checkAlpine: Boolean get() = !developerOptions || alpineSafeLaunch
 
     val onlyMyLanguages: Boolean get() = flatpakLanguages != GuestFiles.ALL_LANGUAGES
 
@@ -247,8 +246,8 @@ class UserSettingsStore(private val file: File) {
             sharedHome = props.getProperty(KEY_SHARED_HOME)?.takeIf { it.startsWith("/") },
             flatpakTheme = FlatpakTheme.entries.firstOrNull { it.name.lowercase() == props.getProperty(KEY_THEME) } ?: FlatpakTheme.SYSTEM,
             security = security(props),
-            terminalFilter = props.getProperty(KEY_TERMINAL_FILTER) != "false",
-            terminalDuringSession = props.getProperty(KEY_TERMINAL_DURING_SESSION) == "true",
+            shellFilter = props.getProperty(KEY_SHELL_FILTER) != "false",
+            alpineSafeLaunch = props.getProperty(KEY_ALPINE_SAFE_LAUNCH) != "false",
             alpineShellUser = AlpineShellUser.entries.firstOrNull { it.key == props.getProperty(KEY_ALPINE_SHELL_USER) } ?: AlpineShellUser.ROOT,
         )
     }
@@ -317,8 +316,8 @@ class UserSettingsStore(private val file: File) {
             props.setProperty(KEY_SHARE_CLIPBOARD, s.shareClipboard.toString())
             props.setProperty(KEY_SHARE_LOCALE, s.shareLocale.toString())
         }
-        if (!settings.terminalFilter) props.setProperty(KEY_TERMINAL_FILTER, "false")
-        if (settings.terminalDuringSession) props.setProperty(KEY_TERMINAL_DURING_SESSION, "true")
+        if (!settings.shellFilter) props.setProperty(KEY_SHELL_FILTER, "false")
+        if (!settings.alpineSafeLaunch) props.setProperty(KEY_ALPINE_SAFE_LAUNCH, "false")
         if (settings.alpineShellUser != AlpineShellUser.ROOT) props.setProperty(KEY_ALPINE_SHELL_USER, settings.alpineShellUser.key)
         file.writeTextAtomically(StringWriter().also { props.store(it, null) }.toString())
         LiveSettings.theme.value = settings.theme
@@ -339,8 +338,8 @@ class UserSettingsStore(private val file: File) {
         private const val KEY_ANDROID_FONTS = "security.androidFonts"
         private const val KEY_SHARE_CLIPBOARD = "security.shareClipboard"
         private const val KEY_SHARE_LOCALE = "security.shareLocale"
-        private const val KEY_TERMINAL_FILTER = "terminal.filter"
-        private const val KEY_TERMINAL_DURING_SESSION = "terminal.duringSession"
+        private const val KEY_SHELL_FILTER = "shell.filter"
+        private const val KEY_ALPINE_SAFE_LAUNCH = "alpine.safeLaunch"
         private const val KEY_ALPINE_SHELL_USER = "terminal.shellUser"
         private const val KEY_LANGUAGES = "flatpak.languages"
         private const val KEY_DEVELOPER = "ui.developerOptions"

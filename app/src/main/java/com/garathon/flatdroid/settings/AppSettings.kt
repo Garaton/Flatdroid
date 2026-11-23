@@ -267,11 +267,11 @@ data class AppSettings(
     /** Whether the app's microphone is on, whatever Android's permission: its own setting, else [defaults] and whether it asks for sound. */
     fun microphoneAllowed(sockets: List<String>): Boolean = microphoneOn(PULSEAUDIO_SOCKET in sockets)
 
-    /** [videoFor] from the app's metadata. */
-    fun videoFor(context: FlatpakContext): VideoMode? = videoFor(DevNodes.ALL in context.devices, context.mayUseCamera)
+    /** [videoFor] from the app's metadata (a program that reads `/dev/video*` itself counts as asking for all devices). */
+    fun videoFor(context: FlatpakContext): VideoMode? = videoFor(DevNodes.ALL in context.devices || context.readsVideoDevices, context.mayUseCamera)
 
     /** [watchesCameraPortal] from the app's metadata. */
-    fun watchesCameraPortal(context: FlatpakContext): Boolean = watchesCameraPortal(DevNodes.ALL in context.devices, context.mayUseCamera)
+    fun watchesCameraPortal(context: FlatpakContext): Boolean = watchesCameraPortal(DevNodes.ALL in context.devices || context.readsVideoDevices, context.mayUseCamera)
 
     /**
      * Whether the app gets a camera at its next launch, whatever Android's permission ([videoFor]).

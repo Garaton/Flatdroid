@@ -32,6 +32,9 @@ object GuestPaths {
     /** Flatdroid's desktop settings, last in a Flatpak's `XDG_CONFIG_DIRS` (see DesktopConfig). */
     const val XDG_CONFIG_DIR = "/run/flatdroid/xdg"
 
+    /** An Alpine program's time zone file, named by TZ: Alpine's /etc may have no localtime, and a bind there would put one in Alpine itself. */
+    const val ALPINE_LOCALTIME = "/run/flatdroid/localtime"
+
     /** Where the launcher has `ldconfig` build an app's ld.so.cache ([com.garathon.flatdroid.launcher.LdCache]). */
     const val LD_CACHE_DIR = "/run/flatdroid/ld"
 

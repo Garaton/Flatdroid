@@ -21,8 +21,15 @@
  * with formats as "mjpeg,nv12" in the order they are offered.
  *
  * The calls wrapped are those of PipeWire's pw-v4l2 (read for its behaviour only) but munmap,
- * plus the stat family. Other paths and descriptors go straight to the kernel. Known misses: apps
- * that go through libv4l2 (it makes raw system calls), static binaries.
+ * plus the stat family, and the C library's syscall() for the same calls (libv4l2, which OBS and
+ * others use, makes its calls through it). Other paths, descriptors and system calls go straight
+ * to the kernel. Known misses: static binaries, and system call instructions of a program's own.
+ *
+ * Also socket(): Android refuses apps the kernel's device event socket (NETLINK_KOBJECT_UEVENT,
+ * EACCES), and eudev's udev_monitor_new_from_netlink() then gives no monitor, which programs
+ * watching for new cameras use unchecked (OBS crashes in udev_monitor_enable_receiving). A
+ * refused one becomes a routing netlink socket, which carries no device events: the monitor
+ * exists and stays quiet (no camera comes or goes). Loaded for that into every Alpine program.
  *
  * No C library, like fdsec and fdshm: raw system calls, so one library loads into any root's
  * programs. Only errno is the program's own (__errno_location, which glibc and musl export).
@@ -32,6 +39,7 @@
 #include <linux/fcntl.h>
 #include <linux/media.h>
 #include <linux/mman.h>
+#include <linux/netlink.h>
 #include <linux/stat.h>
 #include <linux/videodev2.h>
 #include <stdarg.h>
@@ -1129,6 +1137,19 @@ static void *map_call(void *addr, unsigned long len, int prot, int flags, int fd
     return (void *)result(syscall6(__NR_mmap, (long)addr, (long)len, prot, flags, fd, offset));
 }
 
+#ifndef AF_NETLINK
+#define AF_NETLINK 16
+#endif
+
+static int socket_call(int domain, int type, int protocol)
+{
+    long fd = sys3(__NR_socket, domain, type, protocol);
+    if (fd == -EACCES && domain == AF_NETLINK && protocol == NETLINK_KOBJECT_UEVENT) fd = sys3(__NR_socket, domain, type, NETLINK_ROUTE);
+    return (int)result(fd);
+}
+
+V int socket(int domain, int type, int protocol) { return socket_call(domain, type, protocol); }
+
 V void *mmap(void *addr, unsigned long len, int prot, int flags, int fd, long offset) { return map_call(addr, len, prot, flags, fd, offset); }
 V void *mmap64(void *addr, unsigned long len, int prot, int flags, int fd, long offset) { return map_call(addr, len, prot, flags, fd, offset); }
 
@@ -1207,4 +1228,32 @@ V int statx(int dirfd, const char *path, int flags, unsigned mask, struct statx 
         st->stx_size = 0;
     }
     return 0;
+}
+
+/*
+ * The C library's syscall(), which libv4l2 calls instead of open(), ioctl() and the others: the
+ * calls wrapped above (socket too) get the same answers, every other number goes to the kernel. Six arguments
+ * are read whatever the call takes, as the C library's own does; errors as -1 and errno, as there.
+ */
+V long syscall(long n, ...)
+{
+    va_list ap;
+    va_start(ap, n);
+    long a = va_arg(ap, long), b = va_arg(ap, long), c = va_arg(ap, long);
+    long d = va_arg(ap, long), e = va_arg(ap, long), f = va_arg(ap, long);
+    va_end(ap);
+    switch (n) {
+    case __NR_openat: return open_at((int)a, (const char *)b, (int)c, (int)d);
+#ifdef __NR_open
+    case __NR_open: return open_at(AT_FDCWD, (const char *)a, (int)b, (int)c);
+#endif
+    case __NR_close: return close((int)a);
+    case __NR_dup: return dup((int)a);
+    case __NR_ioctl: return ioctl((int)a, (unsigned long)b, (void *)c);
+    case __NR_mmap: return (long)map_call((void *)a, (unsigned long)b, (int)c, (int)d, (int)e, f);
+    case __NR_newfstatat: return stat_at((int)a, (const char *)b, (struct stat *)c, (int)d);
+    case __NR_fstat: return stat_fd((int)a, (struct stat *)b);
+    case __NR_socket: return socket_call((int)a, (int)b, (int)c);
+    default: return result(syscall6(n, a, b, c, d, e, f));
+    }
 }

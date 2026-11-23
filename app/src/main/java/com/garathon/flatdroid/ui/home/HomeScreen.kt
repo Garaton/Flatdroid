@@ -96,6 +96,12 @@ class HomeListState(val list: LazyListState, private val queryState: MutableStat
 
     /** The list has been shown once: it fades in only then, not each time Home comes back. */
     var shownOnce = false
+
+    /**
+     * The apps the list last showed, kept while Home is away (the browser, Settings): an app
+     * installed meanwhile is new when Home comes back, so the list scrolls up to it.
+     */
+    var knownIds: Set<String>? = null
 }
 
 @Composable
@@ -151,12 +157,12 @@ fun HomeScreen(
     val runningAppId = runningState?.appIdOrNull
 
     ScrollToTopOnNewOrder(query, listState.list)
-    // A newly installed app starts at the top of the Last opened order: scroll up to show it.
-    var knownIds by remember { mutableStateOf<Set<String>?>(null) }
+    // A newly installed app starts at the top of the Last opened order: scroll up to show it, also
+    // when it came while Home was away.
     LaunchedEffect(apps) {
         val ids = apps?.map { it.id }?.toSet() ?: return@LaunchedEffect
-        val known = knownIds
-        knownIds = ids
+        val known = listState.knownIds
+        listState.knownIds = ids
         if (known != null && (ids - known).isNotEmpty()) listState.list.scrollToItem(0)
     }
 
@@ -331,7 +337,7 @@ private fun AppRow(
         AppIcon(app.icon, Modifier.size(48.dp).alpha(dim))
         Column(modifier = Modifier.weight(1f).alpha(dim)) {
             Text(app.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(app.id, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(appSubtitle(app), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         // An app that never ran says so, rather than "0 min".
         val never = if (showTimeUsed) app.launches == 0 && app.usedMillis == 0L else app.lastOpened == null

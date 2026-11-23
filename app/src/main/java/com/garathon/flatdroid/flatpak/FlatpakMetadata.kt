@@ -38,6 +38,12 @@ data class FlatpakContext(
     val devices: List<String> = emptyList(),
     val filesystems: List<String> = emptyList(),
     val persistent: List<String> = emptyList(),
+    /**
+     * A program made for an ordinary Linux system (an Alpine program), which opens `/dev/video*`
+     * itself: Automatic video gives it the device ([com.garathon.flatdroid.settings.AppSettings.videoFor]).
+     * Set by Flatdroid only, never read from a metadata file.
+     */
+    val readsVideoDevices: Boolean = false,
 ) {
     /** Asks for Wayland: such an app gets a Wayland session, unless it also takes X11 and is set to Force X11. */
     val wayland: Boolean
@@ -60,7 +66,11 @@ data class FlatpakContext(
 private val CAMERA_PATHS = setOf("xdg-pictures/Camera", "xdg-videos/Camera")
 
 /** The metadata file of an installed app or runtime. */
-class FlatpakMetadata(private val keyfile: Keyfile) {
+class FlatpakMetadata(
+    private val keyfile: Keyfile,
+    /** [FlatpakContext.readsVideoDevices]: Flatdroid's own knowledge of the program, not the file's. */
+    private val readsVideoDevices: Boolean = false,
+) {
     /** The app or runtime ID. */
     val name: String? get() = keyfile.string(APPLICATION, "name") ?: keyfile.string(RUNTIME, "name")
 
@@ -90,6 +100,7 @@ class FlatpakMetadata(private val keyfile: Keyfile) {
             devices = keyfile.list(CONTEXT, "devices"),
             filesystems = keyfile.list(CONTEXT, "filesystems"),
             persistent = keyfile.list(CONTEXT, "persistent"),
+            readsVideoDevices = readsVideoDevices,
         )
 
     /** `[Session Bus Policy]`: bus names (a `.*` suffix for the name and those below it) to `see`, `talk`, `own` or `none`. */

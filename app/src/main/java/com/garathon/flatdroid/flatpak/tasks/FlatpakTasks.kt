@@ -10,7 +10,10 @@ import com.garathon.flatdroid.util.appScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.updateAndGet
+import kotlinx.coroutines.launch
 
 /** One Flatpak operation run in Alpine. */
 sealed interface FlatpakTask {
@@ -38,9 +41,16 @@ sealed interface FlatpakTask {
     data object ReinstallAll : FlatpakTask
     /** Records the file baseline of every installed app that has none yet (with the file check on). */
     data object BaselineAll : FlatpakTask
+    /** Adds Alpine's [packages] (`apk add`); their desktop files then show as apps ([com.garathon.flatdroid.alpine.programs.AlpinePrograms]). */
+    data class AlpineInstall(val packages: List<String>) : FlatpakTask
+    /** Removes [packageName], the Alpine package [appId]'s program came from (`apk del`), and the program's own files; its data too with [deleteData]. */
+    data class AlpineRemove(val appId: String, val packageName: String, val deleteData: Boolean) : FlatpakTask
 
-    /** Downloads from Flathub, so the mobile data setting holds while it runs ([MeteredGate]). */
-    val downloads: Boolean get() = this is Install || this == UpdateAll || this is Reinstall || this == ReinstallAll || this == RefreshCatalog
+    /** Changes only Alpine's packages: Flatpak's repository is never touched, so nothing of it needs repairing after. */
+    val alpineOnly: Boolean get() = this is AlpineInstall || this is AlpineRemove
+
+    /** Downloads (from Flathub, or Alpine's packages), so the mobile data setting holds while it runs ([MeteredGate]). */
+    val downloads: Boolean get() = this is Install || this == UpdateAll || this is Reinstall || this == ReinstallAll || this == RefreshCatalog || this is AlpineInstall
 }
 
 data class FlatpakTaskUi(
@@ -59,7 +69,7 @@ data class FlatpakTaskUi(
     val cancelling: Boolean = false,
     /** The running task is paused on a metered network ([MeteredGate]); null while it runs. */
     val meteredWait: MeteredWait? = null,
-    /** The last task and whether it succeeded, until dismissed. */
+    /** The last task and whether it succeeded: a success for a few seconds, a failure until dismissed. */
     val finished: FlatpakTask? = null,
     val error: String? = null,
     /** Bumped after every task, so lists of installed apps reload. */
@@ -175,6 +185,9 @@ object TaskQueue {
 
 /** Process-wide task state: written by [FlatpakTaskService], read by the UI. */
 object FlatpakTasks {
+    /** How long a finished task's "Done" stays in the bar. */
+    private const val DONE_SHOWN_MS = 4_000L
+
     private val _ui = MutableStateFlow(FlatpakTaskUi())
     val ui: StateFlow<FlatpakTaskUi> = _ui.asStateFlow()
     private val logBuffer = LineBuffer(maxLines = 1_000, scope = appScope)
@@ -224,8 +237,20 @@ object FlatpakTasks {
     /** [task] was claimed ([begin]) but its service couldn't start: nothing ran, so nothing is reported. */
     internal fun abandon(task: FlatpakTask) = _ui.update { if (it.running == task) it.copy(running = null, step = null, cancelling = false, meteredWait = null) else it }
 
-    internal fun end(task: FlatpakTask, error: String?) =
-        _ui.update { it.copy(running = null, step = null, phase = null, progress = null, cancelling = false, meteredWait = null, finished = task, error = error, generation = it.generation + 1) }
+    /**
+     * [task] ended. A success leaves the bar by itself after [DONE_SHOWN_MS] (unless something
+     * replaced it meanwhile); a failure or a cancel stays until dismissed, to be read.
+     */
+    internal fun end(task: FlatpakTask, error: String?) {
+        val ended = _ui.updateAndGet {
+            it.copy(running = null, step = null, phase = null, progress = null, cancelling = false, meteredWait = null, finished = task, error = error, generation = it.generation + 1)
+        }
+        if (error != null) return
+        appScope.launch {
+            delay(DONE_SHOWN_MS)
+            _ui.update { if (it.finished == task && it.error == null && it.generation == ended.generation) it.copy(finished = null) else it }
+        }
+    }
 
     /** Queues [task] behind what runs ([TaskQueue.add]), or lets the update do it ([TaskQueue.joinsUpdate]). */
     internal fun enqueue(task: FlatpakTask) = _ui.update {

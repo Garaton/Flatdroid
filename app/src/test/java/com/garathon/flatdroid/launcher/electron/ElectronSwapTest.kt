@@ -133,9 +133,12 @@ class ElectronSwapTest {
         val caches = File(tmp.root, "cache/appcache")
         File(caches, id).mkdirs()
         File(caches, "gone.App/x").apply { parentFile!!.mkdirs(); writeText("x") }
+        // An installed Alpine program's cache stays.
+        val program = File(caches, "alpine+htop").apply { mkdirs() }
         val installation = FlatpakInstallation(File(tmp.root, "flatpak"), "aarch64")
 
-        val removed = Leftovers(installation, electronDir, listOf(caches), JvmTarFs).clean()
+        val removed = Leftovers(installation, electronDir, listOf(caches), JvmTarFs) { setOf("alpine+htop") }.clean()
+        assertTrue(program.isDirectory)
 
         assertEquals(setOf(stale, oldBuild, File(caches, "gone.App")), removed.toSet())
         assertTrue(File(electronDir, id).isDirectory)

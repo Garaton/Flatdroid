@@ -3,7 +3,6 @@ package com.garathon.flatdroid
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.garathon.flatdroid.alpine.AlpineCommands
 import com.garathon.flatdroid.alpine.AlpineEnvironment
 import com.garathon.flatdroid.flatpak.tasks.FlatpakTaskService
 import com.garathon.flatdroid.storage.AppData
@@ -37,8 +36,9 @@ import kotlinx.coroutines.withContext
 import java.io.IOException
 
 /**
- * Work in Alpine started from the screens: the single command field (one command, its output, no
- * session; [running]) and applying settings ([applying]). Each runs one at a time.
+ * Work in Alpine started from the screens: the setup screen's command field (one command, its
+ * output, no session; [running]), which looks into a failed setup, and applying settings
+ * ([applying]). Each runs one at a time.
  */
 class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val outputLines = LineBuffer(maxLines = MAX_OUTPUT_LINES, scope = viewModelScope, intervalMs = OUTPUT_INTERVAL_MS)
@@ -140,14 +140,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun run(command: String) {
         if (command.isBlank() || _running.value) return
         outputLines.clear()
-        // A command started during a session isn't hidden from the app (see AlpineCommands).
-        if (!AlpineCommands.terminalMayRun(getApplication())) {
-            log("$ $command")
-            end(text(R.string.terminal_app_running))
-            return
-        }
         _running.value = true
-        AlpineCommands.terminalRunning = true
         DebugLog.i("$ $command")
         log("$ $command")
         interrupted = false
@@ -159,8 +152,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 // The user's text reaches the guest shell as one argument; the proot invocation
                 // itself is still an argument list. Behind fdsec's filter unless the developer
-                // setting turns it off for the terminal.
-                val filtered = SetupController.settings(getApplication()).load()?.filterTerminal ?: true
+                // setting turns it off for the shell.
+                val filtered = SetupController.settings(getApplication()).load()?.filterShell ?: true
                 proc = AlpineEnvironment.get(getApplication())
                     .start(listOf("/bin/sh", "-c", command), filter = Fdsec.Filter().takeIf { filtered }, onLine = ::log)
                 this@MainViewModel.command = proc
@@ -185,13 +178,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 end(text(R.string.terminal_cancelled))
                 throw e
             } catch (e: Exception) {
-                // Whatever went wrong, the command must not outlive the "running" flag (the session check relies on it) (verify: not forced).
+                // Whatever went wrong, the command must not outlive the "running" flag (verify: not forced).
                 proc?.let { withContext(NonCancellable) { runCatching { runInterruptible { it.stop() } } } }
                 end(text(R.string.terminal_error, e))
             } finally {
                 SavedSizes.changedAll(getApplication(), measureNow = false)
                 this@MainViewModel.command = null
-                AlpineCommands.terminalRunning = false
                 _running.value = false
             }
         }

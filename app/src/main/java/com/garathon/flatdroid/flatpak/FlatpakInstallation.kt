@@ -4,8 +4,15 @@ import com.garathon.flatdroid.util.io.readTextUpTo
 import java.io.File
 
 /** An installed app or runtime: its ref and deployed directory (with `files/` and `metadata`). */
-data class Deployment(val ref: FlatpakRef, val dir: File, val metadata: FlatpakMetadata, val kind: String = "runtime") {
-    val files: File get() = File(dir, "files")
+data class Deployment(
+    val ref: FlatpakRef,
+    val dir: File,
+    val metadata: FlatpakMetadata,
+    val kind: String = "runtime",
+    /** Its files somewhere else than `<dir>/files`: an Alpine program's ([com.garathon.flatdroid.alpine.programs.AlpineRoot]). */
+    val filesDir: File? = null,
+) {
+    val files: File get() = filesDir ?: File(dir, "files")
     /** The ref Flatpak installs it by: `app/…` or `runtime/…`. */
     val installRef: String get() = "$kind/$ref"
     /** `<kind>/<ID>/<arch>/<branch>`, relative to the installation. */

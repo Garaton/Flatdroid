@@ -30,4 +30,6 @@ echo "== refusals"
 timeout 5 "$F" relative 2>&1 | grep -q '^fdsec: usage' || { echo "FAIL: relative command accepted"; fail=1; }
 timeout 5 "$F" --unknown /bin/true 2>&1 | grep -q '^fdsec: unknown option' || { echo "FAIL: unknown option accepted"; fail=1; }
 timeout 5 "$F" --hold-tty "$WORK/x" /bin/true 2>&1 | grep -q '^fdsec: usage' || { echo "FAIL: --hold-tty with a command accepted"; fail=1; }
+timeout 5 "$F" --no-filter /bin/true 2>&1 | grep -q '^fdsec: usage' || { echo "FAIL: --no-filter without --tty accepted"; fail=1; }
+timeout 5 "$F" --no-filter --extra --tty /dev/pts/0 /bin/true 2>&1 | grep -q '^fdsec: usage' || { echo "FAIL: --no-filter with a filter option accepted"; fail=1; }
 [ $fail -eq 0 ] && echo "all passed" || { echo "FAILED"; exit 1; }

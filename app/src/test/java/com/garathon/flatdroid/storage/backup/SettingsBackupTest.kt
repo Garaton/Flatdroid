@@ -91,24 +91,24 @@ class SettingsBackupTest {
     fun anImportKeepsThisDevicesChoices() {
         val device = UserSettings(
             flatpakLanguages = "de;en", vncViewer = "com.example.viewer", externalViewer = true,
-            security = SecuritySettings(extraSyscallFilter = false), terminalFilter = false, terminalDuringSession = true,
+            security = SecuritySettings(extraSyscallFilter = false), shellFilter = false, alpineSafeLaunch = false,
             alpineShellUser = AlpineShellUser.APP_USER,
         )
         val zip = UserSettings(
             flatpakLanguages = "--install-everything", vncViewer = "com.other.viewer", externalViewer = false,
-            security = SecuritySettings(), terminalFilter = true, terminalDuringSession = false, mobileData = MobileData.NEVER,
+            security = SecuritySettings(), shellFilter = true, alpineSafeLaunch = true, mobileData = MobileData.NEVER,
         )
         val kept = SettingsBackup.keepingDevice(zip, device)
         assertEquals("de;en", kept.flatpakLanguages)
         assertEquals("com.example.viewer", kept.vncViewer)
         assertEquals(true, kept.externalViewer)
         assertEquals(device.security, kept.security)
-        assertEquals(false, kept.terminalFilter)
-        assertEquals(true, kept.terminalDuringSession)
+        assertEquals(false, kept.shellFilter)
+        assertEquals(false, kept.alpineSafeLaunch)
         // What isn't a device choice comes from the zip.
         assertEquals(zip.copy(
             flatpakLanguages = device.flatpakLanguages, vncViewer = device.vncViewer, externalViewer = true,
-            security = device.security, terminalFilter = false, terminalDuringSession = true,
+            security = device.security, shellFilter = false, alpineSafeLaunch = false,
             alpineShellUser = AlpineShellUser.APP_USER,
         ), kept)
     }

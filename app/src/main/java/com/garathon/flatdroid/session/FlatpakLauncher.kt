@@ -7,6 +7,7 @@ import android.hardware.display.DisplayManager
 import android.media.AudioManager
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.system.Os
 import android.view.Display
 import android.view.Surface
@@ -14,6 +15,12 @@ import android.widget.Toast
 import com.garathon.flatdroid.BuildConfig
 import com.garathon.flatdroid.R
 import com.garathon.flatdroid.alpine.AlpineEnvironment
+import com.garathon.flatdroid.alpine.GuestFiles
+import com.garathon.flatdroid.alpine.programs.AlpineChanges
+import com.garathon.flatdroid.alpine.programs.AlpinePackages
+import com.garathon.flatdroid.alpine.programs.AlpineProgramIds
+import com.garathon.flatdroid.alpine.programs.AlpinePrograms
+import com.garathon.flatdroid.alpine.programs.AlpineRoot
 import com.garathon.flatdroid.alpine.dns.ResolvConfRefresher
 import com.garathon.flatdroid.audio.AudioPlayer
 import com.garathon.flatdroid.audio.MicStreamer
@@ -59,6 +66,7 @@ import com.garathon.flatdroid.proot.GuestPaths
 import com.garathon.flatdroid.proot.processes.HelperProcesses
 import com.garathon.flatdroid.proot.processes.LeftoverProcesses
 import com.garathon.flatdroid.proot.ProotCommand
+import com.garathon.flatdroid.proot.ProotPaths
 import com.garathon.flatdroid.proot.ProotProcess
 import com.garathon.flatdroid.proot.ProotRunner
 import com.garathon.flatdroid.setup.rootfs.AndroidTarFs
@@ -127,6 +135,12 @@ class FlatpakLauncher(private val context: Context) {
     private val cameraSysDir = File(sessionDir, "camera-sys")
     /** Bound over the helpers' /proc entries in the app's root, when they are hidden. */
     private val emptyDir = File(sessionDir, "empty")
+    private val rootfs = File(env.paths().rootfs)
+    private val alpinePrograms = AlpinePrograms(rootfs, exists = { it.exists() || AndroidTarFs.isSymlink(it) })
+    /** An Alpine program's root ([AlpineRoot]) while [run] launches one; null for a Flatpak. */
+    private var alpineRoot: AlpineRoot? = null
+    /** An Alpine program's empty /app, emptied for each of its launches. */
+    private val emptyApp = File(sessionDir, "alpine-app")
 
     fun electronSwap(appId: String) = ElectronSwap(
         dir = File(AppData.electronDir(context), appId),
@@ -183,6 +197,29 @@ class FlatpakLauncher(private val context: Context) {
         val userSettings = SetupController.settings(context).load()
         val store = AppData.settings(context, appId)
         var settings = store.load()
+        // An Alpine program: its root from Alpine's folders, found by the walk that also records them for Alpine safe launch.
+        val alpineProgram = if (!AlpineProgramIds.isId(appId)) null else alpinePrograms.program(appId) ?: throw LaunchException(context.getString(R.string.launch_alpine_program_missing))
+        val alpineBefore = alpineProgram?.let {
+            SessionController.starting(appId, context.getString(R.string.session_checking_alpine))
+            AlpineChanges.requireUnchanged(context)
+            // Before the record: the helpers' binds would otherwise put stand-ins into Alpine's /etc meanwhile.
+            env.ensureBindTargets()
+            val started = SystemClock.elapsedRealtime()
+            AlpineChanges.snapshot(rootfs, File(env.paths().l2sDir)).also {
+                SessionController.log("[flatdroid] Alpine's files: ${it.stamps.size} entries recorded in ${SystemClock.elapsedRealtime() - started} ms")
+            }
+        }
+        alpineRoot = alpineProgram?.let { program ->
+            AndroidTarFs.deleteTree(emptyApp)
+            emptyApp.mkdirs()
+            val bwrap = File(hostCommandsDir, ALPINE_BWRAP).apply {
+                parentFile!!.mkdirs()
+                writeTextAtomically(GuestFiles.NO_NAMESPACES_BWRAP, durable = false)
+                setExecutable(true, false)
+            }
+            AlpineRoot.of(program, rootfs, emptyApp, arch, BuildConfig.ALPINE_BRANCH, alpineBefore!!.l2sBinds, bwrap)
+        }
+        val checkAlpine = alpineProgram != null && userSettings?.checkAlpine != false
         // Android's storage as the home needs All files access; without it the app gets the shared home.
         if (settings.homeMode == HomeMode.ANDROID && !SharedHome.broadAccess(context)) {
             settings = settings.copy(homeModeChoice = HomeMode.SHARED)
@@ -216,7 +253,8 @@ class FlatpakLauncher(private val context: Context) {
         }
         store.update { it.copy(lastOpened = System.currentTimeMillis()) }
 
-        if (userSettings?.security?.checkFilesBeforeLaunch == true && !checkFiles(appId)) return false
+        // Alpine's files aren't the installation's: Alpine safe launch checks those.
+        if (alpineRoot == null && userSettings?.security?.checkFilesBeforeLaunch == true && !checkFiles(appId)) return false
 
         SessionController.starting(appId, context.getString(R.string.session_preparing_files))
         val home = prepareHome(appId, settings.homeMode)
@@ -283,7 +321,7 @@ class FlatpakLauncher(private val context: Context) {
                 darkDecorations = isDarkTheme(userSettings),
                 pulseScript = if (audio) PulseScript.text(outputRate, microphone, micRate) else null,
                 busArgs = SessionBus.proxyArgs(
-                    appId, plan.app.metadata.sessionBusPolicy, camera = portalNodes.isNotEmpty(),
+                    alpineProgram?.let { it.id.removePrefix(AlpineProgramIds.PREFIX) } ?: appId, plan.app.metadata.sessionBusPolicy, camera = portalNodes.isNotEmpty(),
                     wholeBus = SessionBus.WHOLE_BUS in plan.app.metadata.context.sockets,
                     watchCamera = watchCameraPortal,
                 ),
@@ -392,15 +430,19 @@ class FlatpakLauncher(private val context: Context) {
             // /proc entries Android doesn't let apps read, where Flatdroid knows the real value (the kernel's version, say).
             val procStandIns = env.realProcStandIns()
             // Device mode: the cameras' devices, and the library that answers on them, preloaded first.
+            // An Alpine program gets the library without cameras too: it stands in for the device
+            // event socket Android refuses, which Alpine's libudev needs (Fdv4l2).
+            val preload = cameraBinds.isNotEmpty() || alpineRoot != null
             fun forSession(plan: LaunchPlan) = plan.copy(
                 binds = plan.binds.copy(
                     fakeProc = procStandIns,
                     cameraBinds = cameraBinds,
+                    fdv4l2 = preload,
                 ).let { binds ->
                     if (hidden.isEmpty()) binds else binds.copy(hiddenProc = hidden, emptyDir = emptyDir.path)
                 },
-                environment = if (cameraBinds.isEmpty()) plan.environment
-                    else plan.environment + Fdv4l2.ENVIRONMENT + (PRELOAD to Fdv4l2.preload(plan.environment[PRELOAD])),
+                environment = if (!preload) plan.environment
+                    else plan.environment + (if (cameraBinds.isEmpty()) emptyMap() else Fdv4l2.ENVIRONMENT) + (PRELOAD to Fdv4l2.preload(plan.environment[PRELOAD])),
             )
             plan = forSession(plan)
             SessionController.log("[flatdroid] " + describeFilter(plan.filter, hidden.size))
@@ -417,7 +459,7 @@ class FlatpakLauncher(private val context: Context) {
                 // The app's own: a helper's fdsec refusing later (sound, say) doesn't make the app's exit a failure.
                 val appRefused = AtomicBoolean(false)
                 app = ProotRunner.start(
-                    ProotCommand.flatpak(env.paths(), plan.binds, plan.environment, plan.command, plan.filter, tty),
+                    ProotCommand.flatpak(prootPaths(appId), plan.binds, plan.environment, plan.command, plan.filter, tty),
                     File(plan.binds.root),
                 ) { line ->
                     if (Fdsec.refused(line)) appRefused.set(true)
@@ -532,6 +574,23 @@ class FlatpakLauncher(private val context: Context) {
             SessionController.onDisplayResized = null
             step { helpers.stop() }
             step { endEscaped() }
+            // Once nothing of the program's runs any more: what it changed in Alpine.
+            if (alpineBefore != null && checkAlpine && runningSince != null) step {
+                val started = SystemClock.elapsedRealtime()
+                val after = AlpineChanges.snapshot(rootfs, File(env.paths().l2sDir), settle = false).stamps
+                val suspects = AlpineChanges.changes(alpineBefore.stamps, after)
+                // Content checked only for suspects, against apk's own record (read now: a change to it is reported too).
+                val installed by lazy { alpinePrograms.installedChecksums() }
+                val changes = AlpineChanges.real(suspects, alpineBefore.stamps, after) { rel ->
+                    installed[rel]?.let { sum -> runCatching { File(rootfs, rel).inputStream().use { AlpinePackages.matches(sum, it) } }.getOrDefault(false) } == true
+                }
+                if (changes.size < suspects.size) SessionController.log("[flatdroid] ${suspects.size - changes.size} of Alpine's entries changed only their times; left out")
+                SessionController.log("[flatdroid] Alpine's files compared in ${SystemClock.elapsedRealtime() - started} ms")
+                if (changes.isNotEmpty()) {
+                    AlpineChanges.keep(context, alpineProgram!!.name, changes)
+                    SessionController.log("[flatdroid] the program changed ${changes.size} of Alpine's files: ${changes.take(5).joinToString()}")
+                }
+            }
             // proot leaves the private binds' mount points behind in the shared home, where the
             // user sees them (empty .ssh, .bashrc, .config and the rest). Remove the empty ones.
             // A private home gets them too when it shares hidden files (a temporary one goes anyway).
@@ -761,12 +820,21 @@ class FlatpakLauncher(private val context: Context) {
     private fun isDarkTheme(user: UserSettings?) =
         (user?.flatpakTheme ?: FlatpakTheme.SYSTEM).isDark(AndroidAppearance.androidDark(context.resources.configuration))
 
+    /**
+     * proot's paths for [appId]: an Alpine program's hard links go to a store of its own, since its
+     * root has only Alpine's files of the shared one ([AlpineRoot]).
+     */
+    private fun prootPaths(appId: String): ProotPaths = env.paths().let { paths ->
+        if (alpineRoot == null) paths else paths.withL2sDir(File(File(AppData.root(context), appId), ALPINE_L2S_DIR).apply { mkdirs() }.path)
+    }
+
     /** [appId]'s launch with its [settings] and the [user]'s. */
     private fun plan(appId: String, settings: AppSettings, user: UserSettings?): PlanResult =
         planner.plan(appId, hostDirs(appId, settings, user?.security?.androidFonts ?: SecuritySettings().androidFonts), options(appId, settings, user))
 
     private fun options(appId: String, settings: AppSettings, user: UserSettings?): LaunchOptions {
-        val app = installation.app(appId)
+        val alpine = alpineRoot
+        val app = alpine?.app ?: installation.app(appId)
         val security = user?.security ?: SecuritySettings()
         // Developer settings count only while developer options are on.
         val developerOptions = user?.developerOptions == true
@@ -775,9 +843,9 @@ class FlatpakLauncher(private val context: Context) {
             newerElectronFlags = settings.newerElectronFlags,
             extraArgs = if (developerOptions) settings.launchArgs else emptyList(),
             forceX11 = settings.forceX11,
-            electronSwap = app?.let { electronSwap(appId).preparedFor(it) },
+            electronSwap = app?.takeIf { alpine == null }?.let { electronSwap(appId).preparedFor(it) },
             wholeDev = settings.wholeDev,
-            flatpakInfo = !settings.withoutFlatpakInfo,
+            flatpakInfo = alpine == null && !settings.withoutFlatpakInfo,
             languageTags = if (security.shareLocale) context.resources.configuration.locales.toLanguageTags().split(',').filter { it.isNotBlank() } else emptyList(),
             audio = settings.audioAllowed(app?.metadata?.context?.sockets.orEmpty()),
             network = settings.networkAllowed(app?.metadata?.context?.shared.orEmpty()),
@@ -785,6 +853,7 @@ class FlatpakLauncher(private val context: Context) {
             limitDevices = security.limitDevices,
             reduceMotion = user?.reduceMotion == true,
             terminal = InstalledApps(context).runsInTerminal(appId),
+            alpine = alpine,
             softwareRendering = when (settings.rendering) {
                 Rendering.SOFTWARE -> true
                 Rendering.GL -> false
@@ -996,7 +1065,7 @@ class FlatpakLauncher(private val context: Context) {
      */
     private fun checkBindSources(plan: LaunchPlan) {
         val b = plan.binds
-        val sources = listOfNotNull(b.root, b.runtimeFiles, b.appFiles, "${b.runtimeFiles}/etc", b.tmp, b.shm, b.x11Sockets, b.pulseSockets, b.waylandSockets, b.home, b.emptyDir, env.paths().l2sDir) +
+        val sources = listOfNotNull(b.root, b.runtimeFiles, b.appFiles, b.etc(), b.tmp, b.shm, b.x11Sockets, b.pulseSockets, b.waylandSockets, b.home, b.emptyDir, prootPaths(plan.appId).l2sDir) +
             b.etc.values + b.extensions.map { it.first } + b.appDirs.map { it.first } + b.privateFiles.map { it.first } + b.extra.map { it.first } +
             b.cameraBinds.map { it.first }
         for (path in sources) {
@@ -1112,6 +1181,10 @@ class FlatpakLauncher(private val context: Context) {
     }
 
     private companion object {
+        /** An Alpine program's own link2symlink store, in its data folder ([prootPaths]). */
+        const val ALPINE_L2S_DIR = "l2s"
+        /** An Alpine program's bwrap stand-in, beside the host-command stand-ins. */
+        const val ALPINE_BWRAP = "alpine-bwrap"
         const val AUDIO_TIMEOUT_MS = 10_000L
         const val BUS_TIMEOUT_MS = 10_000L
         /** Flatdroid's zypak, beside the "run on the host" stand-ins. */

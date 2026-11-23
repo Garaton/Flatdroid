@@ -7,6 +7,7 @@ import android.system.ErrnoException
 import android.system.Os
 import com.garathon.flatdroid.alpine.dns.NetworkDns
 import com.garathon.flatdroid.alpine.dns.ResolvConfRefresher
+import com.garathon.flatdroid.alpine.programs.AlpineChanges
 import com.garathon.flatdroid.proot.AlpineBinds
 import com.garathon.flatdroid.proot.DevNodes
 import com.garathon.flatdroid.proot.Fdsec
@@ -95,6 +96,7 @@ class AlpineEnvironment private constructor(private val context: Context) {
         onLine: (String) -> Unit = {},
     ): ProcessResult {
         check(isInstalled()) { "The Alpine rootfs is not installed" }
+        AlpineChanges.requireUnchanged(context)
         val invocation = ProotCommand.alpine(paths(), prepareBinds(extraBinds), command)
         return ProotRunner.run(
             invocation, alpineDir, timeoutSeconds, stdin, interruptGraceMillis = interruptGraceMillis,
@@ -104,8 +106,9 @@ class AlpineEnvironment private constructor(private val context: Context) {
 
     /**
      * Starts [command] in Alpine as fake root and returns at once; the caller stops it. Used for
-     * the terminal and the long-running display and audio helpers. [filter] is [Fdsec]'s; only
-     * the terminal may pass null (its developer setting), every other start keeps a filter.
+     * the Alpine shell, setup's command field and the long-running display and audio helpers.
+     * [filter] is [Fdsec]'s; only the shell and the command field may pass null (the shell's
+     * developer setting), every other start keeps a filter.
      */
     fun start(
         command: List<String>,
@@ -119,6 +122,7 @@ class AlpineEnvironment private constructor(private val context: Context) {
         onLine: (String) -> Unit = {},
     ): ProotProcess {
         check(isInstalled()) { "The Alpine rootfs is not installed" }
+        AlpineChanges.requireUnchanged(context)
         val uid = Os.getuid()
         val gid = Os.getgid()
         val ids = if (asAppUser) "$uid:$gid" else "0:0"
@@ -149,8 +153,22 @@ class AlpineEnvironment private constructor(private val context: Context) {
         fdv4l2 = File(libDir, Fdv4l2.LIBRARY).path,
     )
 
+    /**
+     * Empty files in Alpine's own `/etc` where its proot binds Flatdroid's: without one, proot keeps
+     * a stand-in there for the run and removes it after, which changes Alpine's `/etc` (Alpine safe
+     * launch would report it), and an Alpine program's root then binds none (no DNS). A minirootfs
+     * has no resolv.conf. Called before Alpine safe launch records the files, too.
+     */
+    fun ensureBindTargets() {
+        for (name in BIND_TARGETS) {
+            val file = File(installer.rootfs, "etc/$name")
+            if (!file.exists() && !AndroidTarFs.isSymlink(file)) runCatching { file.createNewFile() }
+        }
+    }
+
     private fun prepareBinds(extra: List<Pair<String, String>>): AlpineBinds {
         dir(generatedDir)
+        ensureBindTargets()
         val resolv = write("resolv.conf", resolvConf())
         val hosts = write("hosts", GuestFiles.hosts())
         val fakeProc = writeFakeProc()
@@ -237,6 +255,9 @@ class AlpineEnvironment private constructor(private val context: Context) {
     }
 
     companion object {
+        /** The `/etc` files every Alpine proot binds Flatdroid's over ([ensureBindTargets]); passwd and group come with Alpine. */
+        private val BIND_TARGETS = listOf("resolv.conf", "hosts")
+
         /** prctl's option to read the capability bounding set (linux/prctl.h). */
         private const val PR_CAPBSET_READ = 23
         private val ARCH_BY_LIB_DIR = mapOf("arm64" to "aarch64", "x86_64" to "x86_64")

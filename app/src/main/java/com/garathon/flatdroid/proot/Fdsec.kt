@@ -47,6 +47,12 @@ object Fdsec {
         return listOf(guestPath) + flags(filter) + listOfNotNull(TTY.takeIf { tty != null }, tty) + "--" + command
     }
 
+    /** [command] given the terminal [tty] without a filter (fdsec's `--no-filter`): only for the Alpine shell, when its developer setting says so. */
+    fun terminalOnly(guestPath: String, command: List<String>, tty: String): List<String> {
+        require(isTerminal(tty)) { "Not a pseudo-terminal: $tty" }
+        return listOf(guestPath, NO_FILTER, TTY, tty, "--") + command
+    }
+
     /**
      * A terminal emulator's command (in Alpine's root, behind [filter]): it gives up its terminal as
      * controlling terminal, so another root sharing /dev/pts can take it ([wrap]'s tty), writes the
@@ -61,6 +67,7 @@ object Fdsec {
     const val EXIT_TTY = 124
 
     private const val TTY = "--tty"
+    private const val NO_FILTER = "--no-filter"
     private const val HOLD_TTY = "--hold-tty"
     private val TERMINAL = Regex("/dev/pts/[0-9]{1,9}")
 

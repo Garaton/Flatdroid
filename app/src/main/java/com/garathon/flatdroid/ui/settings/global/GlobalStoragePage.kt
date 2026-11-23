@@ -28,6 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.garathon.flatdroid.alpine.programs.AlpineProgramIds
 import com.garathon.flatdroid.R
 import com.garathon.flatdroid.ui.settings.SettingsPageColumn
 import com.garathon.flatdroid.ui.settings.app.UninstallDialog
@@ -142,6 +143,7 @@ fun GlobalStoragePage(s: GlobalPageState) = SettingsPageColumn(R.string.settings
     uninstall?.let { id ->
         UninstallDialog(
             nameOf(id),
+            runtimes = !AlpineProgramIds.isId(id),
             onConfirm = { data, runtimes -> uninstall = null; actions.onUninstall(id, data, runtimes) },
             onDismiss = { uninstall = null },
         )

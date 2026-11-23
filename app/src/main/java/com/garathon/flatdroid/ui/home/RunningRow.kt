@@ -98,8 +98,8 @@ fun RunningRow(
                         is SessionState.Starting -> state.detail
                         is SessionState.Preparing -> state.detail
                         is SessionState.Stopping -> stringResource(R.string.session_stopping_short)
-                        is SessionState.Running -> if (state.opening) stringResource(R.string.session_opening) else appId
-                        else -> appId
+                        is SessionState.Running -> if (state.opening) stringResource(R.string.session_opening) else app?.let { appSubtitle(it) } ?: appId
+                        else -> app?.let { appSubtitle(it) } ?: appId
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSecondaryContainer,

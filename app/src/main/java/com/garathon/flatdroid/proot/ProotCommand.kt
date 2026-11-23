@@ -17,12 +17,17 @@ data class ProotPaths(
     val fdshm: String,
     /** nativeLibraryDir/libfdv4l2.so ([Fdv4l2]). */
     val fdv4l2: String,
+    /** link2symlink's backing files, where Flatpak's hard links end up; null for the rootfs's `.l2s`. An Alpine program has its own. */
+    private val ownL2sDir: String? = null,
 ) {
-    /** link2symlink's backing files; Flatpak's hard links end up here. */
-    val l2sDir: String get() = "$rootfs/.l2s"
+    /** link2symlink's backing files. */
+    val l2sDir: String get() = ownL2sDir ?: "$rootfs/.l2s"
+
+    /** The same with [dir] as link2symlink's store. */
+    fun withL2sDir(dir: String) = copy(ownL2sDir = dir)
 
     init {
-        for (path in listOf(proot, loader, tmpDir, rootfs, fdsec, fdshm, fdv4l2)) {
+        for (path in listOfNotNull(proot, loader, tmpDir, rootfs, fdsec, fdshm, fdv4l2, ownL2sDir)) {
             require(path.startsWith("/") && ':' !in path) { "Unusable path: $path" }
         }
     }
@@ -78,10 +83,12 @@ data class AlpineBinds(
 data class FlatpakBinds(
     /** The app's root directory (its layout and /.flatpak-info). */
     val root: String,
-    /** Runtime `files`, bound to /usr; its `etc` is bound to /etc. */
+    /** Runtime `files`, bound to /usr; its `etc` is bound to /etc unless [etcFiles] says otherwise. */
     val runtimeFiles: String,
     /** App `files`, bound to /app. */
     val appFiles: String,
+    /** The folder bound to /etc instead of the runtime's `etc` (an Alpine program's: Alpine's own); null for the runtime's. */
+    val etcFiles: String? = null,
     /** Generated files over the runtime's: name in /etc to host file. */
     val etc: Map<String, String>,
     /** Installed extensions: host directory to guest path (under /usr or /app). */
@@ -119,9 +126,11 @@ data class FlatpakBinds(
      * library is bound beside fdsec. Empty for none.
      */
     val cameraBinds: List<Pair<String, String>> = emptyList(),
+    /** The library bound beside fdsec without cameras too: an Alpine program's ([Fdv4l2], its device event socket). */
+    val fdv4l2: Boolean = false,
 ) {
     init {
-        val hosts = listOfNotNull(root, runtimeFiles, appFiles, tmp, shm, x11Sockets, pulseSockets, waylandSockets, home, emptyDir) +
+        val hosts = listOfNotNull(root, runtimeFiles, appFiles, etcFiles, tmp, shm, x11Sockets, pulseSockets, waylandSockets, home, emptyDir) +
             etc.values + extensions.map { it.first } + appDirs.map { it.first } + privateFiles.map { it.first } + extra.map { it.first } + fakeProc.values +
             cameraBinds.map { it.first }
         for (path in hosts) require(path.startsWith("/") && ':' !in path) { "Unusable host path: $path" }
@@ -136,6 +145,9 @@ data class FlatpakBinds(
         require(cameraBinds.all { CAMERA_GUEST.matches(it.second) }) { "Unusable camera path: $cameraBinds" }
         require(cameraBinds.isEmpty() || cameraBinds.any { it.second == Fdv4l2.CAMERAS_PATH }) { "Camera devices need their list" }
     }
+
+    /** The host folder bound to /etc. */
+    fun etc(): String = etcFiles ?: "$runtimeFiles/etc"
 }
 
 private val HIDDEN_PROC = Regex("/proc/[0-9]+")
@@ -190,9 +202,9 @@ object ProotCommand {
      *
      * [command] runs behind [filter] ([Fdsec], bound at [Fdsec.ALPINE_PATH] either way, so a
      * helper script can put a stricter one in front of its own commands). Null runs it without:
-     * only for the terminal, when its developer setting says so. With [tty], fdsec gives the
-     * command that terminal ([Fdsec.wrap]); it needs a [filter]. [environment] is added to the
-     * guest's own.
+     * only for the Alpine shell and setup's command field, when the shell's developer setting
+     * says so. With [tty], fdsec gives the command that terminal ([Fdsec.wrap], or
+     * [Fdsec.terminalOnly] without a filter). [environment] is added to the guest's own.
      */
     fun alpine(
         paths: ProotPaths,
@@ -204,7 +216,6 @@ object ProotCommand {
         tty: String? = null,
         environment: Map<String, String> = emptyMap(),
     ): ProotInvocation {
-        require(tty == null || filter != null) { "A terminal is given through fdsec" }
         require(environment.keys.all { ENV_NAME.matches(it) }) { "Bad variable name in $environment" }
         require(command.isNotEmpty() && command[0].startsWith("/")) {
             "Guest command must start with an absolute path: $command"
@@ -236,7 +247,11 @@ object ProotCommand {
         for ((host, guest) in binds.extra) argv += "--bind=$host:$guest"
         argv += "--bind=${paths.fdshm}:${Fdshm.ALPINE_PATH}"
         argv += "--bind=${paths.fdsec}:${Fdsec.ALPINE_PATH}"
-        argv += if (filter != null) Fdsec.wrap(Fdsec.ALPINE_PATH, filter, command, tty) else command
+        argv += when {
+            filter != null -> Fdsec.wrap(Fdsec.ALPINE_PATH, filter, command, tty)
+            tty != null -> Fdsec.terminalOnly(Fdsec.ALPINE_PATH, command, tty)
+            else -> command
+        }
 
         val env = linkedMapOf(
             "PROOT_LOADER" to paths.loader,
@@ -322,7 +337,7 @@ object ProotCommand {
             "--bind=${paths.l2sDir}",
             "--bind=${binds.runtimeFiles}:/usr",
             "--bind=${binds.appFiles}:/app",
-            "--bind=${binds.runtimeFiles}/etc:/etc",
+            "--bind=${binds.etc()}:/etc",
         )
         for ((name, host) in binds.etc) argv += "--bind=$host:/etc/$name"
         for ((host, guest) in binds.extensions) argv += "--bind=$host:$guest"
@@ -342,10 +357,8 @@ object ProotCommand {
         for ((host, guest) in binds.appDirs) argv += "--bind=$host:$guest"
         for ((host, guest) in binds.privateFiles) argv += "--bind=$host:$guest"
         for ((host, guest) in binds.extra) argv += "--bind=$host:$guest"
-        if (binds.cameraBinds.isNotEmpty()) {
-            for ((host, guest) in binds.cameraBinds) argv += "--bind=$host:$guest"
-            argv += "--bind=${paths.fdv4l2}:${Fdv4l2.APP_PATH}"
-        }
+        for ((host, guest) in binds.cameraBinds) argv += "--bind=$host:$guest"
+        if (binds.cameraBinds.isNotEmpty() || binds.fdv4l2) argv += "--bind=${paths.fdv4l2}:${Fdv4l2.APP_PATH}"
         argv += "--bind=${paths.fdsec}:${Fdsec.APP_PATH}"
         argv += Fdsec.wrap(Fdsec.APP_PATH, filter, listOf("/usr/bin/env") + environment.map { (key, value) -> "$key=$value" } + command, tty)
 

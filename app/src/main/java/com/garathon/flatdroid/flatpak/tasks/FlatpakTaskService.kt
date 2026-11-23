@@ -17,6 +17,9 @@ import com.garathon.flatdroid.MainActivity
 import com.garathon.flatdroid.R
 import com.garathon.flatdroid.alpine.AlpineCommands
 import com.garathon.flatdroid.alpine.AlpineEnvironment
+import com.garathon.flatdroid.alpine.programs.AlpinePackages
+import com.garathon.flatdroid.alpine.programs.AlpineProgramIds
+import com.garathon.flatdroid.alpine.programs.AlpinePrograms
 import com.garathon.flatdroid.alpine.dns.ResolvConfRefresher
 import com.garathon.flatdroid.flatpak.FlatpakInstallation
 import com.garathon.flatdroid.flatpak.FlatpakRef
@@ -77,6 +80,8 @@ class FlatpakTaskService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     /** A command of the running task had to be killed rather than ending on SIGINT. */
     @Volatile private var killed = false
+    /** A Flatpak command of the running task started ([run]): only then can the repository be left half-done. */
+    @Volatile private var flatpakRan = false
     /** Android ended the task by its time limit ([onTimeout]); it says so, since a cancel is otherwise the user's own doing. */
     @Volatile private var timedOut = false
     /** The newest start this service was given (a task or a cancel): the service stops only by it. */
@@ -138,15 +143,17 @@ class FlatpakTaskService : Service() {
         // Installs are left out: an interrupted download is already safe (see cleanUpAfter); so is a
         // baseline, which changes no Flatpak files.
         val marker = AppData.taskMarker(applicationContext).takeIf {
-            task !is FlatpakTask.Install && task != FlatpakTask.BaselineAll && task != FlatpakTask.RefreshCatalog
+            task !is FlatpakTask.Install && task != FlatpakTask.BaselineAll && task != FlatpakTask.RefreshCatalog && !task.alpineOnly
         }
         // A task that ends with baselines: if it doesn't finish (cancelled, failed, killed), they are
         // recorded at the next start instead. A Repair finishes them too, if they were pending.
         val baselineMarker = AppData.baselineMarker(applicationContext).takeIf {
             checkFilesOn(this) && task !is FlatpakTask.Uninstall && task !is FlatpakTask.RemoveRuntime && task != FlatpakTask.RefreshCatalog &&
+                task !is FlatpakTask.AlpineInstall && task !is FlatpakTask.AlpineRemove &&
                 (task != FlatpakTask.Repair || it.exists())
         }
         killed = false
+        flatpakRan = false
         timedOut = false
         job = scope.launch {
             var error: String? = null
@@ -268,7 +275,8 @@ class FlatpakTaskService : Service() {
      * Android empties apps' caches by then.
      */
     private fun requireFreeSpace(task: FlatpakTask) {
-        val downloads = task is FlatpakTask.Install || task == FlatpakTask.UpdateAll || task is FlatpakTask.Reinstall || task == FlatpakTask.ReinstallAll
+        val downloads = task is FlatpakTask.Install || task == FlatpakTask.UpdateAll || task is FlatpakTask.Reinstall || task == FlatpakTask.ReinstallAll ||
+            task is FlatpakTask.AlpineInstall
         if (!downloads) return
         val free = StatFs(filesDir.path).availableBytes
         if (free < MIN_FREE_BYTES) throw IOException(getString(R.string.task_low_storage, free shr 20, MIN_FREE_BYTES shr 20))
@@ -347,6 +355,25 @@ class FlatpakTaskService : Service() {
             // Stopped with the task (an interrupt stops its proot); already over otherwise.
             check.interrupt()
             check.join()
+            AndroidTarFs.deleteTree(cache)
+        }
+    }
+
+    /** One apk command as fake root, its cache in Flatdroid's cache, paused on a metered network as any download; a failure fails the task. */
+    private fun apk(env: AlpineEnvironment, args: List<String>) {
+        val cache = env.apkCacheDir.apply { mkdirs() }
+        try {
+            val command = AlpineSetup.apkCommand(args)
+            FlatpakTasks.log("$ ${command.joinToString(" ")}", status = false)
+            val result = gated { pausedMillis, onStarted ->
+                env.run(
+                    command, ALPINE_TIMEOUT_SECONDS, extraBinds = listOf(cache.path to AlpineSetup.APK_CACHE),
+                    pausedMillis = pausedMillis, onStarted = onStarted, onLine = FlatpakTasks::output,
+                )
+            }
+            if (result.timedOut) throw IOException(getString(R.string.task_timed_out))
+            if (result.exitCode != 0) throw IOException(result.output.lineSequence().lastOrNull { it.isNotBlank() } ?: "exit ${result.exitCode}")
+        } finally {
             AndroidTarFs.deleteTree(cache)
         }
     }
@@ -445,6 +472,18 @@ class FlatpakTaskService : Service() {
                 // The removed files came from Flathub again; everything else must still match its baseline.
                 problems?.let { IntegrityGuard(applicationContext).adoptRedownloaded(it) }
                 requireIntact(listOf(task.appId), R.string.task_reinstall_not_restored)
+            }
+            is FlatpakTask.AlpineInstall -> {
+                require(task.packages.isNotEmpty() && task.packages.all(AlpinePackages::isPackageName)) { "Not package names: ${task.packages}" }
+                apk(env, listOf("add") + task.packages)
+            }
+            is FlatpakTask.AlpineRemove -> {
+                // Flatdroid's own aren't listed as programs; refused here too.
+                if (!AlpinePackages.isPackageName(task.packageName) || task.packageName in AlpinePrograms.FLATDROID_PACKAGES) {
+                    throw IOException(getString(R.string.task_alpine_own_package, task.packageName))
+                }
+                apk(env, listOf("del", task.packageName))
+                removeAppFiles(task.appId, task.deleteData)
             }
             FlatpakTask.ReinstallAll -> {
                 val installation = FlatpakInstallation(env.flatpakDir, env.arch)
@@ -591,12 +630,14 @@ class FlatpakTaskService : Service() {
      * leave a commit whose files are partly gone, and a hard kill can leave files whose content is
      * gone (see BrokenLinks); a later install then fails rather than downloading them again. Not
      * after installs: an interrupted download is already safe, and cleaning would throw away
-     * what it fetched, nor after a baseline, which changes no Flatpak files. Links are checked only after a kill: a command that ended on SIGINT
-     * stopped between system calls, which leaves them whole.
+     * what it fetched, nor after a baseline, which changes no Flatpak files, nor when no Flatpak
+     * command ran (an Alpine package task, an update stopped while Alpine's packages updated).
+     * Links are checked only after a kill: a command that ended on SIGINT stopped between system
+     * calls, which leaves them whole.
      */
     private fun cleanUpAfter(task: FlatpakTask) {
         // A baseline changes no Flatpak files, so there is nothing half-done to clean up after it either.
-        if (task is FlatpakTask.Install || task == FlatpakTask.BaselineAll) return
+        if (task is FlatpakTask.Install || task == FlatpakTask.BaselineAll || !flatpakRan) return
         try {
             cleanRepository(AlpineEnvironment.get(applicationContext), checkLinks = killed)
         } catch (e: Exception) {
@@ -651,6 +692,7 @@ class FlatpakTaskService : Service() {
     }
 
     private fun run(env: AlpineEnvironment, command: List<String>, phase: String? = null) {
+        flatpakRan = true
         FlatpakTasks.newCommand(phase)
         FlatpakTasks.log("$ ${command.joinToString(" ")}", status = false)
         val result = try {
@@ -804,6 +846,7 @@ class FlatpakTaskService : Service() {
         private const val EXTRA_APP_ID = "appId"
         private const val EXTRA_APP_IDS = "appIds"
         private const val EXTRA_DELETE_DATA = "deleteData"
+        private const val EXTRA_PACKAGE = "package"
         private const val EXTRA_KEEP_RUNTIMES = "keepRuntimes"
 
         /**
@@ -829,6 +872,9 @@ class FlatpakTaskService : Service() {
                 FlatpakTask.RefreshCatalog -> intent.putExtra(EXTRA_TASK, "refreshCatalog")
                 is FlatpakTask.RemoveRuntime -> intent.putExtra(EXTRA_TASK, "removeRuntime").putExtra(EXTRA_APP_ID, task.runtimeId)
                 FlatpakTask.ReinstallAll -> intent.putExtra(EXTRA_TASK, "reinstallAll")
+                is FlatpakTask.AlpineInstall -> intent.putExtra(EXTRA_TASK, "alpineInstall").putExtra(EXTRA_APP_IDS, task.packages.toTypedArray())
+                is FlatpakTask.AlpineRemove -> intent.putExtra(EXTRA_TASK, "alpineRemove").putExtra(EXTRA_APP_ID, task.appId)
+                    .putExtra(EXTRA_PACKAGE, task.packageName).putExtra(EXTRA_DELETE_DATA, booleanArrayOf(task.deleteData))
             }
             try {
                 ContextCompat.startForegroundService(context, intent)
@@ -896,10 +942,10 @@ class FlatpakTaskService : Service() {
         private fun checkFilesOn(context: Context) = SetupController.settings(context).load()?.security?.checkFilesBeforeLaunch == true
 
         private fun taskOf(intent: Intent): FlatpakTask? {
-            val appId = intent.getStringExtra(EXTRA_APP_ID)?.takeIf(InstalledApps::isValidId)
+            val appId = intent.getStringExtra(EXTRA_APP_ID)?.takeIf(InstalledApps::isFlatpakId)
             return when (intent.getStringExtra(EXTRA_TASK)) {
                 "install" -> intent.getStringArrayExtra(EXTRA_APP_IDS)?.toList()
-                    ?.takeIf { ids -> ids.isNotEmpty() && ids.all(InstalledApps::isValidId) }?.let { FlatpakTask.Install(it) }
+                    ?.takeIf { ids -> ids.isNotEmpty() && ids.all(InstalledApps::isFlatpakId) }?.let { FlatpakTask.Install(it) }
                 "update" -> FlatpakTask.UpdateAll
                 "repair" -> FlatpakTask.Repair
                 "baselineAll" -> FlatpakTask.BaselineAll
@@ -908,11 +954,19 @@ class FlatpakTaskService : Service() {
                 "removeRuntime" -> appId?.let { FlatpakTask.RemoveRuntime(it) }
                 "reinstallAll" -> FlatpakTask.ReinstallAll
                 "uninstall" -> {
-                    val ids = intent.getStringArrayExtra(EXTRA_APP_IDS)?.toList()?.takeIf { ids -> ids.isNotEmpty() && ids.all(InstalledApps::isValidId) }
+                    val ids = intent.getStringArrayExtra(EXTRA_APP_IDS)?.toList()?.takeIf { ids -> ids.isNotEmpty() && ids.all(InstalledApps::isFlatpakId) }
                     val deleteData = intent.getBooleanArrayExtra(EXTRA_DELETE_DATA)
                     val keepRuntimes = intent.getBooleanArrayExtra(EXTRA_KEEP_RUNTIMES)
                     if (ids == null || deleteData?.size != ids.size || keepRuntimes?.size != ids.size) null
                     else FlatpakTask.Uninstall(ids.indices.map { UninstallApp(ids[it], deleteData[it], keepRuntimes[it]) })
+                }
+                "alpineInstall" -> intent.getStringArrayExtra(EXTRA_APP_IDS)?.toList()
+                    ?.takeIf { names -> names.isNotEmpty() && names.all(AlpinePackages::isPackageName) }?.let { FlatpakTask.AlpineInstall(it) }
+                "alpineRemove" -> {
+                    val id = intent.getStringExtra(EXTRA_APP_ID)?.takeIf(AlpineProgramIds::isId)
+                    val name = intent.getStringExtra(EXTRA_PACKAGE)?.takeIf(AlpinePackages::isPackageName)
+                    val deleteData = intent.getBooleanArrayExtra(EXTRA_DELETE_DATA)?.singleOrNull()
+                    if (id == null || name == null || deleteData == null) null else FlatpakTask.AlpineRemove(id, name, deleteData)
                 }
                 else -> null
             }
@@ -933,6 +987,8 @@ class FlatpakTaskService : Service() {
             is FlatpakTask.RemoveRuntime -> context.getString(R.string.task_removing_runtime, task.runtimeId)
             FlatpakTask.RefreshCatalog -> context.getString(R.string.task_refreshing_catalog)
             FlatpakTask.ReinstallAll -> context.getString(R.string.task_reinstalling_all)
+            is FlatpakTask.AlpineInstall -> context.getString(R.string.task_alpine_installing, task.packages.joinToString(", "))
+            is FlatpakTask.AlpineRemove -> context.getString(R.string.task_alpine_removing, task.packageName)
         }
     }
 }

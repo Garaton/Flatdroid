@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.content.ContextCompat
-import com.garathon.flatdroid.alpine.AlpineCommands
 import com.garathon.flatdroid.audio.MicStreamer
 import com.garathon.flatdroid.camera.AndroidCameras
 import com.garathon.flatdroid.flatpak.InstalledApps
@@ -23,14 +22,14 @@ import com.garathon.flatdroid.storage.tasks.StorageTasks
  * ([LaunchActivity]) without Flatdroid's window. Errs towards the window: anything a launch from
  * the window would stop for (the notification permission, a storage task or one left unfinished,
  * the temporary home's question, the storage permission, the shared home's warning, the
- * microphone and camera questions, a terminal command) sends the start there instead.
+ * microphone and camera questions) sends the start there instead.
  */
 object QuietLaunch {
     fun possible(context: Context, appId: String): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) return false
-        if (AlpineCommands.terminalRunning || StorageTasks.busy) return false
+        if (StorageTasks.busy) return false
         if (StorageTaskService.pendingTasks(context).all().isNotEmpty()) return false
         if (TempHomePrompt.needsAsking(context) != null) return false
         val settings = AppData.settings(context, appId).load()

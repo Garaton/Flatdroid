@@ -63,9 +63,9 @@ object SessionBus {
             "unix:path=$GUEST_DAEMON_DIR/$SOCKET",
             "$GUEST_PROXY_DIR/$SOCKET",
             "--filter",
-            "--own=$appId.*",
-            "--own=org.mpris.MediaPlayer2.$appId.*",
         )
+        // An Alpine program's bus name is its desktop file's, when that is one.
+        if (isPolicyName("$appId.*")) args += listOf("--own=$appId.*", "--own=org.mpris.MediaPlayer2.$appId.*")
         for ((name, level) in policy) {
             if (level !in LEVELS || !isPolicyName(name) || isReserved(name)) continue
             args += "--${if (level == "own" && FLATDROID_NAMES.any { covers(name, it) }) "talk" else level}=$name"

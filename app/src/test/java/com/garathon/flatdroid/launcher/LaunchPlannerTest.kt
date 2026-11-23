@@ -1,5 +1,8 @@
 package com.garathon.flatdroid.launcher
 
+import com.garathon.flatdroid.alpine.programs.AlpinePackages
+import com.garathon.flatdroid.alpine.programs.AlpineProgram
+import com.garathon.flatdroid.alpine.programs.AlpineRoot
 import com.garathon.flatdroid.flatpak.FlatpakInstallation
 import com.garathon.flatdroid.flatpak.TestInstallation
 import com.garathon.flatdroid.launcher.electron.Electron
@@ -479,5 +482,44 @@ class LaunchPlannerTest {
         assertEquals(LaunchEnvironment.GENERIC_LOCALE, generic.environment["LANG"])
         assertFalse("container" in generic.environment)
         assertTrue(LaunchPlanner.LOCALTIME in LaunchPlanner.ETC_OVERRIDES && LaunchPlanner.TIMEZONE in LaunchPlanner.ETC_OVERRIDES)
+    }
+
+    @Test
+    fun anAlpineProgramRunsOnAlpinesFoldersWithoutTheStore() {
+        val rootfs = File(tmp.root, "rootfs").apply { for (d in listOf("usr/bin", "lib", "bin", "sbin", "etc")) File(this, d).mkdirs() }
+        val emptyApp = File(tmp.root, "app").apply { mkdirs() }
+        val program = AlpineProgram(
+            "alpine+org.xfce.mousepad", "mousepad", "Mousepad", listOf("/usr/bin/mousepad", "--opt"), terminal = false, icon = null,
+            display = AlpinePackages.Display.WAYLAND_AND_X11,
+        )
+        val root = AlpineRoot.of(program, rootfs, emptyApp, "aarch64", "v3.24", l2sBinds = listOf("${l2s.path}/abc.0001" to "${l2s.path}/abc"))
+        val plan = Ready(planner.plan(program.id, dirs, LaunchOptions(alpine = root, extraArgs = listOf("--dev"))))
+        assertEquals(listOf("/usr/bin/mousepad", "--opt", "--dev"), plan.command)
+        assertEquals(File(rootfs, "usr").path, plan.binds.runtimeFiles)
+        assertEquals(File(rootfs, "etc").path, plan.binds.etc())
+        assertEquals(emptyApp.path, plan.binds.appFiles)
+        assertEquals(emptyList<String>(), plan.usrLinks)
+        assertEquals(null, plan.flatpakInfo)
+        assertTrue(plan.wayland)
+        assertTrue(plan.binds.extensions.isEmpty())
+        val extra = plan.binds.extra
+        for (dir in listOf("lib", "bin", "sbin")) assertTrue(dir, File(rootfs, dir).path to "/$dir" in extra)
+        assertTrue("${l2s.path}/abc.0001" to "${l2s.path}/abc" in extra)
+        // Alpine's fontconfig cache is in /var, outside the root.
+        assertFalse(extra.any { it.second == "/usr/lib/fontconfig/cache" })
+        assertEquals("/usr/bin:/bin:/usr/sbin:/sbin", plan.environment["PATH"])
+        assertEquals(null, plan.environment["FLATPAK_ID"])
+        assertEquals("1", plan.environment["PYTHONDONTWRITEBYTECODE"])
+        // Alpine has no /etc/passwd here: a bind would make proot put one into Alpine's own folder.
+        assertEquals(emptyMap<String, String>(), plan.binds.etc)
+        File(rootfs, "etc/passwd").writeText("")
+        val withPasswd = Ready(planner.plan(program.id, dirs, LaunchOptions(alpine = root)))
+        assertEquals(setOf("passwd"), withPasswd.binds.etc.keys)
+        // The refusing bwrap goes over Alpine's own, only where Alpine has one.
+        val standIn = File(tmp.root, "bwrap").apply { writeText("") }
+        val withBwrap = root.copy(bwrap = standIn.path)
+        assertFalse(Ready(planner.plan(program.id, dirs, LaunchOptions(alpine = withBwrap))).binds.extra.any { it.second == AlpineRoot.BWRAP })
+        File(rootfs, "usr/bin/bwrap").writeText("")
+        assertTrue(standIn.path to AlpineRoot.BWRAP in Ready(planner.plan(program.id, dirs, LaunchOptions(alpine = withBwrap))).binds.extra)
     }
 }

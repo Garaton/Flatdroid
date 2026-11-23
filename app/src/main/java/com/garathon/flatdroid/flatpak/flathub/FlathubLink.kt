@@ -24,7 +24,7 @@ object FlathubLink {
             "appstream" -> fromAppstream(parsed)
             else -> null
         }
-        return id?.takeIf(InstalledApps::isValidId)
+        return id?.takeIf(InstalledApps::isFlatpakId)
     }
 
     private fun fromWebLink(uri: URI): String? {

@@ -27,20 +27,19 @@ import java.util.concurrent.atomic.AtomicInteger
 
 /** Who Alpine's shell runs as (a developer setting). */
 enum class AlpineShellUser(val key: String) {
-    /** proot's fake root, as Flatdroid's Alpine terminal: apk and package changes work. */
+    /** proot's fake root: apk and package changes work. */
     ROOT("root"),
     /** Android's user for Flatdroid, as the helpers run (and an Alpine program would): no fake root. */
     APP_USER("app"),
 }
 
 /**
- * Alpine's shell in a terminal window (a developer option): a session with only the display and
- * foot ([SessionHelpers]), and a login shell in Alpine's root on foot's terminal, as
- * [AlpineShellUser] says. The shell sees all of Alpine, Flatpak's installation included, as the
- * Alpine terminal does. It always runs behind fdsec, which hands it the terminal (the terminal's
- * filter setting is for Flatdroid's own terminal). The session's Wayland socket is in its root
- * too, so a graphical Alpine program started from it shows in the session (verify). Blocking;
- * interrupting the thread ends the shell and the helpers.
+ * Alpine's shell in a terminal window: a session with only the display and foot
+ * ([SessionHelpers]), and a login shell in Alpine's root on foot's terminal, as [AlpineShellUser]
+ * says. The shell sees all of Alpine, Flatpak's installation included. fdsec hands it the
+ * terminal, behind its filter unless the developer setting turns it off. The session's Wayland
+ * socket is in its root too, so a graphical Alpine program started from it shows in the session
+ * (verify). Blocking; interrupting the thread ends the shell and the helpers.
  */
 class AlpineShell(private val context: Context) {
     private val env = AlpineEnvironment.get(context)
@@ -97,7 +96,7 @@ class AlpineShell(private val context: Context) {
                 LOGIN_SHELL,
                 listOf(helpers.waylandDir.path to GuestPaths.WAYLAND_DIR),
                 asAppUser = (userChoice ?: user?.alpineShellUser) == AlpineShellUser.APP_USER,
-                filter = Fdsec.Filter(extraSyscalls = security.extraSyscallFilter),
+                filter = Fdsec.Filter(extraSyscalls = security.extraSyscallFilter).takeIf { user?.filterShell ?: true },
                 tty = tty,
                 environment = mapOf(
                     "TERM" to TERM, "COLORTERM" to "truecolor",

@@ -73,7 +73,7 @@ object FlathubClient {
 
     /** [id] must be a valid app ID (it goes into the address). */
     fun fetch(id: String): FlathubApp {
-        require(InstalledApps.isValidId(id)) { "Not an app ID: $id" }
+        require(InstalledApps.isFlatpakId(id)) { "Not an app ID: $id" }
         // Asked side by side: on a slow connection the two waits would add up. The name, summary and
         // verification are nice to have; the summary's facts are what matter, and its failure is the failure.
         var appstream: String? = null
@@ -118,7 +118,7 @@ object FlathubClient {
         val hits = answer.optJSONArray("hits") ?: return CollectionPage(emptyList(), 0)
         val apps = (0 until hits.length()).mapNotNull { i ->
             val hit = hits.optJSONObject(i) ?: return@mapNotNull null
-            val id = hit.optString("app_id").takeIf(InstalledApps::isValidId) ?: return@mapNotNull null
+            val id = hit.optString("app_id").takeIf(InstalledApps::isFlatpakId) ?: return@mapNotNull null
             CollectionApp(id, hit.longOrNull("installs_last_month"), hit.longOrNull("added_at"), hit.longOrNull("updated_at"), hit.optBoolean("verification_verified"))
         }.distinctBy { it.id }
         return CollectionPage(apps, answer.optInt("totalPages", 1))
@@ -126,7 +126,7 @@ object FlathubClient {
 
     /** [id]'s installs from Flathub's statistics. Network work. */
     fun stats(id: String): FlathubStats {
-        require(InstalledApps.isValidId(id)) { "Not an app ID: $id" }
+        require(InstalledApps.isFlatpakId(id)) { "Not an app ID: $id" }
         val answer = get("$API/stats/$id", id)
         return try {
             parseStats(answer)

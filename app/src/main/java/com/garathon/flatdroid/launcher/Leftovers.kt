@@ -9,7 +9,7 @@ import java.io.File
 
 /**
  * Per-app files that can outlive their app, removed at start-up: an app uninstalled from the
- * Alpine terminal, or updated so that its Electron swap no longer applies, leaves them behind.
+ * Alpine shell, or updated so that its Electron swap no longer applies, leaves them behind.
  */
 class Leftovers(
     private val installation: FlatpakInstallation,
@@ -18,6 +18,8 @@ class Leftovers(
     /** Per-app directories in the cache and the work folder, one entry per app ID (caches, roots, private /tmp, swaps being built). */
     private val perAppCacheDirs: List<File>,
     private val fs: TarFs,
+    /** Installed apps that aren't Flatpaks (Alpine programs), whose caches stay too. */
+    private val otherApps: () -> Set<String> = { emptySet() },
 ) {
     /**
      * Removes Electron swaps not made for an installed app's current deployment, and per-app cache
@@ -34,7 +36,7 @@ class Leftovers(
             val app = installation.app(swap.name)
             if (app == null || !ElectronSwap.isPreparedFor(swap, app, fs)) remove(swap)
         }
-        val installed = installation.appIds().toSet()
+        val installed = installation.appIds().toSet() + otherApps()
         for (dir in perAppCacheDirs) dir.listFiles()?.filter { it.name !in installed }?.forEach(::remove)
         return removed
     }

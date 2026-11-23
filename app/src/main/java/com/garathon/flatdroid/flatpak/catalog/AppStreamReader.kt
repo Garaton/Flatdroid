@@ -124,7 +124,7 @@ class AppStreamReader(languages: List<String>) {
                 else -> skip(parser)
             }
         }
-        val appId = id?.removeSuffix(".desktop")?.takeIf(InstalledApps::isValidId) ?: return null
+        val appId = id?.removeSuffix(".desktop")?.takeIf(InstalledApps::isFlatpakId) ?: return null
         val app = CatalogApp(
             id = appId,
             name = name.value?.takeIf { it.isNotEmpty() } ?: appId,

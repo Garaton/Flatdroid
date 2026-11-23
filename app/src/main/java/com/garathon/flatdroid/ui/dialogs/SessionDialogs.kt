@@ -32,6 +32,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import com.garathon.flatdroid.alpine.programs.AlpinePackages
 import com.garathon.flatdroid.R
 import com.garathon.flatdroid.flatpak.flathub.FlathubLinkApproval
 import com.garathon.flatdroid.flatpak.InstalledApps
@@ -85,7 +86,7 @@ fun InstallDialog(
     var id by rememberSaveable { mutableStateOf("") }
     var problem by rememberSaveable { mutableStateOf<String?>(null) }
     val words = InstalledApps.splitIds(id)
-    val notIds = words.filterNot(InstalledApps::isValidId)
+    val notIds = words.filterNot(InstalledApps::isFlatpakId)
     val problemText = when (problem) {
         PROBLEM_NOT_ID -> stringResource(R.string.install_not_an_id, notIds.joinToString(", "))
         PROBLEM_UNKNOWN -> stringResource(R.string.install_unknown_id, words.filter { inCatalog != null && !inCatalog(it) }.joinToString(", "))
@@ -139,6 +140,42 @@ fun InstallDialog(
             }
         },
         confirmButton = { Button(onClick = submit, enabled = words.isNotEmpty() && problemText == null) { Text(stringResource(R.string.install)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
+    )
+}
+
+/**
+ * Typed Alpine package names to add (the catalog browser's Terminal icon). Install
+ * checks they are names; apk itself says which one Alpine doesn't have.
+ */
+@Composable
+fun AlpineInstallDialog(onInstall: (List<String>) -> Unit, onDismiss: () -> Unit) {
+    var text by rememberSaveable { mutableStateOf("") }
+    val words = text.split(Regex("\\s+")).filter { it.isNotEmpty() }.distinct()
+    val notNames = words.filterNot(AlpinePackages::isPackageName)
+    val submit = { AlpinePackages.parseNames(text)?.let(onInstall) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.alpine_install_title)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(stringResource(R.string.alpine_install_text))
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    label = { Text(stringResource(R.string.alpine_install_label)) },
+                    placeholder = { Text("mousepad") },
+                    singleLine = true,
+                    isError = notNames.isNotEmpty(),
+                    supportingText = if (notNames.isEmpty()) null else ({ Text(stringResource(R.string.alpine_install_not_names, notNames.joinToString(", "))) }),
+                    keyboardOptions = KeyboardOptions(
+                        capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false, imeAction = ImeAction.Go,
+                    ),
+                    keyboardActions = KeyboardActions(onGo = { submit() }),
+                )
+            }
+        },
+        confirmButton = { Button(onClick = { submit() }, enabled = words.isNotEmpty() && notNames.isEmpty()) { Text(stringResource(R.string.install)) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
     )
 }

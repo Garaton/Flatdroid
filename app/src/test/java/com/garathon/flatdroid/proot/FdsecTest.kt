@@ -26,6 +26,8 @@ class FdsecTest {
         assertTrue(Fdsec.isTerminal("/dev/pts/12"))
         for (path in listOf("/dev/pts/", "/dev/pts/1/../../null", "/dev/null", "/dev/pts/1 ", "/dev/pts/x", "/dev/tty")) assertFalse(path, Fdsec.isTerminal(path))
         assertThrows(IllegalArgumentException::class.java) { Fdsec.wrap("/f", Fdsec.Filter(), listOf("/bin/x"), tty = "/dev/null") }
+        assertEquals(listOf("/f", "--no-filter", "--tty", "/dev/pts/3", "--", "/bin/x"), Fdsec.terminalOnly("/f", listOf("/bin/x"), "/dev/pts/3"))
+        assertThrows(IllegalArgumentException::class.java) { Fdsec.terminalOnly("/f", listOf("/bin/x"), "/dev/null") }
     }
 
     @Test

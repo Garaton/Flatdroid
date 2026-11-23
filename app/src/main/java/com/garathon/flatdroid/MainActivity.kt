@@ -43,6 +43,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.lifecycleScope
+import com.garathon.flatdroid.alpine.programs.AlpineChanges
 import com.garathon.flatdroid.alpine.AlpineEnvironment
 import com.garathon.flatdroid.alpine.GuestFiles
 import com.garathon.flatdroid.audio.MicStreamer
@@ -104,6 +105,8 @@ import com.garathon.flatdroid.flatpak.catalog.CatalogState
 import com.garathon.flatdroid.ui.home.forgetIcons
 import com.garathon.flatdroid.util.DoneNotice
 import com.garathon.flatdroid.ui.home.rememberHomeListState
+import com.garathon.flatdroid.ui.dialogs.AlpineChangedDialog
+import com.garathon.flatdroid.ui.dialogs.AlpineInstallDialog
 import com.garathon.flatdroid.ui.dialogs.InstallDialog
 import com.garathon.flatdroid.ui.dialogs.LogDialog
 import com.garathon.flatdroid.ui.dialogs.UseLaunchDialog
@@ -111,7 +114,6 @@ import com.garathon.flatdroid.ui.dialogs.MeteredPauseDialog
 import com.garathon.flatdroid.ui.dialogs.MobileDataDialog
 import com.garathon.flatdroid.ui.setup.ResetScreen
 import com.garathon.flatdroid.ui.setup.SetupSettingsScreen
-import com.garathon.flatdroid.ui.terminal.TerminalScreen
 import com.garathon.flatdroid.ui.setup.SetupScreen
 import com.garathon.flatdroid.ui.common.followHideScreen
 import com.garathon.flatdroid.ui.settings.AppPage
@@ -196,7 +198,7 @@ class MainActivity : ComponentActivity() {
             // Only once set up: a launch held until setup ends would start unasked.
             if (InstalledApps.isValidId(id) && SetupController.state.value.isComplete) home.requestShortcutLaunch(id)
         }
-        val id = intent.getStringExtra(EXTRA_INSTALL)?.takeIf(InstalledApps::isValidId) ?: return
+        val id = intent.getStringExtra(EXTRA_INSTALL)?.takeIf(InstalledApps::isFlatpakId) ?: return
         intent.removeExtra(EXTRA_INSTALL)
         home.requestInstall(id)
     }
@@ -299,10 +301,9 @@ class MainActivity : ComponentActivity() {
     /** Where the first run is: the user's choices, the installation, then the app itself; and the reset between. */
     private enum class AppStage { CHOICES, SETUP, MAIN, RESETTING }
 
-    /** Everything after setup: home, Settings (with the terminal) and each app's settings. */
+    /** Everything after setup: home, Settings and each app's settings. */
     @Composable
     private fun Main(screen: Screen, navigate: (Screen) -> Unit, languages: String, modifier: Modifier) {
-        val running by viewModel.running.collectAsState()
         val applying by viewModel.applying.collectAsState()
         val settingsError by viewModel.settingsError.collectAsState()
         val apps by home.apps.collectAsState()
@@ -313,7 +314,6 @@ class MainActivity : ComponentActivity() {
         // whose lambda keeps what is computed here until this body runs again. Reading it only
         // while the session was idle left the buttons disabled after a session ended.
         val sessionState = session.state
-        val sessionActive = sessionState !is SessionState.Idle && sessionState !is SessionState.Question
         val sessionBusy = sessionState !is SessionState.Idle
         // The home list's position and search, kept here so they survive a visit to Settings.
         val homeListState = rememberHomeListState()
@@ -341,10 +341,8 @@ class MainActivity : ComponentActivity() {
             if (sessionBusy) wasBusy = true else if (wasBusy) { wasBusy = false; home.autoOpenApp = null }
         }
         val taskRunning = task.running != null
-        // No task while an app runs, and no app while a task or (unless allowed) a terminal command
-        // runs: a running app could take over Alpine processes started after it ([AlpineCommands]).
-        val terminalWithApps = saved.terminalWithApps
-        val terminalRunning = running
+        // No task while an app runs, and no app while a task runs: a running app could take over
+        // Alpine processes started after it ([AlpineCommands]).
         val nameOf = { id: String -> apps?.firstOrNull { it.id == id }?.name ?: id }
         // Settings open with fresh drafts, wherever they are opened from (Home, or an app's page in the browser).
         val go = { target: Screen ->
@@ -364,7 +362,7 @@ class MainActivity : ComponentActivity() {
         LaunchedEffect(shortcutLaunch) {
             val id = shortcutLaunch ?: return@LaunchedEffect
             home.clearShortcutLaunch()
-            val decision = ShortcutLaunch.decide(id, sessionState, busy = taskRunning || (terminalRunning && !terminalWithApps))
+            val decision = ShortcutLaunch.decide(id, sessionState, busy = taskRunning)
             ShortcutActivity.refusal(this@MainActivity, decision)?.let {
                 home.clearLaunchCover()
                 return@LaunchedEffect Toast.makeText(this@MainActivity, it, Toast.LENGTH_LONG).show()
@@ -442,7 +440,26 @@ class MainActivity : ComponentActivity() {
         val catalogIndex = (catalog as? CatalogState.Ready)?.index
         // Over Home and the browser: typed app IDs, the mobile data question, the logs of the bottom bar.
         var installDialog by rememberSaveable { mutableStateOf(false) }
+        var alpineInstallDialog by rememberSaveable { mutableStateOf(false) }
+        // Alpine safe launch found changes: asked until answered, since nothing runs in Alpine meanwhile.
+        val alpineChanged by AlpineChanges.pendingState.collectAsState()
+        alpineChanged?.let { changes ->
+            AlpineChangedDialog(
+                changes,
+                onReinstall = { go(Screen.Home); resetAlpine(ResetMode.KEEP_FLATPAKS) },
+                onKeep = { AlpineChanges.clear(this@MainActivity) },
+            )
+        }
         var log by rememberSaveable { mutableStateOf<LogKind?>(null) }
+        if (alpineInstallDialog) {
+            AlpineInstallDialog(
+                onInstall = {
+                    startDownload(FlatpakTask.AlpineInstall(it))
+                    alpineInstallDialog = false
+                },
+                onDismiss = { alpineInstallDialog = false },
+            )
+        }
         if (installDialog) {
             InstallDialog(
                 onInstall = {
@@ -564,7 +581,7 @@ class MainActivity : ComponentActivity() {
         val savedSizes by SavedSizes.updates.collectAsState()
         // Read again after storage tasks and once sizes measured in the background are saved.
         if (screen is Screen.Settings) LaunchedEffect(storageTasks.generation, savedSizes) { home.measureFlatdroid() }
-        // Between levels (home, settings, terminal) the screen slides sideways; pages of one
+        // Between levels (home, settings, the browser) the screen slides sideways; pages of one
         // level change inside their own screen.
         AnimatedContent(
             targetState = screen,
@@ -606,7 +623,6 @@ class MainActivity : ComponentActivity() {
                         storageBusy = storageTasks.running != null || storageTasks.queued.isNotEmpty(),
                         canReset = !sessionBusy && !taskRunning,
                         runningAppId = sessionState.appIdOrNull,
-                        canOpenTerminal = !sessionActive || terminalWithApps,
                         actions = GlobalStorageActions(
                             onChangeSharedHome = storage::changeSharedHome,
                             onAllFilesAccess = storage::openAllFilesAccess,
@@ -628,16 +644,13 @@ class MainActivity : ComponentActivity() {
                             onResetAllAppData = home::resetAllAppData,
                             onAppStorage = { id, action -> storage.storageAction(id, action) },
                             onOpenHome = storage::openHomeInFiles,
-                            onUninstall = { id, deleteData, keepRuntimes ->
-                                FlatpakTaskService.run(this@MainActivity, FlatpakTask.Uninstall(id, deleteData, keepRuntimes))
-                            },
+                            onUninstall = { id, deleteData, keepRuntimes -> uninstall(apps, id, deleteData, keepRuntimes) },
                             onRemoveRuntime = { id ->
                                 FlatpakTaskService.run(this@MainActivity, FlatpakTask.RemoveRuntime(id))
                             },
                         ),
                         onReset = { mode -> go(Screen.Home); resetAlpine(mode) },
                         onResetSettings = { viewModel.applySettings(UserSettings.defaults(languages), MainViewModel.AfterApply.HOME) },
-                        onTerminal = { go(Screen.Terminal) },
                         canStartSession = !sessionBusy && !taskRunning,
                         onAlpineShell = { user -> go(Screen.Home); openAlpineShell(user) },
                         apps = apps.orEmpty(),
@@ -655,11 +668,6 @@ class MainActivity : ComponentActivity() {
                     onDiscard = { go(Screen.Home); viewModel.clearSettingsError() },
                     modifier = modifier,
                 )
-            }
-            Screen.Terminal -> {
-                // Read here and not in Main: the output changes ten times a second while a command runs.
-                val output by viewModel.output.collectAsState()
-                TerminalScreen(output, running, viewModel::run, viewModel::cancel, onBack = { go(Screen.Settings(GlobalPage.DEVELOPER)) }, modifier = modifier)
             }
             is Screen.AppSettings -> {
                 val list = apps ?: return@AnimatedContent
@@ -708,7 +716,7 @@ class MainActivity : ComponentActivity() {
                         permissionAnswer = drafts.permissionAnswer,
                         onPermissionHandled = { drafts.permissionAnswer = null },
                         onUninstall = { deleteData, keepRuntimes ->
-                            FlatpakTaskService.run(this@MainActivity, FlatpakTask.Uninstall(app.id, deleteData, keepRuntimes))
+                            uninstall(apps, app.id, deleteData, keepRuntimes)
                             go(Screen.Home)
                         },
                         onAddShortcut = if (shortcutsSupported) ({ addShortcut(app) }) else null,
@@ -765,6 +773,7 @@ class MainActivity : ComponentActivity() {
                     onOpenApp = { go(Screen.BrowseApp(it)) },
                     onRefresh = { startDownload(FlatpakTask.RefreshCatalog) },
                     onInstallById = { installDialog = true },
+                    onAlpineInstall = { alpineInstallDialog = true },
                     onRetry = { Catalog.open(this@MainActivity) },
                     bottomBar = bottomBar,
                     modifier = modifier,
@@ -816,7 +825,7 @@ class MainActivity : ComponentActivity() {
                                 is SessionState.Stopping -> OpenState.BUSY
                                 else -> OpenState.STARTING
                             }
-                            !sessionBusy && !taskRunning && (!terminalRunning || terminalWithApps) -> OpenState.READY
+                            !sessionBusy && !taskRunning -> OpenState.READY
                             else -> OpenState.BUSY
                         },
                         onOpen = { upSession?.takeIf { it.appId == id }?.let(::openViewer) ?: launch(id) },
@@ -841,7 +850,7 @@ class MainActivity : ComponentActivity() {
                     listState = homeListState,
                     developerOptions = developerOptions,
                     showTimeUsed = showTimeUsed,
-                    canLaunch = !sessionBusy && !taskRunning && (!terminalRunning || terminalWithApps),
+                    canLaunch = !sessionBusy && !taskRunning,
                     // Browsing needs nothing idle; an install then waits in the queue.
                     canInstall = true,
                     // Waits in the queue behind what runs; off while an update runs or waits.
@@ -871,6 +880,14 @@ class MainActivity : ComponentActivity() {
     }
 
     /** Starts a task that downloads, first doing what the mobile data setting says on a metered connection. */
+    /** Uninstalls [id]: a Flatpak, or an Alpine program's package ([InstalledApp.alpinePackage]). */
+    private fun uninstall(apps: List<InstalledApp>?, id: String, deleteData: Boolean, keepRuntimes: Boolean) {
+        val alpinePackage = apps?.firstOrNull { it.id == id }?.alpinePackage
+        FlatpakTaskService.run(
+            this, if (alpinePackage != null) FlatpakTask.AlpineRemove(id, alpinePackage, deleteData) else FlatpakTask.Uninstall(id, deleteData, keepRuntimes),
+        )
+    }
+
     private fun startDownload(task: FlatpakTask) {
         when (mobileDataPolicy()) {
             MobileData.ALWAYS -> startTask(task)
@@ -1030,7 +1047,7 @@ class MainActivity : ComponentActivity() {
 private sealed interface Screen {
     val key: String
 
-    /** Home is the first level, settings (with an app's) the second, the terminal the third: screens slide between levels. */
+    /** Home is the first level, settings (with an app's) the second: screens slide between levels. */
     val level: Int
 
     /** Which side of the home screen it slides in from: 1 right, -1 left. */
@@ -1061,12 +1078,6 @@ private sealed interface Screen {
         override val side = 1
     }
 
-    data object Terminal : Screen {
-        override val key = "terminal"
-        override val level = 2
-        override val side = 1
-    }
-
     /** [fromBrowser]: opened from the app's page in the browser, which Back, Save and Discard return to. */
     data class AppSettings(val appId: String, val page: AppPage = AppPage.OVERVIEW, val fromBrowser: Boolean = false) : Screen {
         override val key get() = "${if (fromBrowser) BROWSER_APP_PREFIX else APP_PREFIX}${page.key}:$appId"
@@ -1075,13 +1086,12 @@ private sealed interface Screen {
     }
 
     /** Whether it is one of the screens that edit a draft ([SettingsDraftModel]). */
-    fun inSettings(): Boolean = this is Settings || this is AppSettings || this == Terminal
+    fun inSettings(): Boolean = this is Settings || this is AppSettings
 
     /** Where Back goes; null on the home screen. */
     val parent: Screen?
         get() = when (this) {
             Home -> null
-            Terminal -> Settings(GlobalPage.DEVELOPER)
             is BrowseApp -> Browse
             Browse -> Home
             is AppSettings -> if (fromBrowser) BrowseApp(appId) else Home
@@ -1102,9 +1112,8 @@ private sealed interface Screen {
                     key.startsWith(APP_PREFIX) -> key.removePrefix(APP_PREFIX).split(":", limit = 2).let { AppSettings(it.getOrElse(1) { "" }, AppPage.of(it[0])) }
                     key.startsWith(BROWSER_APP_PREFIX) -> key.removePrefix(BROWSER_APP_PREFIX).split(":", limit = 2)
                         .let { AppSettings(it.getOrElse(1) { "" }, AppPage.of(it[0]), fromBrowser = true) }
-                    key == Terminal.key -> Terminal
                     key == Browse.key -> Browse
-                    key.startsWith(BROWSE_PREFIX) -> key.removePrefix(BROWSE_PREFIX).takeIf(InstalledApps::isValidId)?.let { BrowseApp(it) } ?: Browse
+                    key.startsWith(BROWSE_PREFIX) -> key.removePrefix(BROWSE_PREFIX).takeIf(InstalledApps::isFlatpakId)?.let { BrowseApp(it) } ?: Browse
                     else -> Home
                 }
             },

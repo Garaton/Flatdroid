@@ -12,6 +12,7 @@ import android.os.IBinder
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import com.garathon.flatdroid.alpine.programs.AlpineChanges
 import com.garathon.flatdroid.MainActivity
 import com.garathon.flatdroid.R
 import com.garathon.flatdroid.util.DoneNotice
@@ -172,6 +173,8 @@ class SetupService : Service() {
         /** Requests a reset of the Alpine environment and carries it out; setup isn't started. */
         fun reset(context: Context, mode: ResetMode) {
             SetupController.reset(context).request(mode)
+            // A new Alpine has nothing an Alpine program changed (the reset finishes before anything runs in it).
+            AlpineChanges.clear(context)
             SetupController.beginReset()
             SetupController.refresh(context)
             ContextCompat.startForegroundService(

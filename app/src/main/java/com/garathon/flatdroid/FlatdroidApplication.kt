@@ -5,6 +5,8 @@ import android.content.Context
 import android.system.ErrnoException
 import android.system.Os
 import android.system.OsConstants
+import com.garathon.flatdroid.alpine.programs.AlpineChanges
+import com.garathon.flatdroid.alpine.programs.AlpinePrograms
 import com.garathon.flatdroid.alpine.AlpineEnvironment
 import com.garathon.flatdroid.flatpak.catalog.CatalogImages
 import com.garathon.flatdroid.storage.AppData
@@ -53,6 +55,7 @@ class FlatdroidApplication : Application() {
         DebugLog.init(cacheDir)
         DoneNotice.track(this)
         SetupController.settings(this).loadLive()
+        AlpineChanges.refresh(this)
         // Before anything of this run starts: every process of Flatdroid's that is running now is left over.
         val killed = LeftoverProcesses.kill()
         if (killed > 0) DebugLog.i("Ended $killed processes left by an earlier run")
@@ -94,6 +97,7 @@ class FlatdroidApplication : Application() {
                     AppData.cacheRoot(this), AppData.rootsDir(this), AppData.appTmpDir(this), File(env.cacheDir, ElectronSwap.BUILD_DIR),
                 ),
                 fs = AndroidTarFs,
+                otherApps = { AlpinePrograms(env.installer.rootfs, exists = { it.exists() || AndroidTarFs.isSymlink(it) }).list().mapTo(HashSet()) { it.id } },
             ).clean()
             SavedSizes.removeStale(this)
             for (file in removed) {

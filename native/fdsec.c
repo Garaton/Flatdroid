@@ -4,6 +4,7 @@
  *
  *   fdsec [--extra] [--no-inet] [--no-connect] [--tty /dev/pts/N] [--] /absolute/command args...
  *   fdsec [filter options] --hold-tty FILE
+ *   fdsec --no-filter --tty /dev/pts/N [--] /absolute/command args...
  *
  * Always blocked: io_uring and openat2 (ENOSYS, so programs fall back to what proot
  * translates), fanotify_init, fanotify_mark and quotactl (ENOSYS: their paths aren't translated
@@ -27,6 +28,9 @@
  *                    failure is also written to FILE.error.
  *   --tty PATH       a new session, with PATH (under /dev/pts/) as its controlling terminal and as
  *                    standard input, output and error, before the command is executed.
+ *   --no-filter      only with --tty and no filter option: the terminal without the filter, for a
+ *                    shell whose user turned the filter off (debuggers need ptrace). Nothing is
+ *                    removed from a filter the caller already has.
  *
  * The check: a rule only this filter has answers getpriority(CHECK_WHICH, 0) with CHECK_ERRNO
  * (the kernel itself would say EINVAL); where the kernel reports Seccomp_filters (5.9 and
@@ -424,22 +428,30 @@ __attribute__((used)) static void start(long *sp)
 	long argc = sp[0];
 	char **argv = (char **)(sp + 1);
 	char **envp = argv + argc + 1;
-	int extra = 0, no_inet = 0, no_connect = 0;
+	int extra = 0, no_inet = 0, no_connect = 0, no_filter = 0;
 	const char *tty = 0, *hold = 0;
 	int i = 1;
 	for (; i < argc && argv[i][0] == '-'; i++) {
 		if (equal(argv[i], "--extra")) extra = 1;
 		else if (equal(argv[i], "--no-inet")) no_inet = 1;
 		else if (equal(argv[i], "--no-connect")) no_connect = 1;
+		else if (equal(argv[i], "--no-filter")) no_filter = 1;
 		else if (equal(argv[i], "--tty") && i + 1 < argc) tty = argv[++i];
 		else if (equal(argv[i], "--hold-tty") && i + 1 < argc) hold = argv[++i];
 		else if (equal(argv[i], "--")) { i++; break; }
 		else { say("fdsec: unknown option ", argv[i]); leave(EXIT_USAGE); }
 	}
-	if (hold ? (tty || i < argc) : (i >= argc || argv[i][0] != '/')) {
+	if ((hold ? (tty || i < argc) : (i >= argc || argv[i][0] != '/')) ||
+	    (no_filter && (!tty || hold || extra || no_inet || no_connect))) {
 		say("fdsec: usage: fdsec [--extra] [--no-inet] [--no-connect] [--tty /dev/pts/N] [--] /absolute/command args..."
-		    " | fdsec [options] --hold-tty FILE", 0);
+		    " | fdsec [options] --hold-tty FILE | fdsec --no-filter --tty /dev/pts/N [--] /absolute/command args...", 0);
 		leave(EXIT_USAGE);
+	}
+	if (no_filter) {
+		take_tty(tty);
+		sys3(__NR_execve, argv[i], argv + i, envp);
+		say("fdsec: cannot execute ", argv[i]);
+		leave(EXIT_EXEC);
 	}
 
 	struct sock_filter filter[MAX_FILTER];

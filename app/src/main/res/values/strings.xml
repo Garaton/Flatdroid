@@ -195,7 +195,6 @@
     <string name="settings_open">Settings</string>
     <string name="settings_section_danger">Danger zone</string>
 
-    <string name="terminal_title">Alpine terminal</string>
     <string name="terminal_ctrl_c">(Ctrl-C sent; press X again to force-stop)</string>
     <string name="terminal_force_stopping">(force-stopping)</string>
     <string name="terminal_timed_out">(timed out)</string>
@@ -240,6 +239,10 @@
     <string name="dismiss">Close</string>
 
     <string name="install_title">Install from Flathub</string>
+    <string name="alpine_install_title">Add Alpine packages</string>
+    <string name="alpine_install_text">Enter Alpine package names, separated by spaces. Programs among them show on Home with your apps.</string>
+    <string name="alpine_install_label">Package names</string>
+    <string name="alpine_install_not_names">Not a package name: %1$s</string>
     <string name="install_text">Enter the app\'s ID, as shown on its Flathub page. Separate several IDs with spaces to install them together.</string>
     <string name="install_id_label">App IDs</string>
     <string name="install_not_an_id">Not an app ID: %1$s. An ID looks like org.xfce.mousepad.</string>
@@ -349,6 +352,8 @@
     <string name="task_queue_clear_all">Remove all</string>
     <string name="queued_install">Install %1$s</string>
     <string name="queued_uninstall">Uninstall %1$s</string>
+    <string name="queued_alpine_install">Add Alpine packages: %1$s</string>
+    <string name="queued_alpine_remove">Remove the Alpine package %1$s</string>
     <string name="queued_install_group">Install</string>
     <string name="queued_uninstall_group">Uninstall</string>
     <string name="queued_reinstall">Reinstall %1$s</string>
@@ -386,6 +391,9 @@
     <string name="task_log_metered_paused">(paused: the connection is metered)</string>
     <string name="task_log_metered_goes_on">(going on)</string>
     <string name="task_timed_out">Timed out</string>
+    <string name="task_alpine_installing">Adding Alpine packages: %1$s</string>
+    <string name="task_alpine_removing">Removing the Alpine package %1$s</string>
+    <string name="task_alpine_own_package">%1$s is one of Flatdroid\'s own packages and stays</string>
     <string name="task_log_done">(done)</string>
     <string name="task_log_failed">(%1$s)</string>
     <string name="task_log_cleanup_failed">(clean-up failed: %1$s)</string>
@@ -516,9 +524,21 @@
     <string name="terminal_exited">Exited with code %1$d. Press Enter to close</string>
     <string name="terminal_ended">Ended by %1$s. Press Enter to close</string>
     <string name="alpine_shell">Alpine shell</string>
+    <string name="alpine_package_label">Alpine package %1$s</string>
+    <string name="security_alpine_safe_launch">Alpine safe launch</string>
+    <string name="security_alpine_safe_launch_hint">Alpine programs can change Alpine\'s own files, which Flatdroid runs later with more access. Flatdroid records those files before each Alpine program starts and compares them when it ends. Off, a change goes unnoticed.</string>
+    <string name="alpine_changed_title">Alpine was changed</string>
+    <string name="alpine_changed_text">While %1$s ran, these of Alpine\'s files changed. Flatdroid runs nothing in Alpine until you choose. Reinstalling Alpine keeps your Flatpaks and their data, and removes Alpine packages you added.</string>
+    <string name="alpine_changed_more">and %1$d more</string>
+    <string name="alpine_changed_reinstall">Reinstall Alpine</string>
+    <string name="alpine_changed_keep">Keep it</string>
+    <string name="alpine_changed_refused">An Alpine program changed Alpine\'s files. Reinstall Alpine or keep it first.</string>
+    <string name="launch_alpine_program_missing">This Alpine program isn\'t installed any more.</string>
+    <string name="session_checking_alpine">Recording Alpine\'s files</string>
     <string name="settings_open_alpine_shell">Open Alpine shell</string>
+    <string name="settings_alpine_shell_hint">A terminal in Alpine, the Linux system Flatdroid installs apps with. It can add and remove Alpine\'s packages.</string>
     <string name="settings_alpine_shell_user">Alpine shell runs as</string>
-    <string name="settings_alpine_shell_user_hint">Root can add and remove Alpine\'s packages. The app user is how Alpine\'s programs would run for an app. The shell sees all of Alpine and Flatpak\'s installation either way.</string>
+    <string name="settings_alpine_shell_user_hint">Root can add and remove Alpine\'s packages. The app user is the one Flatdroid\'s helpers run as. The shell sees all of Alpine and Flatpak\'s installation either way.</string>
     <string name="settings_alpine_shell_root">Root</string>
     <string name="settings_alpine_shell_app_user">App user</string>
     <string name="packages_x11_title">Download X11?</string>
@@ -613,6 +633,7 @@
     <string name="uninstall_button">Uninstall…</string>
     <string name="uninstall_title">Uninstall %1$s?</string>
     <string name="uninstall_text">The app is removed, along with runtimes no other app uses unless you keep them.</string>
+    <string name="uninstall_alpine_text">Its Alpine package is removed, along with the packages only it needed.</string>
     <string name="uninstall_delete_data">Also delete its settings, data and files</string>
     <string name="uninstall_keep_runtimes">Keep runtimes no other app uses (update removes them)</string>
     <string name="uninstall_confirm">Uninstall</string>
@@ -825,9 +846,7 @@
     <string name="baseline_choice_reinstall">Reinstall all apps</string>
     <string name="baseline_choice_record_now">Record now</string>
     <string name="baseline_choice_first_launch">At first launch</string>
-    <string name="settings_terminal_filter">Filter the terminal\'s commands</string>
-    <string name="settings_terminal_during_session">Terminal while an app runs</string>
-    <string name="settings_terminal_during_session_hint">Lets the terminal run commands while an app runs, and apps start while a command runs. A running app can take over those commands and run its own code in Alpine\'s proot, with everything Alpine reaches.</string>
+    <string name="settings_shell_filter">Filter the Alpine shell</string>
     <string name="app_running_settings">Stop the app to change its settings.</string>
     <!-- Home-screen shortcuts to apps. -->
     <string name="shortcut_add">Add to home screen</string>
@@ -838,8 +857,7 @@
     <string name="shortcut_busy">Flatdroid is busy. Try again once its task is done.</string>
     <string name="storage_app_running">This app is running. Stop it first.</string>
     <string name="settings_app_running">These settings change Alpine, which can\'t happen while an app runs. Stop the app, then save again.</string>
-    <string name="terminal_app_running">An app is running. Stop it first: a command run now could be taken over by the app (see the developer setting \"Terminal while an app runs\").</string>
-    <string name="settings_terminal_filter_hint">Commands run behind Flatdroid\'s system call filter, as everything else in Alpine does. Off, tools such as strace and gdb work, and so does anything you run there that tries to leave proot.</string>
+    <string name="settings_shell_filter_hint">The shell and setup\'s command field run behind Flatdroid\'s system call filter, as everything else in Alpine does. Off, tools such as strace and gdb work, and so does anything you run there that tries to leave proot.</string>
     <string name="launch_dumpable">Flatdroid couldn\'t make its own process non-dumpable, so an app could read Flatdroid\'s memory. Not starting.</string>
     <string name="launch_filter_refused">Flatdroid couldn\'t put its system call filter in place, so it started nothing.</string>
     <string name="app_settings_web_content">This app shows web content without Chromium\'s sandbox: a page it opens can reach everything the app can.</string>

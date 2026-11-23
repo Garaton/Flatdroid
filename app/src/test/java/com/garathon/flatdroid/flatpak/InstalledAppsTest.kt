@@ -16,6 +16,11 @@ class InstalledAppsTest {
         for (bad in listOf("", "mousepad", "-y.x", "--help.x", "a/b.c", "a..b", "a.b ", "../x.y", "a.b;rm")) {
             assertFalse(bad, InstalledApps.isValidId(bad))
         }
+        // An Alpine program's ID is one Flatdroid keeps data for, but never one for Flatpak.
+        assertTrue(InstalledApps.isValidId("alpine+htop"))
+        assertFalse(InstalledApps.isFlatpakId("alpine+htop"))
+        assertTrue(InstalledApps.isFlatpakId("org.xfce.mousepad"))
+        assertEquals(null, InstalledApps.parseIds("org.xfce.mousepad alpine+htop"))
     }
 
     @Test
