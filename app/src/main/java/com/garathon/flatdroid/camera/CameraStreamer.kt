@@ -191,13 +191,17 @@ class CameraStreamer(
             val (y, u, v) = image.planes
             if (order == null && v.pixelStride == 2) order = Nv21.order(u.buffer, v.buffer)
             meter.start()
-            Nv21.pack(
+            val into = if (format == Fdv4l2.Format.NV12) Nv21.Order.UV else Nv21.Order.VU
+            val written = Nv21.pack(
                 camera.width, camera.height, y.buffer, y.rowStride,
-                u.buffer, v.buffer, u.rowStride, u.pixelStride, order, frame, row,
-                into = if (format == Fdv4l2.Format.NV12) Nv21.Order.UV else Nv21.Order.VU,
+                u.buffer, v.buffer, u.rowStride, u.pixelStride, order, frame, row, into,
             )
             meter.step(0)
-            if (rotation != 0) Nv21.rotate(frame, camera.width, camera.height, rotation, turned)
+            if (rotation != 0) {
+                NativeFrames.rotate(frame, camera.width, camera.height, rotation, turned, swapChroma = written != into)
+            } else if (written != into) {
+                NativeFrames.swapChroma(frame, camera.width, camera.height)
+            }
             meter.step(1)
             writeFrame(if (rotation != 0) turned else frame)
             meter.round()

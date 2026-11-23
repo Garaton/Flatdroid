@@ -1,12 +1,8 @@
 package com.garathon.flatdroid.alpine.programs
 
 import android.content.Context
-import android.os.Build
-import android.os.SystemClock
-import android.system.ErrnoException
-import android.system.Os
-import android.system.OsConstants
 import com.garathon.flatdroid.R
+import com.garathon.flatdroid.util.io.DirReader
 import com.garathon.flatdroid.util.io.writeTextAtomically
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -29,7 +25,7 @@ import java.io.IOException
  * which the program's root binds one by one instead of the whole store ([AlpineRoot]).
  */
 object AlpineChanges {
-    /** An entry's change time (nanoseconds; whole seconds before Android 8.1), inode, size and mode (type and permissions). */
+    /** An entry's change time (nanoseconds), inode, size and mode (type and permissions). */
     data class Stamp(val ctime: Long, val inode: Long, val size: Long, val mode: Int = 0)
 
     /**
@@ -38,9 +34,6 @@ object AlpineChanges {
      * Alpine's links name (the store's own entry there is a link to it).
      */
     class Snapshot(val stamps: Map<String, Stamp>, val l2sBinds: List<Pair<String, String>>)
-
-    /** Links followed inside the store before giving up on an entry. */
-    private const val MAX_STORE_HOPS = 4
 
     /** At most this many changed paths are kept and shown. */
     const val MAX_SHOWN = 50
@@ -69,43 +62,12 @@ object AlpineChanges {
     }
 
     /**
-     * Walks [rootfs]'s [AlpineRoot.DIRS]. Without nanoseconds the walk waits for the next whole
-     * second, so a change right after it can't share its second.
+     * Walks [rootfs]'s [AlpineRoot.DIRS] in C ([NativeSnapshot]): folders in name order, links
+     * never followed but into the store, where an entry is followed through a few links to the
+     * file it names. Change times are read in nanoseconds on every Android version, so a change
+     * right after the walk can't share its time with what was recorded.
      */
-    fun snapshot(rootfs: File, l2sDir: File, settle: Boolean = true): Snapshot {
-        val stamps = HashMap<String, Stamp>(8192)
-        val binds = LinkedHashMap<String, String>()
-        val store = l2sDir.path.trimEnd('/') + "/"
-        fun inStore(path: String?) = path != null && path.startsWith(store) && '/' !in path.removePrefix(store) && path.none { it == ':' }
-        // link2symlink's entry for a hard link is a link to the file itself (`<name>` to `<name>.0001`).
-        fun storeFile(entry: String) {
-            var path = entry
-            repeat(MAX_STORE_HOPS) {
-                val st = try { Os.lstat(path) } catch (_: ErrnoException) { return }
-                stamps[path] = stamp(st)
-                if (!OsConstants.S_ISLNK(st.st_mode)) {
-                    if (OsConstants.S_ISREG(st.st_mode)) binds[entry] = path
-                    return
-                }
-                path = (try { Os.readlink(path) } catch (_: ErrnoException) { null })?.takeIf(::inStore) ?: return
-            }
-        }
-        fun visit(rel: String) {
-            val path = "${rootfs.path}/$rel"
-            val st = try { Os.lstat(path) } catch (_: ErrnoException) { return }
-            stamps[rel] = stamp(st)
-            when {
-                OsConstants.S_ISDIR(st.st_mode) -> File(path).list()?.sorted()?.forEach { visit("$rel/$it") }
-                OsConstants.S_ISLNK(st.st_mode) -> {
-                    val target = try { Os.readlink(path) } catch (_: ErrnoException) { null }
-                    if (target != null && inStore(target) && target !in binds) storeFile(target)
-                }
-            }
-        }
-        for (dir in AlpineRoot.DIRS) visit(dir)
-        if (settle && Build.VERSION.SDK_INT < Build.VERSION_CODES.O_MR1) SystemClock.sleep(1_000 - System.currentTimeMillis() % 1_000 + 10)
-        return Snapshot(stamps, binds.map { (guest, host) -> host to guest })
-    }
+    fun snapshot(rootfs: File, l2sDir: File): Snapshot = NativeSnapshot.take(rootfs, l2sDir, AlpineRoot.DIRS)
 
     /** The paths added, removed or changed between [before] and [after], sorted. */
     fun changes(before: Map<String, Stamp>, after: Map<String, Stamp>): List<String> =
@@ -125,9 +87,9 @@ object AlpineChanges {
             val was = before[path] ?: return@filterNot false
             val now = after[path] ?: return@filterNot false
             if (was.inode != now.inode || was.mode != now.mode) return@filterNot false
-            when (now.mode and S_IFMT) {
-                S_IFDIR -> entriesBefore[path].orEmpty() == entriesAfter[path].orEmpty()
-                S_IFREG -> was.size == now.size && sameAsInstalled(path)
+            when (now.mode and DirReader.S_IFMT) {
+                DirReader.S_IFDIR -> entriesBefore[path].orEmpty() == entriesAfter[path].orEmpty()
+                DirReader.S_IFREG -> was.size == now.size && sameAsInstalled(path)
                 else -> false
             }
         }
@@ -156,9 +118,6 @@ object AlpineChanges {
         return map
     }
 
-    private const val S_IFMT = 0xF000
-    private const val S_IFDIR = 0x4000
-    private const val S_IFREG = 0x8000
 
     /** Changed entries of one folder shown one by one up to this many ([summary]). */
     const val GROUP_LIMIT = 10
@@ -185,10 +144,5 @@ object AlpineChanges {
     fun clear(context: Context) {
         changedFile(context).delete()
         refresh(context)
-    }
-
-    private fun stamp(st: android.system.StructStat): Stamp {
-        val ctime = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) st.st_ctim.tv_sec * 1_000_000_000L + st.st_ctim.tv_nsec else st.st_ctime * 1_000_000_000L
-        return Stamp(ctime, st.st_ino, st.st_size, st.st_mode)
     }
 }

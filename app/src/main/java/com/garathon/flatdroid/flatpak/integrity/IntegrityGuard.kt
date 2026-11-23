@@ -8,8 +8,6 @@ import com.garathon.flatdroid.flatpak.FlatpakRef
 import com.garathon.flatdroid.launcher.LaunchPlanner
 import com.garathon.flatdroid.storage.AppData
 import java.io.File
-import java.util.concurrent.Callable
-import java.util.concurrent.Executors
 
 /**
  * Orchestrates the file-integrity check over all the deployments one app uses (the app, its
@@ -44,12 +42,9 @@ class IntegrityGuard(context: Context) {
 
         /** How a changed `metadata` (beside `files/`) is reported among the changed paths. */
         const val METADATA = "../metadata"
-
-        /** Deployments listed ahead at once ([verify]); listing is mostly waiting on storage. */
-        private const val LISTING_THREADS = 3
     }
 
-    private val ignore: (String) -> Boolean = { it in OVERRIDDEN_PATHS }
+    private val ignore = OVERRIDDEN_PATHS
 
     /**
      * Records the baseline of each deployment [appId] uses that doesn't have one yet (manifests are
@@ -108,10 +103,8 @@ class IntegrityGuard(context: Context) {
         verify(appIds.flatMap { installation.deploymentsFor(it) }.distinctBy { it.dir.name }, onProgress, { false }, recordMissing = false)
 
     /**
-     * Checks [deployments] in order. Listing a deployment's files is one thread's work and reports
-     * no progress, so the next deployments are listed meanwhile ([LISTING_THREADS] at a time),
-     * while the current one is stat'ed and hashed; [onProgress] gets `0` of `0` when a
-     * deployment's turn comes and its list isn't ready yet.
+     * Checks [deployments] in order; [onProgress] gets `0` of `0` while a deployment's files are
+     * still being listed.
      */
     private fun verify(
         deployments: List<Deployment>,
@@ -120,32 +113,23 @@ class IntegrityGuard(context: Context) {
         recordMissing: Boolean,
     ): List<Problem> {
         val problems = mutableListOf<Problem>()
-        val checked = deployments.filter { recordMissing || check.hasBaseline(it.dir.name) }
-        if (checked.isEmpty()) return problems
-        val listing = Executors.newFixedThreadPool(LISTING_THREADS.coerceAtMost(checked.size))
-        try {
-            val lists = checked.map { d -> listing.submit(Callable { check.leaves(d.files, ignore, cancelled) }) }
-            for ((i, d) in checked.withIndex()) {
-                if (cancelled()) break
-                if (!lists[i].isDone) onProgress(d.ref, 0, 0)
-                val listed = lists[i].get()
-                val metadata = File(d.dir, "metadata")
-                val metadataChanged = when (check.metadataMatches(d.dir.name, metadata)) {
-                    null -> { if (recordMissing) check.baselineMetadata(d.dir.name, metadata); false }
-                    true -> false
-                    false -> true
-                }
-                val diff = check.verify(d.dir.name, d.files, ignore, { done, total -> onProgress(d.ref, done, total) }, cancelled, listed)
-                if (diff == null) {
-                    // First time (or install predating the check): trust the current files as the baseline.
-                    check.baseline(d.dir.name, d.files, ignore, { done, total -> onProgress(d.ref, done, total) }, cancelled, listed)
-                }
-                val tampered = (if (metadataChanged) listOf(METADATA) else emptyList()) + diff?.tampered.orEmpty()
-                val removed = diff?.removed.orEmpty()
-                if (tampered.isNotEmpty() || removed.isNotEmpty()) problems += Problem(d, tampered, removed)
+        for (d in deployments.filter { recordMissing || check.hasBaseline(it.dir.name) }) {
+            if (cancelled()) break
+            val metadata = File(d.dir, "metadata")
+            val metadataChanged = when (check.metadataMatches(d.dir.name, metadata)) {
+                null -> { if (recordMissing) check.baselineMetadata(d.dir.name, metadata); false }
+                true -> false
+                false -> true
             }
-        } finally {
-            listing.shutdownNow()
+            val progress = { done: Int, total: Int -> onProgress(d.ref, done, total) }
+            val diff = check.verify(d.dir.name, d.files, ignore, progress, cancelled)
+            if (diff == null) {
+                // First time (or install predating the check): trust the current files as the baseline.
+                check.baseline(d.dir.name, d.files, ignore, progress, cancelled)
+            }
+            val tampered = (if (metadataChanged) listOf(METADATA) else emptyList()) + diff?.tampered.orEmpty()
+            val removed = diff?.removed.orEmpty()
+            if (tampered.isNotEmpty() || removed.isNotEmpty()) problems += Problem(d, tampered, removed)
         }
         return problems
     }

@@ -2,9 +2,10 @@ package com.garathon.flatdroid.storage.sizes
 
 import android.system.ErrnoException
 import android.system.Os
-import android.system.OsConstants
 import com.garathon.flatdroid.proot.L2s
 import com.garathon.flatdroid.storage.AppFiles
+import com.garathon.flatdroid.util.io.DirReader
+import com.garathon.flatdroid.util.io.NativeFs
 import java.io.File
 
 /** One app's storage, in bytes, as its Storage section shows it. */
@@ -27,24 +28,35 @@ class MeasureStopped : Exception("Measuring stopped")
 
 /**
  * Disk space as `du` counts it: allocated blocks of every entry, directories included. [stop] is
- * checked at each directory; when it is true the walk ends with [MeasureStopped].
+ * checked at each directory; when it is true the walk ends with [MeasureStopped]. Folders are
+ * read through a [DirReader] ([NativeFs] in the app), their entries stat'ed many at a time, on the calling thread only: this
+ * is background work.
  */
 object StorageSizes {
     /** Under [file], without following links; an entry [instead] gives a size for isn't walked. */
-    fun of(file: File, stop: () -> Boolean = { false }, instead: (File) -> Long? = { null }): Long {
-        fun walk(entry: File): Long {
-            instead(entry)?.let { return it }
-            val stat = lstat(entry) ?: return 0L
-            val own = stat.st_blocks * 512
-            if (!OsConstants.S_ISDIR(stat.st_mode)) return own
+    fun of(file: File, stop: () -> Boolean = { false }, instead: (File) -> Long? = { null }, reader: DirReader = NativeFs): Long {
+        fun walk(entry: File, st: DirReader.Stats, i: Int): Long {
+            val own = st.bytes(i)
+            if (!st.isDirectory(i)) return own
             if (stop()) throw MeasureStopped()
-            return own + (entry.listFiles()?.sumOf(::walk) ?: 0L)
+            val listing = reader.list(entry) ?: return own
+            var sum = own
+            val walked = listing.indicesWhere { i ->
+                val replaced = instead(File(entry, listing.names[i]))
+                if (replaced != null) sum += replaced
+                replaced == null
+            }
+            val stats = reader.stats(entry, listing, walked, follow = false)
+            for (k in walked.indices) if (stats.found(k)) sum += walk(File(entry, listing.names[walked[k]]), stats, k)
+            return sum
         }
-        return walk(file)
+        instead(file)?.let { return it }
+        val st = reader.stat(file, follow = false)
+        return if (st.found(0)) walk(file, st, 0) else 0L
     }
 
     /** What [dir] holds, without the directory itself. */
-    fun contents(dir: File): Long = dir.listFiles()?.sumOf { of(it) } ?: 0L
+    fun contents(dir: File, reader: DirReader = NativeFs): Long = reader.list(dir)?.names?.sumOf { of(File(dir, it), reader = reader) } ?: 0L
 
     /**
      * Under [files], counting each link into [l2sDir] as itself (a long link takes a block) and
@@ -61,44 +73,47 @@ object StorageSizes {
         deployments: ((File) -> DeploymentSize)? = null,
         /** Each content counted, with its bytes: once per call. */
         onContent: (inode: Long, bytes: Long) -> Unit = { _, _ -> },
+        reader: DirReader = NativeFs,
     ): Long {
         val seen = HashSet<Long>()
+        val store = L2s.Store(l2sDir)
         fun content(inode: Long, bytes: Long): Long =
             if (seen.add(inode)) { onContent(inode, bytes); bytes } else 0L
-        fun walk(entry: File, depth: Int): Long {
-            val stat = lstat(entry) ?: return 0L
-            return when {
-                OsConstants.S_ISDIR(stat.st_mode) -> {
-                    if (stop()) throw MeasureStopped()
-                    if (deployments != null && depth == DEPLOYMENT_DEPTH && DeploymentSizes.COMMIT.matches(entry.name)) {
-                        val size = deployments(entry)
-                        var sum = size.own
-                        for (i in size.inodes.indices) sum += content(size.inodes[i], size.bytes[i])
-                        sum
-                    } else {
-                        stat.st_blocks * 512 + (entry.listFiles()?.sumOf { walk(it, depth + 1) } ?: 0L)
-                    }
-                }
-                OsConstants.S_ISLNK(stat.st_mode) -> {
-                    val target = try { Os.readlink(entry.path) } catch (_: ErrnoException) { null }
-                    if (target != null && L2s.inStore(target, l2sDir)) {
-                        val stored = try { Os.stat(entry.path) } catch (_: ErrnoException) { null }
-                        stat.st_blocks * 512 + if (stored != null) content(stored.st_ino, stored.st_blocks * 512) else 0L
-                    } else {
-                        stat.st_blocks * 512
-                    }
-                }
-                else -> stat.st_blocks * 512
+        fun walk(entry: File, st: DirReader.Stats, i: Int, depth: Int): Long {
+            if (!st.isDirectory(i)) return st.bytes(i)
+            if (stop()) throw MeasureStopped()
+            if (deployments != null && depth == DEPLOYMENT_DEPTH && DeploymentSizes.COMMIT.matches(entry.name)) {
+                val size = deployments(entry)
+                var sum = size.own
+                for (k in size.inodes.indices) sum += content(size.inodes[k], size.bytes[k])
+                return sum
             }
+            val listing = reader.list(entry) ?: return st.bytes(i)
+            val stats = reader.stats(entry, listing, listing.all, follow = false)
+            var sum = st.bytes(i)
+            val links = listing.indicesWhere { stats.isLink(it) }
+            val targets = reader.readlinks(entry, listing, links)
+            // Links into the store count as themselves and, once, the content they lead to.
+            val stored = links.indices.filter { k -> targets[k]?.let(store::inStore) == true }.map { links[it] }.toIntArray()
+            val followed = reader.stats(entry, listing, stored, follow = true)
+            for (k in stored.indices) if (followed.found(k)) sum += content(followed.inode(k), followed.bytes(k))
+            for (k in 0 until listing.size) {
+                if (!stats.found(k)) continue
+                sum += if (stats.isDirectory(k)) walk(File(entry, listing.names[k]), stats, k, depth + 1) else stats.bytes(k)
+            }
+            return sum
         }
-        return files.sumOf { walk(it, 0) }
+        return files.sumOf { file ->
+            val st = reader.stat(file, follow = false)
+            if (st.found(0)) walk(file, st, 0, 0) else 0L
+        }
     }
 
     /** One deployment's directory walked ([following] over it alone), for [DeploymentSizes]. */
     fun deployment(dir: File, l2sDir: File, stop: () -> Boolean = { false }): DeploymentSize {
         val inodes = ArrayList<Long>()
         val bytes = ArrayList<Long>()
-        val total = following(listOf(dir), l2sDir, stop) { inode, size -> inodes += inode; bytes += size }
+        val total = following(listOf(dir), l2sDir, stop, onContent = { inode, size -> inodes += inode; bytes += size })
         return DeploymentSize(total - bytes.sum(), inodes.toLongArray(), bytes.toLongArray())
     }
 
@@ -122,7 +137,7 @@ object StorageSizes {
     ): Pair<List<Long>, Long> {
         val all = HashSet<Long>()
         var again = 0L
-        val each = dirs.map { dir -> following(listOf(dir), l2sDir, stop, deployments) { inode, bytes -> if (!all.add(inode)) again += bytes } }
+        val each = dirs.map { dir -> following(listOf(dir), l2sDir, stop, deployments, onContent = { inode, bytes -> if (!all.add(inode)) again += bytes }) }
         return each to each.sum() - again
     }
 
@@ -130,10 +145,13 @@ object StorageSizes {
     private const val DEPLOYMENT_DEPTH = 3
 
     /** [ListedSizes] over [root], saved in [sizes] as [name]. */
-    fun listed(sizes: ListedSizes, name: String, root: File, stop: () -> Boolean): Long = sizes.measure(
+    fun listed(sizes: ListedSizes, name: String, root: File, stop: () -> Boolean, reader: DirReader = NativeFs): Long = sizes.measure(
         name, root,
-        stat = { file -> lstat(file)?.let { ListedSizes.Entry(OsConstants.S_ISDIR(it.st_mode), it.st_blocks * 512) } },
-        list = { it.list() },
+        stats = { dir, names ->
+            val st = reader.stats(dir, names, follow = false)
+            List(names.size) { i -> if (st.found(i)) ListedSizes.Entry(st.isDirectory(i), st.bytes(i), st.ctimeNanos(i)) else null }
+        },
+        list = { dir -> reader.list(dir)?.names?.toTypedArray() },
         stop = stop,
     )
 

@@ -123,11 +123,11 @@ abstract class BuildProotTask @Inject constructor(private val exec: ExecOperatio
     }
 }
 
-/** Runs a native helper's build script (native/build-fdsec.sh, build-fdshm.sh, build-fdv4l2.sh) for one ABI; output is a jniLibs root (<dir>/<abi>/lib*.so). */
+/** Runs a native helper's build script (native/build-fdsec.sh, build-fdshm.sh, build-fdv4l2.sh, build-fdwalk.sh, build-fdframe.sh) for one ABI; output is a jniLibs root (<dir>/<abi>/lib*.so). */
 abstract class BuildHelperTask @Inject constructor(private val exec: ExecOperations) : DefaultTask() {
     @get:Input abstract val abi: Property<String>
     @get:InputFile abstract val script: RegularFileProperty
-    @get:InputFile abstract val source: RegularFileProperty
+    @get:InputFiles abstract val sources: ConfigurableFileCollection
     @get:Internal abstract val ndkDirectory: DirectoryProperty
     @get:Input val ndkPath: Provider<String> get() = ndkDirectory.map { it.asFile.absolutePath }
     @get:OutputDirectory abstract val outputDirectory: DirectoryProperty
@@ -145,7 +145,7 @@ val fdsecTasks = architectures.keys.associateWith { abi ->
     tasks.register<BuildHelperTask>("buildFdsec_$abi") {
         this.abi = abi
         script = rootProject.file("native/build-fdsec.sh")
-        source = rootProject.file("native/fdsec.c")
+        sources.from(rootProject.file("native/fdsec.c"))
         ndkDirectory = androidComponents.sdkComponents.ndkDirectory
         outputDirectory = layout.buildDirectory.dir("generated/fdsec/$abi")
     }
@@ -155,7 +155,7 @@ val fdshmTasks = architectures.keys.associateWith { abi ->
     tasks.register<BuildHelperTask>("buildFdshm_$abi") {
         this.abi = abi
         script = rootProject.file("native/build-fdshm.sh")
-        source = rootProject.file("native/fdshm.c")
+        sources.from(rootProject.file("native/fdshm.c"))
         ndkDirectory = androidComponents.sdkComponents.ndkDirectory
         outputDirectory = layout.buildDirectory.dir("generated/fdshm/$abi")
     }
@@ -165,9 +165,29 @@ val fdviewTasks = architectures.keys.associateWith { abi ->
     tasks.register<BuildHelperTask>("buildFdview_$abi") {
         this.abi = abi
         script = rootProject.file("native/build-fdview.sh")
-        source = rootProject.file("native/fdview.c")
+        sources.from(rootProject.file("native/fdview.c"))
         ndkDirectory = androidComponents.sdkComponents.ndkDirectory
         outputDirectory = layout.buildDirectory.dir("generated/fdview/$abi")
+    }
+}
+
+val fdframeTasks = architectures.keys.associateWith { abi ->
+    tasks.register<BuildHelperTask>("buildFdframe_$abi") {
+        this.abi = abi
+        script = rootProject.file("native/build-fdframe.sh")
+        sources.from(rootProject.file("native/fdframe.c"))
+        ndkDirectory = androidComponents.sdkComponents.ndkDirectory
+        outputDirectory = layout.buildDirectory.dir("generated/fdframe/$abi")
+    }
+}
+
+val fdwalkTasks = architectures.keys.associateWith { abi ->
+    tasks.register<BuildHelperTask>("buildFdwalk_$abi") {
+        this.abi = abi
+        script = rootProject.file("native/build-fdwalk.sh")
+        sources.from(rootProject.file("native/fdwalk.c"), rootProject.file("native/fdcheck.c"), rootProject.file("native/fdsnap.c"))
+        ndkDirectory = androidComponents.sdkComponents.ndkDirectory
+        outputDirectory = layout.buildDirectory.dir("generated/fdwalk/$abi")
     }
 }
 
@@ -175,7 +195,7 @@ val fdv4l2Tasks = architectures.keys.associateWith { abi ->
     tasks.register<BuildHelperTask>("buildFdv4l2_$abi") {
         this.abi = abi
         script = rootProject.file("native/build-fdv4l2.sh")
-        source = rootProject.file("native/fdv4l2.c")
+        sources.from(rootProject.file("native/fdv4l2.c"))
         ndkDirectory = androidComponents.sdkComponents.ndkDirectory
         outputDirectory = layout.buildDirectory.dir("generated/fdv4l2/$abi")
     }
@@ -211,6 +231,8 @@ androidComponents {
             variant.sources.jniLibs?.addGeneratedSourceDirectory(fdshmTasks.getValue(abi), BuildHelperTask::outputDirectory)
             variant.sources.jniLibs?.addGeneratedSourceDirectory(fdviewTasks.getValue(abi), BuildHelperTask::outputDirectory)
             variant.sources.jniLibs?.addGeneratedSourceDirectory(fdv4l2Tasks.getValue(abi), BuildHelperTask::outputDirectory)
+            variant.sources.jniLibs?.addGeneratedSourceDirectory(fdwalkTasks.getValue(abi), BuildHelperTask::outputDirectory)
+            variant.sources.jniLibs?.addGeneratedSourceDirectory(fdframeTasks.getValue(abi), BuildHelperTask::outputDirectory)
         }
     }
 }

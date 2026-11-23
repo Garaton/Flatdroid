@@ -27,10 +27,13 @@ class Nv21Test {
         return if (vFirst) second to first else first to second
     }
 
-    private fun pack(u: ByteBuffer, v: ByteBuffer, pixelStride: Int, order: Nv21.Order?, into: Nv21.Order = Nv21.Order.VU): ByteArray {
+    private fun pack(u: ByteBuffer, v: ByteBuffer, pixelStride: Int, order: Nv21.Order?, into: Nv21.Order = Nv21.Order.VU): ByteArray =
+        packed(u, v, pixelStride, order, into).second
+
+    /** The order [Nv21.pack] says it wrote, and what it wrote. */
+    private fun packed(u: ByteBuffer, v: ByteBuffer, pixelStride: Int, order: Nv21.Order?, into: Nv21.Order = Nv21.Order.VU): Pair<Nv21.Order, ByteArray> {
         val out = ByteArray(Nv21.bytes(width, height))
-        Nv21.pack(width, height, yPlane(), stride, u, v, stride, pixelStride, order, out, ByteArray(width), into)
-        return out
+        return Nv21.pack(width, height, yPlane(), stride, u, v, stride, pixelStride, order, out, ByteArray(width), into) to out
     }
 
     /** What apps that take NV12 get: U before V. */
@@ -39,13 +42,20 @@ class Nv21Test {
     @Test
     fun nv12ComesOutOfEveryLayout() {
         val (u12, v12) = interleaved(vFirst = false)
-        assertArrayEquals(expectedNv12, pack(u12, v12, 2, Nv21.Order.UV, into = Nv21.Order.UV))
+        val (order12, out12) = packed(u12, v12, 2, Nv21.Order.UV, into = Nv21.Order.UV)
+        assertEquals(Nv21.Order.UV, order12)
+        assertArrayEquals(expectedNv12, out12)
+        // NV21 memory stays NV21, and says so: NativeFrames trades the order (fdframe-test.c checks that).
         val (u21, v21) = interleaved(vFirst = true)
-        assertArrayEquals(expectedNv12, pack(u21, v21, 2, Nv21.Order.VU, into = Nv21.Order.UV))
+        val (order21, out21) = packed(u21, v21, 2, Nv21.Order.VU, into = Nv21.Order.UV)
+        assertEquals(Nv21.Order.VU, order21)
+        assertArrayEquals(expected, out21)
         // Planar chroma, and the slow path for any other stride.
         val planarU = ByteBuffer.wrap(byteArrayOf(101, 102, 0, 0, 0, 0))
         val planarV = ByteBuffer.wrap(byteArrayOf(201.toByte(), 202.toByte(), 0, 0, 0, 0))
-        assertArrayEquals(expectedNv12, pack(planarU, planarV, 1, null, into = Nv21.Order.UV))
+        val (orderPlanar, outPlanar) = packed(planarU, planarV, 1, null, into = Nv21.Order.UV)
+        assertEquals(Nv21.Order.UV, orderPlanar)
+        assertArrayEquals(expectedNv12, outPlanar)
         val (u, v) = interleaved(vFirst = false)
         assertArrayEquals(expectedNv12, pack(u, v, 2, null, into = Nv21.Order.UV))
     }
@@ -58,10 +68,12 @@ class Nv21Test {
     }
 
     @Test
-    fun nv12MemoryIsSwapped() {
+    fun nv12MemoryIsCopiedAsItIsAndSaysSo() {
         val (u, v) = interleaved(vFirst = false)
         assertEquals(Nv21.Order.UV, Nv21.order(u, v))
-        assertArrayEquals(expected, pack(u, v, 2, Nv21.Order.UV))
+        val (written, out) = packed(u, v, 2, Nv21.Order.UV)
+        assertEquals(Nv21.Order.UV, written)
+        assertArrayEquals(expectedNv12, out)
     }
 
     @Test
@@ -89,41 +101,11 @@ class Nv21Test {
     }
 
     @Test
-    fun screenPixelsBecomeFullRangeYuv() {
-        // 4×2 RGBA, rows 20 bytes apart (4 bytes of padding): a white 2×2 block, then a red one.
-        val white = byteArrayOf(-1, -1, -1, -1)
-        val red = byteArrayOf(-1, 0, 0, -1)
-        val row = white + white + red + red + ByteArray(4)
-        val rgba = ByteBuffer.wrap(row + row)
-        val out = ByteArray(Nv21.bytes(4, 2))
-        Nv21.fromRgba(rgba, 20, 4, 2, out, IntArray(8))
-        val luma = byteArrayOf(-1, -1, 77, 77, -1, -1, 77, 77)
-        // White: neutral chroma. Red: V at the top, U low.
-        assertArrayEquals(luma + byteArrayOf(128.toByte(), 128.toByte(), 255.toByte(), 85), out)
-        Nv21.fromRgba(rgba, 20, 4, 2, out, IntArray(8), Nv21.Order.UV)
-        assertArrayEquals(luma + byteArrayOf(128.toByte(), 128.toByte(), 85, 255.toByte()), out)
-    }
-
-    @Test
     fun blackIsZeroLumaAndNeutralChroma() {
         val black = Nv21.black(4, 2)
         assertEquals(12, black.size)
         assertArrayEquals(ByteArray(8), black.copyOfRange(0, 8))
         assertArrayEquals(ByteArray(4) { 128.toByte() }, black.copyOfRange(8, 12))
-    }
-
-    @Test
-    fun rotatesLumaAndChromaClockwise() {
-        // 4×2: Y rows 1 2 3 4 / 5 6 7 8, one chroma row (V,U) (10,20) (30,40).
-        val src = byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8, 10, 20, 30, 40)
-        val out = ByteArray(src.size)
-        Nv21.rotate(src, 4, 2, 90, out)
-        // 2×4: the left column read bottom-up becomes the top row.
-        assertArrayEquals(byteArrayOf(5, 1, 6, 2, 7, 3, 8, 4, 10, 20, 30, 40), out)
-        Nv21.rotate(src, 4, 2, 180, out)
-        assertArrayEquals(byteArrayOf(8, 7, 6, 5, 4, 3, 2, 1, 30, 40, 10, 20), out)
-        Nv21.rotate(src, 4, 2, 270, out)
-        assertArrayEquals(byteArrayOf(4, 8, 3, 7, 2, 6, 1, 5, 30, 40, 10, 20), out)
     }
 
     @Test

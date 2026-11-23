@@ -33,7 +33,7 @@ Android app (`com.garathon.flatdroid`, Kotlin, GPL-3.0-or-later) that installs F
 
 ## Code conventions
 
-- Kotlin for the app; POSIX sh for guest glue (Alpine setup, helper start-up); C only for native helpers (proot build, `fdsec`, `fdshm`) and the viewer's frames (`fdview`).
+- Kotlin for the app; POSIX sh for guest glue (Alpine setup, helper start-up); C only for native helpers (proot build, `fdsec`, `fdshm`, `fdv4l2`), the viewer's frames (`fdview`), camera frames (`fdframe`) and file walks and checks (`fdwalk`).
 - Build the proot invocation as an argument list in one place, used by setup and the launcher. Never build it as a shell string.
 - Start every proot from a cleared environment (`env -i` equivalent) with absolute paths; never rely on ambient state.
 - Pure Kotlin, unit-tested: metadata parser (keyfile; trim spaces around `=`), bind and argument builders, path mapping, ELF architecture check.

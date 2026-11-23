@@ -7,6 +7,8 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.attribute.FileTime
 
 class ListedSizesTest {
     @get:Rule val tmp = TemporaryFolder()
@@ -14,11 +16,18 @@ class ListedSizesTest {
     /** A store with fixed sizes: 100 per directory, a file's length times 10. Counts the stats. */
     private inner class Store(val root: File) {
         var stats = 0
-        val stat = { file: File ->
-            stats++
-            if (!file.exists()) null else ListedSizes.Entry(file.isDirectory, if (file.isDirectory) 100L else file.length() * 10)
+        var lists = 0
+        val stat = { dir: File, names: List<String> ->
+            names.map { name ->
+                stats++
+                val file = File(dir, name)
+                if (!file.exists()) null else ListedSizes.Entry(
+                    file.isDirectory, if (file.isDirectory) 100L else file.length() * 10,
+                    (Files.getAttribute(file.toPath(), "unix:ctime") as FileTime).toInstant().let { it.epochSecond * 1_000_000_000L + it.nano },
+                )
+            }
         }
-        val list = { file: File -> file.list() }
+        val list = { file: File -> lists++; file.list() }
         fun measure(sizes: ListedSizes, stop: () -> Boolean = { false }) = sizes.measure("store", root, stat, list, stop)
     }
 
@@ -34,17 +43,37 @@ class ListedSizesTest {
         assertEquals(100 + 100 + 10 + 20 + 30L, store.measure(sizes))
         assertEquals(5, store.stats)
 
-        // One file added, one removed: the directories and the new file are stat'ed, the rest is read.
+        // One file added, one removed: the two directories' times are checked, then the directories
+        // and the new file are stat'ed, the rest is read.
         File(root, "ab/four").writeText("4444")
         File(root, "three").delete()
         store.stats = 0
         assertEquals(100 + 100 + 10 + 20 + 40L, store.measure(sizes))
-        assertEquals(3, store.stats)
+        assertEquals(2 + 3, store.stats)
 
-        // Nothing new: only the directories.
+        // Nothing new: only the directories are stat'ed, and nothing is listed.
         store.stats = 0
+        store.lists = 0
         assertEquals(100 + 100 + 10 + 20 + 40L, store.measure(sizes))
         assertEquals(2, store.stats)
+        assertEquals(0, store.lists)
+    }
+
+    @Test
+    fun aChangeInAnyFolderListsAgain() {
+        val root = tmp.newFolder("store")
+        File(root, "ab").mkdir()
+        File(root, "ab/one").writeText("1")
+        val store = Store(root)
+        val sizes = ListedSizes(tmp.newFolder("sizes"))
+        assertEquals(100 + 100 + 10L, store.measure(sizes))
+        // A rename deep down changes only its own folder's time: still seen.
+        File(root, "ab/one").renameTo(File(root, "ab/won"))
+        store.lists = 0
+        assertEquals(100 + 100 + 10L, store.measure(sizes))
+        assertEquals(2, store.lists)
+        File(root, "ab/two").writeText("22")
+        assertEquals(100 + 100 + 10 + 20L, store.measure(sizes))
     }
 
     @Test

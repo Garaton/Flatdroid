@@ -4,7 +4,13 @@ import android.system.ErrnoException
 import android.system.Os
 import com.garathon.flatdroid.proot.L2s
 import com.garathon.flatdroid.setup.rootfs.AndroidTarFs
+import com.garathon.flatdroid.util.io.DirReader
+import com.garathon.flatdroid.util.io.NativeFs
 import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 
 /** The file operations [BrokenLinks] needs; never follows links. */
 interface LinkFs {
@@ -20,6 +26,22 @@ interface LinkFs {
     fun replaceLink(link: File, target: String)
     /** Whether [file] is there (a content file in the store: a plain file). */
     fun exists(file: File): Boolean = file.exists()
+
+    /** [dir]'s entries with their types (a link to a folder is a link); null if it can't be listed. */
+    fun listTyped(dir: File): DirReader.Listing? = list(dir)?.let { names ->
+        DirReader.Listing(names.toList(), ByteArray(names.size) { i ->
+            val file = File(dir, names[i])
+            when {
+                isSymlink(file) -> DirReader.LINK
+                isDirectory(file) -> DirReader.DIRECTORY
+                else -> DirReader.FILE
+            }
+        })
+    }
+
+    /** [readlink] of each of [listing]'s entries at [indices] ([listing] is [dir]'s, from [listTyped]). */
+    fun readlinks(dir: File, listing: DirReader.Listing, indices: IntArray): Array<String?> =
+        Array(indices.size) { readlink(File(dir, listing.names[indices[it]])) }
 }
 
 /**
@@ -49,21 +71,29 @@ class BrokenLinks(private val l2sDir: File, private val fs: LinkFs) {
      * the names of the intermediates repaired.
      */
     fun relinkStranded(): List<String> {
-        val names = fs.list(l2sDir).orEmpty()
+        val listing = fs.listTyped(l2sDir) ?: return emptyList()
+        val names = listing.names
         val nameSet = names.toHashSet()
-        val contents = names.filter { COUNT.containsMatchIn(it) }.groupBy { it.dropLast(COUNT_LENGTH) }
+        // Each intermediate's content file when it has exactly one (null when it has several).
+        val contents = HashMap<String, String?>()
+        for (name in names) if (hasCount(name)) {
+            val intermediate = name.dropLast(COUNT_LENGTH)
+            contents[intermediate] = if (intermediate in contents) null else name
+        }
+        val candidates = listing.indicesWhere { !hasCount(names[it]) && contents[names[it]] != null }
         val relinked = mutableListOf<String>()
-        for (name in names) {
+        for (from in candidates.indices step BATCH) {
             if (Thread.interrupted()) throw InterruptedException()
-            if (COUNT.containsMatchIn(name)) continue
-            val own = contents[name]?.singleOrNull() ?: continue
-            val intermediate = File(l2sDir, name)
-            val target = fs.readlink(intermediate) ?: continue
-            val targetName = File(target).name
-            if (targetName in nameSet) continue
-            // Same directory form as link2symlink wrote it (its path for the store, not ours).
-            fs.replaceLink(intermediate, File(File(target).parentFile ?: l2sDir, own).path)
-            relinked += name
+            val batch = candidates.copyOfRange(from, minOf(candidates.size, from + BATCH))
+            val targets = fs.readlinks(l2sDir, listing, batch)
+            for (i in batch.indices) {
+                val target = targets[i] ?: continue
+                if (target.substring(target.lastIndexOf('/') + 1) in nameSet) continue
+                val name = names[batch[i]]
+                // Same directory form as link2symlink wrote it (its path for the store, not ours).
+                fs.replaceLink(File(l2sDir, name), File(File(target).parentFile ?: l2sDir, contents.getValue(name)!!).path)
+                relinked += name
+            }
         }
         return relinked
     }
@@ -84,30 +114,53 @@ class BrokenLinks(private val l2sDir: File, private val fs: LinkFs) {
         stored
     }
 
-    /** Removes the broken links under [dir] (and their dangling intermediates); returns how many. */
-    fun removeUnder(dir: File): Int {
+    /**
+     * Removes the broken links under [dir] (and their dangling intermediates); returns how many.
+     * Folders are read on [threads] threads: the walk waits on storage, which answers several
+     * reads at once.
+     */
+    fun removeUnder(dir: File, threads: Int = WALK_THREADS): Int {
         val names = fs.list(l2sDir).orEmpty().toHashSet()
-        val withContent = names.mapNotNullTo(HashSet()) { name -> if (COUNT.containsMatchIn(name)) name.dropLast(COUNT_LENGTH) else null }
-        var removed = 0
-        val pending = ArrayDeque(listOf(dir))
-        while (pending.isNotEmpty()) {
-            if (Thread.interrupted()) throw InterruptedException()
-            val current = pending.removeFirst()
-            for (name in fs.list(current) ?: continue) {
-                val entry = File(current, name)
-                val target = fs.readlink(entry)
-                if (target == null) {
-                    if (fs.isDirectory(entry)) pending.addLast(entry)
-                    continue
-                }
-                val intermediate = L2s.storedName(target, l2sDir) ?: continue
+        val withContent = names.mapNotNullTo(HashSet()) { name -> if (hasCount(name)) name.dropLast(COUNT_LENGTH) else null }
+        val store = L2s.Store(l2sDir)
+        val removed = AtomicInteger()
+        val pool = Executors.newFixedThreadPool(threads)
+        val pending = AtomicInteger()
+        val finished = CountDownLatch(1)
+        val failure = AtomicReference<Throwable?>()
+        fun visit(folder: File, submit: (File) -> Unit) {
+            val listing = fs.listTyped(folder) ?: return
+            for (i in 0 until listing.size) if (listing.isDirectory(i)) submit(File(folder, listing.names[i]))
+            val links = listing.indicesWhere { listing.isLink(it) }
+            val targets = fs.readlinks(folder, listing, links)
+            for (i in links.indices) {
+                val intermediate = targets[i]?.let(store::storedName) ?: continue
                 if (intermediate in names && intermediate in withContent) continue
-                fs.delete(entry)
+                fs.delete(File(folder, listing.names[links[i]]))
                 if (intermediate in names) fs.delete(File(l2sDir, intermediate))
-                removed++
+                removed.incrementAndGet()
             }
         }
-        return removed
+        fun submit(folder: File) {
+            pending.incrementAndGet()
+            pool.execute {
+                try {
+                    if (failure.get() == null) visit(folder, ::submit)
+                } catch (t: Throwable) {
+                    failure.compareAndSet(null, t)
+                } finally {
+                    if (pending.decrementAndGet() == 0) finished.countDown()
+                }
+            }
+        }
+        try {
+            submit(dir)
+            finished.await()
+        } finally {
+            pool.shutdownNow()
+        }
+        failure.get()?.let { throw it }
+        return removed.get()
     }
 
     companion object {
@@ -122,18 +175,33 @@ class BrokenLinks(private val l2sDir: File, private val fs: LinkFs) {
         fun namedObjects(error: String?): List<String> =
             error?.let { OBJECT.findAll(it).map { m -> m.value }.distinct().toList() }.orEmpty()
 
+        /** Store entries read per call: an interrupt is noticed between them. */
+        private const val BATCH = 4096
+        /** Threads for [removeUnder]'s walk: on a Cortex-A53's storage 4 gained as much as 8. */
+        const val WALK_THREADS = 4
+
         private val OBJECT = Regex("""\b[0-9a-f]{2}/[0-9a-f]{62}\.(file|dirtree|dirmeta|commit)\b""")
         private const val MAX_COUNT = 9999
 
         private val STRANDED_ERROR = Regex("""\b(rename|renameat|unlink|unlinkat|link|linkat)\b[^\n]*Operation not permitted""")
 
-        /** A content file's ending: its link count. */
-        private val COUNT = Regex("""\.\d{4}$""")
+        /** Whether [name] ends as a content file does: a dot and its four-digit link count (checked by hand: a regex per name cost 20 µs on ART). */
+        fun hasCount(name: String): Boolean {
+            val n = name.length
+            if (n < COUNT_LENGTH || name[n - COUNT_LENGTH] != '.') return false
+            for (i in n - 4 until n) if (name[i] !in '0'..'9') return false
+            return true
+        }
+
         private const val COUNT_LENGTH = 5
     }
 }
 
 object AndroidLinkFs : LinkFs {
+    override fun listTyped(dir: File): DirReader.Listing? = NativeFs.list(dir)
+
+    override fun readlinks(dir: File, listing: DirReader.Listing, indices: IntArray): Array<String?> = NativeFs.readlinks(dir, listing, indices)
+
     override fun isSymlink(file: File) = AndroidTarFs.isSymlink(file)
 
     override fun readlink(file: File): String? = try {

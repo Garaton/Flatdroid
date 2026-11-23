@@ -45,6 +45,8 @@ object FileIntegrity {
         val sha256: (File) -> String?,
         /** Whether a link's target is a file in link2symlink's store ([L2s.storedName]). */
         val isStoreLink: (String) -> Boolean = { File(it).name.startsWith(L2s.PREFIX) },
+        /** A folder's entries, each with whether it is a real directory (not a link to one); null when it can't be listed. */
+        val list: (File) -> List<Pair<String, Boolean>>? = { dir -> dir.listFiles()?.map { it.name to (!isSymlink(it) && it.isDirectory) } },
     )
 
     /**
@@ -57,12 +59,12 @@ object FileIntegrity {
         val out = mutableListOf<String>()
         fun recurse(dir: File, prefix: String) {
             if (cancelled()) return
-            val children = dir.listFiles()?.sortedBy { it.name } ?: return
-            for (child in children) {
+            val children = fs.list(dir)?.sortedBy { it.first } ?: return
+            for ((name, isDirectory) in children) {
                 if (cancelled()) return // the walk (sequential, before hashing) must also stop on a skip
-                val rel = if (prefix.isEmpty()) child.name else "$prefix/${child.name}"
+                val rel = if (prefix.isEmpty()) name else "$prefix/$name"
                 // A real directory (not a symlink to one) is recursed; everything else is a leaf.
-                if (!fs.isSymlink(child) && child.isDirectory) recurse(child, rel) else out += rel
+                if (isDirectory) recurse(File(dir, name), rel) else out += rel
             }
         }
         recurse(root, "")
@@ -72,14 +74,18 @@ object FileIntegrity {
     /** The [Entry] for one leaf: its link target, stat and (unless a directory) content hash. */
     fun entry(file: File, fs: Fs): Entry {
         val link = fs.readlink(file)
-        // A symlink of the Flatpak's own tree names a guest path: followed from the host it would
-        // read the host's file (or nothing), so only its target is recorded. link2symlink's links
-        // lead to the file's content in its store and are followed.
-        if (link != null && !fs.isStoreLink(link)) return Entry(link, 0, 0, 0, null)
+        if (isGuestLink(link, fs.isStoreLink)) return Entry(link, 0, 0, 0, null)
         val stat = fs.stat(file) ?: Triple(0L, 0L, 0L)
         val sha = fs.sha256(file)
         return Entry(link, stat.first, stat.second, stat.third, sha)
     }
+
+    /**
+     * A symlink of the Flatpak's own tree, which names a guest path: followed from the host it
+     * would read the host's file (or nothing), so only its target is recorded. link2symlink's
+     * links lead to the file's content in its store and are followed.
+     */
+    private fun isGuestLink(link: String?, isStoreLink: (String) -> Boolean): Boolean = link != null && !isStoreLink(link)
 
     /** What a check turns up, by relative path. [tampered] covers changed and added files. */
     data class Diff(
@@ -119,7 +125,7 @@ object FileIntegrity {
     }
 
     // ---- manifest serialization: one tab-separated line per entry, "-" for an absent field. Paths
-    // and link targets are [escape]d, so a tab, newline or backslash in a name can't break a line.
+    // and link targets are [escape]d, so a tab, line break or backslash in a name can't break a line.
 
     fun write(manifest: Map<String, Entry>): String = buildString {
         for ((path, e) in manifest.toSortedMap()) {
@@ -128,10 +134,10 @@ object FileIntegrity {
         }
     }
 
-    /** [text] with backslash, tab and newline written as `\\`, `\t` and `\n`; also how such paths are logged. */
+    /** [text] with backslash, tab, newline and carriage return written as `\\`, `\t`, `\n` and `\r`; also how such paths are logged. */
     fun escape(text: String): String =
-        if (text.none { it == '\\' || it == '\t' || it == '\n' }) text
-        else text.replace("\\", "\\\\").replace("\t", "\\t").replace("\n", "\\n")
+        if (text.none { it == '\\' || it == '\t' || it == '\n' || it == '\r' }) text
+        else text.replace("\\", "\\\\").replace("\t", "\\t").replace("\n", "\\n").replace("\r", "\\r")
 
     /** The reverse of [escape]; any other backslash pair is kept as it is. */
     fun unescape(text: String): String {
@@ -145,6 +151,7 @@ object FileIntegrity {
                     '\\' -> { out.append('\\'); i += 2; continue }
                     't' -> { out.append('\t'); i += 2; continue }
                     'n' -> { out.append('\n'); i += 2; continue }
+                    'r' -> { out.append('\r'); i += 2; continue }
                 }
             }
             out.append(c)

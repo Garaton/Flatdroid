@@ -17,16 +17,30 @@ object L2s {
      * links made at different times may use either for the same store. Those two are compared as
      * text; any other folder only once resolved, which is rare and costs a lookup.
      */
-    fun inStore(target: String, store: File): Boolean {
-        val parent = File(target).parentFile ?: return false
-        if (parent.path in paths(store)) return true
-        return runCatching { parent.canonicalPath == store.canonicalPath }.getOrDefault(false)
-    }
+    fun inStore(target: String, store: File): Boolean = Store(store).inStore(target)
 
     /** The intermediate in [store] that a link's [target] names, or null for any other link. */
-    fun storedName(target: String, store: File): String? {
-        val file = File(target)
-        return file.name.takeIf { it.startsWith(PREFIX) && inStore(target, store) }
+    fun storedName(target: String, store: File): String? = Store(store).storedName(target)
+
+    /** [storedName] and [inStore] for one store, its two paths worked out once: for walks that ask per link. */
+    class Store(private val dir: File) {
+        /** The paths that name the store as text: its own, and the other one Android reaches app data by. */
+        val paths: Set<String> = paths(dir)
+        /** Its canonical path, for a folder that names it another way; null when it can't be resolved. */
+        val canonical: String? by lazy { runCatching { dir.canonicalPath }.getOrNull() }
+
+        fun inStore(target: String): Boolean {
+            val slash = target.lastIndexOf('/')
+            if (slash <= 0) return false
+            val parent = target.substring(0, slash)
+            if (parent in paths) return true
+            return runCatching { File(parent).canonicalPath == canonical }.getOrDefault(false)
+        }
+
+        fun storedName(target: String): String? {
+            val name = target.substring(target.lastIndexOf('/') + 1)
+            return name.takeIf { it.startsWith(PREFIX) && inStore(target) }
+        }
     }
 
     private fun paths(store: File): Set<String> {

@@ -49,9 +49,8 @@ class ScreenStreamer(
     private var projection: MediaProjection? = null
     private var display: VirtualDisplay? = null
     private var reader: ImageReader? = null
-    /** NV12 for an app that takes raw frames, and the two rows [Nv21.fromRgba] reads at a time. */
+    /** The frame [NativeFrames.fromRgba] writes (NV21, or NV12 for an app that takes raw frames). */
     private var raw: ByteArray? = null
-    private var rows: IntArray? = null
     private var pullPending = false
     private val pullLater = Runnable {
         pullPending = false
@@ -218,8 +217,7 @@ class ScreenStreamer(
             // The camera's path: NV21 (NV12 for an app that takes it), then Android's JPEG encoder
             // for NV21, faster than its bitmap encoder from RGBA.
             val frame = raw?.takeIf { it.size == Nv21.bytes(width, height) } ?: ByteArray(Nv21.bytes(width, height)).also { raw = it }
-            val scratch = rows?.takeIf { it.size >= 2 * width } ?: IntArray(2 * width).also { rows = it }
-            Nv21.fromRgba(plane.buffer, plane.rowStride, width, height, frame, scratch, if (format == Fdv4l2.Format.NV12) Nv21.Order.UV else Nv21.Order.VU)
+            NativeFrames.fromRgba(plane.buffer, plane.rowStride, width, height, frame, if (format == Fdv4l2.Format.NV12) Nv21.Order.UV else Nv21.Order.VU)
             meter.step(0)
             meter.step(1)
             writeFrame(frame)

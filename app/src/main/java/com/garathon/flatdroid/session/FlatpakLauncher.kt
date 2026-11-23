@@ -577,7 +577,7 @@ class FlatpakLauncher(private val context: Context) {
             // Once nothing of the program's runs any more: what it changed in Alpine.
             if (alpineBefore != null && checkAlpine && runningSince != null) step {
                 val started = SystemClock.elapsedRealtime()
-                val after = AlpineChanges.snapshot(rootfs, File(env.paths().l2sDir), settle = false).stamps
+                val after = AlpineChanges.snapshot(rootfs, File(env.paths().l2sDir)).stamps
                 val suspects = AlpineChanges.changes(alpineBefore.stamps, after)
                 // Content checked only for suspects, against apk's own record (read now: a change to it is reported too).
                 val installed by lazy { alpinePrograms.installedChecksums() }
