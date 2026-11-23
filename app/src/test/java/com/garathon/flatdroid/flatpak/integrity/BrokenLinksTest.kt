@@ -60,6 +60,37 @@ class BrokenLinksTest {
     }
 
     @Test
+    fun countsOneMoreLinkOnlyWhenTheStoreEntryIsAsExpected() {
+        val l2s = tmp.newFolder("rootfs", ".l2s")
+        val content = File(l2s, ".l2s.ab.file0001.0002").apply { writeText("x") }
+        val intermediate = File(l2s, ".l2s.ab.file0001").also { link(it, content) }
+        val links = BrokenLinks(l2s, fs)
+
+        assertTrue(links.countOneMore(".l2s.ab.file0001"))
+        assertEquals(File(l2s, ".l2s.ab.file0001.0003").path, fs.readlink(intermediate))
+        assertEquals("x", intermediate.readText())
+        assertFalse(content.exists())
+
+        // Its content gone, a content file already on the next count, no intermediate: unchanged.
+        val gone = File(l2s, ".l2s.gone.file0001").also { link(it, File(l2s, ".l2s.gone.file0001.0002")) }
+        assertFalse(links.countOneMore(".l2s.gone.file0001"))
+        File(l2s, ".l2s.two.file0001.0002").writeText("y")
+        File(l2s, ".l2s.two.file0001.0003").writeText("z")
+        val two = File(l2s, ".l2s.two.file0001").also { link(it, File(l2s, ".l2s.two.file0001.0002")) }
+        assertFalse(links.countOneMore(".l2s.two.file0001"))
+        assertEquals("y", two.readText())
+        assertFalse(links.countOneMore(".l2s.none.file0001"))
+        // An intermediate pointing outside the store.
+        val outside = tmp.newFolder("elsewhere")
+        File(outside, ".l2s.out.file0001.0002").writeText("o")
+        link(File(l2s, ".l2s.out.file0001"), File(outside, ".l2s.out.file0001.0002"))
+        File(l2s, ".l2s.out.file0001.0002").writeText("o")
+        assertFalse(links.countOneMore(".l2s.out.file0001"))
+        assertTrue(File(l2s, ".l2s.out.file0001.0002").exists())
+        assertEquals(File(l2s, ".l2s.gone.file0001.0002").path, fs.readlink(gone))
+    }
+
+    @Test
     fun relinksAnIntermediateLeftOnAnOldCount() {
         val l2s = tmp.newFolder("rootfs", ".l2s")
         // Renamed to its new count (5), but the intermediate still names the old one (4).

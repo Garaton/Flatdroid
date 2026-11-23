@@ -109,6 +109,24 @@ class FileIntegrityTest {
     }
 
     @Test
+    fun anEntryRecordedThroughABrokenLinkTakesOnlyAHashRecordedForItsContent() {
+        val link = "/data/rootfs/.l2s/.l2s.obj0001"
+        // Recorded while the link was broken: no stat, no hash.
+        val base = mapOf("icon" to Entry(link, 0, 0, 0, null), "other" to Entry(link, 0, 0, 0, null), "plain" to Entry(null, 0, 0, 0, null))
+        val current = mapOf("icon" to Entry(link, 7, 100, 501, null), "other" to Entry(link, 7, 100, 501, null), "plain" to Entry(null, 8, 100, 3, null))
+        val rehash = mapOf(
+            "icon" to Entry(link, 7, 100, 501, "sha-icon"),
+            "other" to Entry(link, 7, 100, 501, "sha-else"),
+            "plain" to Entry(null, 8, 100, 3, "sha-icon"),
+        )
+        val diff = FileIntegrity.diff(base, current, { if (it == link) setOf("sha-icon") else emptySet() }) { rehash[it] }
+        assertEquals(listOf("other", "plain"), diff.tampered)
+        assertEquals(mapOf("icon" to rehash.getValue("icon")), diff.refreshed)
+        // Nothing recorded for its content: still reported.
+        assertEquals(listOf("icon", "other", "plain"), FileIntegrity.diff(base, current) { rehash[it] }.tampered)
+    }
+
+    @Test
     fun manifestRoundTrips() {
         val m = mapOf(
             "bin/a file" to Entry(null, 10, 1700000000, 1234, "abcdef"),

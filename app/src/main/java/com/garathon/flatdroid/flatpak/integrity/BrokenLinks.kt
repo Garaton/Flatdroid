@@ -7,6 +7,7 @@ import com.garathon.flatdroid.setup.rootfs.AndroidTarFs
 import com.garathon.flatdroid.util.io.DirReader
 import com.garathon.flatdroid.util.io.NativeFs
 import java.io.File
+import java.io.IOException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
@@ -26,6 +27,10 @@ interface LinkFs {
     fun replaceLink(link: File, target: String)
     /** Whether [file] is there (a content file in the store: a plain file). */
     fun exists(file: File): Boolean = file.exists()
+    /** Renames [from] to [to] in one step. */
+    fun rename(from: File, to: File) {
+        if (!from.renameTo(to)) throw IOException("Couldn't rename $from")
+    }
 
     /** [dir]'s entries with their types (a link to a folder is a link); null if it can't be listed. */
     fun listTyped(dir: File): DirReader.Listing? = list(dir)?.let { names ->
@@ -112,6 +117,38 @@ class BrokenLinks(private val l2sDir: File, private val fs: LinkFs) {
         val own = (1..MAX_COUNT).asSequence().map { "$stored.%04d".format(it) }.firstOrNull { fs.exists(File(l2sDir, it)) } ?: return@mapNotNull null
         fs.replaceLink(intermediate, File(File(target).parentFile ?: l2sDir, own).path)
         stored
+    }
+
+    /**
+     * Counts one more link to the content behind [intermediate] (its name in the store): a link
+     * that points at it although link2symlink never counted it, such as one left on a store entry
+     * that was deleted and later made again under the same name. Too low a count deletes the
+     * content while that link still needs it; one too high only keeps it. The content goes to its
+     * next count first, then the intermediate follows; a stop between the two leaves it stranded,
+     * which [relinkStranded] repairs keeping the new count; a failed rewrite puts the content
+     * back. False when the intermediate, its content or its count isn't as expected (an
+     * intermediate pointing outside the store included): nothing is changed then.
+     */
+    fun countOneMore(intermediate: String): Boolean {
+        val link = File(l2sDir, intermediate)
+        val target = fs.readlink(link) ?: return false
+        val content = File(target).name
+        if (content.length != intermediate.length + COUNT_LENGTH || !content.startsWith(intermediate) || !hasCount(content)) return false
+        if (!L2s.inStore(target, l2sDir)) return false
+        val count = content.takeLast(COUNT_LENGTH - 1).toInt()
+        val next = "$intermediate.%04d".format(count + 1)
+        val from = File(l2sDir, content)
+        val to = File(l2sDir, next)
+        if (count >= MAX_COUNT || !fs.exists(from) || fs.exists(to)) return false
+        fs.rename(from, to)
+        try {
+            // Same directory form as link2symlink wrote it (its path for the store, not ours).
+            fs.replaceLink(link, File(File(target).parentFile ?: l2sDir, next).path)
+        } catch (e: Exception) {
+            runCatching { fs.rename(to, from) }
+            throw e
+        }
+        return true
     }
 
     /**
@@ -217,6 +254,8 @@ object AndroidLinkFs : LinkFs {
     override fun list(dir: File): Array<String>? = dir.list()
 
     override fun isDirectory(file: File) = file.isDirectory
+
+    override fun rename(from: File, to: File) = Os.rename(from.path, to.path)
 
     override fun replaceLink(link: File, target: String) {
         val temporary = File(link.parentFile, link.name + ".relink")

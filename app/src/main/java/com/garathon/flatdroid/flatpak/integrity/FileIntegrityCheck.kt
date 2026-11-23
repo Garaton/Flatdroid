@@ -116,13 +116,36 @@ class FileIntegrityCheck(
         if (BuildConfig.DEBUG) {
             DebugLog.i("File check: ${found.leaves} files in ${(System.nanoTime() - started) / 1_000_000} ms, ${found.current.size} differ, ${toHash.size} hashed, ${found.removed.size} removed")
         }
-        val diff = FileIntegrity.diff(found.baseline, found.current) { hashed[it] }
+        // Entries recorded without a hash (a link broken then) that read now: looked up in the
+        // manifests only when there are any.
+        val unhashed = toHash.mapNotNullTo(HashSet()) { rel -> found.baseline[rel]?.takeIf { it.sha256 == null }?.link?.let(store::storedName) }
+        val recorded by lazy { recordedHashes(unhashed) }
+        val diff = FileIntegrity.diff(found.baseline, found.current, { link -> store.storedName(link)?.let { recorded[it] }.orEmpty() }) { hashed[it] }
         val checked = FileIntegrity.Diff(diff.tampered, found.removed.sorted(), diff.refreshed)
         if (checked.clean && checked.refreshed.isNotEmpty()) {
             val baseline = runCatching { FileIntegrity.read(manifest.readText()) }.getOrNull()?.filterKeys { it !in ignore }
-            if (baseline != null) write(commit, baseline + checked.refreshed)
+            if (baseline != null) {
+                write(commit, baseline + checked.refreshed)
+                countAdopted(checked.refreshed.filter { (rel, entry) -> entry.sha256 != null && found.baseline[rel]?.sha256 == null })
+            }
         }
         return checked
+    }
+
+    /**
+     * Entries that took a hash recorded elsewhere ([recordedHashes]): their link reads through a
+     * store entry made again after it was deleted, which link2symlink never counted it in, so it
+     * is counted now ([BrokenLinks.countOneMore]). After the manifest is written: a stop in
+     * between leaves the count as it was, never counted twice.
+     */
+    private fun countAdopted(adopted: Map<String, FileIntegrity.Entry>) {
+        if (adopted.isEmpty()) return
+        val links = BrokenLinks(l2sDir, AndroidLinkFs)
+        for ((rel, entry) in adopted) {
+            val name = entry.link?.let(store::storedName) ?: continue
+            val counted = runCatching { links.countOneMore(name) }.getOrDefault(false)
+            if (BuildConfig.DEBUG) DebugLog.i("File check: $rel took a recorded hash; its link ${if (counted) "is counted now" else "couldn't be counted"}")
+        }
     }
 
     /**
@@ -141,11 +164,14 @@ class FileIntegrityCheck(
      * baseline recorded as unreadable (no hash: the link was broken then) whose link goes through
      * one of [intermediates] (their names) are recorded again from the file as it reads now. A
      * baseline taken while a link was broken would otherwise report its file changed once it reads
-     * again. Returns how many entries were recorded again.
+     * again. When another entry recorded a hash for the same content file, the file must still
+     * hold it, or the entry stays as it was (and the check reports the file). Returns how many
+     * entries were recorded again.
      */
     fun rereadRepaired(intermediates: Collection<String>): Int {
         if (intermediates.isEmpty()) return 0
         val names = intermediates.toHashSet()
+        val recorded = recordedHashes(names)
         var reread = 0
         for (file in integrityDir.listFiles().orEmpty()) {
             if (!file.name.endsWith(SUFFIX)) continue
@@ -155,12 +181,44 @@ class FileIntegrityCheck(
                 if (entry.sha256 != null || link == null || File(link).name !in names) return@mapValues entry
                 val target = File(link)
                 val stat = withHash.stat(target) ?: return@mapValues entry
+                val hash = withHash.sha256(target)
+                if (recorded[File(link).name]?.let { hash !in it } == true) return@mapValues entry
                 reread++
-                FileIntegrity.Entry(link, stat.first, stat.second, stat.third, withHash.sha256(target))
+                FileIntegrity.Entry(link, stat.first, stat.second, stat.third, hash)
             }
             if (fixed != baseline) write(file.name.removeSuffix(SUFFIX), fixed)
         }
         return reread
+    }
+
+    /**
+     * The hashes the manifests recorded for the content files behind the intermediates [names]
+     * (link2symlink's store: every hard link to one content file goes through one intermediate),
+     * by intermediate. One read of each manifest, and only the lines that name one are parsed;
+     * nothing is read when [names] is empty.
+     */
+    private fun recordedHashes(names: Set<String>): Map<String, Set<String>> {
+        if (names.isEmpty()) return emptyMap()
+        val recorded = HashMap<String, MutableSet<String>>()
+        for (file in integrityDir.listFiles().orEmpty()) {
+            if (!file.name.endsWith(SUFFIX)) continue
+            val text = runCatching { file.readText() }.getOrNull() ?: continue
+            for (name in names) {
+                var at = text.indexOf(name)
+                while (at >= 0) {
+                    val end = text.indexOf('\n', at).let { if (it < 0) text.length else it }
+                    for (entry in FileIntegrity.read(text.substring(text.lastIndexOf('\n', at) + 1, end)).values) {
+                        val hash = entry.sha256 ?: continue
+                        val link = entry.link ?: continue
+                        if (link.substring(link.lastIndexOf('/') + 1) == name && store.storedName(link) != null) {
+                            recorded.getOrPut(name, ::HashSet) += hash
+                        }
+                    }
+                    at = text.indexOf(name, end)
+                }
+            }
+        }
+        return recorded
     }
 
     /** Records [metadata]'s hash for [commit]; nothing when it can't be read. */

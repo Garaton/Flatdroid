@@ -104,8 +104,16 @@ object FileIntegrity {
      * (a bare ctime touch, such as link2symlink renaming its file when another hard link is made)
      * and goes into [Diff.refreshed]; anything else is tampering. A new path is tampering without
      * a hash, and a link-only entry ([Entry.linkOnly]) is compared by its target alone.
+     * A baseline entry recorded without a hash (its link was broken then) whose file reads again
+     * is benign only when it holds a hash [recordedHashes] gives for its link: one another entry
+     * recorded for the same content file.
      */
-    fun diff(baseline: Map<String, Entry>, current: Map<String, Entry>, needsHash: (String) -> Entry?): Diff {
+    fun diff(
+        baseline: Map<String, Entry>,
+        current: Map<String, Entry>,
+        recordedHashes: (link: String) -> Set<String> = { emptySet() },
+        needsHash: (String) -> Entry?,
+    ): Diff {
         val tampered = mutableListOf<String>()
         val refreshed = LinkedHashMap<String, Entry>()
         for ((path, shape) in current) {
@@ -117,8 +125,10 @@ object FileIntegrity {
                 continue
             }
             val hashed = needsHash(path)                        // shape changed: re-hash
-            if (hashed == null || hashed.link != base.link || hashed.sha256 == null || hashed.sha256 != base.sha256) tampered += path
-            else refreshed[path] = hashed
+            if (hashed != null && hashed.link == base.link && hashed.sha256 != null &&
+                (hashed.sha256 == base.sha256 || base.sha256 == null && base.link != null && hashed.sha256 in recordedHashes(base.link))
+            ) refreshed[path] = hashed
+            else tampered += path
         }
         val removed = baseline.keys.filter { it !in current }
         return Diff(tampered.sorted(), removed.sorted(), refreshed)
