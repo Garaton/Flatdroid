@@ -35,7 +35,7 @@ object StorageTaskCodec {
                 appId != null -> StorageTask.ImportFiles(ImportTarget.Private(appId))
                 else -> null
             }
-            "saveToDownload" -> StorageTask.SaveToDownload
+            "exportFiles" -> StorageTask.ExportFiles
             "exportTemp" -> appId?.let { StorageTask.ExportTempHome(it) }
             "exportHome" -> appId?.let { StorageTask.ExportHome(it) }
             "exportSettings" -> appId?.let { StorageTask.ExportAppFiles(it) }
@@ -55,7 +55,7 @@ object StorageTaskCodec {
 
     private fun nameOf(task: StorageTask): String = when (task) {
         is StorageTask.ImportFiles -> "import"
-        StorageTask.SaveToDownload -> "saveToDownload"
+        StorageTask.ExportFiles -> "exportFiles"
         is StorageTask.ExportTempHome -> "exportTemp"
         is StorageTask.ExportHome -> "exportHome"
         is StorageTask.ExportAppFiles -> "exportSettings"

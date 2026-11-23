@@ -7,6 +7,7 @@ import com.garathon.flatdroid.settings.AppSettings
 import com.garathon.flatdroid.session.helpers.SessionBus
 import com.garathon.flatdroid.setup.AlpineSetup
 import com.garathon.flatdroid.setup.PackageGroup
+import com.garathon.flatdroid.setup.rootfs.AndroidTarFs
 import com.garathon.flatdroid.util.io.readTextUpTo
 import java.io.File
 import java.util.Locale
@@ -28,6 +29,11 @@ data class AlpineProgram(
     val display: AlpinePackages.Display,
     /** When its desktop file was written (apk keeps a package's own times, so its change time); null if unknown. */
     val installed: Long? = null,
+    /**
+     * What Uninstall frees, in bytes as apk records them: its package and the packages nothing else
+     * in apk's world needs ([AlpinePackages.freedBy]). Programs of one package each have it.
+     */
+    val freedBytes: Long = 0,
 ) {
     /**
      * What a Flatpak's metadata would say, as a typical app asks: the network, sound, Wayland or X11
@@ -98,16 +104,26 @@ class AlpinePrograms(
 
     private fun scan(db: File, world: File, apps: File): List<AlpineProgram> {
         val packages = runCatching { db.readTextUpTo(MAX_DB_BYTES)?.let(AlpinePackages::parseInstalled) }.getOrNull() ?: return emptyList()
-        val wanted = runCatching { world.readTextUpTo()?.let(AlpinePackages::parseWorld) }.getOrNull().orEmpty() - FLATDROID_PACKAGES
+        val allWorld = runCatching { world.readTextUpTo()?.let(AlpinePackages::parseWorld) }.getOrNull().orEmpty()
+        val wanted = allWorld - FLATDROID_PACKAGES
         if (wanted.isEmpty()) return emptyList()
         val owners = AlpinePackages.owners(packages)
         val files = apps.listFiles { f -> f.name.endsWith(DESKTOP) && f.isFile }.orEmpty().sortedBy { it.name }
-        return files.mapNotNull { file ->
+        val programs = files.mapNotNull { file ->
             val owner = owners["$APPLICATIONS/${file.name}"]?.takeIf { it in wanted } ?: return@mapNotNull null
             val id = AlpineProgramIds.of(file.name.removeSuffix(DESKTOP)) ?: return@mapNotNull null
             val desktop = runCatching { file.readTextUpTo()?.let(Keyfile::parse) }.getOrNull() ?: return@mapNotNull null
             program(id, owner, desktop, packages)
         }
+        return withFreedBytes(programs, packages, allWorld)
+    }
+
+    /** [programs] with [AlpineProgram.freedBytes], worked out once per package. */
+    internal fun withFreedBytes(programs: List<AlpineProgram>, packages: List<ApkPackage>, world: Set<String>): List<AlpineProgram> {
+        val sizes = packages.associate { it.name to it.installedSize }
+        val freed = programs.map { it.packageName }.distinct()
+            .associateWith { name -> AlpinePackages.freedBy(name, packages, world).sumOf { sizes.getValue(it) } }
+        return programs.map { it.copy(freedBytes = freed.getValue(it.packageName)) }
     }
 
     /** [desktop]'s program, or null when it isn't one to show or its command isn't installed. */
@@ -165,6 +181,9 @@ class AlpinePrograms(
         /** Flatdroid's own packages, never listed (their desktop files are the helpers'). */
         val FLATDROID_PACKAGES: Set<String> =
             (AlpineSetup.PACKAGES + PackageGroup.entries.flatMap { it.packages(true) + it.packages(false) }).toSet()
+
+        /** The programs in [rootfs] as the app reads it: Alpine's links are guest paths, so a link counts as there. */
+        fun of(rootfs: File) = AlpinePrograms(rootfs, exists = { it.exists() || AndroidTarFs.isSymlink(it) })
 
         /** The last list per rootfs, kept while apk's records and the desktop files are unchanged. */
         private val cache = HashMap<String, Pair<String, List<AlpineProgram>>>()

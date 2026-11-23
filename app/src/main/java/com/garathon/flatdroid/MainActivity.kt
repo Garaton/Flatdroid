@@ -23,6 +23,7 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
@@ -581,10 +582,14 @@ class MainActivity : ComponentActivity() {
         val savedSizes by SavedSizes.updates.collectAsState()
         // Read again after storage tasks and once sizes measured in the background are saved.
         if (screen is Screen.Settings) LaunchedEffect(storageTasks.generation, savedSizes) { home.measureFlatdroid() }
+        // The bottom bar is on every screen, below them and outside their transitions: it stays still
+        // while a screen slides, and a screen ends above it, so nothing scrolls under it.
+        Column(modifier) {
         // Between levels (home, settings, the browser) the screen slides sideways; pages of one
         // level change inside their own screen.
         AnimatedContent(
             targetState = screen,
+            modifier = Modifier.weight(1f),
             contentKey = { it.level },
             transitionSpec = {
                 val forward = targetState.level > initialState.level
@@ -666,7 +671,6 @@ class MainActivity : ComponentActivity() {
                     onSaveAndReinstallAll = { new -> viewModel.applySettings(withSavedHome(new), MainViewModel.AfterApply.REINSTALL_ALL) },
                     onSaveAndBaselineAll = { new -> viewModel.applySettings(withSavedHome(new), MainViewModel.AfterApply.BASELINE_ALL) },
                     onDiscard = { go(Screen.Home); viewModel.clearSettingsError() },
-                    modifier = modifier,
                 )
             }
             is Screen.AppSettings -> {
@@ -755,7 +759,6 @@ class MainActivity : ComponentActivity() {
                         }
                     },
                     onDiscard = { go(target.parent ?: Screen.Home) },
-                    modifier = modifier,
                 )
             }
             Screen.Browse -> {
@@ -775,8 +778,6 @@ class MainActivity : ComponentActivity() {
                     onInstallById = { installDialog = true },
                     onAlpineInstall = { alpineInstallDialog = true },
                     onRetry = { Catalog.open(this@MainActivity) },
-                    bottomBar = bottomBar,
-                    modifier = modifier,
                 )
             }
             is Screen.BrowseApp -> {
@@ -790,8 +791,6 @@ class MainActivity : ComponentActivity() {
                         go(Screen.BrowseApp(id))
                     },
                     onBack = { go(Screen.Browse) },
-                    bottomBar = bottomBar,
-                    modifier = modifier,
                 ) { id, onTitle ->
                     val entry = catalogIndex?.app(id)
                     BrowseAppScreen(
@@ -866,11 +865,11 @@ class MainActivity : ComponentActivity() {
                     onStopApp = { SessionService.stop(this@MainActivity) },
                     onSessionLog = { log = LogKind.SESSION },
                     onSkipCheck = { SessionController.skipFileCheck() },
-                    bottomBar = bottomBar,
-                    modifier = modifier,
                 )
             }
         }
+        }
+        bottomBar()
         }
     }
 

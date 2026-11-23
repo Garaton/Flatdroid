@@ -136,7 +136,7 @@ class FlatpakLauncher(private val context: Context) {
     /** Bound over the helpers' /proc entries in the app's root, when they are hidden. */
     private val emptyDir = File(sessionDir, "empty")
     private val rootfs = File(env.paths().rootfs)
-    private val alpinePrograms = AlpinePrograms(rootfs, exists = { it.exists() || AndroidTarFs.isSymlink(it) })
+    private val alpinePrograms = AlpinePrograms.of(rootfs)
     /** An Alpine program's root ([AlpineRoot]) while [run] launches one; null for a Flatpak. */
     private var alpineRoot: AlpineRoot? = null
     /** An Alpine program's empty /app, emptied for each of its launches. */

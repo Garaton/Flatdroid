@@ -148,7 +148,6 @@ fun HomeScreen(
     onSessionLog: () -> Unit,
     onSkipCheck: () -> Unit,
     /** The task and session bar ([StatusBar]), shared with the browser. */
-    bottomBar: @Composable () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
@@ -280,7 +279,6 @@ fun HomeScreen(
                 }
             }
         }
-        bottomBar()
     }
 }
 
@@ -399,7 +397,7 @@ private fun HomeScreenPreview() {
             listState = rememberHomeListState(),
             developerOptions = true, showTimeUsed = true, canLaunch = true, canInstall = true, canUpdate = false,
             onLaunch = {}, onAppSettings = {}, onInstall = {}, onUpdateAll = {}, onSettings = {}, onImportFiles = {}, onImportZip = {},
-            onOpenApp = {}, onStopApp = {}, onSessionLog = {}, onSkipCheck = {}, bottomBar = {},
+            onOpenApp = {}, onStopApp = {}, onSessionLog = {}, onSkipCheck = {},
         )
     }
 }

@@ -13,6 +13,10 @@ data class ApkPackage(
     val provides: List<String>,
     /** Each file's content checksum as apk records it (`Z:`, e.g. `Q1` and a base64 SHA-1), by path relative to the rootfs. */
     val checksums: Map<String, String> = emptyMap(),
+    /** Its installed size in bytes as apk records it (`I:`). */
+    val installedSize: Long = 0,
+    /** The packages that, all installed, make apk install this one too (`i:`), versions dropped. */
+    val installIf: List<String> = emptyList(),
 )
 
 /**
@@ -44,9 +48,12 @@ object AlpinePackages {
         val checksums = HashMap<String, String>()
         var depends = emptyList<String>()
         var provides = emptyList<String>()
+        var size = 0L
+        var installIf = emptyList<String>()
         fun flush() {
-            name?.let { packages += ApkPackage(it, origin ?: it, files.toList(), depends, provides, HashMap(checksums)) }
+            name?.let { packages += ApkPackage(it, origin ?: it, files.toList(), depends, provides, HashMap(checksums), size, installIf) }
             name = null; origin = null; dir = ""; files.clear(); checksums.clear(); depends = emptyList(); provides = emptyList()
+            size = 0L; installIf = emptyList()
         }
         for (line in text.lineSequence()) {
             if (line.isEmpty()) { flush(); continue }
@@ -61,6 +68,8 @@ object AlpinePackages {
                 'Z' -> files.lastOrNull()?.let { checksums[it] = value }
                 'D' -> depends = value.split(' ').filter { it.isNotEmpty() && !it.startsWith('!') }.map(::withoutVersion)
                 'p' -> provides = value.split(' ').filter { it.isNotEmpty() }.map(::withoutVersion)
+                'I' -> size = value.toLongOrNull()?.coerceAtLeast(0) ?: 0L
+                'i' -> installIf = value.split(' ').filter { it.isNotEmpty() && !it.startsWith('!') }.map(::withoutVersion)
             }
         }
         flush()
@@ -113,6 +122,42 @@ object AlpinePackages {
         val owners = HashMap<String, String>()
         for (p in packages) for (file in p.files) owners[file] = p.name
         return owners
+    }
+
+    /**
+     * The installed packages that removing [packageName] from [world] frees, itself included, as
+     * `apk del` works it out: everything no longer needed by the rest of [world], through
+     * dependencies and `install_if` (a package installed because others are). Empty when the rest
+     * still needs it, or [packageName] isn't in [world] (`apk del` removes only what world names).
+     */
+    fun freedBy(packageName: String, packages: List<ApkPackage>, world: Set<String>): Set<String> {
+        if (packageName !in world || packages.none { it.name == packageName }) return emptySet()
+        // Not installed - needed: anything world doesn't need (none, after any apk run) isn't the program's.
+        return needed(world, packages) - needed(world - packageName, packages)
+    }
+
+    /** The installed packages [world] needs: its packages, their dependencies, and what `install_if` adds, to a fixed point. */
+    internal fun needed(world: Set<String>, packages: List<ApkPackage>): Set<String> {
+        val byName = packages.associateBy { it.name }
+        // A name (package, `so:`, `cmd:`, `pc:` and so on) to the installed packages providing it.
+        val providers = HashMap<String, MutableList<String>>()
+        for (p in packages) for (name in listOf(p.name) + p.provides) providers.getOrPut(name) { mutableListOf() } += p.name
+        val needed = HashSet<String>()
+        fun add(roots: Collection<String>) {
+            val stack = ArrayDeque(roots.flatMap { providers[it].orEmpty() })
+            while (stack.isNotEmpty()) {
+                val name = stack.removeLast()
+                if (!needed.add(name)) continue
+                for (dep in byName.getValue(name).depends) stack.addAll(providers[dep].orEmpty())
+            }
+        }
+        add(world)
+        val conditional = packages.filter { it.installIf.isNotEmpty() }
+        while (true) {
+            val more = conditional.filter { p -> p.name !in needed && p.installIf.all { c -> providers[c].orEmpty().any(needed::contains) } }
+            if (more.isEmpty()) return needed
+            add(more.map { it.name })
+        }
     }
 
     /** What an Alpine program's own packages (those of its source) say about the display it takes. */

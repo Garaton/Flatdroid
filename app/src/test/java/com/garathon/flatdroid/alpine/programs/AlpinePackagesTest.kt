@@ -53,6 +53,51 @@ class AlpinePackagesTest {
     }
 
     @Test
+    fun removingAProgramFreesWhatNothingElseNeeds() {
+        val packages = AlpinePackages.parseInstalled(
+            """
+            P:editor
+            I:1000
+            D:so:libgui.so.1 editor-data so:libc.so
+            p:cmd:editor=1
+
+            P:editor-data
+            I:200
+
+            P:gui
+            I:5000
+            D:so:libc.so
+            p:so:libgui.so.1=1
+
+            P:gui-wayland
+            I:300
+            i:gui=2.0-r0 wayland
+
+            P:wayland
+            I:400
+
+            P:musl
+            I:700
+            p:so:libc.so=1
+
+            P:viewer
+            I:100
+            D:gui
+            """.trimIndent() + "\n",
+        )
+        assertEquals(5000L, packages.first { it.name == "gui" }.installedSize)
+        assertEquals(listOf("gui", "wayland"), packages.first { it.name == "gui-wayland" }.installIf)
+        // gui-wayland comes with gui while wayland is there; musl stays for wayland's world.
+        val world = setOf("editor", "wayland", "musl")
+        assertEquals(setOf("editor", "editor-data", "gui", "gui-wayland"), AlpinePackages.freedBy("editor", packages, world))
+        // A library another program in world uses stays.
+        assertEquals(setOf("editor", "editor-data"), AlpinePackages.freedBy("editor", packages, world + "viewer"))
+        // Needed by the rest of world: nothing freed; not installed: nothing.
+        assertEquals(emptySet<String>(), AlpinePackages.freedBy("gui", packages, world + "gui"))
+        assertEquals(emptySet<String>(), AlpinePackages.freedBy("absent", packages, world))
+    }
+
+    @Test
     fun theWorldFileGivesNamesOnly() {
         assertEquals(setOf("flatpak", "mousepad", "foo", "bar"), AlpinePackages.parseWorld("flatpak\nmousepad>=0.6\nfoo@testing\nbar=1.0-r0\n!baz\n"))
     }

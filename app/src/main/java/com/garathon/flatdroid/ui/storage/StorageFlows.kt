@@ -28,6 +28,7 @@ import com.garathon.flatdroid.settings.HomeMode
 import com.garathon.flatdroid.settings.UserSettingsStore
 import com.garathon.flatdroid.setup.SetupController
 import com.garathon.flatdroid.storage.HomesProvider
+import com.garathon.flatdroid.storage.Names
 import com.garathon.flatdroid.storage.tasks.ImportTarget
 import com.garathon.flatdroid.storage.tasks.PendingTasks
 import com.garathon.flatdroid.storage.sizes.SavedSizes
@@ -98,6 +99,9 @@ class StorageFlows(
     /** Where the files being picked go. */
     private var importTarget: ImportTarget? = null
 
+    /** Files picked in a private home, waiting for where to export them. */
+    private var exportSources: List<Uri> = emptyList()
+
     /** What the zip being picked is for. */
     private var zipTarget: ZipTarget? = null
 
@@ -109,6 +113,7 @@ class StorageFlows(
                 clashQuestion?.let { putString(KEY_CLASH, it.toString()) }
                 exportQuestion?.let { task -> StorageTaskCodec.encode(task).forEach { (k, v) -> putString(KEY_EXPORT_QUESTION + k, v) } }
                 exportTarget?.let { task -> StorageTaskCodec.encode(task).forEach { (k, v) -> putString(KEY_EXPORT_TARGET + k, v) } }
+                if (exportSources.isNotEmpty()) putStringArrayList(KEY_EXPORT_SOURCES, ArrayList(exportSources.map { it.toString() }))
             }
         }
     }
@@ -124,6 +129,7 @@ class StorageFlows(
         )
         exportQuestion = task(KEY_EXPORT_QUESTION)
         exportTarget = task(KEY_EXPORT_TARGET)
+        exportSources = state.getStringArrayList(KEY_EXPORT_SOURCES).orEmpty().map { it.toUri() }
     }
 
     private val storagePermission = activity.registerForActivityResult(ActivityResultContracts.RequestPermission()) {
@@ -137,9 +143,33 @@ class StorageFlows(
         if (target != null && uris.isNotEmpty()) start(StorageTask.ImportFiles(target), uris)
     }
 
-    /** Files picked from a private home (the picker opens on it) are saved in Download. */
+    /**
+     * Files picked from a private home (the picker opens on it) are exported where the user
+     * chooses in the save picker: one as it is, several in one zip.
+     */
     private val homeFilesPicker = activity.registerForActivityResult(OpenDocumentsAt()) { uris ->
-        if (uris.isNotEmpty()) start(StorageTask.SaveToDownload, uris)
+        exportSources = uris
+        val resolver = activity.contentResolver
+        when {
+            uris.size == 1 -> {
+                val name = resolver.query(uris[0], arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
+                    ?.use { if (it.moveToFirst() && !it.isNull(0)) it.getString(0) else null }
+                fileSaver.launch(SaveAs.Input(name ?: "", resolver.getType(uris[0]) ?: "application/octet-stream"))
+            }
+            uris.size > 1 -> {
+                // The picker opens on an app's home, whose documents are named `<app ID>/<path>`.
+                val appId = uris[0].takeIf { it.authority == HomesProvider.AUTHORITY }
+                    ?.let { runCatching { DocumentsContract.getDocumentId(it).substringBefore('/') }.getOrNull() }
+                val label = appId?.let { InstalledApps(activity).name(it) ?: it } ?: ""
+                fileSaver.launch(SaveAs.Input(activity.getString(R.string.storage_home_files_zip, label, Names.timestamp()).trim(), "application/zip"))
+            }
+        }
+    }
+
+    private val fileSaver = activity.registerForActivityResult(SaveAs()) { target ->
+        val sources = exportSources
+        exportSources = emptyList()
+        if (target != null && sources.isNotEmpty()) start(StorageTask.ExportFiles, sources + target)
     }
 
     private val zipPicker = activity.registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -152,7 +182,7 @@ class StorageFlows(
         uri?.let(::useSharedHomeFolder)
     }
 
-    private val exportPicker = activity.registerForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+    private val exportPicker = activity.registerForActivityResult(SaveAs()) { uri ->
         val task = exportTarget
         exportTarget = null
         if (task != null && uri != null) {
@@ -221,7 +251,7 @@ class StorageFlows(
             )
         }
         unfinished?.let { record ->
-            val goesOn = record.task is StorageTask.ImportFiles || record.task == StorageTask.SaveToDownload || record.task is StorageTask.ImportSharedZip
+            val goesOn = record.task is StorageTask.ImportFiles || record.task is StorageTask.ImportSharedZip
             UnfinishedDialog(
                 title = activity.getString(R.string.storage_unfinished_title, StorageTaskService.describe(activity, record.task)),
                 text = activity.getString(
@@ -257,7 +287,8 @@ class StorageFlows(
         if (unfinished != null) return
         activity.lifecycleScope.launch {
             val first = withContext(Dispatchers.IO) {
-                if (StorageTasks.ui.value.let { it.running != null || it.queued.isNotEmpty() }) return@withContext null
+                // Also not while a task just started from a picker is on its way: its record isn't written yet.
+                if (StorageTasks.anyArriving || StorageTasks.ui.value.let { it.running != null || it.queued.isNotEmpty() }) return@withContext null
                 val records = pending.all()
                 StorageTaskService.releaseAccess(activity, null, records)
                 records.firstOrNull()
@@ -354,9 +385,7 @@ class StorageFlows(
         when (action) {
             StorageAction.CLEAR_CACHE -> home.clearCache(appId)
             StorageAction.COPY_INTO_HOME -> importFiles(ImportTarget.Private(appId))
-            StorageAction.DOWNLOAD_FROM_HOME -> withStorage(LEGACY_DOWNLOAD) {
-                homeFilesPicker.launch(DocumentsContract.buildDocumentUri(HomesProvider.AUTHORITY, appId))
-            }
+            StorageAction.DOWNLOAD_FROM_HOME -> homeFilesPicker.launch(DocumentsContract.buildDocumentUri(HomesProvider.AUTHORITY, appId))
             StorageAction.IMPORT_HOME -> pickZip(ZipTarget.Home(appId))
             StorageAction.EXPORT_HOME -> export(StorageTask.ExportHome(appId))
             StorageAction.RESET_HOME -> home.resetPrivateHome(appId)
@@ -402,8 +431,7 @@ class StorageFlows(
 
     /**
      * An export. Zips of apps' files first say what they may hold (logins, cookies, keys); then
-     * it goes to Download, or with the security setting wherever the user picks in Android's
-     * "save as" picker.
+     * it goes wherever the user picks in Android's "save as" picker.
      */
     private fun export(task: StorageTask) {
         if (task == StorageTask.ExportFlatdroidSettings) exportConfirmed(task) else exportQuestion = task
@@ -412,7 +440,7 @@ class StorageFlows(
     /** Exports go through Android's "save as" picker. */
     private fun exportConfirmed(task: StorageTask) {
         exportTarget = task
-        exportPicker.launch(StorageTaskService.exportName(activity, task))
+        exportPicker.launch(SaveAs.Input(StorageTaskService.exportName(activity, task), "application/zip"))
     }
 
     /** Runs [then], first asking for the storage permission on Android 10 and older when [needed]. */
@@ -573,6 +601,18 @@ class StorageFlows(
         else -> null
     }
 
+    /** Android's "save as" picker for a file named [Input.name], opening in Download where Android allows it (8.0 and newer). */
+    private class SaveAs : ActivityResultContract<SaveAs.Input, Uri?>() {
+        data class Input(val name: String, val mimeType: String)
+
+        override fun createIntent(context: Context, input: Input): Intent =
+            Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType(input.mimeType)
+                .putExtra(Intent.EXTRA_TITLE, input.name)
+                .apply { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) putExtra(DocumentsContract.EXTRA_INITIAL_URI, DOWNLOAD) }
+
+        override fun parseResult(resultCode: Int, intent: Intent?): Uri? = intent?.data?.takeIf { resultCode == android.app.Activity.RESULT_OK }
+    }
+
     /** Android's picker for several files, opening on [Uri] where Android allows it (8.0 and newer). */
     private class OpenDocumentsAt : ActivityResultContract<Uri?, List<Uri>>() {
         override fun createIntent(context: Context, input: Uri?): Intent =
@@ -598,10 +638,11 @@ class StorageFlows(
         /** The actions that read an app's files, which a running app could swap for links meanwhile. */
         val READS_FILES = setOf(StorageAction.DOWNLOAD_FROM_HOME, StorageAction.EXPORT_HOME, StorageAction.EXPORT_SETTINGS)
 
-        /** Download by path, before Android 10, needs the storage permission. */
-        val LEGACY_DOWNLOAD = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
+        /** Internal storage's Download folder, where the save picker opens (verify: a zip export's picker opening there). */
+        val DOWNLOAD: Uri = DocumentsContract.buildDocumentUri("com.android.externalstorage.documents", "primary:Download")
         const val KEY_EXPORT_QUESTION = "exportQuestion."
         const val KEY_EXPORT_TARGET = "exportTarget."
+        const val KEY_EXPORT_SOURCES = "exportSources"
         const val SAVED_STATE = "storage"
         const val KEY_IMPORT = "import"
         const val KEY_ZIP = "zip"

@@ -504,7 +504,6 @@ fun BrowseAppPager(
     current: String,
     onSettled: (id: String, index: Int) -> Unit,
     onBack: () -> Unit,
-    bottomBar: @Composable () -> Unit,
     modifier: Modifier = Modifier,
     page: @Composable (id: String, onTitle: (String?) -> Unit) -> Unit,
 ) {
@@ -542,7 +541,6 @@ fun BrowseAppPager(
             val id = pages[at]
             page(id) { titles[id] = it }
         }
-        bottomBar()
     }
 }
 

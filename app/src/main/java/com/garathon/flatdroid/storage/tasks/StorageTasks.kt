@@ -1,7 +1,6 @@
 package com.garathon.flatdroid.storage.tasks
 
 import com.garathon.flatdroid.storage.AppFiles
-import com.garathon.flatdroid.storage.Downloads
 import com.garathon.flatdroid.storage.backup.HomeZip
 import com.garathon.flatdroid.storage.backup.SettingsBackup
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -31,18 +30,21 @@ sealed interface StorageTask {
         override val appId get() = (target as? ImportTarget.Private)?.appId
     }
 
-    /** Copies picked files (from a private home, through the Files app's Flatdroid entry) into Download. */
-    data object SaveToDownload : StorageTask {
+    /**
+     * Copies files picked in a private home to the file the user chose in Android's save picker
+     * (the last URI): one as it is, several in one zip.
+     */
+    data object ExportFiles : StorageTask {
         override val appId: String? get() = null
     }
 
-    /** Zips a temporary home into Download, then deletes it. */
+    /** Zips a temporary home into the file picked in Android's save picker, then deletes it. */
     data class ExportTempHome(override val appId: String) : StorageTask
 
-    /** Zips a private home into Download. */
+    /** Zips a private home to a picked file. */
     data class ExportHome(override val appId: String) : StorageTask
 
-    /** Zips an app's settings and other files of its own ([AppFiles]) into Download. */
+    /** Zips an app's settings and other files of its own ([AppFiles]) to a picked file. */
     data class ExportAppFiles(override val appId: String) : StorageTask
 
     /** Replaces a private home with a picked zip's contents. */
@@ -56,10 +58,10 @@ sealed interface StorageTask {
         override val appId: String? get() = null
     }
 
-    /** Zips every app's private home into Download, a folder per app ID. */
+    /** Zips every app's private home to a picked file, a folder per app ID. */
     data object ExportAllHomes : AllAppsTask
 
-    /** Zips every app's settings and other files ([AppFiles]) into Download, a folder per app ID. */
+    /** Zips every app's settings and other files ([AppFiles]) to a picked file, a folder per app ID. */
     data object ExportAllAppFiles : AllAppsTask
 
     /** Replaces the private home of each app in a picked zip ([ExportAllHomes]); other apps' are left alone. */
@@ -68,13 +70,13 @@ sealed interface StorageTask {
     /** Replaces the settings and other files of each app in a picked zip ([ExportAllAppFiles]); other apps' are left alone. */
     data object ImportAllAppFiles : AllAppsTask
 
-    /** Zips the hidden files apps share when they opt in ([com.garathon.flatdroid.storage.AppData.sharedDotfilesDir]) into Download. */
+    /** Zips the hidden files apps share when they opt in ([com.garathon.flatdroid.storage.AppData.sharedDotfilesDir]) to a picked file. */
     data object ExportSharedDotfiles : AllAppsTask
 
     /** Replaces the shared hidden files with a picked zip's. */
     data object ImportSharedDotfiles : AllAppsTask
 
-    /** Zips Flatdroid's own settings ([SettingsBackup]) into Download. */
+    /** Zips Flatdroid's own settings ([SettingsBackup]) to a picked file. */
     data object ExportFlatdroidSettings : StorageTask {
         override val appId: String? get() = null
     }
@@ -118,6 +120,16 @@ object StorageTasks {
         all.any { it is StorageTask.ExportTempHome } || pending.all().any { it.task is StorageTask.ExportTempHome }
 
     internal fun queue(task: StorageTask) = _ui.update { it.copy(queued = it.queued + task) }
+
+    /** Tasks sent to the service that it hasn't queued yet: the activity resumes from a picker before the service gets them. */
+    private val arriving = java.util.concurrent.atomic.AtomicInteger()
+
+    /** Whether a task is on its way to the service ([sent], not yet [received]). */
+    val anyArriving: Boolean get() = arriving.get() > 0
+
+    internal fun sent() { arriving.incrementAndGet() }
+
+    internal fun received() { arriving.updateAndGet { maxOf(0, it - 1) } }
 
     internal fun start(task: StorageTask) = _ui.update { it.copy(running = task, queued = it.queued - task) }
 

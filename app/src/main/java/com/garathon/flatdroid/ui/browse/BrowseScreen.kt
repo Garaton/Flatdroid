@@ -128,7 +128,6 @@ fun BrowseScreen(
     onInstallById: () -> Unit,
     onAlpineInstall: () -> Unit,
     onRetry: () -> Unit,
-    bottomBar: @Composable () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -234,7 +233,6 @@ fun BrowseScreen(
                 }
             }
         }
-        bottomBar()
     }
 }
 

@@ -16,7 +16,7 @@ class PendingTasksTest {
     fun everyTaskSurvivesTheCodec() {
         val tasks = listOf(
             StorageTask.ImportFiles(ImportTarget.Shared), StorageTask.ImportFiles(ImportTarget.Private("org.kde.kate")),
-            StorageTask.SaveToDownload, StorageTask.ExportTempHome("a.App"), StorageTask.ExportHome("a.App"),
+            StorageTask.ExportFiles, StorageTask.ExportTempHome("a.App"), StorageTask.ExportHome("a.App"),
             StorageTask.ExportAppFiles("a.App"), StorageTask.ExportFlatdroidSettings, StorageTask.ImportHome("a.App"),
             StorageTask.ImportAppFiles("a.App"), StorageTask.ExportAllHomes, StorageTask.ExportAllAppFiles,
             StorageTask.ImportAllHomes, StorageTask.ImportAllAppFiles,

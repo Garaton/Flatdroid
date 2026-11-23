@@ -15,6 +15,7 @@ import android.os.SystemClock
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import androidx.core.app.NotificationCompat
+import androidx.core.net.toUri
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.garathon.flatdroid.MainActivity
@@ -26,7 +27,6 @@ import com.garathon.flatdroid.setup.rootfs.deleteTree
 import com.garathon.flatdroid.setup.SetupController
 import com.garathon.flatdroid.setup.rootfs.useOwnGroupTree
 import com.garathon.flatdroid.storage.AppFiles
-import com.garathon.flatdroid.storage.Downloads
 import com.garathon.flatdroid.storage.HomeFolders
 import com.garathon.flatdroid.storage.Names
 import com.garathon.flatdroid.storage.PickedFiles
@@ -83,6 +83,15 @@ class StorageTaskService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        try {
+            return startCommand(intent)
+        } finally {
+            // Queued (or refused) by now: the picked files' access is the record's to keep.
+            if (intent?.getBooleanExtra(EXTRA_SENT, false) == true) StorageTasks.received()
+        }
+    }
+
+    private fun startCommand(intent: Intent?): Int {
         val record = intent?.let(::recordOf)
         if (!startInForeground(progressNotification(record?.task ?: StorageTasks.ui.value.running, null))) {
             // Android 15's daily limit for this kind of service is used up. The task stays recorded
@@ -112,6 +121,9 @@ class StorageTaskService : Service() {
         stopSelf()
     }
 
+    /** What the task's result opens when tapped ([perform] of one exported file sets it). */
+    private var opens: Intent? = null
+
     private suspend fun work() {
         while (true) {
             val record = tasks.tryReceive().getOrNull() ?: break
@@ -120,6 +132,7 @@ class StorageTaskService : Service() {
             lastPercent = -1
             lastUpdate = 0L
             title = describe(this, task)
+            opens = null
             updateProgress(task, null)
             // Stopped (the time limit, the service's end), not failed or done: the staging and the record stay for Continue.
             var stopped = false
@@ -153,7 +166,7 @@ class StorageTaskService : Service() {
                 }
                 StorageTasks.end()
             }
-            notify(result.first, result.second)
+            notify(result.first, result.second, opens)
         }
         worker = null
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
@@ -183,18 +196,18 @@ class StorageTaskService : Service() {
                 result.present.takeIf { it > 0 }?.let { resources.getQuantityString(R.plurals.storage_present, it, it) },
             ).joinToString(" ")
         }
-        StorageTask.SaveToDownload -> {
-            for (i in record.done until uris.size) {
-                val uri = uris[i]
-                val name = Names.safe(queryName(uri), getString(R.string.storage_imported_file_name, i + 1))
-                Downloads.save(this, name, contentResolver.getType(uri) ?: "application/octet-stream") { out ->
-                    open(uri).use { it.copyWithProgress(out) }
-                }
-                pending.progress(record, i + 1)
-                updateProgress(task, (i + 1).toFloat() / uris.size)
+        StorageTask.ExportFiles -> {
+            val sources = uris.dropLast(1)
+            val target = uris.lastOrNull()?.takeIf { sources.isNotEmpty() } ?: throw IOException(getString(R.string.storage_unwritable))
+            // One file as it is, several in one zip, to the file picked in the save picker; written whole again after a stop.
+            val saved = saveExport(queryName(target).orEmpty(), target) { out ->
+                if (sources.size == 1) open(sources[0]).use { it.copyWithProgress(out) } else zipFiles(task, sources, out)
             }
-            val count = uris.size
-            getString(R.string.storage_saved_title) to resources.getQuantityString(R.plurals.storage_saved, count, count)
+            // The result's tap opens it.
+            keepForOpening(this, target)
+            opens = Intent(Intent.ACTION_VIEW).setDataAndType(target, contentResolver.getType(target) ?: contentResolver.getType(sources[0]))
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+            getString(R.string.storage_saved_one_title) to getString(R.string.storage_saved_open, saved)
         }
         is StorageTask.ExportTempHome -> {
             val home = TempHomes.home(this)
@@ -376,8 +389,23 @@ class StorageTaskService : Service() {
 
     private fun open(uri: Uri): InputStream = contentResolver.openInputStream(uri) ?: throw IOException(getString(R.string.storage_unreadable))
 
+    /** [sources] in one zip, each by its name (a taken one numbered), at its top. */
+    private fun zipFiles(task: StorageTask, sources: List<Uri>, out: OutputStream) {
+        val taken = HashSet<String>()
+        java.util.zip.ZipOutputStream(out).use { zip ->
+            for ((i, uri) in sources.withIndex()) {
+                val entry = Names.unique(Names.safe(queryName(uri), getString(R.string.storage_imported_file_name, i + 1)), taken::contains)
+                taken += entry
+                zip.putNextEntry(java.util.zip.ZipEntry(entry))
+                open(uri).use { it.copyTo(zip) }
+                zip.closeEntry()
+                updateProgress(task, (i + 1).toFloat() / sources.size)
+            }
+        }
+    }
+
     /**
-     * [parts] zipped, to the file the user chose in the "save as" picker ([uris]) or into Download.
+     * [parts] zipped, to the file the user chose in the "save as" picker ([uris]).
      * With [ofApp] (one app's export), a part that is a link is refused: it would be left out and
      * the zip would be empty. Inside the write, so the picked file goes with the failure.
      */
@@ -388,12 +416,11 @@ class StorageTaskService : Service() {
         }
 
     /**
-     * Writes an export to [target], the file the user chose in Android's "save as" picker, or
-     * with none into Download. Returns where it went, as the user knows it. A failed write leaves
-     * no file.
+     * Writes an export to [target], a file the user chose in Android's "save as" picker or made in
+     * the folder they chose. Returns its name, as the user knows it. A failed write leaves no file.
      */
     private fun saveExport(name: String, target: Uri?, write: (OutputStream) -> Unit): String {
-        if (target == null) return Downloads.save(this, Names.safe(name, "export.zip"), "application/zip", write)
+        if (target == null) throw IOException(getString(R.string.storage_unwritable))
         try {
             (contentResolver.openOutputStream(target, "wt") ?: throw IOException(getString(R.string.storage_unwritable))).use(write)
         } catch (e: Exception) {
@@ -534,7 +561,8 @@ class StorageTaskService : Service() {
             .build()
     }
 
-    private fun notify(title: String, text: String) {
+    /** The result; tapped, it starts [open] (an exported file, in the app Android picks for it). */
+    private fun notify(title: String, text: String, open: Intent? = null) {
         createChannel(this)
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_download_done)
@@ -542,6 +570,7 @@ class StorageTaskService : Service() {
             .setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setAutoCancel(true)
+            .apply { open?.let { setContentIntent(PendingIntent.getActivity(this@StorageTaskService, RESULT_ID, it, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)) } }
             .build()
         getSystemService(NotificationManager::class.java).notify(RESULT_ID, notification)
     }
@@ -553,6 +582,8 @@ class StorageTaskService : Service() {
         private const val EXTRA_PREFIX = "task."
         private const val EXTRA_RESUMABLE = "resumable"
         private const val EXTRA_RECORD = "record"
+        /** Sent by [start], counted in [StorageTasks.anyArriving] until queued. */
+        private const val EXTRA_SENT = "sent"
         private const val MAX_COPIES = 9999
         private const val PROGRESS_INTERVAL_MS = 500L
 
@@ -573,14 +604,20 @@ class StorageTaskService : Service() {
         fun start(context: Context, task: StorageTask, uris: List<Uri> = emptyList(), resumable: Boolean = true) {
             val intent = Intent(context, StorageTaskService::class.java)
             for ((key, value) in StorageTaskCodec.encode(task)) intent.putExtra(EXTRA_PREFIX + key, value)
-            intent.putExtra(EXTRA_RESUMABLE, resumable)
+            intent.putExtra(EXTRA_RESUMABLE, resumable).putExtra(EXTRA_SENT, true)
             if (uris.isNotEmpty()) {
                 val clip = ClipData.newRawUri(null, uris.first())
                 for (uri in uris.drop(1)) clip.addItem(ClipData.Item(uri))
                 intent.clipData = clip
                 intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
             }
-            ContextCompat.startForegroundService(context, intent)
+            StorageTasks.sent()
+            try {
+                ContextCompat.startForegroundService(context, intent)
+            } catch (e: RuntimeException) {
+                StorageTasks.received()
+                throw e
+            }
         }
 
         /** Continues an unfinished task ([PendingTasks]) from where it stopped. */
@@ -595,7 +632,7 @@ class StorageTaskService : Service() {
          * unfinished task in [unfinished] still needs.
          */
         fun releaseAccess(context: Context, uris: List<String>?, unfinished: List<PendingTasks.Record>) {
-            val needed = unfinished.flatMap { it.uris }.toSet()
+            val needed = unfinished.flatMap { it.uris }.toSet() + listOfNotNull(keptForOpening(context))
             var released = 0
             for (permission in context.contentResolver.persistedUriPermissions) {
                 val uri = permission.uri.toString()
@@ -605,6 +642,23 @@ class StorageTaskService : Service() {
                 if (runCatching { context.contentResolver.releasePersistableUriPermission(permission.uri, flags) }.isSuccess) released++
             }
             if (released > 0) DebugLog.i("released access to $released picked files; ${context.contentResolver.persistedUriPermissions.size} still kept")
+        }
+
+        /** Where the last exported file's URI is kept ([keepForOpening]). */
+        private fun openingFile(context: Context) = File(context.filesDir, "storage-tasks/opens")
+
+        private fun keptForOpening(context: Context): String? = runCatching { openingFile(context).readText().trim() }.getOrNull()?.takeIf { it.isNotEmpty() }
+
+        /**
+         * Keeps access to [uri], the last file exported alone, so its result still opens it after
+         * Flatdroid restarts; the one kept before is let go.
+         */
+        fun keepForOpening(context: Context, uri: Uri) {
+            val before = keptForOpening(context)
+            runCatching { openingFile(context).apply { parentFile?.mkdirs() }.writeText(uri.toString()) }
+            if (before != null && before != uri.toString()) {
+                runCatching { context.contentResolver.releasePersistableUriPermission(before.toUri(), Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
+            }
         }
 
         /** The file name an export suggests; empty for other tasks. */
@@ -631,7 +685,7 @@ class StorageTaskService : Service() {
                     ImportTarget.Shared -> context.getString(R.string.storage_importing)
                     is ImportTarget.Private -> context.getString(R.string.storage_importing_into, context.getString(R.string.storage_private_home_of, label(target.appId)))
                 }
-                StorageTask.SaveToDownload -> context.getString(R.string.storage_saving)
+                StorageTask.ExportFiles -> context.getString(R.string.storage_saving)
                 is StorageTask.ExportTempHome -> context.getString(R.string.storage_exporting_temp_home, label(task.appId))
                 is StorageTask.ExportHome -> context.getString(R.string.storage_exporting_home, label(task.appId))
                 is StorageTask.ExportAppFiles -> context.getString(R.string.storage_exporting_settings, label(task.appId))

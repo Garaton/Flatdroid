@@ -97,7 +97,7 @@ class FlatdroidApplication : Application() {
                     AppData.cacheRoot(this), AppData.rootsDir(this), AppData.appTmpDir(this), File(env.cacheDir, ElectronSwap.BUILD_DIR),
                 ),
                 fs = AndroidTarFs,
-                otherApps = { AlpinePrograms(env.installer.rootfs, exists = { it.exists() || AndroidTarFs.isSymlink(it) }).list().mapTo(HashSet()) { it.id } },
+                otherApps = { AlpinePrograms.of(env.installer.rootfs).list().mapTo(HashSet()) { it.id } },
             ).clean()
             SavedSizes.removeStale(this)
             for (file in removed) {

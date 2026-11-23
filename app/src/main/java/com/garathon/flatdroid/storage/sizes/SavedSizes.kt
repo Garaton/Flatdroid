@@ -2,6 +2,9 @@ package com.garathon.flatdroid.storage.sizes
 
 import android.content.Context
 import com.garathon.flatdroid.alpine.AlpineEnvironment
+import com.garathon.flatdroid.alpine.programs.AlpineProgram
+import com.garathon.flatdroid.alpine.programs.AlpineProgramIds
+import com.garathon.flatdroid.alpine.programs.AlpinePrograms
 import com.garathon.flatdroid.storage.AppData
 import com.garathon.flatdroid.flatpak.FlatpakInstallation
 import com.garathon.flatdroid.flatpak.InstalledApps
@@ -171,9 +174,16 @@ object SavedSizes {
 
     /** One app's saved sizes, in bytes. */
     data class App(
-        /** Its own Flatpak files (deployments, its own extensions such as translations) and its Electron swap. */
+        /**
+         * A Flatpak's own files (deployments, its own extensions such as translations) and its
+         * Electron swap; an Alpine program's [AlpineProgram.freedBytes].
+         */
         val app: Long,
-        /** Of [app], the Flatpak files alone ([shared] subtracts them from everything Flatdroid keeps). */
+        /**
+         * Of [app], what lies in Flatdroid's environment, which [shared] subtracts from everything
+         * Flatdroid keeps: a Flatpak's files without its Electron swap; an Alpine program's [app],
+         * or 0 for the programs of a package after its first, so a package counts once.
+         */
         val flatpak: Long,
         val privateHome: Long,
         /** Its settings and other files of its own ([AppFiles]), with Flatdroid's settings for it. */
@@ -225,10 +235,19 @@ object SavedSizes {
         val sizes = measuring {
             store(context).get(appId, APP_KEYS) {
                 val env = AlpineEnvironment.get(context)
-                val l2s = File(env.paths().l2sDir)
-                val flatpak = StorageSizes.following(flatpakFiles(env, appId), l2s, stop, deploymentSize(context, l2s))
+                val (app, flatpak) = if (AlpineProgramIds.isId(appId)) {
+                    // From apk's records, not walked: its packages are in Alpine's files.
+                    val programs = AlpinePrograms.of(env.installer.rootfs).list()
+                    val program = programs.firstOrNull { it.id == appId }
+                    val first = programs.firstOrNull { it.packageName == program?.packageName }
+                    (program?.freedBytes ?: 0L) to (if (first === program) program?.freedBytes ?: 0L else 0L)
+                } else {
+                    val l2s = File(env.paths().l2sDir)
+                    val flatpak = StorageSizes.following(flatpakFiles(env, appId), l2s, stop, deploymentSize(context, l2s))
+                    flatpak + StorageSizes.of(File(AppData.electronDir(context), appId), stop) to flatpak
+                }
                 mapOf(
-                    "app" to flatpak + StorageSizes.of(File(AppData.electronDir(context), appId), stop),
+                    "app" to app,
                     "flatpak" to flatpak,
                     "home" to StorageSizes.of(AppData.privateHome(context, appId), stop),
                     "settings" to AppFiles.dirs(File(AppData.root(context), appId), appId).sumOf { StorageSizes.of(it, stop) } +
@@ -243,7 +262,7 @@ object SavedSizes {
     fun shared(context: Context): Shared? {
         val sizes = measuring { store(context).get(SHARED, SHARED_KEYS) {
             val env = AlpineEnvironment.get(context)
-            val apps = FlatpakInstallation(env.flatpakDir, env.arch).appIds()
+            val apps = installedIds(context)
             val runtimes = runtimesOnce(context) ?: throw MeasureStopped()
             // As each app's own size counts them, so that the rest is what neither counts. Saved with
             // the app's sizes (apps are measured before this), so read rather than walked again.
@@ -444,13 +463,17 @@ object SavedSizes {
      */
     fun forgetDeployment(context: Context, dir: File) = deployments(context).forget(dir.name)
 
-    /** Apps Flatdroid has files for: installed, or with data or Flatdroid settings left. */
-    fun appIds(context: Context): Set<String> {
+    /** Installed Flatpak apps and Alpine programs. */
+    fun installedIds(context: Context): Set<String> {
         val env = AlpineEnvironment.get(context)
-        return FlatpakInstallation(env.flatpakDir, env.arch).appIds().toSet() +
+        return FlatpakInstallation(env.flatpakDir, env.arch).appIds().toSet() + AlpinePrograms.of(env.installer.rootfs).list().map { it.id }
+    }
+
+    /** Apps Flatdroid has files for: installed, or with data or Flatdroid settings left. */
+    fun appIds(context: Context): Set<String> =
+        installedIds(context) +
             AppData.root(context).list().orEmpty().filter(InstalledApps::isValidId) +
             AppData.settingsDir(context).list().orEmpty().mapNotNull(SettingsBackup::appId)
-    }
 
     private fun measureLater(context: Context, names: Collection<String>) {
         val appContext = context.applicationContext

@@ -751,12 +751,9 @@
     <string name="clash_replace">Replace</string>
     <string name="clash_keep_both">Keep both</string>
     <string name="clash_skip">Skip</string>
-    <string name="storage_saving">Saving files in Download</string>
-    <string name="storage_saved_title">Files saved</string>
-    <plurals name="storage_saved">
-        <item quantity="one">Saved %1$d file in Download</item>
-        <item quantity="other">Saved %1$d files in Download</item>
-    </plurals>
+    <string name="storage_saving">Exporting files</string>
+    <string name="storage_saved_one_title">File saved</string>
+    <string name="storage_saved_open">Saved as %1$s. Tap to open it.</string>
     <plurals name="storage_adopted">
         <item quantity="one">%1$d file already in the shared home is now Flatdroid\'s, where it is.</item>
         <item quantity="other">%1$d files already in the shared home are now Flatdroid\'s, where they are.</item>
@@ -782,6 +779,7 @@
     <string name="storage_no_private_home">%1$s has no app home yet.</string>
     <string name="storage_home_zip">%1$s app home %2$s.zip</string>
     <string name="storage_settings_zip">%1$s settings %2$s.zip</string>
+    <string name="storage_home_files_zip">%1$s files %2$s.zip</string>
     <string name="storage_flatdroid_settings_zip">Flatdroid settings %1$s.zip</string>
     <string name="storage_exporting_home">Exporting %1$s\'s app home</string>
     <string name="storage_exporting_settings">Exporting %1$s\'s app data</string>

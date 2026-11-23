@@ -47,4 +47,11 @@ class NamesTest {
         File(dir, ".hidden").writeText("")
         assertEquals(File(dir, ".hidden (1)"), Names.unique(dir, ".hidden"))
     }
+
+    @Test
+    fun takenNamesInAZipGetANumber() {
+        val taken = mutableSetOf("a.txt", "a (1).txt")
+        assertEquals("a (2).txt", Names.unique("a.txt", taken::contains))
+        assertEquals("b.txt", Names.unique("b.txt", taken::contains))
+    }
 }

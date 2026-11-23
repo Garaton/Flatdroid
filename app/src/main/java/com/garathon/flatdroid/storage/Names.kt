@@ -47,16 +47,18 @@ object Names {
     }
 
     /** [name] in [dir], or "name (1).ext" and so on when it is taken. */
-    fun unique(dir: File, name: String): File {
-        val first = File(dir, name)
-        if (!first.exists()) return first
+    fun unique(dir: File, name: String): File = File(dir, unique(name) { File(dir, it).exists() })
+
+    /** [name], or "name (1).ext" and so on when [taken] says it is. */
+    fun unique(name: String, taken: (String) -> Boolean): String {
+        if (!taken(name)) return name
         val base = name.substringBeforeLast('.', name).takeIf { it.isNotEmpty() } ?: name
         val ext = if (base == name) "" else "." + name.substringAfterLast('.')
         for (i in 1..MAX_COPIES) {
-            val candidate = File(dir, "$base ($i)$ext")
-            if (!candidate.exists()) return candidate
+            val candidate = "$base ($i)$ext"
+            if (!taken(candidate)) return candidate
         }
-        throw IOException("No free name for $name in $dir")
+        throw IOException("No free name for $name")
     }
 
     /** Now, for names of exports ("2026-10-20 13-28": no colons, which some file systems refuse). */

@@ -8,7 +8,7 @@ import com.garathon.flatdroid.storage.tasks.StorageTasks
 /**
  * What happens to the temporary home after its app closes: an empty one is deleted; otherwise
  * Flatdroid asks in its window ([needsAsking]), the next time it is open, whether to export it (a
- * zip in Download) or delete it. Only an answer deletes it: the question can't be dismissed, and
+ * zip where the user picks) or delete it. Only an answer deletes it: the question can't be dismissed, and
  * there is no notification to swipe away by accident. A launch in Temporary Home mode asks first,
  * since it replaces the home.
  */

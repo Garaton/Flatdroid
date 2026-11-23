@@ -10,7 +10,7 @@ import java.io.File
  * The temporary home: one `temphome/` in the work folder ([AppData.workDir]), since one app runs at a time. It holds the app's
  * home, its settings directories and its cache for one launch, and is deleted and made again at
  * every launch in Temporary Home mode, whatever was left. When the app closes, the user is asked
- * whether to export the home (a zip in Download), and it is deleted either way (TempHomePrompt).
+ * whether to export the home (a zip where the user picks), and it is deleted either way (TempHomePrompt).
  */
 object TempHomes {
     /** Also the base of the app's settings directories in this mode. */

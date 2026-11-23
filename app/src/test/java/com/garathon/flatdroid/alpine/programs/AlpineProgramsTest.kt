@@ -91,6 +91,18 @@ class AlpineProgramsTest {
     }
 
     @Test
+    fun programsOfOnePackageEachHaveWhatUninstallFrees() {
+        val packages = AlpinePackages.parseInstalled("P:office\nI:900\nD:libs\n\nP:libs\nI:100\n\nP:other\nI:50\n")
+        fun program(id: String, packageName: String) =
+            AlpineProgram(id, packageName, id, listOf("/usr/bin/$id"), terminal = false, icon = null, display = AlpinePackages.Display.WAYLAND_AND_X11)
+        val programs = AlpinePrograms(tmp.root).withFreedBytes(
+            listOf(program("alpine+writer", "office"), program("alpine+calc", "office"), program("alpine+other", "other")),
+            packages, setOf("office", "other"),
+        )
+        assertEquals(listOf(1000L, 1000L, 50L), programs.map { it.freedBytes })
+    }
+
+    @Test
     fun idsNeverLookLikeFlatpaks() {
         assertEquals("alpine+htop", AlpineProgramIds.of("htop"))
         assertTrue(AlpineProgramIds.isId("alpine+org.gnome.Calculator"))

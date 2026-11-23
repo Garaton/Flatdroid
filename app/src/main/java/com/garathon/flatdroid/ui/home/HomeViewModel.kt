@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.garathon.flatdroid.alpine.AlpineEnvironment
+import com.garathon.flatdroid.alpine.programs.AlpineProgramIds
 import com.garathon.flatdroid.flatpak.catalog.Catalog
 import com.garathon.flatdroid.shortcuts.Shortcuts
 import com.garathon.flatdroid.storage.AppData
@@ -370,13 +371,14 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         AppFiles.dirs(File(AppData.root(context), appId), appId).forEach { AndroidTarFs.deleteTree(it) }
     }
 
-    private fun installedIds(): Set<String> = AlpineEnvironment.get(getApplication()).let { FlatpakInstallation(it.flatpakDir, it.arch).appIds().toSet() }
+    /** Flatpaks and Alpine programs: an Alpine program's files are never "not installed". */
+    private fun installedIds(): Set<String> = SavedSizes.installedIds(getApplication())
 }
 
 /** Flatdroid's storage, in bytes, by part. */
 data class FlatdroidStorage(
     val runtimes: Long? = null,
-    /** Installed apps' own Flatpak files. */
+    /** Installed apps' own files: Flatpaks' (with Electron swaps) and what Alpine programs' Uninstall frees. */
     val apps: Long? = null,
     /** Apps' settings and other files of their own, installed or not. */
     val appData: Long? = null,
@@ -410,7 +412,8 @@ data class FlatdroidStorage(
         val unused = apps.filterKeys { it !in installed }.values
         return copy(
             perApp = apps,
-            apps = apps.values.sumOf { it.app },
+            // An Alpine package with several programs counts once ([SavedSizes.App.flatpak]).
+            apps = apps.entries.sumOf { (id, sizes) -> if (AlpineProgramIds.isId(id)) sizes.flatpak else sizes.app },
             appData = apps.values.sumOf { it.settings },
             privateHomes = apps.values.sumOf { it.privateHome },
             unusedAppData = Unused(unused.count { it.settings > 0 }, unused.sumOf { it.settings }),
