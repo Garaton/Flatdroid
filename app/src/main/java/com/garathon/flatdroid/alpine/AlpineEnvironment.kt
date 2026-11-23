@@ -197,22 +197,39 @@ class AlpineEnvironment private constructor(private val context: Context) {
     private fun writeFakeProc(): Map<String, String> {
         val uname = Os.uname()
         val uptime = SystemClock.elapsedRealtime() / 1000
+        val bootEpoch = System.currentTimeMillis() / 1000 - uptime
         val proc = GuestFiles.fakeProc(
             cpuCount = Runtime.getRuntime().availableProcessors(),
             kernelRelease = uname.release,
             kernelVersion = uname.version,
             uptimeSeconds = uptime,
-            bootEpochSeconds = System.currentTimeMillis() / 1000 - uptime,
+            bootEpochSeconds = bootEpoch,
             capLastCap = capLastCap,
         )
         val fakeProc = linkedMapOf<String, String>()
         dir(File(generatedDir, "proc"))
         for ((guest, content) in proc) {
             if (hostCanRead(guest)) continue
-            val name = guest.removePrefix("/proc/").replace('/', '_')
-            fakeProc[guest] = write("proc/$name", content).path
+            fakeProc[guest] = write(procFileName(guest), content).path
+        }
+        if (!hostCanRead(GuestFiles.BOOT_ID)) {
+            fakeProc[GuestFiles.BOOT_ID] = write(procFileName(GuestFiles.BOOT_ID), bootId(bootEpoch) + "\n").path
         }
         return fakeProc
+    }
+
+    private fun procFileName(guest: String) = "proc/" + guest.removePrefix("/proc/").replace('/', '_')
+
+    /**
+     * A stand-in boot ID that stays the same until Android restarts. OSTree names its staging
+     * directories after it and deletes other boots' ones, so it mustn't change within a boot.
+     */
+    private fun bootId(bootEpochSeconds: Long): String {
+        val record = File(generatedDir, "boot-id")
+        GuestFiles.storedBootId(record.takeIf { it.isFile }?.readText(), bootEpochSeconds)?.let { return it }
+        val id = java.util.UUID.randomUUID().toString()
+        record.writeTextAtomically(GuestFiles.bootIdRecord(bootEpochSeconds, id), durable = false)
+        return id
     }
 
     /** The stand-ins that hold real values ([GuestFiles.REAL_PROC]), for a Flatpak's root: guest path to host file. */

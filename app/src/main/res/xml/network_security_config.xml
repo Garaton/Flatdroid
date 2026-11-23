@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Flatdroid's own downloads trust the system's roots plus ISRG Root X1 (Let's Encrypt), which
+     Android 7.0 lacks (7.1.1 and later have it). User-added roots stay untrusted, as by default.
+     Downloads inside Alpine use Alpine's own roots. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="@raw/isrg_root_x1" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

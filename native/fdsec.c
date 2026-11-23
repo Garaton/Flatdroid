@@ -32,6 +32,11 @@
  *                    shell whose user turned the filter off (debuggers need ptrace). Nothing is
  *                    removed from a filter the caller already has.
  *
+ * Kernels before 5.8 have no faccessat2. Android 8 and later trap it with SIGSYS, and proot
+ * answers the trap with faccessat; without that filter (Android 7) the kernel's ENOSYS reaches the
+ * program, and musl then fails AT_SYMLINK_NOFOLLOW with EINVAL (GLib takes the file as missing).
+ * When faccessat2 answers ENOSYS here, the filter traps it the same way.
+ *
  * The check: a rule only this filter has answers getpriority(CHECK_WHICH, 0) with CHECK_ERRNO
  * (the kernel itself would say EINVAL); where the kernel reports Seccomp_filters (5.9 and
  * later), the count must also have gone up by one. If either fails, nothing is executed and a
@@ -62,6 +67,9 @@
 
 /* Since Linux 5.1 new system calls have the same number on every architecture; older kernel
  * headers (the NDK's) may not name these yet. */
+#ifndef __NR_faccessat2
+#define __NR_faccessat2 439
+#endif
 #ifndef __NR_statmount
 #define __NR_statmount 457
 #endif
@@ -215,10 +223,10 @@ static const struct rule EXTRA[] = {
 /* Big enough for every rule build() can emit; the _Static_assert below fails the build if a
  * future rule would overflow the stack array. */
 #define MAX_FILTER 96
-/* base (arch check, nr load) + x32 guard + newer-than-proot guard + ALWAYS + EXTRA + the
+/* base (arch check, nr load) + x32 guard + newer-than-proot guard + the faccessat2 trap + ALWAYS + EXTRA + the
  * no_connect block + the socket block (test, argument load, two EACCES rules for --no-inet, the
  * families, EAFNOSUPPORT) + the check rule. */
-_Static_assert(5 + 2 + 2 + 2 * (sizeof ALWAYS / sizeof *ALWAYS) + 2 * (sizeof EXTRA / sizeof *EXTRA) + 2
+_Static_assert(5 + 2 + 2 + 2 + 2 * (sizeof ALWAYS / sizeof *ALWAYS) + 2 * (sizeof EXTRA / sizeof *EXTRA) + 2
                    + (2 + 4 + 2 * (sizeof FAMILIES / sizeof *FAMILIES) + 1) + 5 <= MAX_FILTER,
                "fdsec filter would overflow MAX_FILTER");
 #define LOAD(field) BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, field))
@@ -227,7 +235,7 @@ _Static_assert(5 + 2 + 2 + 2 * (sizeof ALWAYS / sizeof *ALWAYS) + 2 * (sizeof EX
 #define RETURN(action) BPF_STMT(BPF_RET | BPF_K, (action))
 #define IF_EQUAL(k, skip_if_not) BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, (k), 0, (skip_if_not))
 
-static unsigned build(struct sock_filter *f, int extra, int no_inet, int no_connect)
+static unsigned build(struct sock_filter *f, int extra, int no_inet, int no_connect, int trap_faccessat2)
 {
 	unsigned n = 0;
 	f[n++] = (struct sock_filter)LOAD(arch);
@@ -241,6 +249,10 @@ static unsigned build(struct sock_filter *f, int extra, int no_inet, int no_conn
 #endif
 	f[n++] = (struct sock_filter)BPF_JUMP(BPF_JMP | BPF_JGT | BPF_K, LAST_KNOWN_NR, 0, 1);
 	f[n++] = (struct sock_filter)RETURN(SECCOMP_RET_ERRNO | ENOSYS);
+	if (trap_faccessat2) {
+		f[n++] = (struct sock_filter)IF_EQUAL(__NR_faccessat2, 1);
+		f[n++] = (struct sock_filter)RETURN(SECCOMP_RET_TRAP);
+	}
 	for (unsigned i = 0; i < sizeof ALWAYS / sizeof *ALWAYS; i++) {
 		f[n++] = (struct sock_filter)IF_EQUAL(ALWAYS[i].nr, 1);
 		f[n++] = (struct sock_filter)RETURN(SECCOMP_RET_ERRNO | ALWAYS[i].err);
@@ -454,8 +466,10 @@ __attribute__((used)) static void start(long *sp)
 		leave(EXIT_EXEC);
 	}
 
+	/* Asked before the filter exists: under Android's own filter proot already answers it. */
+	int trap_faccessat2 = sys6(__NR_faccessat2, AT_FDCWD, (long)"/", 0 /* F_OK */, 0, 0, 0) == -ENOSYS;
 	struct sock_filter filter[MAX_FILTER];
-	struct sock_fprog prog = { .len = (unsigned short)build(filter, extra, no_inet, no_connect), .filter = filter };
+	struct sock_fprog prog = { .len = (unsigned short)build(filter, extra, no_inet, no_connect, trap_faccessat2), .filter = filter };
 	long before = filter_count();
 	if (sys3(__NR_prctl, PR_SET_NO_NEW_PRIVS, 1, 0) != 0) {
 		say("fdsec: refused: prctl(PR_SET_NO_NEW_PRIVS) failed", 0);

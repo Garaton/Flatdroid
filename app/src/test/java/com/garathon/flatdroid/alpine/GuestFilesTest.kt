@@ -77,6 +77,20 @@ class GuestFilesTest {
     }
 
     @Test
+    fun bootIdLastsOneBoot() {
+        val id = "6f1c2a52-3b0e-4d6a-9f3e-0a1b2c3d4e5f"
+        val record = GuestFiles.bootIdRecord(1_700_000_000, id)
+        assertEquals(id, GuestFiles.storedBootId(record, 1_700_000_000))
+        assertEquals(id, GuestFiles.storedBootId(record, 1_700_000_002))
+        assertEquals(id, GuestFiles.storedBootId(record, 1_699_999_998))
+        // Another boot.
+        assertEquals(null, GuestFiles.storedBootId(record, 1_700_000_600))
+        assertEquals(null, GuestFiles.storedBootId(null, 1_700_000_000))
+        assertEquals(null, GuestFiles.storedBootId("1700000000 not-an-id\n", 1_700_000_000))
+        assertEquals(null, GuestFiles.storedBootId("garbage", 1_700_000_000))
+    }
+
+    @Test
     fun machineIdIsRandomHex() {
         val a = GuestFiles.machineId()
         assertTrue(Regex("^[0-9a-f]{32}\n$").matches(a))

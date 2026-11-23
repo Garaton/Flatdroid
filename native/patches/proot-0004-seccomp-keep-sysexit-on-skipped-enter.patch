@@ -1,0 +1,28 @@
+diff --git a/src/tracee/event.c b/src/tracee/event.c
+--- a/src/tracee/event.c
++++ b/src/tracee/event.c
+@@ -584,7 +584,23 @@
+
+ 			switch (tracee->seccomp) {
+ 			case ENABLED:
+-				if (IS_IN_SYSENTER(tracee)) {
++				/* On kernels which evaluate seccomp before the
++				 * ptrace sysenter stop, this may be that stop
++				 * for a syscall whose sysenter stage was already
++				 * handled on its PTRACE_EVENT_SECCOMP stop.  It
++				 * looks like a sysexit stop but isn't one: the
++				 * sysexit_pending its sysenter handler set has
++				 * to survive until the real sysexit stop.  Else
++				 * a ptrace event in between (eg.
++				 * PTRACE_EVENT_CLONE for clone(2), see
++				 * force_fork_sysexit()) restarts the tracee with
++				 * PTRACE_CONT, the sysexit stop is lost and the
++				 * next PTRACE_EVENT_SECCOMP stop finds the tracee
++				 * "in sysexit".  The skipping below restarts it
++				 * with PTRACE_SYSCALL.  */
++				if (tracee->seccomp_already_handled_enter)
++					;
++				else if (IS_IN_SYSENTER(tracee)) {
+ 					/* sysenter: ensure the sysexit
+ 					 * stage will be hit under seccomp.  */
+ 					tracee->restart_how = PTRACE_SYSCALL;

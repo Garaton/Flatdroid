@@ -343,6 +343,29 @@ object GuestFiles {
      */
     val REAL_PROC = setOf("/proc/version", "/proc/sys/kernel/cap_last_cap", "/proc/sys/kernel/overflowuid", "/proc/sys/kernel/overflowgid")
 
+    /**
+     * The kernel's ID of this boot, which OSTree needs to create Flatpak's repository. Android 8
+     * doesn't let apps read it (7.0 and 13 do; 9 to 12 (verify)).
+     */
+    const val BOOT_ID = "/proc/sys/kernel/random/boot_id"
+
+    /**
+     * The boot ID stored as `<boot time> <ID>` ([bootIdRecord]) if it belongs to the boot that
+     * started at [bootEpochSeconds], else null. The boot time is only known to the second, so it
+     * may move by a few seconds within one boot; a different boot starts minutes later at least.
+     */
+    fun storedBootId(stored: String?, bootEpochSeconds: Long): String? {
+        val parts = stored?.trim()?.split(' ') ?: return null
+        val time = parts.firstOrNull()?.toLongOrNull() ?: return null
+        val id = parts.getOrNull(1)?.takeIf { BOOT_ID_FORMAT.matches(it) } ?: return null
+        return id.takeIf { kotlin.math.abs(time - bootEpochSeconds) <= BOOT_TIME_SLACK_SECONDS }
+    }
+
+    fun bootIdRecord(bootEpochSeconds: Long, id: String) = "$bootEpochSeconds $id\n"
+
+    private const val BOOT_TIME_SLACK_SECONDS = 60
+    private val BOOT_ID_FORMAT = Regex("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+
     /** cap_last_cap when the kernel's can't be found: Linux 5.9's. */
     const val DEFAULT_CAP_LAST_CAP = 40
 }
