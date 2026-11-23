@@ -150,6 +150,7 @@ class FlatpakLauncher(private val context: Context) {
         fs = AndroidTarFs,
         download = ::httpDownload,
         sha256 = ::sha256,
+        log = { SessionController.log("[flatdroid] $it") },
     )
 
     /** Prepares the Electron swap the app needs, after the user agreed. */

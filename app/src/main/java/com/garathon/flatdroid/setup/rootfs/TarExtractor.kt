@@ -53,41 +53,12 @@ class TarExtractor(private val fs: TarFs) {
     fun extract(input: InputStream, dest: File) {
         dest.mkdirs()
         val root = dest.canonicalFile
-        val header = ByteArray(BLOCK)
-        var paxPath: String? = null
-        var paxLink: String? = null
-        var paxSize: Long? = null
-        var longName: String? = null
-        var longLink: String? = null
-
-        while (true) {
-            if (!readBlock(input, header)) return
-            if (header.all { it == 0.toByte() }) return
-
-            val type = header[156].toInt().toChar()
-            val size = paxSize ?: parseSize(header)
-            when (type) {
-                'x' -> {
-                    val records = parsePax(readData(input, size))
-                    paxPath = records["path"]
-                    paxLink = records["linkpath"]
-                    paxSize = records["size"]?.toLong()
-                    continue
-                }
-                'g' -> { skip(input, size); continue }
-                'L' -> { longName = cString(readData(input, size)); continue }
-                'K' -> { longLink = cString(readData(input, size)); continue }
-            }
-
-            val name = paxPath ?: longName ?: ustarName(header)
-            val link = paxLink ?: longLink ?: field(header, 157, 100)
-            paxPath = null; paxLink = null; paxSize = null; longName = null; longLink = null
-
-            val mode = parseOctal(header, 100, 8).toInt() and 0x1ff
+        forEachEntry(input) { entry ->
+            val (type, name, link, mode, size) = entry
             val rel = safeRelative(name)
             if (rel == null) {
                 skip(input, size)
-                if (name.trimStart('.', '/').isEmpty()) continue
+                if (name.trimStart('.', '/').isEmpty()) return@forEachEntry true
                 throw IOException("Unsafe tar entry: $name")
             }
             val target = File(root, rel)
@@ -124,21 +95,8 @@ class TarExtractor(private val fs: TarFs) {
                 }
                 else -> skip(input, size)
             }
+            true
         }
-    }
-
-    private fun ustarName(h: ByteArray): String {
-        val name = field(h, 0, 100)
-        val isUstar = field(h, 257, 5) == "ustar"
-        val prefix = if (isUstar) field(h, 345, 155) else ""
-        return if (prefix.isEmpty()) name else "$prefix/$name"
-    }
-
-    /** Normalised relative path, or null for an empty, absolute-escaping or ".." path. */
-    private fun safeRelative(name: String): String? {
-        val parts = name.split('/').filter { it.isNotEmpty() && it != "." }
-        if (parts.isEmpty() || parts.any { it == ".." }) return null
-        return parts.joinToString("/")
     }
 
     /** Refuses paths that would leave [root] through an already extracted symlink. */
@@ -149,69 +107,144 @@ class TarExtractor(private val fs: TarFs) {
         }
     }
 
-    private fun readData(input: InputStream, size: Long): ByteArray {
-        if (size > MAX_META) throw IOException("Tar metadata entry too large: $size")
-        val data = ByteArray(size.toInt())
-        readFully(input, data, data.size)
-        skipPadding(input, size)
-        return data
-    }
-
-    private fun copyData(input: InputStream, out: java.io.OutputStream, size: Long) {
-        val buf = ByteArray(64 * 1024)
-        var left = size
-        while (left > 0) {
-            val n = input.read(buf, 0, minOf(buf.size.toLong(), left).toInt())
-            if (n < 0) throw EOFException("Truncated tar entry")
-            out.write(buf, 0, n)
-            left -= n
-        }
-        skipPadding(input, size)
-    }
-
-    private fun skip(input: InputStream, size: Long) {
-        var left = size + padding(size)
-        val buf = ByteArray(BLOCK)
-        while (left > 0) {
-            val n = input.read(buf, 0, minOf(BLOCK.toLong(), left).toInt())
-            if (n < 0) throw EOFException("Truncated tar entry")
-            left -= n
-        }
-    }
-
-    private fun skipPadding(input: InputStream, size: Long) {
-        val pad = padding(size)
-        if (pad > 0) readFully(input, ByteArray(pad), pad)
-    }
-
-    private fun padding(size: Long): Int = ((BLOCK - size % BLOCK) % BLOCK).toInt()
-
-    /** True when a full block was read, false at a clean end of stream. */
-    private fun readBlock(input: InputStream, buf: ByteArray): Boolean {
-        var off = 0
-        while (off < BLOCK) {
-            val n = input.read(buf, off, BLOCK - off)
-            if (n < 0) {
-                if (off == 0) return false
-                throw EOFException("Truncated tar header")
-            }
-            off += n
-        }
-        return true
-    }
-
-    private fun readFully(input: InputStream, buf: ByteArray, len: Int) {
-        var off = 0
-        while (off < len) {
-            val n = input.read(buf, off, len - off)
-            if (n < 0) throw EOFException("Truncated tar entry")
-            off += n
-        }
-    }
+    /** An entry's header, its pax or GNU long-name headers applied. */
+    private data class Entry(val type: Char, val name: String, val link: String, val mode: Int, val size: Long)
 
     internal companion object {
         const val BLOCK = 512
         private const val MAX_META = 1L shl 20
+
+        /**
+         * The content of the regular file at [path] (as a relative path, e.g. `package/checksums.json`)
+         * in the tar stream [input], read without extracting anything; null if it has none, or it is
+         * larger than [maxBytes].
+         */
+        fun readFile(input: InputStream, path: String, maxBytes: Long): ByteArray? {
+            var found: ByteArray? = null
+            forEachEntry(input) { (type, name, _, _, size) ->
+                if (type in "0\u00007" && safeRelative(name) == path) {
+                    if (size <= maxBytes) found = readData(input, size)
+                    false
+                } else {
+                    skip(input, size)
+                    true
+                }
+            }
+            return found
+        }
+
+        /**
+         * Calls [each] for every entry of [input] until it returns false or the archive ends. [each]
+         * reads or skips the entry's data before it returns true.
+         */
+        private fun forEachEntry(input: InputStream, each: (Entry) -> Boolean) {
+            val header = ByteArray(BLOCK)
+            var paxPath: String? = null
+            var paxLink: String? = null
+            var paxSize: Long? = null
+            var longName: String? = null
+            var longLink: String? = null
+
+            while (true) {
+                if (!readBlock(input, header)) return
+                if (header.all { it == 0.toByte() }) return
+
+                val type = header[156].toInt().toChar()
+                val size = paxSize ?: parseSize(header)
+                when (type) {
+                    'x' -> {
+                        val records = parsePax(readData(input, size))
+                        paxPath = records["path"]
+                        paxLink = records["linkpath"]
+                        paxSize = records["size"]?.toLong()
+                        continue
+                    }
+                    'g' -> { skip(input, size); continue }
+                    'L' -> { longName = cString(readData(input, size)); continue }
+                    'K' -> { longLink = cString(readData(input, size)); continue }
+                }
+
+                val name = paxPath ?: longName ?: ustarName(header)
+                val link = paxLink ?: longLink ?: field(header, 157, 100)
+                paxPath = null; paxLink = null; paxSize = null; longName = null; longLink = null
+                val mode = parseOctal(header, 100, 8).toInt() and 0x1ff
+                if (!each(Entry(type, name, link, mode, size))) return
+            }
+        }
+
+        private fun ustarName(h: ByteArray): String {
+            val name = field(h, 0, 100)
+            val isUstar = field(h, 257, 5) == "ustar"
+            val prefix = if (isUstar) field(h, 345, 155) else ""
+            return if (prefix.isEmpty()) name else "$prefix/$name"
+        }
+
+        /** Normalised relative path, or null for an empty, absolute-escaping or ".." path. */
+        private fun safeRelative(name: String): String? {
+            val parts = name.split('/').filter { it.isNotEmpty() && it != "." }
+            if (parts.isEmpty() || parts.any { it == ".." }) return null
+            return parts.joinToString("/")
+        }
+
+        private fun readData(input: InputStream, size: Long): ByteArray {
+            if (size > MAX_META) throw IOException("Tar metadata entry too large: $size")
+            val data = ByteArray(size.toInt())
+            readFully(input, data, data.size)
+            skipPadding(input, size)
+            return data
+        }
+
+        private fun copyData(input: InputStream, out: java.io.OutputStream, size: Long) {
+            val buf = ByteArray(64 * 1024)
+            var left = size
+            while (left > 0) {
+                val n = input.read(buf, 0, minOf(buf.size.toLong(), left).toInt())
+                if (n < 0) throw EOFException("Truncated tar entry")
+                out.write(buf, 0, n)
+                left -= n
+            }
+            skipPadding(input, size)
+        }
+
+        private fun skip(input: InputStream, size: Long) {
+            var left = size + padding(size)
+            val buf = ByteArray(BLOCK)
+            while (left > 0) {
+                val n = input.read(buf, 0, minOf(BLOCK.toLong(), left).toInt())
+                if (n < 0) throw EOFException("Truncated tar entry")
+                left -= n
+            }
+        }
+
+        private fun skipPadding(input: InputStream, size: Long) {
+            val pad = padding(size)
+            if (pad > 0) readFully(input, ByteArray(pad), pad)
+        }
+
+        private fun padding(size: Long): Int = ((BLOCK - size % BLOCK) % BLOCK).toInt()
+
+        /** True when a full block was read, false at a clean end of stream. */
+        private fun readBlock(input: InputStream, buf: ByteArray): Boolean {
+            var off = 0
+            while (off < BLOCK) {
+                val n = input.read(buf, off, BLOCK - off)
+                if (n < 0) {
+                    if (off == 0) return false
+                    throw EOFException("Truncated tar header")
+                }
+                off += n
+            }
+            return true
+        }
+
+        private fun readFully(input: InputStream, buf: ByteArray, len: Int) {
+            var off = 0
+            while (off < len) {
+                val n = input.read(buf, off, len - off)
+                if (n < 0) throw EOFException("Truncated tar entry")
+                off += n
+            }
+        }
 
         fun field(h: ByteArray, off: Int, len: Int): String {
             var end = off

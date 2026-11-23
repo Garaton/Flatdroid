@@ -133,9 +133,5 @@ class AlpinePackagesTest {
         assertTrue(AlpinePackages.matches("Q2LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=", "hello".byteInputStream()))
         assertFalse(AlpinePackages.matches("Q1qvTGHdzF6KLavt4PO0gs2a6pQ00=", "hellO".byteInputStream()))
         assertFalse(AlpinePackages.matches("X1qvTGHdzF6KLavt4PO0gs2a6pQ00=", "hello".byteInputStream()))
-        assertEquals("", AlpinePackages.base64(ByteArray(0)))
-        assertEquals("YQ==", AlpinePackages.base64("a".toByteArray()))
-        assertEquals("YWI=", AlpinePackages.base64("ab".toByteArray()))
-        assertEquals("YWJj", AlpinePackages.base64("abc".toByteArray()))
     }
 }

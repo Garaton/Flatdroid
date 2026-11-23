@@ -1,5 +1,7 @@
 package com.garathon.flatdroid.alpine.programs
 
+import com.garathon.flatdroid.util.base64
+
 /** An installed Alpine package as apk's database lists it (`/lib/apk/db/installed`). */
 data class ApkPackage(
     val name: String,
@@ -98,23 +100,6 @@ object AlpinePackages {
             digest.update(buffer, 0, n)
         }
         return base64(digest.digest()) == checksum.substring(2)
-    }
-
-    /** Standard base64 with padding (java.util.Base64 needs Android 8.0). */
-    internal fun base64(bytes: ByteArray): String {
-        val alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-        val out = StringBuilder((bytes.size + 2) / 3 * 4)
-        var i = 0
-        while (i < bytes.size) {
-            val b0 = bytes[i].toInt() and 0xff
-            val b1 = if (i + 1 < bytes.size) bytes[i + 1].toInt() and 0xff else 0
-            val b2 = if (i + 2 < bytes.size) bytes[i + 2].toInt() and 0xff else 0
-            out.append(alphabet[b0 shr 2]).append(alphabet[((b0 and 3) shl 4) or (b1 shr 4)])
-            out.append(if (i + 1 < bytes.size) alphabet[((b1 and 15) shl 2) or (b2 shr 6)] else '=')
-            out.append(if (i + 2 < bytes.size) alphabet[b2 and 63] else '=')
-            i += 3
-        }
-        return out.toString()
     }
 
     /** Which package owns each file (relative to the rootfs). */
