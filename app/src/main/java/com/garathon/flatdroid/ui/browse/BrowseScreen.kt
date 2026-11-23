@@ -60,7 +60,6 @@ import com.garathon.flatdroid.ui.list.ListSearchBar
 import com.garathon.flatdroid.ui.list.ScrollToTopOnNewOrder
 import com.garathon.flatdroid.ui.list.rememberListQuery
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Locale
@@ -134,15 +133,7 @@ fun BrowseScreen(
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     Column(modifier.fillMaxSize()) {
         ScrollToTopOnNewOrder(listState.query, listState.list)
-        // The text searched for: what is typed once typing pauses, so each keystroke doesn't search
-        // thousands of apps for a word not finished yet. Cleared at once.
-        val typed = listState.query.text
-        var searched by remember { mutableStateOf(typed) }
-        LaunchedEffect(typed) {
-            if (typed.isNotEmpty()) delay(SEARCH_DELAY_MS)
-            searched = typed
-        }
-        val query = listState.query.copy(text = searched)
+        val query = listState.query
         // A list of thousands: a new search, filter or category starts at its top too (the shared rule keeps the place, which suits short lists).
         var seenSelection by remember { mutableStateOf(listOf(query.text, query.filters, listState.category, listState.seed)) }
         LaunchedEffect(query.text, query.filters, listState.category, listState.seed) {
@@ -315,9 +306,6 @@ private fun BrowseRow(app: CatalogApp, icon: File?, iconPx: Int, label: Int?, in
 }
 
 private val ROW_ICON_SIZE = 48.dp
-
-/** How long typing pauses before the list is searched. */
-private const val SEARCH_DELAY_MS = 250L
 
 /** A count as short as it reads well: 950, 8.9K, 241K, 1.2M, in the user's locale. */
 fun compactCount(count: Long): String = synchronized(CompactFormat) { CompactFormat.forLocale(Locale.getDefault()).format(count) }
