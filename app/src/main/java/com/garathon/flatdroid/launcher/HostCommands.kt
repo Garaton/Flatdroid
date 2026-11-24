@@ -2,11 +2,11 @@ package com.garathon.flatdroid.launcher
 
 /**
  * Stand-ins for "run on the host": scripts bound over the runtime's `/usr/bin/flatpak-spawn` and
- * an app's own `/app/bin/host-spawn`. There is no host and no other sandbox here, so both run the
- * command in the app's own root, behind the same proot and filter: nothing is widened, and only
- * what the runtime and the app ship can run. As in Flatpak, running "on the host" needs the
- * metadata's `org.freedesktop.Flatpak` (or the whole session bus); without it both fail as there.
- * Options asking for a narrower sandbox are refused: nothing can be narrowed here.
+ * an app's own `/app/bin/host-spawn`. There is no host here, so both run the command in the app's
+ * own root, behind the same proot and filter: nothing is widened, and only what the runtime and
+ * the app ship can run. As in Flatpak, running "on the host" needs the metadata's
+ * `org.freedesktop.Flatpak` (or the whole session bus); without it both fail as there. Flatpak's
+ * sandbox options (`--sandbox` and the rest) are refused: Flatdroid can't start a Flatpak sandbox.
  */
 object HostCommands {
     const val FLATPAK_SPAWN = "flatpak-spawn"
@@ -33,7 +33,8 @@ object HostCommands {
     /**
      * `flatpak-spawn`: options up to the first argument not starting with `-` (or `--`), then the
      * command. `--env`, `--unset-env`, `--env-fd`, `--clear-env`, `--directory` and `--forward-fd`
-     * (the descriptor is simply inherited) as flatpak-spawn has them, values only as `--opt=value`;
+     * (the descriptor is simply inherited) as flatpak-spawn has them, values only as `--opt=value`
+     * (flatpak-spawn too: `--env A=b` ends its options at `A=b`, so `--env` misses its value);
      * `--watch-bus`, `--expose-pids`, `--share-pids` and `--latest-version` change nothing here.
      * The command replaces the script, so its exit status is the caller's (a signal shows as the
      * signal, where flatpak-spawn returns 128 + its number).
@@ -41,67 +42,77 @@ object HostCommands {
     fun flatpakSpawn(hostAllowed: Boolean): String = """
         |#!/bin/sh
         |# Flatdroid's flatpak-spawn: runs the command in this app's own root.
-        |host_allowed=${if (hostAllowed) 1 else 0}
-        |die() { echo "flatpak-spawn: ${'$'}1" >&2; exit 1; }
-        |drop() { r=; for w in ${'$'}1; do [ "${'$'}w" = "${'$'}2" ] || r="${'$'}r ${'$'}w"; done; echo "${'$'}r"; }
-        |valid() { case ${'$'}1 in ''|[0-9]*|*[!A-Za-z0-9_]*) return 1;; esac; }
-        |names= unsets=
-        |setenv() {
-        |  case ${'$'}1 in *=*) ;; *) die "Invalid env format ${'$'}1";; esac
-        |  name=${'$'}{1%%=*}
-        |  valid "${'$'}name" || die "Invalid env format ${'$'}1"
-        |  eval "fdv_${'$'}name=\${'$'}{1#*=}"
-        |  names="${'$'}(drop "${'$'}names" "${'$'}name") ${'$'}name"
-        |  unsets=${'$'}(drop "${'$'}unsets" "${'$'}name")
+        |# Its own names start with _fs_, so the command's environment keeps its own.
+        |_fs_host_allowed=${if (hostAllowed) 1 else 0}
+        |_fs_die() { echo "flatpak-spawn: ${'$'}1" >&2; exit 1; }
+        |# ${'$'}1's words but ${'$'}2, into _fs_r (no subshell: each costs a fork).
+        |_fs_drop() { _fs_r=; for _fs_w in ${'$'}1; do [ "${'$'}_fs_w" = "${'$'}2" ] || _fs_r="${'$'}_fs_r ${'$'}_fs_w"; done; }
+        |_fs_valid() { case ${'$'}1 in ''|[0-9]*|*[!A-Za-z0-9_]*) return 1;; esac; }
+        |_fs_names= _fs_unsets=
+        |_fs_setenv() {
+        |  case ${'$'}1 in *=*) ;; *) _fs_die "Invalid env format ${'$'}1";; esac
+        |  _fs_name=${'$'}{1%%=*}
+        |  _fs_valid "${'$'}_fs_name" || _fs_die "Invalid env format ${'$'}1"
+        |  eval "_fs_v_${'$'}_fs_name=\${'$'}{1#*=}"
+        |  _fs_drop "${'$'}_fs_names" "${'$'}_fs_name"; _fs_names="${'$'}_fs_r ${'$'}_fs_name"
+        |  _fs_drop "${'$'}_fs_unsets" "${'$'}_fs_name"; _fs_unsets=${'$'}_fs_r
         |}
-        |unsetenv() {
-        |  valid "${'$'}1" || die "Invalid env format ${'$'}1"
-        |  unsets="${'$'}(drop "${'$'}unsets" "${'$'}1") ${'$'}1"
-        |  names=${'$'}(drop "${'$'}names" "${'$'}1")
+        |_fs_unsetenv() {
+        |  _fs_valid "${'$'}1" || _fs_die "Invalid env format ${'$'}1"
+        |  _fs_drop "${'$'}_fs_unsets" "${'$'}1"; _fs_unsets="${'$'}_fs_r ${'$'}1"
+        |  _fs_drop "${'$'}_fs_names" "${'$'}1"; _fs_names=${'$'}_fs_r
         |}
-        |envfd() {
-        |  case ${'$'}1 in ''|*[!0-9]*) die "Not a valid file descriptor";; esac
-        |  data=${'$'}(tr '\0' '\n' < "/proc/self/fd/${'$'}1") || die "Not a valid file descriptor"
-        |  while IFS= read -r line; do [ -z "${'$'}line" ] || setenv "${'$'}line"; done <<EOF
-        |${'$'}data
+        |# Entries end in NUL; a newline in a value travels as \001 until it is read.
+        |_fs_envfd() {
+        |  case ${'$'}1 in ''|*[!0-9]*) _fs_die "Not a valid file descriptor";; esac
+        |  _fs_data=${'$'}(tr '\n\0' '\001\n' < "/proc/self/fd/${'$'}1") || _fs_die "Not a valid file descriptor"
+        |  _fs_soh=${'$'}(printf '\001')
+        |  while IFS= read -r _fs_line; do
+        |    case ${'$'}_fs_line in
+        |      '') continue;;
+        |      *"${'$'}_fs_soh"*) _fs_line=${'$'}(printf '%sx' "${'$'}_fs_line" | tr '\001' '\n'); _fs_line=${'$'}{_fs_line%x};;
+        |    esac
+        |    _fs_setenv "${'$'}_fs_line"
+        |  done <<EOF
+        |${'$'}_fs_data
         |EOF
         |}
-        |host=0 clear=0 dir=
+        |_fs_host=0 _fs_clear=0 _fs_dir=
         |while [ ${'$'}# -gt 0 ]; do
-        |  a=${'$'}1
-        |  case ${'$'}a in -*) ;; *) break;; esac
+        |  _fs_a=${'$'}1
+        |  case ${'$'}_fs_a in -*) ;; *) break;; esac
         |  shift
-        |  case ${'$'}a in
+        |  case ${'$'}_fs_a in
         |    --) break;;
-        |    --host) host=1;;
-        |    --clear-env) clear=1;;
+        |    --host) _fs_host=1;;
+        |    --clear-env) _fs_clear=1;;
         |    -v|--verbose|--watch-bus|--expose-pids|--share-pids|--latest-version) ;;
-        |    --directory=*) dir=${'$'}{a#--directory=};;
-        |    --env=*) setenv "${'$'}{a#--env=}";;
-        |    --unset-env=*) unsetenv "${'$'}{a#--unset-env=}";;
-        |    --env-fd=*) envfd "${'$'}{a#--env-fd=}";;
-        |    --forward-fd=*) fd=${'$'}{a#--forward-fd=}; case ${'$'}fd in ''|*[!0-9]*) die "Invalid fd '${'$'}fd'";; esac;;
+        |    --directory=*) _fs_dir=${'$'}{_fs_a#--directory=};;
+        |    --env=*) _fs_setenv "${'$'}{_fs_a#--env=}";;
+        |    --unset-env=*) _fs_unsetenv "${'$'}{_fs_a#--unset-env=}";;
+        |    --env-fd=*) _fs_envfd "${'$'}{_fs_a#--env-fd=}";;
+        |    --forward-fd=*) _fs_fd=${'$'}{_fs_a#--forward-fd=}; case ${'$'}_fs_fd in ''|*[!0-9]*) _fs_die "Invalid fd '${'$'}_fs_fd'";; esac;;
         |    --sandbox|--sandbox=*|--sandbox-*|--no-network|--no-network=*|--app-path|--app-path=*|--usr-path|--usr-path=*)
-        |      die "Flatdroid can't run a command in a narrower sandbox (${'$'}a)";;
-        |    --directory|--env|--unset-env|--env-fd|--forward-fd) die "Missing argument for ${'$'}a";;
+        |      _fs_die "Flatdroid can't start a Flatpak sandbox (${'$'}_fs_a)";;
+        |    --directory|--env|--unset-env|--env-fd|--forward-fd) _fs_die "Missing argument for ${'$'}_fs_a";;
         |    -h|--help) echo "Usage: flatpak-spawn [OPTION…] COMMAND [ARGUMENT…]"; exit 0;;
-        |    *) die "Unknown option ${'$'}a";;
+        |    *) _fs_die "Unknown option ${'$'}_fs_a";;
         |  esac
         |done
-        |[ ${'$'}# -gt 0 ] || die "No command specified"
-        |if [ "${'$'}host" = 1 ] && [ "${'$'}host_allowed" != 1 ]; then
+        |[ ${'$'}# -gt 0 ] || _fs_die "No command specified"
+        |if [ "${'$'}_fs_host" = 1 ] && [ "${'$'}_fs_host_allowed" != 1 ]; then
         |  echo "Portal call failed: $NOT_PROVIDED" >&2
         |  exit 1
         |fi
-        |if [ -n "${'$'}dir" ]; then cd -- "${'$'}dir" || exit 1; fi
+        |if [ -n "${'$'}_fs_dir" ]; then cd -- "${'$'}_fs_dir" || exit 1; fi
         |# A command whose name holds '=' would be taken for a variable.
         |case ${'$'}1 in *=*) set -- /bin/sh -euc 'exec "${'$'}@"' sh "${'$'}@";; esac
-        |for name in ${'$'}unsets; do unset "${'$'}name"; done
-        |# The variables go before the command: the command and its arguments are rotated behind them.
-        |m=${'$'}#
-        |for name in ${'$'}names; do eval "set -- \"\${'$'}@\" \"${'$'}name=\${'$'}{fdv_${'$'}name}\""; done
-        |while [ "${'$'}m" -gt 0 ]; do a=${'$'}1; shift; set -- "${'$'}@" "${'$'}a"; m=${'$'}((m - 1)); done
-        |if [ "${'$'}clear" = 1 ]; then set -- /usr/bin/env -i "${'$'}@"; else set -- /usr/bin/env "${'$'}@"; fi
+        |# env's options and the variables go before the command: the command and its arguments are rotated behind them.
+        |_fs_m=${'$'}#
+        |for _fs_name in ${'$'}_fs_names; do eval "set -- \"\${'$'}@\" \"${'$'}_fs_name=\${'$'}{_fs_v_${'$'}_fs_name}\""; done
+        |while [ "${'$'}_fs_m" -gt 0 ]; do _fs_a=${'$'}1; shift; set -- "${'$'}@" "${'$'}_fs_a"; _fs_m=${'$'}((_fs_m - 1)); done
+        |for _fs_name in ${'$'}_fs_unsets; do set -- -u "${'$'}_fs_name" "${'$'}@"; done
+        |if [ "${'$'}_fs_clear" = 1 ]; then set -- /usr/bin/env -i "${'$'}@"; else set -- /usr/bin/env "${'$'}@"; fi
         |$NEW_SESSION
         |exec "${'$'}@"
         |""".trimMargin()
@@ -116,37 +127,38 @@ object HostCommands {
     fun hostSpawn(hostAllowed: Boolean): String = """
         |#!/bin/sh
         |# Flatdroid's host-spawn: runs the command in this app's own root.
-        |host_allowed=${if (hostAllowed) 1 else 0}
-        |me=${'$'}{0##*/}
-        |case ${'$'}me in
+        |# Its own names start with _fs_, so the command's environment keeps its own.
+        |_fs_host_allowed=${if (hostAllowed) 1 else 0}
+        |_fs_me=${'$'}{0##*/}
+        |case ${'$'}_fs_me in
         |  host-spawn*) ;;
-        |  *) echo "${'$'}me: commands outside the app aren't available in Flatdroid" >&2; exit 127;;
+        |  *) echo "${'$'}_fs_me: commands outside the app aren't available in Flatdroid" >&2; exit 127;;
         |esac
-        |usage() { echo "Usage: ${'$'}me [options] [ COMMAND [ arguments... ] ]" >&2; exit 0; }
-        |cwd=
+        |_fs_usage() { echo "Usage: ${'$'}_fs_me [options] [ COMMAND [ arguments... ] ]" >&2; exit 0; }
+        |_fs_cwd=
         |while [ ${'$'}# -gt 0 ]; do
-        |  a=${'$'}1
-        |  case ${'$'}a in
+        |  _fs_a=${'$'}1
+        |  case ${'$'}_fs_a in
         |    --) shift; break;;
         |    -) break;;
         |    -pty|--pty|-pty=*|--pty=*|-no-pty|--no-pty|-no-pty=*|--no-pty=*) ;;
         |    -version|--version) echo flatdroid; exit 0;;
         |    -env=*|--env=*) ;;
-        |    -cwd=*|--cwd=*) cwd=${'$'}{a#*=};;
+        |    -cwd=*|--cwd=*) _fs_cwd=${'$'}{_fs_a#*=};;
         |    -env|--env|-cwd|--cwd)
-        |      [ ${'$'}# -ge 2 ] || usage
-        |      case ${'$'}a in *cwd) cwd=${'$'}2;; esac
+        |      [ ${'$'}# -ge 2 ] || _fs_usage
+        |      case ${'$'}_fs_a in *cwd) _fs_cwd=${'$'}2;; esac
         |      shift;;
-        |    -*) usage;;
+        |    -*) _fs_usage;;
         |    *) break;;
         |  esac
         |  shift
         |done
-        |if [ "${'$'}host_allowed" != 1 ]; then
+        |if [ "${'$'}_fs_host_allowed" != 1 ]; then
         |  echo "$NOT_PROVIDED" >&2
         |  exit 127
         |fi
-        |if [ -n "${'$'}cwd" ]; then cd -- "${'$'}cwd" || exit 127; fi
+        |if [ -n "${'$'}_fs_cwd" ]; then cd -- "${'$'}_fs_cwd" || exit 127; fi
         |[ ${'$'}# -gt 0 ] || set -- "${'$'}{SHELL:-/bin/sh}"
         |$NEW_SESSION
         |exec "${'$'}@"
@@ -161,7 +173,7 @@ object HostCommands {
      * session, and a new one couldn't take it (setsid would fail and run nothing), as for a
      * terminal emulator running the stand-in as its shell, or a shell running it as a command.
      */
-    private val NEW_SESSION = "if [ -t 0 ] && [ -x /usr/bin/setsid ]; then fd_ctty() { fd_ctty=${'$'}5; }; fd_ctty=0; " +
-        "read -r fd_stat < /proc/${'$'}${'$'}/stat && fd_ctty ${'$'}{fd_stat##*) }; " +
-        "[ \"${'$'}fd_ctty\" = 0 ] && set -- /usr/bin/setsid -w -c \"${'$'}@\"; fi"
+    private val NEW_SESSION = "if [ -t 0 ] && [ -x /usr/bin/setsid ]; then _fs_ctty() { _fs_ctty=${'$'}5; }; _fs_ctty=0; " +
+        "read -r _fs_stat < /proc/${'$'}${'$'}/stat && _fs_ctty ${'$'}{_fs_stat##*) }; " +
+        "[ \"${'$'}_fs_ctty\" = 0 ] && set -- /usr/bin/setsid -w -c \"${'$'}@\"; fi"
 }

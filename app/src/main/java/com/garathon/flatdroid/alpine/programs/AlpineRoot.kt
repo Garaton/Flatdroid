@@ -41,10 +41,10 @@ data class AlpineRoot(
         /** Alpine's folders in the root, relative to the rootfs; `usr` is the runtime. */
         val DIRS = listOf("usr", "lib", "bin", "sbin", "etc")
 
-        /** [program]'s root from the Alpine at [rootfs]; [emptyApp] is an empty folder for `/app`. */
         /** Where Alpine has bwrap (Flatpak depends on it). */
         const val BWRAP = "/usr/bin/bwrap"
 
+        /** [program]'s root from the Alpine at [rootfs]; [emptyApp] is an empty folder for `/app`. */
         fun of(
             program: AlpineProgram, rootfs: File, emptyApp: File, arch: String, branch: String,
             l2sBinds: List<Pair<String, String>>, bwrap: File? = null,

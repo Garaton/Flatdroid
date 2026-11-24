@@ -3,11 +3,14 @@ package com.garathon.flatdroid.flatpak.integrity
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
 import java.nio.file.Files
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 class BrokenLinksTest {
     @get:Rule val tmp = TemporaryFolder()
@@ -57,6 +60,40 @@ class BrokenLinksTest {
         assertFalse(fs.isSymlink(badIntermediate))
         assertFalse(fs.isSymlink(orphan))
         assertTrue(fs.isSymlink(relative))
+    }
+
+    @Test
+    fun aCancelledRemovalDeletesNothingAfterItReturns() {
+        val l2s = tmp.newFolder("rootfs", ".l2s")
+        val repo = tmp.newFolder("rootfs", "root", "flatpak", "repo", "objects", "c6")
+        repeat(50) { link(File(repo, "orphan$it.file"), File(l2s, ".l2s.orphan$it.file0001")) }
+        val caller = Thread.currentThread()
+        val returned = AtomicBoolean()
+        val deleted = AtomicInteger()
+        val late = AtomicInteger()
+        // The first delete cancels the caller, then takes its time: the rest of the folder is still to come.
+        val slow = object : LinkFs by fs {
+            override fun delete(file: File) {
+                if (deleted.getAndIncrement() == 0) {
+                    caller.interrupt()
+                    try {
+                        Thread.sleep(300)
+                    } catch (_: InterruptedException) {
+                    }
+                }
+                if (returned.get()) late.incrementAndGet()
+                fs.delete(file)
+            }
+        }
+        try {
+            BrokenLinks(l2s, slow).removeUnder(File(tmp.root, "rootfs/root/flatpak"), threads = 1)
+            fail("expected an interrupt")
+        } catch (_: InterruptedException) {
+        }
+        returned.set(true)
+        Thread.sleep(300)
+        assertEquals(0, late.get())
+        assertTrue(deleted.get().toString(), deleted.get() < 50)
     }
 
     @Test

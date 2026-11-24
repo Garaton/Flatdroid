@@ -408,11 +408,6 @@ class LaunchPlanner(
     }
 
     /**
-     * The host file for an /app path, following symlinks: guest ones and relative ones within
-     * /app, and link2symlink's (into .l2s, a host path). Null for anything else, such as a link
-     * to the runtime's /usr (a guest path that means something else on the host), and for loops.
-     */
-    /**
      * Whether the app's `/app/bin/<name>` is a file of its own (a link into link2symlink's store
      * counts as one); a link elsewhere (`zypak-wrapper` to the script) reaches a bound one anyway.
      */
@@ -422,6 +417,11 @@ class LaunchPlanner(
         return L2s.inStore(target, l2sDir) && File(target).isFile
     }
 
+    /**
+     * The host file for an /app path, following symlinks: guest ones and relative ones within
+     * /app, and link2symlink's (into .l2s, a host path). Null for anything else, such as a link
+     * to the runtime's /usr (a guest path that means something else on the host), and for loops.
+     */
     private fun hostPath(app: Deployment, guest: String): File? {
         var path = guest
         repeat(MAX_LINKS) {

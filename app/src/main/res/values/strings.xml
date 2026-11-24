@@ -589,6 +589,7 @@
     <string name="app_settings_screen_needs_hidden">Turn on Continue while hidden first. A share would stop while the app is paused.</string>
     <string name="app_settings_screen_android_denied">Android didn\'t allow Flatdroid to share the screen.</string>
     <string name="camera_portal_next_launch">This app asked for a camera. Open it again to use one.</string>
+    <string name="link_too_soon">The app opened links too quickly. Flatdroid opened only the first.</string>
     <string name="app_settings_always_allow_camera">Always allow camera</string>
     <string name="app_settings_always_allow_camera_hint">Uses Android\'s cameras whenever the app wants them, without asking.</string>
     <string name="app_settings_camera_none">This device has no camera Flatdroid can use.</string>

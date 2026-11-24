@@ -9,7 +9,10 @@ import com.garathon.flatdroid.util.io.NativeFs
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
@@ -154,7 +157,7 @@ class BrokenLinks(private val l2sDir: File, private val fs: LinkFs) {
     /**
      * Removes the broken links under [dir] (and their dangling intermediates); returns how many.
      * Folders are read on [threads] threads: the walk waits on storage, which answers several
-     * reads at once.
+     * reads at once. Interruptible: nothing is deleted once it has returned.
      */
     fun removeUnder(dir: File, threads: Int = WALK_THREADS): Int {
         val names = fs.list(l2sDir).orEmpty().toHashSet()
@@ -165,12 +168,14 @@ class BrokenLinks(private val l2sDir: File, private val fs: LinkFs) {
         val pending = AtomicInteger()
         val finished = CountDownLatch(1)
         val failure = AtomicReference<Throwable?>()
+        val stopped = AtomicBoolean()
         fun visit(folder: File, submit: (File) -> Unit) {
             val listing = fs.listTyped(folder) ?: return
             for (i in 0 until listing.size) if (listing.isDirectory(i)) submit(File(folder, listing.names[i]))
             val links = listing.indicesWhere { listing.isLink(it) }
             val targets = fs.readlinks(folder, listing, links)
             for (i in links.indices) {
+                if (stopped.get()) return
                 val intermediate = targets[i]?.let(store::storedName) ?: continue
                 if (intermediate in names && intermediate in withContent) continue
                 fs.delete(File(folder, listing.names[links[i]]))
@@ -182,7 +187,7 @@ class BrokenLinks(private val l2sDir: File, private val fs: LinkFs) {
             pending.incrementAndGet()
             pool.execute {
                 try {
-                    if (failure.get() == null) visit(folder, ::submit)
+                    if (failure.get() == null && !stopped.get()) visit(folder, ::submit)
                 } catch (t: Throwable) {
                     failure.compareAndSet(null, t)
                 } finally {
@@ -194,10 +199,26 @@ class BrokenLinks(private val l2sDir: File, private val fs: LinkFs) {
             submit(dir)
             finished.await()
         } finally {
+            stopped.set(true)
             pool.shutdownNow()
+            // A visit running now stops at its next link.
+            awaitUninterruptibly(pool)
         }
         failure.get()?.let { throw it }
         return removed.get()
+    }
+
+    /** Waits for [pool]'s threads to end; an interrupt meanwhile is kept for the caller. */
+    private fun awaitUninterruptibly(pool: ExecutorService) {
+        var interrupted = false
+        while (true) {
+            try {
+                if (pool.awaitTermination(1, TimeUnit.MINUTES)) break
+            } catch (_: InterruptedException) {
+                interrupted = true
+            }
+        }
+        if (interrupted) Thread.currentThread().interrupt()
     }
 
     companion object {

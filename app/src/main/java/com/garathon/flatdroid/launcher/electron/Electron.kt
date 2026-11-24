@@ -49,10 +49,10 @@ object Electron {
      * [flags] before the app's own arguments, without zypak's sandbox. Takes zypak's forms:
      * `zypak-wrapper[.sh] <binary> [args]` and `zypak-helper host|child [descriptors] - <binary> [args]`
      * (a child is started as it is), `host-latest`/`exec-latest <binary> [args]`, `version`;
-     * `spawn-strategy-test` says no. Electron run as Node (`ELECTRON_RUN_AS_NODE`, VS Code's
-     * `cli.js`, which starts the window itself with its own arguments) gets [nodeFlags] after the
+     * `spawn-strategy-test` says no. Electron run as Node (`ELECTRON_RUN_AS_NODE`, an app's CLI
+     * script that starts the window itself with its own arguments) gets [nodeFlags] after the
      * script instead: Node refuses them before it, and the script passes them on to the window.
-     * That window's output is the script's to keep or drop (VS Code's drops it), so a failure
+     * That window's output is the script's to keep or drop (some drop it), so a failure
      * Flatdroid would relaunch for can't be seen: [nodeFlags] are the newer Electron's from the start.
      */
     fun zypakStandIn(flags: List<String>, nodeFlags: List<String> = flags): String {

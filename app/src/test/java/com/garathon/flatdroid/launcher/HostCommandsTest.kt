@@ -62,12 +62,31 @@ class HostCommandsTest {
     }
 
     @Test
-    fun narrowerSandboxesAreRefused() {
+    fun sandboxOptionsAreRefused() {
         for (option in listOf("--sandbox", "--no-network", "--sandbox-expose=x", "--sandbox-flag=share-gpu", "--app-path=", "--usr-path=/x")) {
             val r = spawn(option, "true")
             assertEquals(option, 1, r.code)
-            assertTrue(option, "narrower sandbox" in r.err)
+            assertTrue(option, "can't start a Flatpak sandbox" in r.err)
         }
+    }
+
+    @Test
+    fun valuesFromADescriptorMayHoldNewlines() {
+        val vars = File(tmp.root, "vars").apply { writeBytes("M=one\ntwo\u0000T=end\n\u0000P=plain\u0000".toByteArray()) }
+        val r = spawn("--env-fd=7", "sh", "-c", "printf '%s|%s|%s' \"\$M\" \"\$T\" \"\$P\"", stdinFd = vars.path)
+        assertEquals(r.err, "one\ntwo|end\n|plain", r.out)
+    }
+
+    @Test
+    fun theScriptsOwnNamesDontReachTheCommand() {
+        // Names a script might use for itself: the command sees the caller's values.
+        val outer = mapOf("dir" to "d", "host" to "h", "clear" to "c", "names" to "n", "a" to "x", "m" to "y", "name" to "z")
+        val r = spawn("--host", "--env=A=1", "sh", "-c", "echo \"\$dir|\$host|\$clear|\$names|\$a|\$m|\$name|\$A\"", env = outer)
+        assertEquals(r.err, "d|h|c|n|x|y|z|1\n", r.out)
+        // Unsetting such a name unsets the caller's variable, not the script's state.
+        val cleared = spawn("--clear-env", "--unset-env=clear", "--unset-env=_fs_clear", "--env=A=a", "/bin/sh", "-c", "echo \"\$A|\${KEEP-gone}\"", env = mapOf("KEEP" to "kept"))
+        assertEquals(cleared.err, "a|gone\n", cleared.out)
+        assertEquals("c\n", hostSpawn("sh", "-c", "echo \"\$cwd\"", env = mapOf("cwd" to "c", "a" to "x")).out)
     }
 
     @Test

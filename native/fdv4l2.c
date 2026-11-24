@@ -13,21 +13,22 @@
  * For libcamera, each camera also has a media controller device (/dev/media*) that tells the
  * driver ("uvcvideo", as a USB camera) and the one video node; Flatdroid lays out the matching
  * /sys entries. stat() and its relatives report the devices as character devices (video: major
- * 81), as apps check. Devices are also recognised by their inode on their first V4L2 or media
+ * 81), as apps check. Devices are also recognized by their inode on their first V4L2 or media
  * call, for callers that open them with a raw system call (libcamera does).
  *
  * The cameras are listed in CONFIG, one per line:
  *   "<video path> <media path> <control path> <width> <height> <rate> <formats> <name>"
  * with formats as "mjpeg,nv12" in the order they are offered.
  *
- * The calls wrapped are those of PipeWire's pw-v4l2 (read for its behaviour only) but munmap,
- * plus the stat family, and the C library's syscall() for the same calls (libv4l2, which OBS and
- * others use, makes its calls through it). Other paths, descriptors and system calls go straight
- * to the kernel. Known misses: static binaries, and system call instructions of a program's own.
+ * The calls wrapped are those of PipeWire's pw-v4l2 (read for its behavior only) but munmap,
+ * plus the stat family, and the C library's syscall() for the same calls (libv4l2, which many
+ * camera programs use, makes its calls through it). Other paths, descriptors and system calls go
+ * straight to the kernel. Known misses: static binaries, and system call instructions of a
+ * program's own.
  *
  * Also socket(): Android refuses apps the kernel's device event socket (NETLINK_KOBJECT_UEVENT,
  * EACCES), and eudev's udev_monitor_new_from_netlink() then gives no monitor, which programs
- * watching for new cameras use unchecked (OBS crashes in udev_monitor_enable_receiving). A
+ * watching for new cameras use unchecked (they crash in udev_monitor_enable_receiving). A
  * refused one becomes a routing netlink socket, which carries no device events: the monitor
  * exists and stays quiet (no camera comes or goes). Loaded for that into every Alpine program.
  *
@@ -228,8 +229,21 @@ struct camera {
     unsigned long video_dev, video_ino, media_dev, media_ino;
 };
 
-static struct camera cameras[MAX_CAMERAS];
-static int camera_count = -1;
+struct camera_list {
+    int count;
+    struct camera at[MAX_CAMERAS];
+};
+
+/*
+ * Loaded once, then published whole: a thread never sees it half-filled, and loading takes no
+ * lock, so a fork while another thread loads it leaves nothing held in the child.
+ */
+static struct camera_list *camera_list;
+/* What a caller gets when there was no memory to load the list into; it is loaded again next time. */
+static struct camera_list no_cameras;
+
+static void *map(int fd, unsigned long len);
+static unsigned long pages(unsigned long n);
 
 static unsigned number(const char **p)
 {
@@ -260,27 +274,26 @@ static void identify(const char *path, unsigned long *dev, unsigned long *ino)
     }
 }
 
-/* Under the lock. */
-static void load_cameras(void)
+/* CONFIG into list, with buf (CONFIG_BYTES) to read it into. */
+static void load_cameras(struct camera_list *list, char *buf)
 {
-    static char buf[CONFIG_BYTES];
-    camera_count = 0;
+    list->count = 0;
     long fd = sys4(__NR_openat, AT_FDCWD, CONFIG, O_RDONLY | O_CLOEXEC, 0);
     if (failed(fd)) return;
     long len = 0;
     for (;;) {
-        long n = sys3(__NR_read, fd, buf + len, sizeof(buf) - 1 - len);
+        long n = sys3(__NR_read, fd, buf + len, CONFIG_BYTES - 1 - len);
         if (n == -EINTR) continue;
         if (n <= 0) break;
         len += n;
-        if (len == (long)sizeof(buf) - 1) break;
+        if (len == CONFIG_BYTES - 1) break;
     }
     sys1(__NR_close, fd);
     if (len <= 0) return;
     buf[len] = 0;
     const char *p = buf;
-    while (*p && camera_count < MAX_CAMERAS) {
-        struct camera *c = &cameras[camera_count];
+    while (*p && list->count < MAX_CAMERAS) {
+        struct camera *c = &list->at[list->count];
         zero(c, sizeof(*c));
         word(&p, c->path, sizeof(c->path));
         word(&p, c->media, sizeof(c->media));
@@ -313,17 +326,28 @@ static void load_cameras(void)
         c->format = c->formats[0];
         identify(c->path, &c->video_dev, &c->video_ino);
         identify(c->media, &c->media_dev, &c->media_ino);
-        camera_count++;
+        list->count++;
     }
 }
 
-static void ensure_cameras(void)
+/* The cameras, loaded on first use. Threads that load it at once each do; the first to finish is kept. */
+static struct camera_list *cameras(void)
 {
-    if (__atomic_load_n(&camera_count, __ATOMIC_ACQUIRE) >= 0) return;
-    lock();
-    if (camera_count < 0) load_cameras();
-    unlock();
+    struct camera_list *list = __atomic_load_n(&camera_list, __ATOMIC_ACQUIRE);
+    if (list) return list;
+    unsigned long kept = pages(sizeof(*list));
+    list = map(-1, kept + CONFIG_BYTES);
+    if (!list) return &no_cameras;
+    load_cameras(list, (char *)list + kept);
+    sys2(__NR_munmap, (char *)list + kept, CONFIG_BYTES);
+    struct camera_list *first = 0;
+    if (__atomic_compare_exchange_n(&camera_list, &first, list, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) return list;
+    sys2(__NR_munmap, list, kept);
+    return first;
 }
+
+/* A camera a stream was opened on: the list is loaded by then. */
+static struct camera *camera(int index) { return &camera_list->at[index]; }
 
 enum kind { NONE, VIDEO, MEDIA };
 
@@ -331,10 +355,10 @@ enum kind { NONE, VIDEO, MEDIA };
 static int camera_at(const char *path, enum kind *kind)
 {
     if (!path || path[0] != '/') return -1;
-    ensure_cameras();
-    for (int i = 0; i < camera_count; i++) {
-        if (same(path, cameras[i].path)) { *kind = VIDEO; return i; }
-        if (same(path, cameras[i].media)) { *kind = MEDIA; return i; }
+    const struct camera_list *list = cameras();
+    for (int i = 0; i < list->count; i++) {
+        if (same(path, list->at[i].path)) { *kind = VIDEO; return i; }
+        if (same(path, list->at[i].media)) { *kind = MEDIA; return i; }
     }
     return -1;
 }
@@ -498,25 +522,26 @@ static void forget_fd(int fd)
         break;
     }
     unlock();
-    if (stopped >= 0) announce(&cameras[stopped], OFF);
+    if (stopped >= 0) announce(camera(stopped), OFF);
 }
 
 /*
  * The stream behind fd for a request of type ('V' for V4L2, '|' for the media controller): known
- * already, or a camera's device opened some other way, recognised by its inode.
+ * already, or a camera's device opened some other way, recognized by its inode.
  */
 static struct stream *stream_for(int fd, unsigned type)
 {
     struct stream *s = stream_of(fd);
     if (s || (type != 'V' && type != '|')) return s;
-    ensure_cameras();
-    if (camera_count <= 0) return 0;
+    const struct camera_list *list = cameras();
+    if (list->count <= 0) return 0;
     struct statx st;
     if (failed(sys5(__NR_statx, fd, "", AT_EMPTY_PATH, STATX_INO, &st))) return 0;
     unsigned long dev = ((unsigned long)st.stx_dev_major << 32) | st.stx_dev_minor;
-    for (int i = 0; i < camera_count; i++) {
-        if (cameras[i].video_ino && dev == cameras[i].video_dev && st.stx_ino == cameras[i].video_ino) return register_open(fd, i, VIDEO);
-        if (cameras[i].media_ino && dev == cameras[i].media_dev && st.stx_ino == cameras[i].media_ino) return register_open(fd, i, MEDIA);
+    for (int i = 0; i < list->count; i++) {
+        const struct camera *c = &list->at[i];
+        if (c->video_ino && dev == c->video_dev && st.stx_ino == c->video_ino) return register_open(fd, i, VIDEO);
+        if (c->media_ino && dev == c->media_dev && st.stx_ino == c->media_ino) return register_open(fd, i, MEDIA);
     }
     return 0;
 }
@@ -618,7 +643,7 @@ static void *destination(struct stream *s, unsigned index, unsigned long *room)
 /* Waits for a whole frame into the first queued buffer and dequeues it into b. */
 static long dequeue(int fd, struct stream *s, struct v4l2_buffer *b)
 {
-    const struct camera *c = &cameras[s->camera];
+    const struct camera *c = camera(s->camera);
     if (!s->staging) {
         s->staging_size = pages(sizeimage(c, MJPEG) + sizeimage(c, NV12) + PAGE);
         s->staging = map(-1, s->staging_size);
@@ -758,7 +783,7 @@ static int import(struct buffer *b, int fd, unsigned length)
 
 static long v4l2(int fd, struct stream *s, unsigned request, void *arg)
 {
-    struct camera *c = &cameras[s->camera];
+    struct camera *c = camera(s->camera);
     if (!arg && request != VIDIOC_STREAMON && request != VIDIOC_STREAMOFF) return fail(EFAULT);
     switch (request) {
     case VIDIOC_QUERYCAP: {
@@ -964,7 +989,7 @@ enum { ENTITY_ID = 1, INTERFACE_ID = 2, PAD_ID = 3, LINK_ID = 4 };
 
 static long media(struct stream *s, unsigned request, void *arg)
 {
-    const struct camera *c = &cameras[s->camera];
+    const struct camera *c = camera(s->camera);
     if (!arg) return fail(EFAULT);
     switch (request) {
     case MEDIA_IOC_DEVICE_INFO: {

@@ -15,7 +15,7 @@ trap 'kill $(jobs -p) 2>/dev/null; rm -rf "$WORK"' EXIT
 
 FDV4L2_DEFINES="-DCONFIG=\"$WORK/cameras\"" "$HERE/build-fdv4l2.sh" x86_64 "$1" "$WORK" >/dev/null
 printf '%s/video0 %s/media0 %s/control0 640 480 30 mjpeg,nv12 Back camera\n' "$WORK" "$WORK" "$WORK" > "$WORK/cameras"
-cc -O2 -Wall -o "$WORK/fdv4l2-test" "$HERE/fdv4l2-test.c"
+cc -O2 -Wall -pthread -o "$WORK/fdv4l2-test" "$HERE/fdv4l2-test.c"
 L=$WORK/libfdv4l2.so
 fail=0
 
@@ -65,7 +65,7 @@ if command -v ffmpeg >/dev/null; then
         echo "FAIL: ffmpeg"; fail=1
     fi
     kill $(jobs -p) 2>/dev/null || true
-    # libv4l2 makes its calls through syscall() (OBS's way to cameras).
+    # libv4l2 makes its calls through syscall() (many camera programs' way to cameras).
     if ffmpeg -hide_banner -h demuxer=v4l2 2>/dev/null | grep -q use_libv4l2; then
         echo "== ffmpeg through libv4l2, Motion-JPEG"
         feed image/jpeg "$WORK/frame.jpg"

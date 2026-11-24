@@ -116,22 +116,4 @@ class TarExtractorTest {
         val bytes = Tar().apply { entry("a", '0', data = ByteArray(2000)) }.out.toByteArray()
         TarExtractor(JvmTarFs).extract(ByteArrayInputStream(bytes.copyOf(1000)), dest)
     }
-
-    @Test
-    fun readsOneFileWithoutExtracting() {
-        val long = "package/" + "d".repeat(120) + "/f.json"
-        val tar = Tar().apply {
-            entry("package/", '5', 0x1ed)
-            entry("package/README.md", '0', data = "readme".toByteArray())
-            pax(mapOf("path" to long))
-            entry("ignored", '0', data = "long".toByteArray())
-            entry("package/checksums.json", '0', data = "{}".toByteArray())
-        }
-        fun read(path: String, max: Long = 1024) = TarExtractor.readFile(ByteArrayInputStream(tar.bytes()), path, max)?.let { String(it) }
-        assertEquals("{}", read("package/checksums.json"))
-        assertEquals("long", read(long))
-        assertEquals(null, read("package/missing"))
-        assertEquals(null, read("package"))
-        assertEquals(null, read("package/README.md", max = 3))
-    }
 }

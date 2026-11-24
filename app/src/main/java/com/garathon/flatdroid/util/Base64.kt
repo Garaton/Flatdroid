@@ -20,23 +20,3 @@ fun base64(bytes: ByteArray): String {
     return out.toString()
 }
 
-/** The bytes of standard base64 with padding; null if [text] isn't that. */
-fun fromBase64(text: String): ByteArray? {
-    if (text.length % 4 != 0) return null
-    val pad = text.length - text.trimEnd('=').length
-    if (pad > 2) return null
-    val out = ByteArray(text.length / 4 * 3 - pad)
-    var o = 0
-    var i = 0
-    while (i < text.length) {
-        var group = 0
-        for (j in 0 until 4) {
-            val c = text[i + j]
-            val v = if (c == '=' && i + j >= text.length - pad) 0 else ALPHABET.indexOf(c).takeIf { it >= 0 } ?: return null
-            group = (group shl 6) or v
-        }
-        for (shift in intArrayOf(16, 8, 0)) if (o < out.size) out[o++] = (group shr shift).toByte()
-        i += 4
-    }
-    return out
-}

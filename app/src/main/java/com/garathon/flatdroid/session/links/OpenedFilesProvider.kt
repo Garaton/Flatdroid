@@ -22,18 +22,13 @@ import java.security.SecureRandom
 class OpenedFilesProvider : ContentProvider() {
     override fun onCreate() = true
 
-    override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor {
-        val entry = OpenedFiles.get(uri) ?: throw FileNotFoundException(uri.toString())
-        val writes = 'w' in mode || 'a' in mode
-        if (writes && !entry.writable) throw FileNotFoundException("read-only")
-        return ParcelFileDescriptor.open(File("/proc/self/fd/${entry.fd.fd}"), ParcelFileDescriptor.parseMode(mode))
-    }
+    override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor = OpenedFiles.open(uri, mode)
 
     override fun query(uri: Uri, projection: Array<out String>?, selection: String?, selectionArgs: Array<out String>?, sortOrder: String?): Cursor {
         val entry = OpenedFiles.get(uri) ?: throw FileNotFoundException(uri.toString())
         val columns = projection?.filter { it == OpenableColumns.DISPLAY_NAME || it == OpenableColumns.SIZE }?.toTypedArray()
             ?: arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE)
-        val size = runCatching { Os.fstat(entry.fd.fileDescriptor).st_size }.getOrNull()
+        val size = OpenedFiles.size(entry)
         return MatrixCursor(columns).apply {
             addRow(columns.map { if (it == OpenableColumns.DISPLAY_NAME) entry.name else size })
         }
@@ -73,6 +68,22 @@ object OpenedFiles {
 
     @Synchronized
     fun get(uri: Uri): Entry? = uri.pathSegments.firstOrNull()?.let { entries[it] }
+
+    /**
+     * The file behind [uri], opened anew in [mode]. Under the lock: a file closed meanwhile
+     * ([add] past [MAX], or [clear]) could have its descriptor's number reused for another file.
+     */
+    @Synchronized
+    fun open(uri: Uri, mode: String): ParcelFileDescriptor {
+        val entry = get(uri) ?: throw FileNotFoundException(uri.toString())
+        val writes = 'w' in mode || 'a' in mode
+        if (writes && !entry.writable) throw FileNotFoundException("read-only")
+        return ParcelFileDescriptor.open(File("/proc/self/fd/${entry.fd.fd}"), ParcelFileDescriptor.parseMode(mode))
+    }
+
+    /** [entry]'s size; null once it is closed. */
+    @Synchronized
+    fun size(entry: Entry): Long? = runCatching { Os.fstat(entry.fd.fileDescriptor).st_size }.getOrNull()
 
     /** Closes every file: their addresses stop working. At the session's end. */
     @Synchronized

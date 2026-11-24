@@ -11,6 +11,7 @@
 #include <linux/media.h>
 #include <linux/videodev2.h>
 #include <poll.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/ioctl.h>
@@ -50,6 +51,19 @@ static int pipe_at(const char *dir, const char *name)
     return (int)kernel(SYS_openat, AT_FDCWD, (long)path, O_RDWR | O_NONBLOCK, 0);
 }
 
+/* Threads that look at the camera at once, the first calls of all: each sees it whole. */
+#define RACERS 4
+static pthread_barrier_t start_line;
+static const char *race_path;
+
+static void *race(void *ok)
+{
+    struct stat st;
+    pthread_barrier_wait(&start_line);
+    *(int *)ok = stat(race_path, &st) == 0 && S_ISCHR(st.st_mode);
+    return NULL;
+}
+
 static int format_request(int fd, unsigned fourcc, struct v4l2_format *f)
 {
     memset(f, 0, sizeof(*f));
@@ -72,6 +86,16 @@ int main(int argc, char **argv)
     int media_end = pipe_at(dir, "media0");
     int control = pipe_at(dir, "control0");
     CHECK(writer >= 0 && media_end >= 0 && control >= 0);
+
+    race_path = path;
+    pthread_t racers[RACERS];
+    int seen[RACERS] = { 0 };
+    pthread_barrier_init(&start_line, NULL, RACERS);
+    for (int i = 0; i < RACERS; i++) CHECK(pthread_create(&racers[i], NULL, race, &seen[i]) == 0);
+    for (int i = 0; i < RACERS; i++) {
+        pthread_join(racers[i], NULL);
+        CHECK(seen[i]);
+    }
 
     struct stat st;
     CHECK(stat(path, &st) == 0 && S_ISCHR(st.st_mode) && major(st.st_rdev) == 81 && minor(st.st_rdev) == 0);

@@ -135,6 +135,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.IOException
+import java.util.UUID
 
 class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
@@ -194,8 +195,9 @@ class MainActivity : ComponentActivity() {
      */
     private fun handleLink(intent: Intent?) {
         if (intent == null || intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0) return
-        intent.getStringExtra(EXTRA_LAUNCH)?.let { id ->
+        intent.getStringExtra(EXTRA_LAUNCH)?.let { token ->
             intent.removeExtra(EXTRA_LAUNCH)
+            val id = takeLaunch(token) ?: return@let
             // Only once set up: a launch held until setup ends would start unasked.
             if (InstalledApps.isValidId(id) && SetupController.state.value.isComplete) home.requestShortcutLaunch(id)
         }
@@ -1037,8 +1039,23 @@ class MainActivity : ComponentActivity() {
         /** The window, to ask about installing [appId]. */
         fun installIntent(context: Context, appId: String): Intent = windowIntent(context).putExtra(EXTRA_INSTALL, appId)
 
-        /** The window, to start [appId] as a tap in its list does (or show it, when it runs). */
-        fun launchIntent(context: Context, appId: String): Intent = windowIntent(context).putExtra(EXTRA_LAUNCH, appId)
+        /**
+         * The window, to start [appId] as a tap in its list does (or show it, when it runs). The
+         * window is exported, so the intent carries a one-time token, not the app: another app can
+         * open the window but can't start anything in it.
+         */
+        fun launchIntent(context: Context, appId: String): Intent {
+            val token = UUID.randomUUID().toString()
+            pendingLaunch = token to appId
+            return windowIntent(context).putExtra(EXTRA_LAUNCH, token)
+        }
+
+        /** The last [launchIntent]'s token and app. */
+        @Volatile private var pendingLaunch: Pair<String, String>? = null
+
+        /** The app [token] stands for, once; null for a token Flatdroid didn't hand out. */
+        @Synchronized private fun takeLaunch(token: String): String? =
+            pendingLaunch?.takeIf { it.first == token }?.second?.also { pendingLaunch = null }
     }
 }
 

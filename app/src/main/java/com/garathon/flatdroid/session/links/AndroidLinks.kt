@@ -5,12 +5,16 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import android.provider.DocumentsContract
 import android.system.Os
 import android.system.OsConstants
 import android.webkit.MimeTypeMap
+import android.widget.Toast
+import com.garathon.flatdroid.R
 import com.garathon.flatdroid.session.bus.Portal
 import com.garathon.flatdroid.storage.AppData
 import com.garathon.flatdroid.storage.FolderDocuments
@@ -24,10 +28,11 @@ import java.io.FileDescriptor
  * by host path (`FileManager1`). Only while
  * Flatdroid is on screen: Android doesn't let an app in the background start one (Android 10 and
  * later), and a link the user didn't just ask for shouldn't appear later. At most one a second, so
- * an app can't bury the screen in choosers.
+ * an app can't bury the screen in choosers: one refused for that says so, at most once per toast.
  */
 class AndroidLinks(private val context: Context, private val log: (String) -> Unit) : Portal.Links {
     private var lastShown = 0L
+    private var lastToast = 0L
 
     override fun openUri(uri: String): Boolean {
         // Browsable only: the activities browsers may open from a web page.
@@ -88,6 +93,10 @@ class AndroidLinks(private val context: Context, private val log: (String) -> Un
         val now = SystemClock.elapsedRealtime()
         if (now - lastShown < MIN_INTERVAL_MS) {
             log("[flatdroid] the app asked to open $what again within a second; not opened")
+            if (now - lastToast >= TOAST_INTERVAL_MS) {
+                lastToast = now
+                Handler(Looper.getMainLooper()).post { Toast.makeText(context, R.string.link_too_soon, Toast.LENGTH_SHORT).show() }
+            }
             return false
         }
         return try {
@@ -112,6 +121,8 @@ class AndroidLinks(private val context: Context, private val log: (String) -> Un
 
     private companion object {
         const val MIN_INTERVAL_MS = 1_000L
+        /** About a short toast's time on screen: a burst of links shows one. */
+        const val TOAST_INTERVAL_MS = 2_500L
         /** Linux's O_PATH on arm64 and x86_64 (Android's constants don't have it). */
         const val O_PATH = 0x200000
     }

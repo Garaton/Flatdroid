@@ -35,8 +35,6 @@ class ElectronSwap(
     /** Downloads a URL to a file (resumable), reporting bytes done and total (-1 if unknown). */
     private val download: (url: String, dest: File, maxBytes: Long, onProgress: (Long, Long) -> Unit) -> Unit,
     private val sha256: (File) -> String,
-    /** Says what npm's cross-check found ([NpmChecksums]). */
-    private val log: (String) -> Unit = {},
 ) {
     /** Where the swap is built, apart from the prepared ones, so a half-built one is never taken for one. */
     private val work get() = File(cacheDir, "$BUILD_DIR/${dir.name}")
@@ -49,8 +47,7 @@ class ElectronSwap(
 
     /**
      * Downloads Electron [needed]'s version for this device, checks it against the release's
-     * SHASUMS256.txt and, where npm has them, npm's signed checksums ([NpmChecksums]: a mismatch
-     * stops, no answer leaves GitHub's alone), and builds the swap directory. [onProgress] gets the step, the Electron zip's
+     * SHASUMS256.txt, and builds the swap directory. [onProgress] gets the step, the Electron zip's
      * name and the download's fraction. Interruptible; a half-built swap is never marked as prepared.
      */
     fun prepare(app: Deployment, needed: PlanResult.ElectronSwapNeeded, onProgress: (Step, String, Float?) -> Unit) {
@@ -64,11 +61,6 @@ class ElectronSwap(
         if (!sums.isFile) download(Electron.releaseUrl(version, "SHASUMS256.txt"), sums, 1L shl 20) { _, _ -> }
         val expected = Electron.sha256(sums.readText(), zipName)
             ?: throw IOException("$zipName is not in Electron $version's SHASUMS256.txt")
-        when (val npm = NpmChecksums.check(version, zipName, expected, downloads, download = { url, dest, max -> download(url, dest, max) { _, _ -> } })) {
-            NpmChecksums.Result.Match -> log("$zipName: npm's signed checksum matches GitHub's")
-            is NpmChecksums.Result.Skipped -> log("$zipName: GitHub's checksum only; ${npm.reason}")
-            is NpmChecksums.Result.Mismatch -> throw IOException("Electron $version can't be trusted: ${npm.reason}")
-        }
 
         val zip = File(downloads, zipName)
         if (!zip.isFile) {

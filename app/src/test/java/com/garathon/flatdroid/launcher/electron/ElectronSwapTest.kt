@@ -29,7 +29,6 @@ class ElectronSwapTest {
     /** Serves URLs from local files, recording what was fetched. */
     private val served = mutableMapOf<String, File>()
     private val fetched = mutableListOf<String>()
-    private val logged = mutableListOf<String>()
     private fun download(url: String, dest: File, maxBytes: Long, onProgress: (Long, Long) -> Unit) {
         fetched += url
         val src = served[url] ?: throw IOException("404 $url")
@@ -66,7 +65,6 @@ class ElectronSwapTest {
         val swap = ElectronSwap(
             File(tmp.root, "files/electron/$id"), File(tmp.root, "cache"), "aarch64",
             allowedSources = listOf(inst.root, l2sDir), fs = JvmTarFs, download = ::download, sha256 = ::sha256,
-            log = { logged += it },
         )
         val needed = PlanResult.ElectronSwapNeeded("9.4.4", "x86_64", "/app/uhc", "uhc", File(files, "uhc"), hasNativeModules = false)
         return Triple(swap, needed, app)
@@ -167,30 +165,6 @@ class ElectronSwapTest {
             assertTrue(e.message!!, "checksum mismatch" in e.message!!)
         }
         assertNull(swap.preparedFor(app))
-    }
-
-    @Test
-    fun npmsSilenceLeavesGithubsChecksumAndIsLogged() {
-        val (swap, needed, app) = setUp(electronZip)
-        swap.prepare(app, needed) { _, _, _ -> }
-        assertTrue(fetched.toString(), NpmChecksums.versionUrl("9.4.4") in fetched)
-        assertTrue(logged.toString(), logged.single().startsWith("$zipName: GitHub's checksum only; npm didn't answer"))
-    }
-
-    @Test
-    fun npmsBrokenSignatureStopsTheSwap() {
-        val (swap, needed, app) = setUp(electronZip)
-        served[NpmChecksums.versionUrl("9.4.4")] = File(tmp.root, "npm.json").apply {
-            writeText("""{"dist":{"integrity":"sha512-AAAA","signatures":[{"keyid":"${NpmChecksums.KEYS.keys.first()}","sig":"MEUCIA=="}]}}""")
-        }
-        try {
-            swap.prepare(app, needed) { _, _, _ -> }
-            fail("expected a refusal")
-        } catch (e: IOException) {
-            assertTrue(e.message!!, "can't be trusted" in e.message!!)
-        }
-        assertNull(swap.preparedFor(app))
-        assertFalse(Electron.releaseUrl("9.4.4", zipName) in fetched)
     }
 
     @Test

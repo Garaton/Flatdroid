@@ -115,25 +115,6 @@ class TarExtractor(private val fs: TarFs) {
         private const val MAX_META = 1L shl 20
 
         /**
-         * The content of the regular file at [path] (as a relative path, e.g. `package/checksums.json`)
-         * in the tar stream [input], read without extracting anything; null if it has none, or it is
-         * larger than [maxBytes].
-         */
-        fun readFile(input: InputStream, path: String, maxBytes: Long): ByteArray? {
-            var found: ByteArray? = null
-            forEachEntry(input) { (type, name, _, _, size) ->
-                if (type in "0\u00007" && safeRelative(name) == path) {
-                    if (size <= maxBytes) found = readData(input, size)
-                    false
-                } else {
-                    skip(input, size)
-                    true
-                }
-            }
-            return found
-        }
-
-        /**
          * Calls [each] for every entry of [input] until it returns false or the archive ends. [each]
          * reads or skips the entry's data before it returns true.
          */
@@ -179,7 +160,7 @@ class TarExtractor(private val fs: TarFs) {
             return if (prefix.isEmpty()) name else "$prefix/$name"
         }
 
-        /** Normalised relative path, or null for an empty, absolute-escaping or ".." path. */
+        /** Normalized relative path, or null for an empty, absolute-escaping or ".." path. */
         private fun safeRelative(name: String): String? {
             val parts = name.split('/').filter { it.isNotEmpty() && it != "." }
             if (parts.isEmpty() || parts.any { it == ".." }) return null
