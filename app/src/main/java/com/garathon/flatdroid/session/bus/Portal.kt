@@ -20,6 +20,14 @@ import java.io.FileDescriptor
  * asks, closes the request, or leaves the bus; and folders shown in Android's Files app
  * ([links], the app's paths mapped to the host's by [hostPath]).
  *
+ * Inhibits also come through the names GNOME and KDE apps use: `org.gnome.SessionManager`'s
+ * `Inhibit`, `org.freedesktop.PowerManagement` (the processor), and `org.gnome.ScreenSaver`
+ * (never active); `org.gnome.Mutter.IdleMonitor` answers the time since the viewer's last input
+ * ([idleMillis]).
+ *
+ * With [notifications], the app's notifications ([Notifications]): `org.freedesktop.Notifications`,
+ * and the Notification portal (or, as [Role.BACKEND], the real portal's backend for it).
+ *
  * As [Role.PORTAL], with [cameraAsked], the camera portal is answered too, only to learn that the
  * app asks for it: a camera is present, and each `AccessCamera` is refused after [cameraAsked]
  * is called (the real portal runs from the app's next launch).
@@ -36,6 +44,10 @@ class Portal(
     private val hostPath: (String) -> String? = { null },
     /** The app asked for the camera portal; null leaves the portal's camera unanswered. */
     private val cameraAsked: (() -> Unit)? = null,
+    /** The app's notifications; null serves none (the app's Notifications permission is off). */
+    private val notifications: Notifications? = null,
+    /** Milliseconds since the user's last input. */
+    private val idleMillis: () -> Long = { 0L },
 ) {
     enum class Role { PORTAL, BACKEND }
 
@@ -58,9 +70,9 @@ class Portal(
 
     /** The names Flatdroid owns in this [role]. */
     val names: List<String> = when (role) {
-        Role.PORTAL -> listOf(PORTAL_NAME, SCREENSAVER, FILE_MANAGER)
-        Role.BACKEND -> listOf(BACKEND_NAME, SCREENSAVER, FILE_MANAGER)
-    }
+        Role.PORTAL -> listOf(PORTAL_NAME)
+        Role.BACKEND -> listOf(BACKEND_NAME)
+    } + listOf(SCREENSAVER, FILE_MANAGER) + INHIBIT_NAMES + listOfNotNull(Notifications.NAME.takeIf { notifications != null })
 
     /**
      * What to send for [call], whose file descriptors are [fds]: its reply (none when it asks for
@@ -109,6 +121,12 @@ class Portal(
             INHIBIT -> inhibit(call)
             IMPL_INHIBIT -> implInhibit(call)
             SCREENSAVER_IFACE -> screenSaver(call)
+            GNOME_SESSION_MANAGER -> sessionManager(call)
+            POWER_MANAGEMENT_IFACE -> powerManagement(call)
+            GNOME_SCREENSAVER -> gnomeScreenSaver(call)
+            IDLE_MONITOR -> idleMonitor(call)
+            Notifications.IFACE -> freedesktopNotifications(call, signals)
+            Notifications.PORTAL_IFACE, Notifications.IMPL_IFACE -> portalNotifications(call, fds)
             FILE_MANAGER_IFACE -> fileManager(call)
             CAMERA -> camera(call, signals)
             null -> call.error(UNKNOWN_METHOD, "No interface")
@@ -120,6 +138,7 @@ class Portal(
     private fun busSignal(signal: Message) {
         if (signal.sender != BUS || signal.iface != BUS || signal.member != "NameOwnerChanged" || signal.signature != "sss") return
         val (name, _, newOwner) = signal.body.map { it as String }
+        // Notifications stay: a sender may exit right after one (notify-send does), as on a desktop.
         if (name.startsWith(":") && newOwner.isEmpty()) inhibitions.removeOwner(name)
     }
 
@@ -134,10 +153,17 @@ class Portal(
     private fun interfaces(path: String?): Map<String, UInt>? = when (path) {
         PATH -> when (role) {
             Role.PORTAL -> mapOf(SETTINGS to 2u, NETWORK_MONITOR to 3u, PROXY_RESOLVER to 1u, OPEN_URI to 5u, INHIBIT to 3u) +
-                (if (cameraAsked != null) mapOf(CAMERA to 1u) else emptyMap())
-            Role.BACKEND -> mapOf(IMPL_SETTINGS to 1u, IMPL_APP_CHOOSER to 2u, LINKS to 1u, IMPL_INHIBIT to 3u)
+                (if (cameraAsked != null) mapOf(CAMERA to 1u) else emptyMap()) +
+                (if (notifications != null) mapOf(Notifications.PORTAL_IFACE to 2u) else emptyMap())
+            Role.BACKEND -> mapOf(IMPL_SETTINGS to 1u, IMPL_APP_CHOOSER to 2u, LINKS to 1u, IMPL_INHIBIT to 3u) +
+                (if (notifications != null) mapOf(Notifications.IMPL_IFACE to 1u) else emptyMap())
         }
         in SCREENSAVER_PATHS -> mapOf(SCREENSAVER_IFACE to 0u)
+        GNOME_SESSION_MANAGER_PATH -> mapOf(GNOME_SESSION_MANAGER to 0u)
+        POWER_MANAGEMENT_PATH -> mapOf(POWER_MANAGEMENT_IFACE to 0u)
+        GNOME_SCREENSAVER_PATH -> mapOf(GNOME_SCREENSAVER to 0u)
+        IDLE_MONITOR_PATH -> mapOf(IDLE_MONITOR to 0u)
+        Notifications.PATH -> if (notifications != null) mapOf(Notifications.IFACE to 0u) else null
         FILE_MANAGER_PATH -> mapOf(FILE_MANAGER_IFACE to 0u)
         else -> null
     }
@@ -159,8 +185,11 @@ class Portal(
     }
 
     /** Properties beside `version`. */
-    private fun extraProperties(iface: String): Map<String, Variant> =
-        if (iface == CAMERA) mapOf("IsCameraPresent" to Variant("b", true)) else emptyMap()
+    private fun extraProperties(iface: String): Map<String, Variant> = when (iface) {
+        CAMERA -> mapOf("IsCameraPresent" to Variant("b", true))
+        Notifications.PORTAL_IFACE -> mapOf("SupportedOptions" to Variant("a{sv}", emptyMap<String, Variant>()))
+        else -> emptyMap()
+    }
 
     /**
      * The camera portal while it isn't run ([cameraAsked]): each `AccessCamera` gets its request
@@ -336,6 +365,103 @@ class Portal(
         else -> unknown(call)
     }
 
+    /** `org.gnome.SessionManager`'s inhibits, whose flags are the portal's. */
+    private fun sessionManager(call: Message): Message = when (call.member) {
+        "Inhibit" -> {
+            val flags = call.args("susu")[3] as UInt
+            hold(call, GNOME_SESSION_MANAGER, flags)
+        }
+        "Uninhibit" -> release(call, GNOME_SESSION_MANAGER)
+        "IsInhibited" -> call.reply("b", inhibitions.holding(call.args("u")[0] as UInt))
+        else -> unknown(call)
+    }
+
+    /** `org.freedesktop.PowerManagement.Inhibit`: the processor stays awake. */
+    private fun powerManagement(call: Message): Message = when (call.member) {
+        "Inhibit" -> {
+            call.strings("ss")
+            hold(call, POWER_MANAGEMENT_IFACE, Inhibitions.SUSPEND)
+        }
+        "UnInhibit" -> release(call, POWER_MANAGEMENT_IFACE)
+        "HasInhibit" -> call.args("").let { call.reply("b", inhibitions.holding(Inhibitions.SUSPEND)) }
+        else -> unknown(call)
+    }
+
+    /** A new cookie's hold of [flags] under [prefix], answered with the cookie. */
+    private fun hold(call: Message, prefix: String, flags: UInt): Message {
+        val cookie = inhibitions.nextCookie()
+        return if (!inhibitions.add(call.sender ?: "", "$prefix:$cookie", flags)) call.error(LIMITS_EXCEEDED, "Too many inhibits")
+        else call.reply("u", cookie)
+    }
+
+    private fun release(call: Message, prefix: String): Message {
+        val cookie = call.args("u")[0] as UInt
+        inhibitions.remove(call.sender ?: "", "$prefix:$cookie")
+        return call.reply()
+    }
+
+    /** `org.gnome.ScreenSaver`: never active, and nothing to lock (Android's lock screen is its own). */
+    private fun gnomeScreenSaver(call: Message): Message = when (call.member) {
+        "GetActive" -> call.args("").let { call.reply("b", false) }
+        "GetActiveTime" -> call.args("").let { call.reply("u", 0u) }
+        "SetActive" -> call.args("b").let { call.reply() }
+        "Lock", "SimulateUserActivity" -> call.args("").let { call.reply() }
+        else -> unknown(call)
+    }
+
+    /** `org.gnome.Mutter.IdleMonitor`: the time since the viewer's last input. Watches are accepted and never fire (verify which apps need them). */
+    private fun idleMonitor(call: Message): Message = when (call.member) {
+        "GetIdletime" -> call.args("").let { call.reply("t", idleMillis().coerceAtLeast(0).toULong()) }
+        "AddIdleWatch" -> call.args("t").let { call.reply("u", ++watches) }
+        "AddUserActiveWatch" -> call.args("").let { call.reply("u", ++watches) }
+        "RemoveWatch" -> call.args("u").let { call.reply() }
+        else -> unknown(call)
+    }
+
+    private var watches = 0u
+
+    /** `org.freedesktop.Notifications` ([notifications]). */
+    private fun freedesktopNotifications(call: Message, signals: MutableList<Message>): Message {
+        val shown = notifications ?: return unknownInterface(call)
+        val owner = call.sender ?: ""
+        return when (call.member) {
+            "Notify" -> {
+                val a = call.args("susssasa{sv}i")
+                @Suppress("UNCHECKED_CAST")
+                val id = shown.notify(owner, a[1] as UInt, a[2] as String, a[3] as String, a[4] as String, a[5] as List<String>, a[6] as Map<*, *>, a[7] as Int)
+                if (id == null) call.error(LIMITS_EXCEEDED, "Too many notifications") else call.reply("u", id)
+            }
+            "CloseNotification" -> {
+                signals += shown.close(owner, call.args("u")[0] as UInt)
+                call.reply()
+            }
+            "GetCapabilities" -> call.args("").let { call.reply("as", Notifications.CAPABILITIES) }
+            "GetServerInformation" -> call.args("").let { call.reply("ssss", "Flatdroid", "Flatdroid", "1", "1.2") }
+            else -> unknown(call)
+        }
+    }
+
+    /** The Notification portal, or as [Role.BACKEND] its backend (the app's ID first). */
+    private fun portalNotifications(call: Message, fds: List<FileDescriptor>): Message {
+        val shown = notifications ?: return unknownInterface(call)
+        val owner = call.sender ?: ""
+        val backend = call.iface == Notifications.IMPL_IFACE
+        return when (call.member) {
+            "AddNotification" -> {
+                val a = if (backend) call.args("ssa{sv}") else call.args("sa{sv}")
+                val added = if (backend) shown.add(owner, a[1] as String, a[2] as Map<*, *>, fds, appId = a[0] as String)
+                else shown.add(owner, a[0] as String, a[1] as Map<*, *>, fds)
+                if (added) call.reply() else call.error(LIMITS_EXCEEDED, "Too many notifications")
+            }
+            "RemoveNotification" -> {
+                val a = if (backend) call.strings("ss").drop(1) else call.strings("s")
+                shown.removeFromPortal(owner, a[0])
+                call.reply()
+            }
+            else -> unknown(call)
+        }
+    }
+
     /**
      * `org.freedesktop.FileManager1`: Android's Files app at the first folder shown, or at the
      * folder holding the first item (it can't point at a file). Only folders the Files app can
@@ -403,6 +529,17 @@ class Portal(
         /** The freedesktop path, and KDE's. */
         val SCREENSAVER_PATHS = listOf("/org/freedesktop/ScreenSaver", "/ScreenSaver")
         const val FILE_MANAGER = "org.freedesktop.FileManager1"
+        const val GNOME_SESSION_MANAGER = "org.gnome.SessionManager"
+        const val GNOME_SESSION_MANAGER_PATH = "/org/gnome/SessionManager"
+        const val POWER_MANAGEMENT = "org.freedesktop.PowerManagement"
+        const val POWER_MANAGEMENT_IFACE = "org.freedesktop.PowerManagement.Inhibit"
+        const val POWER_MANAGEMENT_PATH = "/org/freedesktop/PowerManagement/Inhibit"
+        const val GNOME_SCREENSAVER = "org.gnome.ScreenSaver"
+        const val GNOME_SCREENSAVER_PATH = "/org/gnome/ScreenSaver"
+        const val IDLE_MONITOR = "org.gnome.Mutter.IdleMonitor"
+        const val IDLE_MONITOR_PATH = "/org/gnome/Mutter/IdleMonitor/Core"
+        /** The other names inhibits and idle time come through. */
+        val INHIBIT_NAMES = listOf(GNOME_SESSION_MANAGER, POWER_MANAGEMENT, GNOME_SCREENSAVER, IDLE_MONITOR)
         const val FILE_MANAGER_IFACE = FILE_MANAGER
         const val FILE_MANAGER_PATH = "/org/freedesktop/FileManager1"
         /** Items of one `ShowItems` looked at; the first that maps is shown. */
@@ -562,6 +699,64 @@ class Portal(
                 |  <method name="UnInhibit"><arg type="u" name="cookie" direction="in"/></method>
                 |  <method name="SimulateUserActivity"/>
                 |  <method name="GetActive"><arg type="b" direction="out"/></method>
+                | </interface>
+                |""".trimMargin(),
+            GNOME_SESSION_MANAGER to """
+                | <interface name="$GNOME_SESSION_MANAGER">
+                |  <method name="Inhibit"><arg type="s" name="app_id" direction="in"/><arg type="u" name="toplevel_xid" direction="in"/><arg type="s" name="reason" direction="in"/><arg type="u" name="flags" direction="in"/><arg type="u" name="cookie" direction="out"/></method>
+                |  <method name="Uninhibit"><arg type="u" name="cookie" direction="in"/></method>
+                |  <method name="IsInhibited"><arg type="u" name="flags" direction="in"/><arg type="b" direction="out"/></method>
+                | </interface>
+                |""".trimMargin(),
+            POWER_MANAGEMENT_IFACE to """
+                | <interface name="$POWER_MANAGEMENT_IFACE">
+                |  <method name="Inhibit"><arg type="s" name="application" direction="in"/><arg type="s" name="reason" direction="in"/><arg type="u" name="cookie" direction="out"/></method>
+                |  <method name="UnInhibit"><arg type="u" name="cookie" direction="in"/></method>
+                |  <method name="HasInhibit"><arg type="b" direction="out"/></method>
+                | </interface>
+                |""".trimMargin(),
+            GNOME_SCREENSAVER to """
+                | <interface name="$GNOME_SCREENSAVER">
+                |  <method name="GetActive"><arg type="b" direction="out"/></method>
+                |  <method name="GetActiveTime"><arg type="u" direction="out"/></method>
+                |  <method name="SetActive"><arg type="b" direction="in"/></method>
+                |  <method name="Lock"/>
+                |  <method name="SimulateUserActivity"/>
+                | </interface>
+                |""".trimMargin(),
+            IDLE_MONITOR to """
+                | <interface name="$IDLE_MONITOR">
+                |  <method name="GetIdletime"><arg type="t" direction="out"/></method>
+                |  <method name="AddIdleWatch"><arg type="t" name="interval" direction="in"/><arg type="u" name="id" direction="out"/></method>
+                |  <method name="AddUserActiveWatch"><arg type="u" name="id" direction="out"/></method>
+                |  <method name="RemoveWatch"><arg type="u" name="id" direction="in"/></method>
+                | </interface>
+                |""".trimMargin(),
+            Notifications.IFACE to """
+                | <interface name="${Notifications.IFACE}">
+                |  <method name="Notify"><arg type="s" name="app_name" direction="in"/><arg type="u" name="replaces_id" direction="in"/><arg type="s" name="app_icon" direction="in"/><arg type="s" name="summary" direction="in"/><arg type="s" name="body" direction="in"/><arg type="as" name="actions" direction="in"/><arg type="a{sv}" name="hints" direction="in"/><arg type="i" name="expire_timeout" direction="in"/><arg type="u" direction="out"/></method>
+                |  <method name="CloseNotification"><arg type="u" name="id" direction="in"/></method>
+                |  <method name="GetCapabilities"><arg type="as" direction="out"/></method>
+                |  <method name="GetServerInformation"><arg type="s" direction="out"/><arg type="s" direction="out"/><arg type="s" direction="out"/><arg type="s" direction="out"/></method>
+                |  <signal name="NotificationClosed"><arg type="u"/><arg type="u"/></signal>
+                |  <signal name="ActionInvoked"><arg type="u"/><arg type="s"/></signal>
+                | </interface>
+                |""".trimMargin(),
+            Notifications.PORTAL_IFACE to """
+                | <interface name="${Notifications.PORTAL_IFACE}">
+                |  <method name="AddNotification"><arg type="s" name="id" direction="in"/><arg type="a{sv}" name="notification" direction="in"/></method>
+                |  <method name="RemoveNotification"><arg type="s" name="id" direction="in"/></method>
+                |  <signal name="ActionInvoked"><arg type="s"/><arg type="s"/><arg type="av"/></signal>
+                |  <property name="SupportedOptions" type="a{sv}" access="read"/>
+                |  <property name="version" type="u" access="read"/>
+                | </interface>
+                |""".trimMargin(),
+            Notifications.IMPL_IFACE to """
+                | <interface name="${Notifications.IMPL_IFACE}">
+                |  <method name="AddNotification"><arg type="s" name="app_id" direction="in"/><arg type="s" name="id" direction="in"/><arg type="a{sv}" name="notification" direction="in"/></method>
+                |  <method name="RemoveNotification"><arg type="s" name="app_id" direction="in"/><arg type="s" name="id" direction="in"/></method>
+                |  <signal name="ActionInvoked"><arg type="s"/><arg type="s"/><arg type="s"/><arg type="av"/></signal>
+                |  <property name="version" type="u" access="read"/>
                 | </interface>
                 |""".trimMargin(),
             FILE_MANAGER_IFACE to """

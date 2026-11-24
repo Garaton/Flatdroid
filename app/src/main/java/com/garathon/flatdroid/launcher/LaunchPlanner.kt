@@ -73,7 +73,16 @@ data class HostDirs(
      * deployments; null for none.
      */
     val ldCache: File? = null,
+    /** Per-launch folder for the extensions' merged folders ([MergedDir]), one subfolder each; null merges none. */
+    val mergedDirs: File? = null,
 )
+
+/**
+ * A folder that collects the entries of several extensions' folders, as Flatpak's `merge-dirs`
+ * does: [dir] (bound at [guest]) holds a relative link per entry, to the extension that has it.
+ * The first extension (in mount order) with an entry wins.
+ */
+data class MergedDir(val dir: File, val guest: String, val links: Map<String, String>)
 
 /**
  * The app's `/etc/ld.so.cache`, as Flatpak builds one: the runtime's `ldconfig` run in the app's
@@ -155,6 +164,8 @@ data class LaunchPlan(
     val filter: Fdsec.Filter,
     /** The app's ld.so.cache; null when there is none (no [HostDirs.ldCache], or no `ldconfig` in the runtime). */
     val ldCache: LdCache? = null,
+    /** The extensions' merged folders, written before the launch. */
+    val mergedDirs: List<MergedDir> = emptyList(),
 )
 
 sealed interface PlanResult {
@@ -296,6 +307,8 @@ class LaunchPlanner(
         }
         command = command + alpine?.args.orEmpty() + options.extraArgs
 
+        val mergedDirs = mergedDirs(dirs.mergedDirs, extensions)
+        for (merged in mergedDirs) extraBinds += merged.dir.path to merged.guest
         val ldCache = ldCache(dirs.ldCache.takeIf { alpine == null }, runtime, listOf(app, runtime) + extensions.map { it.second.deployment }, extensions)
         if (ldCache != null) {
             extraBinds += ldCache.cache.path to "/etc/$LD_CACHE"
@@ -376,6 +389,7 @@ class LaunchPlanner(
                 terminal = options.terminal,
                 filter = Fdsec.Filter(extraSyscalls = options.extraSyscalls, noInternet = !options.network),
                 ldCache = ldCache,
+                mergedDirs = mergedDirs,
             )
         )
     }
@@ -455,6 +469,29 @@ class LaunchPlanner(
                 sessionBusProxy = dirs.sessionBus != null,
             ),
         )
+    }
+
+    /**
+     * Flatpak's `merge-dirs`: for each extension and each of its point's merged folders, the
+     * entries of that folder linked into the folder of the same name beside the extension
+     * (`<point>/<ext>/lv2/x.lv2` as `<point>/lv2/x.lv2`). Only folders with an entry are made.
+     */
+    private fun mergedDirs(base: File?, extensions: List<Pair<String, MountedExtension>>): List<MergedDir> {
+        if (base == null) return emptyList()
+        val merged = LinkedHashMap<String, LinkedHashMap<String, String>>()
+        for ((root, ext) in extensions) {
+            val parent = ext.guestPath.substringBeforeLast('/', "")
+            val name = ext.guestPath.substringAfterLast('/')
+            for (dir in ext.mergeDirs) {
+                val entries = File(ext.deployment.files, dir).list()?.sorted() ?: continue
+                val guest = listOf(root, parent, dir).filter { it.isNotEmpty() }.joinToString("/")
+                val links = merged.getOrPut(guest) { LinkedHashMap() }
+                // Relative, so proot resolves it inside the root: up out of the merged folder, into the extension's.
+                val up = "../".repeat(dir.count { it == '/' } + 1)
+                for (entry in entries) links.putIfAbsent(entry, "$up$name/$dir/$entry")
+            }
+        }
+        return merged.filterValues { it.isNotEmpty() }.entries.mapIndexed { i, (guest, links) -> MergedDir(File(base, "$i"), guest, links) }
     }
 
     /** The commit a deployment was checked out from: its folder's name, without the `-<languages>` a partial (locale) checkout adds. */

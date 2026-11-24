@@ -29,6 +29,8 @@ data class SecuritySettings(
     val androidFonts: Boolean = true,
     /** Apps share the clipboard with Android (through the VNC viewer) until changed per app. */
     val shareClipboard: Boolean = true,
+    /** Apps' notifications show as Android's until changed per app. */
+    val appNotifications: Boolean = true,
     /**
      * Apps get Android's time zone and its language and region as their locale. Off, they get UTC
      * and the generic C.UTF-8, which hint at no location and no language.
@@ -37,7 +39,7 @@ data class SecuritySettings(
 ) {
     /** What an app's own settings start as; [UserSettings.appDefaults] adds the camera's. */
     val appDefaults: AppDefaults get() =
-        AppDefaults(homeMode = defaultHomeMode, permissionsFromMetadata = permissionsFromMetadata, clipboard = shareClipboard, blockExtraSyscalls = extraSyscallFilter)
+        AppDefaults(homeMode = defaultHomeMode, permissionsFromMetadata = permissionsFromMetadata, clipboard = shareClipboard, notifications = appNotifications, blockExtraSyscalls = extraSyscallFilter)
 }
 
 /**
@@ -64,6 +66,7 @@ enum class SecurityLevel(
             checkFilesBeforeLaunch = true,
             androidFonts = false,
             shareClipboard = false,
+            appNotifications = false,
             shareLocale = false,
         ),
         R.string.security_level_hardened, R.string.security_level_hardened_hint,

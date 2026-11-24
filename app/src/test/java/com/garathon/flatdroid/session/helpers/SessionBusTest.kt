@@ -121,4 +121,12 @@ class SessionBusTest {
         assertTrue("<allow receive_sender=\"*\"/>" in config)
         assertFalse("eavesdrop" in config)
     }
+
+    @Test
+    fun thePortalsNotificationsOnlyWithThePermission() {
+        val rule = "--call=org.freedesktop.portal.Desktop=org.freedesktop.portal.Notification.*@/org/freedesktop/portal/desktop"
+        assertTrue(rule in SessionBus.proxyArgs("org.example.App", emptyMap(), camera = false, notifications = true))
+        assertTrue(rule in SessionBus.proxyArgs("org.example.App", emptyMap(), camera = true, notifications = true))
+        assertFalse(rule in SessionBus.proxyArgs("org.example.App", emptyMap(), camera = false))
+    }
 }

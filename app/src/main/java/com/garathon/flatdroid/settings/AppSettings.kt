@@ -70,6 +70,8 @@ data class AppDefaults(
     /** Network and sound are on when the app's metadata asks for them; otherwise off until the user turns them on. */
     val permissionsFromMetadata: Boolean = true,
     val clipboard: Boolean = true,
+    /** The app's notifications show as Android's. */
+    val notifications: Boolean = true,
     /** The filter also refuses the system calls apps rarely need (the security level's choice). */
     val blockExtraSyscalls: Boolean = true,
     val cameraResolution: Int = AndroidCameras.DEFAULT_RESOLUTION,
@@ -133,6 +135,11 @@ data class AppSettings(
      * Null follows [defaults] ([sharesClipboard]).
      */
     val clipboard: Boolean? = null,
+    /**
+     * The app's notifications (`org.freedesktop.Notifications` and the Notification portal) show
+     * as Android's while it runs. Off, neither is served. Null follows [defaults] ([sendsNotifications]).
+     */
+    val notifications: Boolean? = null,
     /** Developer setting: the filter refuses the rarely used system calls for this app or not; null follows [defaults] ([blocksExtraSyscalls]). */
     val blockExtraSyscalls: Boolean? = null,
     /**
@@ -212,6 +219,7 @@ data class AppSettings(
     val interfaceSize: Int get() = interfaceSizeChoice ?: defaults.interfaceSize
     val rendering: Rendering get() = renderingChoice ?: defaults.rendering
     val sharesClipboard: Boolean get() = clipboard ?: defaults.clipboard
+    val sendsNotifications: Boolean get() = notifications ?: defaults.notifications
     val blocksExtraSyscalls: Boolean get() = blockExtraSyscalls ?: defaults.blockExtraSyscalls
     val cameraResolution: Int get() = cameraResolutionOverride ?: defaults.cameraResolution
     val cameraFrameRate: Int get() = cameraFrameRateOverride ?: defaults.cameraFrameRate
@@ -357,6 +365,7 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
             audio = props.getProperty(KEY_AUDIO)?.toBooleanStrictOrNull(),
             network = props.getProperty(KEY_NETWORK)?.toBooleanStrictOrNull(),
             clipboard = props.getProperty(KEY_CLIPBOARD)?.toBooleanStrictOrNull(),
+            notifications = props.getProperty(KEY_NOTIFICATIONS)?.toBooleanStrictOrNull(),
             blockExtraSyscalls = props.getProperty(KEY_EXTRA_SYSCALLS)?.toBooleanStrictOrNull(),
             shareHiddenFiles = props.getProperty(KEY_SHARE_HIDDEN_FILES) == "true",
             microphone = props.getProperty(KEY_MICROPHONE)?.toBooleanStrictOrNull(),
@@ -404,6 +413,7 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
         settings.audio?.let { props.setProperty(KEY_AUDIO, it.toString()) }
         settings.network?.let { props.setProperty(KEY_NETWORK, it.toString()) }
         settings.clipboard?.let { props.setProperty(KEY_CLIPBOARD, it.toString()) }
+        settings.notifications?.let { props.setProperty(KEY_NOTIFICATIONS, it.toString()) }
         settings.blockExtraSyscalls?.let { props.setProperty(KEY_EXTRA_SYSCALLS, it.toString()) }
         if (settings.shareHiddenFiles) props.setProperty(KEY_SHARE_HIDDEN_FILES, "true")
         settings.microphone?.let { props.setProperty(KEY_MICROPHONE, it.toString()) }
@@ -485,6 +495,7 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
         private const val KEY_SDCARD = "storage.sdcard"
         private const val KEY_NETWORK = "permission.network"
         private const val KEY_CLIPBOARD = "permission.clipboard"
+        private const val KEY_NOTIFICATIONS = "permission.notifications"
         private const val KEY_EXTRA_SYSCALLS = "filter.blockExtraSyscalls"
         private const val KEY_SHARE_HIDDEN_FILES = "home.shareHiddenFiles"
         /** Statistics of this device: an import doesn't bring or replace them. */

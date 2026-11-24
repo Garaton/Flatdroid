@@ -292,6 +292,7 @@ class UserSettingsStore(private val file: File) {
             checkFilesBeforeLaunch = flag(KEY_CHECK_FILES, default.checkFilesBeforeLaunch),
             androidFonts = flag(KEY_ANDROID_FONTS, default.androidFonts),
             shareClipboard = flag(KEY_SHARE_CLIPBOARD, default.shareClipboard),
+            appNotifications = flag(KEY_APP_NOTIFICATIONS, default.appNotifications),
             shareLocale = flag(KEY_SHARE_LOCALE, default.shareLocale),
         )
     }
@@ -335,6 +336,7 @@ class UserSettingsStore(private val file: File) {
             props.setProperty(KEY_CHECK_FILES, s.checkFilesBeforeLaunch.toString())
             props.setProperty(KEY_ANDROID_FONTS, s.androidFonts.toString())
             props.setProperty(KEY_SHARE_CLIPBOARD, s.shareClipboard.toString())
+            props.setProperty(KEY_APP_NOTIFICATIONS, s.appNotifications.toString())
             props.setProperty(KEY_SHARE_LOCALE, s.shareLocale.toString())
         }
         if (!settings.shellFilter) props.setProperty(KEY_SHELL_FILTER, "false")
@@ -359,6 +361,7 @@ class UserSettingsStore(private val file: File) {
         private const val KEY_CHECK_FILES = "security.checkFiles"
         private const val KEY_ANDROID_FONTS = "security.androidFonts"
         private const val KEY_SHARE_CLIPBOARD = "security.shareClipboard"
+        private const val KEY_APP_NOTIFICATIONS = "security.appNotifications"
         private const val KEY_SHARE_LOCALE = "security.shareLocale"
         private const val KEY_SHELL_FILTER = "shell.filter"
         private const val KEY_ALPINE_SAFE_LAUNCH = "alpine.safeLaunch"

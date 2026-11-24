@@ -34,6 +34,10 @@ class Inhibitions(private val changed: (State) -> Unit) {
         return true
     }
 
+    /** Whether anything holds what [flags] name. */
+    @Synchronized
+    fun holding(flags: UInt): Boolean = holds.values.any { it.flags and flags != 0u }
+
     /** Releases [key], when [owner] took it. */
     @Synchronized
     fun remove(owner: String, key: String): Boolean {

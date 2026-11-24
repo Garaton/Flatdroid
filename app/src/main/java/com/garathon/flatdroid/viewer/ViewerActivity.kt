@@ -77,6 +77,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.garathon.flatdroid.session.bus.AndroidNotifications
 import com.garathon.flatdroid.session.AlpineShell
 import com.garathon.flatdroid.viewer.frames.NativeFrames
 import com.garathon.flatdroid.viewer.input.Keysyms
@@ -140,8 +141,16 @@ class ViewerActivity : ComponentActivity() {
         }
     }
 
+    /** Opened again from an app's notification: its default action goes to the app. */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        AndroidNotifications.deliver(intent)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Opened from an app's notification: its default action goes to the app.
+        if (savedInstanceState == null) AndroidNotifications.deliver(intent)
         val session = SessionController.ui.value.state as? SessionState.Running
         val socket = session?.socket
         if (socket == null) {

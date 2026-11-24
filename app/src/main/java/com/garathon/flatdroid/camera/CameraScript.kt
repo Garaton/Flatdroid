@@ -1,5 +1,6 @@
 package com.garathon.flatdroid.camera
 
+import com.garathon.flatdroid.session.bus.Notifications
 import com.garathon.flatdroid.session.bus.Portal
 import com.garathon.flatdroid.session.helpers.SessionBus
 
@@ -101,7 +102,7 @@ object CameraScript {
         // XDG_DESKTOP_PORTAL_DIR: the portal reads its backends and its configuration only from there.
         "portals/flatdroid-portals.conf" to "[preferred]\ndefault=flatdroid\n",
         "portals/flatdroid.portal" to
-            "[portal]\nDBusName=${Portal.BACKEND_NAME}\nInterfaces=org.freedesktop.impl.portal.Access;${Portal.IMPL_SETTINGS};${Portal.IMPL_APP_CHOOSER};${Portal.IMPL_INHIBIT};\n",
+            "[portal]\nDBusName=${Portal.BACKEND_NAME}\nInterfaces=org.freedesktop.impl.portal.Access;${Portal.IMPL_SETTINGS};${Portal.IMPL_APP_CHOOSER};${Portal.IMPL_INHIBIT};${Notifications.IMPL_IFACE};\n",
         // The real portal opens a link with the one app it finds for the scheme, without asking
         // (xdg-desktop-portal 1.20): this command, which hands the address to Flatdroid. %u is one
         // argument; gdbus reads it as the string the method takes.

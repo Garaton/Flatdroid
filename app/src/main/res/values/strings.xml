@@ -843,6 +843,7 @@
     <string name="security_hide_screen_hint">Flatdroid\'s screens can\'t be captured. Screenshots, screen recordings, and the recent apps list see nothing.</string>
     <string name="security_android_fonts">Share Android\'s fonts</string>
     <string name="security_share_clipboard">App default: share Android clipboard</string>
+    <string name="security_app_notifications">App default: notifications</string>
     <string name="security_check_files">Safe launch</string>
     <string name="security_check_files_hint">When an app starts, Flatdroid compares its files to a known baseline in order to check for tampering. Baselines are updated on install/update. This causes launches to take a few seconds longer. Turning this off drops all baselines.</string>
     <string name="baseline_choice_title">Record a baseline?</string>
@@ -869,6 +870,10 @@
     <string name="app_settings_audio_requested_off">The app asks for sound; your security level keeps it off until you turn it on.</string>
     <string name="app_settings_clipboard">Clipboard</string>
     <string name="app_settings_clipboard_hint">Copy and paste between the app and Android.</string>
+    <string name="app_settings_notifications">Notifications</string>
+    <string name="app_notifications_channel">App notifications</string>
+    <string name="app_notifications_quiet_channel">App notifications, low urgency</string>
+    <string name="app_settings_notifications_hint">The app\'s notifications show in Android while it runs.</string>
     <string name="app_settings_network">Network</string>
     <string name="app_settings_network_requested">The app asks for network access.</string>
     <string name="app_settings_network_requested_off">The app asks for network access; your security level keeps it off until you turn it on.</string>

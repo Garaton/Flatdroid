@@ -324,6 +324,7 @@ class FlatpakLauncher(private val context: Context) {
                     alpineProgram?.let { it.id.removePrefix(AlpineProgramIds.PREFIX) } ?: appId, plan.app.metadata.sessionBusPolicy, camera = portalNodes.isNotEmpty(),
                     wholeBus = SessionBus.WHOLE_BUS in plan.app.metadata.context.sockets,
                     watchCamera = watchCameraPortal,
+                    notifications = settings.sendsNotifications,
                 ),
                 terminalTitle = if (plan.terminal) InstalledApps(context).name(appId) ?: appId else null,
                 clipboard = settings.sharesClipboard,
@@ -408,6 +409,7 @@ class FlatpakLauncher(private val context: Context) {
                     hostPath = plan.binds::hostOf, keepScreenOn = SessionController::keepScreenOn,
                     log = SessionController::log,
                     cameraAsked = if (!watchCameraPortal) null else AtomicBoolean().let { seen -> { if (seen.compareAndSet(false, true)) cameraPortalSeen(store) } },
+                    appId = appId, notify = settings.sendsNotifications,
                 )
                 camera?.takeIf { portalNodes.isNotEmpty() }?.let {
                     cameraHelpers = startCamera(it, Fdsec.Filter(extraSyscalls = security.extraSyscallFilter, noInternet = true))
@@ -941,6 +943,7 @@ class FlatpakLauncher(private val context: Context) {
             // Under the app's cache, so clearing caches drops it (fontconfig then regenerates it).
             runtimeCache = File(cache, RUNTIME_CACHE_DIR),
             runtimeDir = File(tmpBase, "run"),
+            mergedDirs = File(tmpBase, "merged"),
             userId = Os.getuid(),
             // Also under the app's cache: cleared with it, and only this app's own launches read it.
             ldCache = File(cache, LD_CACHE_DIR),
@@ -968,6 +971,11 @@ class FlatpakLauncher(private val context: Context) {
         File(plan.binds.tmp).mkdirs()
         File(plan.binds.shm).mkdirs()
         prepareRuntimeDir(appId, plan)
+        // The extensions' merged folders: links only, rebuilt with the rest of this folder each launch.
+        for (merged in plan.mergedDirs) {
+            merged.dir.mkdirs()
+            for ((name, target) in merged.links) Os.symlink(target, File(merged.dir, name).path)
+        }
         // The app can write these, so it can replace one with a link (see checkBindSources).
         for (dir in listOf(File(plan.binds.home)) + plan.binds.appDirs.map { File(it.first) }) {
             if (AndroidTarFs.isSymlink(dir)) dir.delete()

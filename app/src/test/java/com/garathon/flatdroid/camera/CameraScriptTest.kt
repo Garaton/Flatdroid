@@ -61,7 +61,7 @@ class CameraScriptTest {
         for (monitor in listOf("alsa", "bluez", "v4l2", "libcamera")) assertTrue("monitor.$monitor = disabled" in wireplumber)
         val backend = CameraScript.CONFIG_FILES.getValue("portals/flatdroid.portal")
         assertTrue("DBusName=org.freedesktop.impl.portal.desktop.flatdroid\n" in backend)
-        assertTrue("Interfaces=org.freedesktop.impl.portal.Access;org.freedesktop.impl.portal.Settings;org.freedesktop.impl.portal.AppChooser;org.freedesktop.impl.portal.Inhibit;\n" in backend)
+        assertTrue("Interfaces=org.freedesktop.impl.portal.Access;org.freedesktop.impl.portal.Settings;org.freedesktop.impl.portal.AppChooser;org.freedesktop.impl.portal.Inhibit;org.freedesktop.impl.portal.Notification;\n" in backend)
         val handler = CameraScript.CONFIG_FILES.getValue("applications/flatdroid-links.desktop")
         assertTrue("Exec=gdbus call --session --dest org.freedesktop.impl.portal.desktop.flatdroid --object-path /org/freedesktop/portal/desktop --method com.garathon.flatdroid.Links.Open %u\n" in handler)
         assertTrue("MimeType=x-scheme-handler/http;x-scheme-handler/https;x-scheme-handler/mailto;\n" in handler)

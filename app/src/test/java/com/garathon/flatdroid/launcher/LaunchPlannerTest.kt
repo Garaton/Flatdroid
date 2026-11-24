@@ -457,6 +457,30 @@ class LaunchPlannerTest {
     }
 
     @Test
+    fun mergedFoldersLinkEveryExtensionsEntries() {
+        runtimeWithGl()
+        val id = "org.example.Host"
+        val point = "[Extension org.example.Plugins]\ndirectory=extensions/Plugins\nsubdirectories=true\nmerge-dirs=ladspa;policies/managed;../x;\nversion=1\n"
+        File(inst.app(id, metadata = appMetadata(id, "host", extra = point)), "bin").mkdirs()
+        val a = inst.runtime("org.example.Plugins.A", "1")
+        val b = inst.runtime("org.example.Plugins.B", "1")
+        for (f in listOf("ladspa/one.so", "ladspa/both.so", "policies/managed/p.json")) File(a, f).apply { parentFile.mkdirs() }.writeText("a")
+        File(b, "ladspa/both.so").apply { parentFile.mkdirs() }.writeText("b")
+        File(b, "ladspa/two.so").writeText("b")
+        val merged = File(tmp.root, "merged")
+        val plan = Ready(planner.plan(id, dirs.copy(mergedDirs = merged)))
+        assertEquals(
+            listOf(
+                MergedDir(File(merged, "0"), "/app/extensions/Plugins/ladspa", mapOf("both.so" to "../A/ladspa/both.so", "one.so" to "../A/ladspa/one.so", "two.so" to "../B/ladspa/two.so")),
+                MergedDir(File(merged, "1"), "/app/extensions/Plugins/policies/managed", mapOf("p.json" to "../../A/policies/managed/p.json")),
+            ),
+            plan.mergedDirs,
+        )
+        assertTrue(File(merged, "0").path to "/app/extensions/Plugins/ladspa" in plan.binds.extra)
+        assertEquals(emptyList<MergedDir>(), Ready(planner.plan(id, dirs)).mergedDirs)
+    }
+
+    @Test
     fun flatpakInfoListsWhatTheAppAskedForAndGets() {
         runtimeWithGl()
         val id = "org.example.Browser"
@@ -479,7 +503,8 @@ class LaunchPlannerTest {
         // The portal's names stay Flatdroid's; the whole bus reaches Flatdroid's own names, and Flatpak for the host.
         assertTrue(
             "[Session Bus Policy]\norg.freedesktop.Notifications=talk\norg.freedesktop.ScreenSaver=talk\n" +
-                "org.freedesktop.FileManager1=talk\norg.freedesktop.Flatpak=talk\n" in info,
+                "org.freedesktop.FileManager1=talk\norg.gnome.SessionManager=talk\norg.freedesktop.PowerManagement=talk\n" +
+                "org.gnome.ScreenSaver=talk\norg.gnome.Mutter.IdleMonitor=talk\norg.freedesktop.Flatpak=talk\n" in info,
         )
         val x11 = Ready(all.plan(id, dirs, LaunchOptions(forceX11 = true, audio = false, wholeDev = true))).flatpakInfo!!
         assertTrue("sockets=x11;fallback-x11;\ndevices=all;\n" in x11)

@@ -29,6 +29,11 @@ data class ExtensionPoint(
     val subdirectories: Boolean,
     /** Added to LD_LIBRARY_PATH, relative to the mounted extension. */
     val addLdPath: String?,
+    /**
+     * `merge-dirs`: folders of each mounted extension whose entries are also linked into one
+     * folder of that name beside the extensions (plugins found in one place), relative paths.
+     */
+    val mergeDirs: List<String> = emptyList(),
 )
 
 /** The `[Context]` permissions an app asks for: the defaults of its per-app permissions, where the user lets them be. */
@@ -119,6 +124,8 @@ class FlatpakMetadata(
                 versions = keyfile.list(group, "versions").ifEmpty { listOfNotNull(keyfile.string(group, "version")) },
                 subdirectories = keyfile.boolean(group, "subdirectories") ?: false,
                 addLdPath = keyfile.string(group, "add-ld-path")?.trim('/')?.takeIf { it.isNotEmpty() },
+                mergeDirs = keyfile.list(group, "merge-dirs").map { it.trim('/') }
+                    .filter { dir -> dir.isNotEmpty() && dir.split('/').none { it.isEmpty() || it == "." || it == ".." } }.distinct(),
             )
         }
 

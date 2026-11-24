@@ -21,7 +21,13 @@ data class Deployment(
 }
 
 /** An installed extension and where it is mounted, relative to the guest's /usr or /app. */
-data class MountedExtension(val deployment: Deployment, val guestPath: String, val addLdPath: String?)
+data class MountedExtension(
+    val deployment: Deployment,
+    val guestPath: String,
+    val addLdPath: String?,
+    /** Its point's `merge-dirs` ([com.garathon.flatdroid.flatpak.ExtensionPoint.mergeDirs]). */
+    val mergeDirs: List<String> = emptyList(),
+)
 
 /**
  * Reads the Flatpak user installation from the host side (`<rootfs>/root/.local/share/flatpak`),
@@ -122,7 +128,7 @@ class FlatpakInstallation(root: File, private val arch: String) {
             for (name in names) {
                 val deployment = versions.firstNotNullOfOrNull { runtime(FlatpakRef(name, arch, it)) } ?: continue
                 val guest = if (point.subdirectories) "${point.directory}/${name.removePrefix(point.name + ".")}" else point.directory
-                mounted += MountedExtension(deployment, guest, point.addLdPath)
+                mounted += MountedExtension(deployment, guest, point.addLdPath, point.mergeDirs)
             }
         }
         return mounted

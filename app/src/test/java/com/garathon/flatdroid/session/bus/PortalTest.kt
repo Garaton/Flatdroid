@@ -35,8 +35,87 @@ class PortalTest {
 
     @Test
     fun ownsThePortalOrItsBackendName() {
-        assertEquals(listOf("org.freedesktop.portal.Desktop", "org.freedesktop.ScreenSaver", "org.freedesktop.FileManager1"), portal.names)
-        assertEquals(listOf("org.freedesktop.impl.portal.desktop.flatdroid", "org.freedesktop.ScreenSaver", "org.freedesktop.FileManager1"), backend.names)
+        val others = listOf(
+            "org.freedesktop.ScreenSaver", "org.freedesktop.FileManager1", "org.gnome.SessionManager", "org.freedesktop.PowerManagement",
+            "org.gnome.ScreenSaver", "org.gnome.Mutter.IdleMonitor",
+        )
+        assertEquals(listOf("org.freedesktop.portal.Desktop") + others, portal.names)
+        assertEquals(listOf("org.freedesktop.impl.portal.desktop.flatdroid") + others, backend.names)
+        assertEquals(listOf("org.freedesktop.portal.Desktop") + others + "org.freedesktop.Notifications", notifying.names)
+    }
+
+    private val shown = mutableListOf<Notifications.AppNotification>()
+    private val removed = mutableListOf<Int>()
+    private val notifications = Notifications(object : Notifications.Shower {
+        override fun show(notification: Notifications.AppNotification) { shown += notification }
+        override fun remove(key: Int) { removed += key }
+    })
+    private var idle = 0L
+    private val notifying = Portal(Portal.Role.PORTAL, { settings }, { status }, links, inhibitions, hostPath, notifications = notifications, idleMillis = { idle })
+
+    private fun notify(replaces: UInt = 0u, actions: List<String> = emptyList(), hints: Map<String, Variant> = emptyMap(), timeout: Int = -1) =
+        call(Notifications.IFACE, "Notify", "susssasa{sv}i", "App", replaces, "", "Title", "Body", actions, hints, timeout, path = Notifications.PATH)
+
+    @Test
+    fun freedesktopNotificationsShowReplaceAndClose() {
+        val id = ask(notify(actions = listOf("default", "Open", "reply", "Reply"), hints = mapOf("urgency" to Variant("y", 0.toUByte()))), notifying).body[0] as UInt
+        val first = shown.single()
+        assertEquals(listOf(Notifications.Button("Reply", "reply")), first.buttons)
+        assertTrue(first.hasDefault && first.quiet)
+        assertEquals(id, ask(notify(replaces = id, timeout = 5000), notifying).body[0])
+        assertEquals(first.key, shown.last().key)
+        assertEquals(5000L, shown.last().timeoutMillis)
+        val sent = all(call(Notifications.IFACE, "CloseNotification", "u", id, path = Notifications.PATH), notifying)
+        assertEquals(listOf(first.key), removed)
+        assertEquals(listOf(id, 3u), sent[1].body)
+        assertEquals(":1.9", sent[1].destination)
+        assertEquals(listOf("actions", "body", "icon-static", "persistence"), ask(call(Notifications.IFACE, "GetCapabilities", path = Notifications.PATH), notifying).body[0])
+    }
+
+    @Test
+    fun aTapSendsTheDefaultActionAndCloses() {
+        val id = ask(notify(actions = listOf("default", "Open")), notifying).body[0] as UInt
+        val signals = notifications.activated(shown.single().key, null)
+        assertEquals(listOf("ActionInvoked", "NotificationClosed"), signals.map { it.member })
+        assertEquals(listOf(id, "default"), signals[0].body)
+        assertEquals(listOf(id, 2u), signals[1].body)
+        assertEquals(emptyList<Message>(), notifications.activated(shown.single().key, null))
+        ask(notify(), notifying)
+        assertEquals(listOf("NotificationClosed"), notifications.dismissed(shown.last().key).map { it.member })
+    }
+
+    @Test
+    fun portalNotificationsSendTheirActionWithItsTarget() {
+        val options = mapOf(
+            "title" to Variant("s", "New mail"),
+            "markup-body" to Variant("s", "<b>From</b> &amp; you"),
+            "priority" to Variant("s", "low"),
+            "default-action" to Variant("s", "app.open"),
+            "buttons" to Variant("aa{sv}", listOf(mapOf("label" to Variant("s", "Archive"), "action" to Variant("s", "app.archive"), "target" to Variant("v", Variant("s", "42"))))),
+        )
+        assertEquals(DBusWire.METHOD_RETURN, ask(call(Notifications.PORTAL_IFACE, "AddNotification", "sa{sv}", "mail", options), notifying).type)
+        val n = shown.single()
+        assertEquals("From & you", n.body)
+        assertTrue(n.quiet && n.hasDefault)
+        val signal = DBusWire.decode(DBusWire.encode(notifications.activated(n.key, "app.archive").single(), 5u))
+        assertEquals(listOf("mail", "app.archive", listOf(Variant("s", "42"))), signal.body)
+        assertEquals(":1.9", signal.destination)
+        // Without the permission the portal has no notifications.
+        assertEquals("org.freedesktop.DBus.Error.UnknownInterface", ask(call(Notifications.PORTAL_IFACE, "AddNotification", "sa{sv}", "x", options)).errorName)
+    }
+
+    @Test
+    fun gnomeAndPowerManagementInhibitsHoldAsTheOthers() {
+        val cookie = ask(call(Portal.GNOME_SESSION_MANAGER, "Inhibit", "susu", "app", 0u, "playing", 8u, path = Portal.GNOME_SESSION_MANAGER_PATH)).body[0] as UInt
+        assertEquals(Inhibitions.State(idle = true), states.last())
+        assertEquals(listOf(true), ask(call(Portal.GNOME_SESSION_MANAGER, "IsInhibited", "u", 8u, path = Portal.GNOME_SESSION_MANAGER_PATH)).body)
+        ask(call(Portal.POWER_MANAGEMENT_IFACE, "Inhibit", "ss", "app", "download", path = Portal.POWER_MANAGEMENT_PATH))
+        assertEquals(Inhibitions.State(idle = true, suspend = true), states.last())
+        ask(call(Portal.GNOME_SESSION_MANAGER, "Uninhibit", "u", cookie, path = Portal.GNOME_SESSION_MANAGER_PATH))
+        assertEquals(Inhibitions.State(suspend = true), states.last())
+        assertEquals(listOf(false), ask(call(Portal.GNOME_SCREENSAVER, "GetActive", path = Portal.GNOME_SCREENSAVER_PATH)).body)
+        idle = 4200
+        assertEquals(listOf(4200uL), ask(call(Portal.IDLE_MONITOR, "GetIdletime", path = Portal.IDLE_MONITOR_PATH), notifying).body)
     }
 
     @Test

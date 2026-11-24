@@ -217,6 +217,10 @@ fun GlobalDefaultsPage(s: GlobalPageState) = SettingsPageColumn(R.string.setting
             security.shareClipboard, { v -> s.editSettings { copy(security = security.copy(shareClipboard = v)) } },
             stringResource(R.string.security_share_clipboard), stringResource(R.string.app_settings_clipboard_hint) + appliesToDefault,
         )
+        SwitchRow(
+            security.appNotifications, { v -> s.editSettings { copy(security = security.copy(appNotifications = v)) } },
+            stringResource(R.string.security_app_notifications), stringResource(R.string.app_settings_notifications_hint) + appliesToDefault,
+        )
         val percentLabel = stringResource(R.string.app_settings_resolution_percent)
         DropdownRow(
             selected = s.settings.appResolution,

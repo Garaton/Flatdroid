@@ -485,6 +485,12 @@ fun AppPermissionsPage(s: AppPageState) = SettingsPageColumn(R.string.app_page_p
             }
         }
         SwitchRow(
+            s.settings.sendsNotifications, { v -> s.editSettings { copy(notifications = v.takeIf { it != defaults.notifications }) } },
+            stringResource(R.string.app_settings_notifications),
+            stringResource(R.string.app_settings_notifications_hint),
+            onReset = if (s.settings.notifications != null) ({ s.editSettings { copy(notifications = null) } }) else null,
+        )
+        SwitchRow(
             s.settings.sharesClipboard, { v -> s.editSettings { copy(clipboard = v.takeIf { it != defaults.clipboard }) } },
             stringResource(R.string.app_settings_clipboard),
             stringResource(R.string.app_settings_clipboard_hint),

@@ -150,6 +150,10 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <receiver
+            android:name=".session.bus.NotificationActionReceiver"
+            android:exported="false" />
+
         <!-- Private homes in the Files app. MANAGE_DOCUMENTS: only Android's own Files app and
              picker can browse it; other apps get only what the user picks. -->
         <!-- Files an app opens through Android's chooser; reached only through a URI grant. -->

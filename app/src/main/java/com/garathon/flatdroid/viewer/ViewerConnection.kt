@@ -264,7 +264,19 @@ object ViewerConnection {
     @Volatile private var pointerX = 0
     @Volatile private var pointerY = 0
 
+    /**
+     * When the user last touched, typed or scrolled in the viewer ([android.os.SystemClock.elapsedRealtime]):
+     * the idle time apps ask for ([com.garathon.flatdroid.session.bus.Portal]).
+     */
+    @Volatile var lastInputAt = android.os.SystemClock.elapsedRealtime()
+        private set
+
+    private fun input() {
+        lastInputAt = android.os.SystemClock.elapsedRealtime()
+    }
+
     fun pointer(buttons: Int, x: Int, y: Int) = client?.let { c ->
+        input()
         this.buttons = buttons
         pointerX = x
         pointerY = y
@@ -272,6 +284,7 @@ object ViewerConnection {
     }
 
     fun key(down: Boolean, keysym: Int) {
+        input()
         if (Keysyms.outsideKeymap(keysym)) typed(down, keysym) else client?.let { c -> send { c.key(down, keysym) } }
     }
 
@@ -280,6 +293,7 @@ object ViewerConnection {
      * if it isn't in its keymap. Text mixing the two all goes this way: the two paths could overtake each other.
      */
     fun typed(down: Boolean, keysym: Int) {
+        input()
         val wayland = waylandClient?.takeIf { it.canType }
         if (wayland != null) wayland.key(down, keysym) else client?.let { c -> send { c.key(down, keysym) } }
     }
@@ -355,6 +369,7 @@ object ViewerConnection {
 
     /** Scrolls [down] and [right] steps at ([x], [y]) ([WaylandClient.scroll]). */
     fun scrollSteps(x: Int, y: Int, down: Int, right: Int) {
+        input()
         val fb = client?.framebuffer ?: return
         waylandClient?.scroll(x, y, fb.width, fb.height, down, right)
     }

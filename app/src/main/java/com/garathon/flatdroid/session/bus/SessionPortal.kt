@@ -9,11 +9,13 @@ import android.net.Network
 import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.PowerManager
+import android.os.SystemClock
 import com.garathon.flatdroid.session.links.AndroidLinks
 import com.garathon.flatdroid.session.links.OpenedFiles
 import com.garathon.flatdroid.settings.LiveSettings
 import com.garathon.flatdroid.settings.UserSettings
 import com.garathon.flatdroid.util.debug.DebugLog
+import com.garathon.flatdroid.viewer.ViewerConnection
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -28,10 +30,13 @@ import java.io.File
  * kept up to date with Android's, links ([AndroidLinks]), and inhibits: the screen kept on
  * through [keepScreenOn] (the viewer does it while visible), the processor through a partial wake
  * lock. In [Portal.Role.BACKEND] the real portal answers the app's network calls, so Android's
- * network isn't watched here.
+ * network isn't watched here. With [notify], the app's notifications as Android's
+ * ([AndroidNotifications]), removed at the session's end.
  */
 class SessionPortal private constructor(
     private val context: Context,
+    appId: String,
+    notify: Boolean,
     private val role: Portal.Role,
     private val appNetwork: Boolean,
     @Volatile private var user: UserSettings?,
@@ -51,7 +56,12 @@ class SessionPortal private constructor(
     private val wakeLock = context.getSystemService(PowerManager::class.java)
         ?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Flatdroid:inhibit")?.apply { setReferenceCounted(false) }
     private val inhibitions = Inhibitions(::inhibited)
-    private val portal = Portal(role, ::settings, ::networkStatus, AndroidLinks(context, log), inhibitions, hostPath, cameraAsked)
+    private val shower = if (!notify) null else AndroidNotifications(context, appId, hostPath, ::notificationEvent)
+    private val notifications = shower?.let { Notifications(it) }
+    private val portal = Portal(
+        role, ::settings, ::networkStatus, AndroidLinks(context, log), inhibitions, hostPath, cameraAsked, notifications,
+        idleMillis = { SystemClock.elapsedRealtime() - ViewerConnection.lastInputAt },
+    )
     private var client: BusClient? = null
 
     private fun settings(): Map<String, Map<String, Variant>> = appearance.settings()
@@ -128,6 +138,14 @@ class SessionPortal private constructor(
         portal.networkChanged()?.let { client?.send(it) }
     }
 
+    /** A notification tapped ([action] null), a button, or a dismissal: the app hears of it. */
+    private fun notificationEvent(key: Int, action: String?, dismissed: Boolean) {
+        val shown = notifications ?: return
+        val signals = if (dismissed) shown.dismissed(key) else shown.activated(key, action)
+        DebugLog.i("Bus: notification $key ${if (dismissed) "dismissed" else action ?: "tapped"}")
+        for (signal in signals) client?.send(signal)
+    }
+
     /** What the app holds off now: the screen's timeout, the processor's sleep (released at the session's end at the latest). */
     private fun inhibited(state: Inhibitions.State) {
         DebugLog.i("Bus: inhibits now $state")
@@ -150,6 +168,8 @@ class SessionPortal private constructor(
         client?.close()
         client = null
         inhibitions.clear()
+        notifications?.clear()
+        shower?.close()
         // The files the app opened stop being served with its session.
         OpenedFiles.clear()
     }
@@ -168,9 +188,9 @@ class SessionPortal private constructor(
         fun open(
             context: Context, socket: File, role: Portal.Role, appNetwork: Boolean, user: UserSettings?,
             hostPath: (String) -> String?, keepScreenOn: (Boolean) -> Unit, log: (String) -> Unit,
-            cameraAsked: (() -> Unit)? = null,
+            cameraAsked: (() -> Unit)? = null, appId: String = "", notify: Boolean = false,
         ): SessionPortal? {
-            val session = SessionPortal(context, role, appNetwork, user, hostPath, keepScreenOn, log, cameraAsked)
+            val session = SessionPortal(context, appId, notify, role, appNetwork, user, hostPath, keepScreenOn, log, cameraAsked)
             session.client = BusClient.open(socket, session.portal.names, session.portal::handle, log) ?: return null
             session.watchNetwork()
             session.watchAppearance()

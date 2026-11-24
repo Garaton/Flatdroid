@@ -1,6 +1,7 @@
 package com.garathon.flatdroid.session.helpers
 
 import com.garathon.flatdroid.proot.GuestPaths
+import com.garathon.flatdroid.session.bus.Notifications
 import com.garathon.flatdroid.session.bus.Portal
 
 /**
@@ -52,13 +53,17 @@ object SessionBus {
      * serves ([Portal]: settings, network monitor, proxy resolver, links and their requests), and
      * with [camera], where the real portal runs, its camera and its links for addresses only. With
      * [watchCamera] (no real portal), the camera's calls reach Flatdroid, which learns from them that
-     * the app asks for it. The portal's other interfaces stay closed, whoever owns its name.
+     * the app asks for it. With [notifications], the portal's notifications (Flatdroid's, or the
+     * real portal's in front of Flatdroid's backend). The portal's other interfaces stay closed, whoever owns its name.
      *
      * The other names Flatdroid owns ([FLATDROID_NAMES]) are reached as in Flatpak: by apps whose
      * metadata lets them talk to one, or that have the whole bus there ([wholeBus], `sockets=session-bus`).
      * The metadata may not own them.
      */
-    fun proxyArgs(appId: String, policy: Map<String, String>, camera: Boolean, wholeBus: Boolean = false, watchCamera: Boolean = false): List<String> {
+    fun proxyArgs(
+        appId: String, policy: Map<String, String>, camera: Boolean, wholeBus: Boolean = false, watchCamera: Boolean = false,
+        notifications: Boolean = false,
+    ): List<String> {
         val args = mutableListOf(
             "unix:path=$GUEST_DAEMON_DIR/$SOCKET",
             "$GUEST_PROXY_DIR/$SOCKET",
@@ -70,6 +75,7 @@ object SessionBus {
         args += PORTAL_RULES
         args += if (camera) CAMERA_RULES else LINK_RULES
         if (watchCamera && !camera) args += CAMERA_CALLS
+        if (notifications) args += NOTIFICATION_CALLS
         return args
     }
 
@@ -112,8 +118,8 @@ object SessionBus {
     /** `sockets=` entry for the whole session bus. */
     const val WHOLE_BUS = "session-bus"
 
-    /** Names Flatdroid owns beside the portal's ([Portal.names]). */
-    val FLATDROID_NAMES = listOf(Portal.SCREENSAVER, Portal.FILE_MANAGER)
+    /** Names Flatdroid owns beside the portal's ([Portal.names]); notifications' only while the app may send them. */
+    val FLATDROID_NAMES = listOf(Portal.SCREENSAVER, Portal.FILE_MANAGER, Notifications.NAME) + Portal.INHIBIT_NAMES
 
     /** Whether the policy [name] (optionally ending in `.*`) is or covers [owned]. */
     private fun covers(name: String, owned: String): Boolean =
@@ -146,6 +152,8 @@ object SessionBus {
      * The real portal's camera, and its links for addresses only: its OpenFile would look up the
      * app's descriptor from another proot (verify).
      */
+    /** Its signals go to the app alone, which the proxy lets through without a rule. */
+    private const val NOTIFICATION_CALLS = "--call=$PORTAL=${Notifications.PORTAL_IFACE}.*@$PORTAL_PATH"
     private const val CAMERA_CALLS = "--call=$PORTAL=${Portal.CAMERA}.*@$PORTAL_PATH"
     private val CAMERA_RULES = listOf(
         CAMERA_CALLS,

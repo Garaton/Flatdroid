@@ -193,7 +193,7 @@ val SecuritySaver: Saver<SecuritySettings, Any> = listSaver(
         listOf(
             it.extraSyscallFilter, it.hideHelperProcesses, it.permissionsFromMetadata, it.defaultHomeMode.name,
             it.limitDevices, it.hideScreen, it.checkFilesBeforeLaunch,
-            it.androidFonts, it.shareClipboard, it.shareLocale,
+            it.androidFonts, it.shareClipboard, it.shareLocale, it.appNotifications,
         )
     },
     restore = {
@@ -208,6 +208,7 @@ val SecuritySaver: Saver<SecuritySettings, Any> = listSaver(
             androidFonts = it[7] as Boolean,
             shareClipboard = it[8] as Boolean,
             shareLocale = it[9] as Boolean,
+            appNotifications = it[10] as Boolean,
         )
     },
 )
