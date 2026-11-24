@@ -12,6 +12,10 @@ import com.garathon.flatdroid.R
 import com.garathon.flatdroid.camera.AndroidCameras
 import com.garathon.flatdroid.camera.ScreenStreamer
 import com.garathon.flatdroid.settings.HomeMode
+import com.garathon.flatdroid.settings.PerformanceLevel
+import com.garathon.flatdroid.settings.PerformanceSettings
+import com.garathon.flatdroid.settings.Preset
+import com.garathon.flatdroid.settings.Resolution
 import com.garathon.flatdroid.settings.SecurityLevel
 import com.garathon.flatdroid.settings.SecuritySettings
 import com.garathon.flatdroid.ui.common.DropdownRow
@@ -27,21 +31,34 @@ import com.garathon.flatdroid.ui.common.SwitchRow
  */
 @Composable
 fun SecurityLevelRow(security: SecuritySettings, onChange: (SecuritySettings) -> Unit, enabled: Boolean = true) {
-    val level = SecurityLevel.of(security)
-    // Each level carries its own label and hint, so adding a preset needs no change here.
-    val names = SecurityLevel.entries.associateWith { stringResource(it.labelRes) }
+    PresetRow(SecurityLevel.entries, SecurityLevel.of(security), onChange, R.string.security_level, enabled)
+    Text(stringResource(R.string.security_not_sandboxed), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+}
+
+/**
+ * The performance level (shown as chosen, or Custom), and what it means. Each setting it sets is
+ * changed on its own, on the settings pages. On the Overview and in setup.
+ */
+@Composable
+fun PerformanceLevelRow(performance: PerformanceSettings, onChange: (PerformanceSettings) -> Unit, enabled: Boolean = true) =
+    PresetRow(PerformanceLevel.entries, PerformanceLevel.of(performance), onChange, R.string.performance_level, enabled)
+
+/** A preset's dropdown: [levels] with [level] chosen, or Custom (null), which is listed only while it is what the settings are. */
+@Composable
+private fun <T, P : Preset<T>> PresetRow(levels: List<P>, level: P?, onChange: (T) -> Unit, titleRes: Int, enabled: Boolean) {
+    // Each level carries its own label and hint, so adding one needs no change here.
+    val names = levels.associateWith { stringResource(it.labelRes) }
     val custom = stringResource(R.string.security_level_custom)
     DropdownRow(
         selected = level,
-        // Custom is shown only while it is what the settings are; choosing it changes nothing.
-        options = SecurityLevel.entries.toList<SecurityLevel?>() + if (level == null) listOf(null) else emptyList(),
+        // Choosing Custom changes nothing.
+        options = levels.toList<P?>() + if (level == null) listOf(null) else emptyList(),
         onSelect = { it?.let { chosen -> onChange(chosen.settings) } },
         label = { it?.let(names::getValue) ?: custom },
-        title = stringResource(R.string.security_level),
+        title = stringResource(titleRes),
         hint = stringResource(level?.hintRes ?: R.string.security_level_custom_hint),
         enabled = enabled,
     )
-    Text(stringResource(R.string.security_not_sandboxed), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
 }
 
 /** Only download translations for the device's languages: on the Flatpak page and in setup. */
@@ -191,6 +208,29 @@ val SecuritySaver: Saver<SecuritySettings, Any> = listSaver(
             androidFonts = it[7] as Boolean,
             shareClipboard = it[8] as Boolean,
             shareLocale = it[9] as Boolean,
+        )
+    },
+)
+
+/** Keeps [PerformanceSettings] across configuration changes. */
+val PerformanceSaver: Saver<PerformanceSettings, Any> = listSaver(
+    save = {
+        listOf(
+            it.appResolution.name, it.appInterfaceSize, it.frameRate60, it.lowLatencyAudio, it.highQualityAudio,
+            it.cameraResolution, it.cameraFrameRate, it.screenScale, it.reduceMotion,
+        )
+    },
+    restore = {
+        PerformanceSettings(
+            appResolution = Resolution.valueOf(it[0] as String),
+            appInterfaceSize = it[1] as Int,
+            frameRate60 = it[2] as Boolean,
+            lowLatencyAudio = it[3] as Boolean,
+            highQualityAudio = it[4] as Boolean,
+            cameraResolution = it[5] as Int,
+            cameraFrameRate = it[6] as Int,
+            screenScale = it[7] as Int,
+            reduceMotion = it[8] as Boolean,
         )
     },
 )

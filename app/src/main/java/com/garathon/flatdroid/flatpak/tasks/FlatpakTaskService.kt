@@ -326,13 +326,14 @@ class FlatpakTaskService : Service() {
      */
     private fun updateAlpine(env: AlpineEnvironment) {
         val cache = env.apkCacheDir.apply { mkdirs() }
-        val packages = AlpineSetup.updateList(env.installer.rootfs, PackageGroup.ANDROID_MONOSPACE.isFile)
+        val monospace = PackageGroup.ANDROID_MONOSPACE.isFile
+        val packages = AlpineSetup.updateList(env.installer.rootfs, monospace)
         var allInstalled = false
         val check = thread(name = "apk-info") {
             allInstalled = runCatching { env.run(listOf("/sbin/apk", "info", "-e") + packages).exitCode == 0 }.getOrDefault(false)
         }
         try {
-            for (args in listOf(listOf("upgrade"), listOf("add") + packages)) {
+            for (args in listOf(listOf("upgrade")) + AlpineSetup.updateAdds(env.installer.rootfs, monospace)) {
                 if (args.first() == "add") {
                     check.join()
                     if (allInstalled) return

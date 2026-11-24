@@ -64,6 +64,7 @@ class AlpineResetTest {
             flatpakFiles = listOf(electron.parentFile!!),
             userData = listOf(appData),
             fs = JvmTarFs,
+            userPackages = userPackages,
         )
 
         // A set-up environment: Alpine, a Flatpak file that is a link2symlink link into .l2s,
@@ -78,8 +79,12 @@ class AlpineResetTest {
         Files.createSymbolicLink(File(flatpak, "app/org.xfce.mousepad/files/bin/mousepad").toPath(), backing.toPath())
         File(rootfs, "usr/bin").mkdirs()
         File(rootfs, "usr/bin/Xvnc").writeText("old Xvnc")
+        File(rootfs, "etc/apk").mkdirs()
+        File(rootfs, "etc/apk/world").writeText("flatpak\n.flatdroid-x11=20261124\nmousepad\nhtop>=3\n")
         state.save(SetupState(SetupStep.entries.toSet(), settingsChosen = true))
     }
+
+    private val userPackages get() = File(alpine, "user-packages")
 
     private val mousepad get() = File(installer.rootfs, "root/.local/share/flatpak/app/org.xfce.mousepad/files/bin/mousepad")
 
@@ -104,6 +109,23 @@ class AlpineResetTest {
         assertFalse(installer.hasKept())
         assertFalse(File(alpine, "kept").exists())
         assertEquals("[State]", File(appData, "org.xfce.mousepad/config/mousepadrc").readText())
+    }
+
+    @Test
+    fun keepFlatpaksNotesTheUsersPackagesOnce() {
+        reset.request(ResetMode.KEEP_FLATPAKS)
+        reset.finish()
+        // Setup's and the groups' packages aren't the user's; versions are left to apk.
+        assertEquals("mousepad\nhtop\n", userPackages.readText())
+        // A later reset before setup added them back keeps the note (the new rootfs has none of them).
+        installer.install(source)
+        reset.request(ResetMode.KEEP_FLATPAKS)
+        reset.finish()
+        assertEquals("mousepad\nhtop\n", userPackages.readText())
+        // The other modes drop it.
+        reset.request(ResetMode.REMOVE_FLATPAKS)
+        reset.finish()
+        assertFalse(userPackages.exists())
     }
 
     @Test

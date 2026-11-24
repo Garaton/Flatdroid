@@ -1,5 +1,6 @@
 package com.garathon.flatdroid.setup
 
+import com.garathon.flatdroid.alpine.programs.AlpinePrograms
 import com.garathon.flatdroid.setup.rootfs.RootfsInstaller
 import com.garathon.flatdroid.setup.rootfs.TarFs
 import com.garathon.flatdroid.setup.rootfs.deleteTree
@@ -33,6 +34,11 @@ class AlpineReset(
     /** Each Flatpak's settings and data, the launcher's files and Flatdroid's settings: removed only by [ResetMode.WIPE]. */
     private val userData: List<File>,
     private val fs: TarFs,
+    /**
+     * Where a reset that keeps Flatpaks notes the Alpine packages the user added, for setup to add
+     * them back ([AlpineSetup]); the other modes drop it. Null: not noted.
+     */
+    private val userPackages: File? = null,
 ) {
     fun isPending(): Boolean = pendingFile.isFile
 
@@ -45,6 +51,11 @@ class AlpineReset(
         if (!isPending()) return
         // An unreadable request keeps the most.
         val mode = ResetMode.entries.firstOrNull { it.key == pendingFile.readText().trim() } ?: ResetMode.KEEP_FLATPAKS
+        userPackages?.let { file ->
+            // Before the rootfs goes; a repeated finish finds the note already there (or nothing to note).
+            if (mode != ResetMode.KEEP_FLATPAKS) file.delete()
+            else if (!file.exists()) AlpinePrograms.userPackages(installer.rootfs).takeIf { it.isNotEmpty() }?.let { file.writeTextAtomically(it.joinToString("\n") + "\n") }
+        }
         state.clear()
         if (mode == ResetMode.KEEP_FLATPAKS) installer.setAside() else installer.discardKept()
         if (mode != ResetMode.KEEP_FLATPAKS) flatpakFiles.forEach { fs.deleteTree(it) }

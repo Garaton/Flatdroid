@@ -45,4 +45,16 @@ class PackageGroupTest {
             AlpineSetup.updateList(rootfs, androidMonospace = false),
         )
     }
+
+    @Test
+    fun groupsAreAddedUnderTheirVirtualPackages() {
+        assertEquals(listOf("add", "--virtual", ".flatdroid-terminal", "foot"), PackageGroup.TERMINAL.addArgs(androidMonospace = true))
+        val rootfs = tmp.newFolder("virtual")
+        assertEquals(listOf(listOf("add") + AlpineSetup.PACKAGES), AlpineSetup.updateAdds(rootfs, androidMonospace = true))
+        File(rootfs, "usr/bin/foot").apply { parentFile!!.mkdirs() }.writeText("")
+        assertEquals(
+            listOf(listOf("add") + AlpineSetup.PACKAGES, listOf("add", "--virtual", ".flatdroid-terminal", "foot", PackageGroup.DEJAVU)),
+            AlpineSetup.updateAdds(rootfs, androidMonospace = false),
+        )
+    }
 }

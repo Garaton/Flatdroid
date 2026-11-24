@@ -19,11 +19,13 @@ class AlpineProgramsTest {
     private fun rootfs(): File {
         val root = tmp.newFolder("rootfs")
         fun write(path: String, text: String) = File(root, path).apply { parentFile!!.mkdirs(); writeText(text) }
-        write("etc/apk/world", "flatpak\nfoot\nmousepad\nxeyes\nhidden-app\n")
+        // foot came with Flatdroid's terminal group, under its virtual package.
+        write("etc/apk/world", "flatpak\n.flatdroid-terminal\nmousepad\nxeyes\nhidden-app\n")
         write(
             "lib/apk/db/installed",
             listOf(
-                "P:foot\no:foot\nF:usr/share/applications\nR:foot.desktop\n",
+                "P:.flatdroid-terminal\nD:foot\n",
+                "P:foot\no:foot\nF:usr/share/applications\nR:foot.desktop\nR:foot-server.desktop\n",
                 "P:mousepad\no:mousepad\nD:so:libgtk-3.so.0\nF:usr/bin\nR:mousepad\nF:usr/share/applications\nR:org.xfce.mousepad.desktop\n",
                 "P:xeyes\no:xeyes\nD:so:libX11.so.6\nF:usr/share/applications\nR:xeyes.desktop\n",
                 "P:hidden-app\no:hidden-app\nF:usr/share/applications\nR:hidden.desktop\n",
@@ -38,6 +40,7 @@ class AlpineProgramsTest {
         write("usr/share/applications/org.xfce.mousepad.desktop", entry + "Name=Mousepad\nExec=mousepad %F\nIcon=org.xfce.mousepad\n")
         write("usr/share/applications/xeyes.desktop", entry + "Name=XEyes\nExec=/usr/bin/xeyes -geometry 100x100\nTerminal=false\n")
         write("usr/share/applications/foot.desktop", entry + "Name=Foot\nExec=foot\n")
+        write("usr/share/applications/foot-server.desktop", entry + "Name=Foot Server\nExec=foot --server\n")
         write("usr/share/applications/hidden.desktop", entry + "Name=Hidden\nExec=mousepad\nNoDisplay=true\n")
         write("usr/share/applications/dep.desktop", entry + "Name=Dep\nExec=mousepad\n")
         return root
@@ -60,6 +63,18 @@ class AlpineProgramsTest {
         assertEquals(AlpinePackages.Display.X11, xeyes.display)
         assertNull(xeyes.icon)
         assertEquals("xeyes", AlpinePrograms(root).program("alpine+xeyes")?.packageName)
+    }
+
+    @Test
+    fun aGroupsPackageTheUserAddedIsTheirs() {
+        val root = rootfs()
+        File(root, "etc/apk/world").appendText("foot\n")
+        val ids = AlpinePrograms(root).list().map { it.id }
+        assertTrue("alpine+foot" in ids)
+        assertFalse("foot" in AlpinePrograms.FLATDROID_PACKAGES)
+        // Its server mode is the same command with an argument added: not listed.
+        assertFalse("alpine+foot-server" in ids)
+        assertEquals(listOf("mousepad", "xeyes", "foot"), AlpinePrograms.userPackages(root).filter { it != "hidden-app" })
     }
 
     @Test

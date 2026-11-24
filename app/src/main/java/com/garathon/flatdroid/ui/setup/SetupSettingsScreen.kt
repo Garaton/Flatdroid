@@ -28,8 +28,11 @@ import com.garathon.flatdroid.R
 import com.garathon.flatdroid.alpine.GuestFiles
 import com.garathon.flatdroid.settings.UserSettings
 import com.garathon.flatdroid.ui.common.LocalDeveloperOptions
+import com.garathon.flatdroid.ui.common.SettingsCard
 import com.garathon.flatdroid.ui.settings.GpuRuntimesRow
 import com.garathon.flatdroid.ui.settings.LanguagesRow
+import com.garathon.flatdroid.ui.settings.PerformanceLevelRow
+import com.garathon.flatdroid.ui.settings.PerformanceSaver
 import com.garathon.flatdroid.ui.settings.SecurityLevelRow
 import com.garathon.flatdroid.ui.settings.SecuritySaver
 import com.garathon.flatdroid.ui.theme.FlatdroidTheme
@@ -51,6 +54,7 @@ fun SetupSettingsScreen(
 ) {
     var onlyMyLanguages by rememberSaveable { mutableStateOf(settings.onlyMyLanguages) }
     var security by rememberSaveable(stateSaver = SecuritySaver) { mutableStateOf(settings.security) }
+    var performance by rememberSaveable(stateSaver = PerformanceSaver) { mutableStateOf(settings.performance) }
     var gpuRuntimes by rememberSaveable { mutableStateOf(settings.installGpuRuntimes) }
 
     SetupFrame(
@@ -59,7 +63,7 @@ fun SetupSettingsScreen(
         modifier = modifier,
         actions = {
             Button(
-                onClick = { onContinue(settings.copy(flatpakLanguages = if (onlyMyLanguages) deviceLanguages else GuestFiles.ALL_LANGUAGES, security = security, installGpuRuntimes = gpuRuntimes)) },
+                onClick = { onContinue(settings.copy(flatpakLanguages = if (onlyMyLanguages) deviceLanguages else GuestFiles.ALL_LANGUAGES, security = security, installGpuRuntimes = gpuRuntimes).withPerformance(performance)) },
                 modifier = Modifier.fillMaxWidth(),
             ) { Text(stringResource(R.string.setup_settings_continue)) }
             Text(
@@ -72,13 +76,19 @@ fun SetupSettingsScreen(
         error?.let { SetupError(stringResource(R.string.setup_failed, it)) }
         Text(stringResource(R.string.setup_settings_intro), style = MaterialTheme.typography.bodyMedium)
         SetupNote(stringResource(R.string.setup_estimate))
-        LanguagesRow(onlyMyLanguages, { onlyMyLanguages = it }, deviceLanguages)
-        // Only with developer options, which a reset keeps: a first setup has none yet.
-        CompositionLocalProvider(LocalDeveloperOptions provides settings.developerOptions) {
-            GpuRuntimesRow(gpuRuntimes, { gpuRuntimes = it })
+        // In cards, as on the settings pages.
+        SettingsCard {
+            LanguagesRow(onlyMyLanguages, { onlyMyLanguages = it }, deviceLanguages)
+            // Only with developer options, which a reset keeps: a first setup has none yet.
+            CompositionLocalProvider(LocalDeveloperOptions provides settings.developerOptions) {
+                GpuRuntimesRow(gpuRuntimes, { gpuRuntimes = it })
+            }
         }
-        SecurityLevelRow(security, { security = it })
-        Text(stringResource(R.string.security_change_later), style = MaterialTheme.typography.bodySmall)
+        SettingsCard {
+            SecurityLevelRow(security, { security = it })
+            PerformanceLevelRow(performance, { performance = it })
+            Text(stringResource(R.string.security_change_later), style = MaterialTheme.typography.bodySmall)
+        }
     }
 }
 

@@ -28,7 +28,7 @@ object SessionPackages {
     fun add(context: Context, sessionId: String, group: PackageGroup) {
         val env = AlpineEnvironment.get(context)
         val cache = env.apkCacheDir.apply { mkdirs() }
-        val command = AlpineSetup.apkCommand(listOf("add") + group.packages(PackageGroup.ANDROID_MONOSPACE.isFile))
+        val command = AlpineSetup.apkCommand(group.addArgs(PackageGroup.ANDROID_MONOSPACE.isFile))
         SessionController.log("[flatdroid] $ ${command.joinToString(" ")}")
         val preparing = context.getString(if (group == PackageGroup.X11) R.string.packages_adding_x11 else R.string.packages_adding_terminal)
         SessionController.preparing(sessionId, preparing, null)

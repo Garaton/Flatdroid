@@ -52,6 +52,7 @@ import com.garathon.flatdroid.ui.settings.ScreenScaleRow
 import com.garathon.flatdroid.ui.settings.GlobalPage
 import com.garathon.flatdroid.ui.settings.GpuRuntimesRow
 import com.garathon.flatdroid.ui.settings.LanguagesRow
+import com.garathon.flatdroid.ui.settings.PerformanceLevelRow
 import com.garathon.flatdroid.ui.settings.SecurityLevelRow
 import com.garathon.flatdroid.ui.settings.SettingsPageColumn
 import com.garathon.flatdroid.ui.settings.homeModeNames
@@ -157,6 +158,7 @@ fun GlobalOverviewPage(s: GlobalPageState) = SettingsPageColumn(null) {
     }
     SettingsCard {
         SecurityLevelRow(s.settings.security, { v -> s.editSettings { copy(security = v) } })
+        PerformanceLevelRow(s.settings.performance, { v -> s.editSettings { withPerformance(v) } })
     }
 
     SettingsCard(title = stringResource(R.string.settings_flatdroid_settings)) {

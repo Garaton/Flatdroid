@@ -292,9 +292,19 @@ fun BrowseAppScreen(
                     Spacer(Modifier.width(if (landscape) 12.dp else 8.dp))
                     Text(stringResource(R.string.browse_installing), style = if (landscape) MaterialTheme.typography.titleLarge else LocalTextStyle.current)
                 }
-                InstallState.QUEUED -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(stringResource(R.string.browse_queued_waiting), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                    OutlinedButton(onClick = onUnqueue) { Text(stringResource(R.string.cancel)) }
+                // In landscape as tall as Install beside the header: the note over a full-width Cancel.
+                InstallState.QUEUED -> if (landscape) {
+                    Column(Modifier.fillMaxWidth().then(tall), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically)) {
+                        Text(stringResource(R.string.browse_queued_waiting), style = MaterialTheme.typography.titleMedium)
+                        OutlinedButton(onClick = onUnqueue, modifier = Modifier.fillMaxWidth().height(48.dp)) {
+                            Text(stringResource(R.string.cancel), style = MaterialTheme.typography.titleMedium)
+                        }
+                    }
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text(stringResource(R.string.browse_queued_waiting), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                        OutlinedButton(onClick = onUnqueue) { Text(stringResource(R.string.cancel)) }
+                    }
                 }
                 InstallState.UNKNOWN -> Button(onClick = {}, enabled = false, shape = tallShape, modifier = Modifier.fillMaxWidth().then(tall)) {
                     ButtonContent(Icons.Filled.Download, stringResource(R.string.install), large = landscape)

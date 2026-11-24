@@ -30,6 +30,16 @@ enum class PackageGroup(private val packages: List<String>, val files: List<Stri
     /** About how much [packages] download beyond setup's, in MB (Alpine 3.24's index, either architecture). */
     fun downloadMb(androidMonospace: Boolean): Int = if (this == TERMINAL && !androidMonospace) DEJAVU_DOWNLOAD_MB else downloadMb
 
+    /**
+     * apk's virtual package that holds the group in Alpine's world, so its packages are Flatdroid's
+     * and a package the user adds by name (one of these too) stays the user's: listed as a program,
+     * and removable, apk keeping it while the group needs it.
+     */
+    val virtualName: String get() = ".flatdroid-${name.lowercase()}"
+
+    /** apk's arguments that add the group under [virtualName]. */
+    fun addArgs(androidMonospace: Boolean): List<String> = listOf("add", "--virtual", virtualName) + packages(androidMonospace)
+
     /** Whether the group is in the Alpine at [rootfs]. */
     fun addedIn(rootfs: File): Boolean = files.all { File(rootfs, it).isFile }
 

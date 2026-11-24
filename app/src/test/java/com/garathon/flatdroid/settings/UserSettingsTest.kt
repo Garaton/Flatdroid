@@ -157,6 +157,49 @@ class UserSettingsTest {
     }
 
     @Test
+    fun aPerformanceLevelIsSavedByNameAndCustomBySetting() {
+        val file = File(tmp.root, "performance.properties")
+        val store = UserSettingsStore(file)
+        // Flatdroid's defaults, and older files without a level, are Balanced.
+        assertEquals(PerformanceLevel.BALANCED, UserSettings("en").performanceLevel)
+        file.writeText("flatpak.languages=en\n")
+        assertEquals(PerformanceLevel.BALANCED, store.load()!!.performanceLevel)
+        for (level in PerformanceLevel.entries) {
+            store.save(UserSettings("en").withPerformance(level.settings))
+            assertEquals(level, store.load()!!.performanceLevel)
+            assertEquals(level.settings, store.load()!!.performance)
+            assertTrue("performance.level=${level.name.lowercase()}" in file.readText())
+        }
+        // A level's settings follow its definition, not what was saved beside it.
+        file.writeText("flatpak.languages=en\nperformance.level=battery\napps.interfaceSize=200\n")
+        assertEquals(PerformanceLevel.BATTERY.settings, store.load()!!.performance)
+        // One setting changed is Custom, kept as it is.
+        val custom = PerformanceLevel.QUALITY.settings.copy(frameRate60 = false)
+        store.save(UserSettings("en").withPerformance(custom))
+        assertNull(store.load()!!.performanceLevel)
+        assertEquals(custom, store.load()!!.performance)
+        assertTrue("performance.level=custom" in file.readText())
+    }
+
+    @Test
+    fun aPerformanceLevelLeavesSecurityAndAppChoicesAlone() {
+        val hardened = UserSettings("en", security = SecurityLevel.HARDENED.settings)
+        for (level in PerformanceLevel.entries) {
+            val changed = hardened.withPerformance(level.settings)
+            assertEquals(SecurityLevel.HARDENED, changed.securityLevel)
+            assertEquals(level.settings, changed.performance)
+            // An app's own size stays; one following Flatdroid's gets the level's.
+            val defaults = changed.appDefaults
+            assertEquals(Resolution.QUARTER, AppSettings(defaults = defaults, resolutionChoice = Resolution.QUARTER).resolution)
+            assertEquals(level.settings.appResolution, AppSettings(defaults = defaults).resolution)
+            assertEquals(level.settings.appInterfaceSize, AppSettings(defaults = defaults).interfaceSize)
+        }
+        // The interface grows with the screen, so apps look about the same size at every level.
+        val ratios = PerformanceLevel.entries.map { it.settings.appInterfaceSize.toDouble() / it.settings.appResolution.percent!! }
+        assertTrue(ratios.all { it in 1.5..1.7 })
+    }
+
+    @Test
     fun theLevelsSortTheirSettings() {
         val performant = SecurityLevel.PERFORMANT.settings
         val default = SecurityLevel.DEFAULT.settings

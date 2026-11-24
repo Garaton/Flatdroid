@@ -5,6 +5,8 @@ import android.os.StatFs
 import com.garathon.flatdroid.BuildConfig
 import com.garathon.flatdroid.R
 import com.garathon.flatdroid.alpine.AlpineEnvironment
+import com.garathon.flatdroid.alpine.programs.AlpinePackages
+import com.garathon.flatdroid.alpine.programs.AlpinePrograms
 import com.garathon.flatdroid.flatpak.tasks.FlatpakCommands
 import com.garathon.flatdroid.launcher.LauncherFiles
 import com.garathon.flatdroid.proot.ProcessResult
@@ -107,7 +109,30 @@ class AlpineSetup(
         requireFiles(PACKAGE_FILES)
         val flatpak = run(listOf(FlatpakCommands.FLATPAK, "--version"), reporter)
         if (flatpak.exitCode != 0) throw IOException(context.getString(R.string.setup_error_flatpak_check, lastLine(flatpak).ifEmpty { "exit ${flatpak.exitCode}" }))
+        addBackUserPackages(cache, reporter)
         AndroidTarFs.deleteTree(cache)
+    }
+
+    /**
+     * The packages the user had added before a reset that kept Flatpaks ([AlpineReset]), added
+     * again. One try: a package gone from Alpine since only shows in the log, and setup goes on.
+     */
+    private fun addBackUserPackages(cache: File, reporter: SetupReporter) {
+        val file = SetupController.userPackagesFile(context)
+        // Not what the fresh Alpine has already (its own base packages, setup's).
+        val present = AlpinePrograms.worldOf(env.installer.rootfs)
+        val names = runCatching { file.readText() }.getOrNull()?.lines()?.filter { AlpinePackages.isPackageName(it) && it !in present }.orEmpty()
+        if (names.isNotEmpty()) {
+            reporter.progress(null, context.getString(R.string.setup_progress_user_packages))
+            try {
+                val run = apk(listOf("add") + names, cache, reporter)
+                if (run.exitCode != 0 || !run.summary.ok) reporter.log("Your packages weren't all added back: ${run.summary.errors.firstOrNull() ?: run.summary.line ?: "exit ${run.exitCode}"}")
+            } catch (e: IOException) {
+                // apk refused (a package no longer in Alpine): setup itself is done, so it doesn't fail for this.
+                reporter.log("Your packages weren't added back: ${e.message}")
+            }
+        }
+        file.delete()
     }
 
     /** An apk command's end: its exit code and what it printed last. */
@@ -289,6 +314,10 @@ class AlpineSetup(
         /** What Alpine's updates make sure is installed: setup's packages and the groups added since ([PackageGroup]). */
         fun updateList(rootfs: File, androidMonospace: Boolean): List<String> =
             PACKAGES + PackageGroup.entries.filter { it.addedIn(rootfs) }.flatMap { it.packages(androidMonospace) }
+
+        /** The apk commands' arguments that install [updateList]: setup's packages, then each group added since under its virtual package. */
+        fun updateAdds(rootfs: File, androidMonospace: Boolean): List<List<String>> =
+            listOf(listOf("add") + PACKAGES) + PackageGroup.entries.filter { it.addedIn(rootfs) }.map { it.addArgs(androidMonospace) }
 
         /** Where apk's package cache is bound: a directory in Flatdroid's cache, deleted afterwards. */
         const val APK_CACHE = "/var/cache/apk"

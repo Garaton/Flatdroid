@@ -5,11 +5,13 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
+import android.content.res.Configuration
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -24,7 +26,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -32,6 +34,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
@@ -45,10 +48,12 @@ import com.garathon.flatdroid.ui.common.FollowEnd
 import com.garathon.flatdroid.ui.common.LogText
 import com.garathon.flatdroid.ui.dialogs.ResetDialog
 import com.garathon.flatdroid.ui.theme.FlatdroidTheme
+import com.garathon.flatdroid.ui.theme.Spacing
 
 /**
  * The second screen of setup, the same for everyone: the steps with their state, how far the whole
- * setup is, the current step's detail, the recent output, and Start/Resume/Retry. The user's
+ * setup is, the current step's detail, the whole output (filling the room below, scrolling on its
+ * own), and Start/Resume/Retry. The user's
  * choices come before, on [SetupSettingsScreen].
  */
 @Composable
@@ -64,14 +69,18 @@ fun SetupScreen(
     if (confirmReset) {
         ResetDialog(onConfirm = { confirmReset = false; onReset(it) }, onDismiss = { confirmReset = false })
     }
-    var showLog by rememberSaveable { mutableStateOf(false) }
     val scroll = rememberScrollState()
     val commandRunning = command?.running == true
+    // After a failure the command's output takes the log's place.
+    val commandOutput = command?.output?.takeIf { it.isNotEmpty() && !ui.running }
+    val log = commandOutput ?: ui.log.joinToString("\n")
+    val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
 
     SetupFrame(
         title = stringResource(if (ui.running) R.string.setup_title_running else R.string.setup_title),
         screen = 2,
         modifier = modifier,
+        scrolls = false,
         actions = {
             if (ui.running) {
                 Text(
@@ -86,41 +95,61 @@ fun SetupScreen(
                     ui.completed.isNotEmpty() -> R.string.setup_resume
                     else -> R.string.setup_start
                 }
-                Button(onClick = onStart, enabled = !commandRunning, modifier = Modifier.fillMaxWidth()) { Text(stringResource(label)) }
-                if (ui.completed.isNotEmpty() || ui.failed != null) {
-                    TextButton(onClick = { confirmReset = true }, enabled = !commandRunning) { Text(stringResource(R.string.reset_button)) }
+                // Side by side, so the height goes to the steps and the log. Reset as in Settings' danger zone.
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.row)) {
+                    Button(onClick = onStart, enabled = !commandRunning, modifier = Modifier.weight(1f)) { Text(stringResource(label)) }
+                    if (ui.completed.isNotEmpty() || ui.failed != null) {
+                        OutlinedButton(onClick = { confirmReset = true }, enabled = !commandRunning) {
+                            Text(stringResource(R.string.reset_button), color = MaterialTheme.colorScheme.error)
+                        }
+                    }
                 }
             }
         },
     ) {
-        if (!ui.running && ui.completed.isEmpty() && ui.failed == null) {
-            Text(stringResource(R.string.setup_intro), style = MaterialTheme.typography.bodyMedium)
+        val showCommand = command != null && !ui.running
+        val commandInput = @Composable {
+            if (command != null && showCommand) CommandInput(command.running, command.onRun, command.onCancel, Modifier.fillMaxWidth())
         }
-        OverallProgress(ui)
-        Column(verticalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.padding(top = 4.dp)) {
-            for (step in SetupStep.entries) StepRow(step, ui)
-        }
-
-        ui.error?.let { SetupError(stringResource(R.string.setup_failed, it)) }
-
-        if (command != null && !ui.running) {
-            CommandInput(command.running, command.onRun, command.onCancel, Modifier.fillMaxWidth())
-        }
-
-        if (command != null && command.output.isNotEmpty() && !ui.running) {
-            FollowEnd(scroll, command.output)
-            Box(modifier = Modifier.fillMaxWidth().height(OUTPUT_HEIGHT).verticalScroll(scroll)) {
-                LogText(command.output, Modifier.fillMaxWidth())
+        // In landscape the command and the log share the right half, at its top.
+        val sideBySide = landscape && (log.isNotEmpty() || showCommand)
+        // The steps and what goes with them; they scroll on their own only when they don't fit.
+        val steps = @Composable { stepsModifier: Modifier ->
+            Column(stepsModifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(Spacing.row)) {
+                if (!ui.running && ui.completed.isEmpty() && ui.failed == null) {
+                    Text(stringResource(R.string.setup_intro), style = MaterialTheme.typography.bodyMedium)
+                }
+                OverallProgress(ui)
+                Column(verticalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.padding(top = 4.dp)) {
+                    for (step in SetupStep.entries) StepRow(step, ui)
+                }
+                ui.error?.let { SetupError(stringResource(R.string.setup_failed, it)) }
+                if (!sideBySide) commandInput()
             }
-        } else if (ui.log.isNotEmpty()) {
-            TextButton(onClick = { showLog = !showLog }) {
-                Text(stringResource(if (showLog) R.string.setup_hide_log else R.string.setup_show_log))
+        }
+        // The whole log, filling the room down to the buttons, scrolling by itself and following its end.
+        val logBox = @Composable { boxModifier: Modifier ->
+            FollowEnd(scroll, log)
+            Surface(boxModifier.fillMaxWidth(), shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.surfaceContainer) {
+                Box(Modifier.padding(8.dp).verticalScroll(scroll)) { LogText(log, Modifier.fillMaxWidth()) }
             }
-            FollowEnd(scroll, ui.log, showLog)
-            val logModifier = if (showLog) Modifier.height(OUTPUT_HEIGHT).verticalScroll(scroll) else Modifier
-            Surface(Modifier.fillMaxWidth().animateContentSize(), shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.surfaceContainer) {
-                Box(modifier = Modifier.padding(8.dp).then(logModifier)) {
-                    LogText((if (showLog) ui.log else ui.log.takeLast(4)).joinToString("\n"), Modifier.fillMaxWidth())
+        }
+        when {
+            // Too little height for both: side by side.
+            sideBySide -> Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(Spacing.row)) {
+                steps(Modifier.weight(1f))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.small)) {
+                    commandInput()
+                    if (log.isNotEmpty()) logBox(Modifier.weight(1f))
+                }
+            }
+            log.isEmpty() -> steps(Modifier.weight(1f, fill = false))
+            else -> BoxWithConstraints(Modifier.weight(1f)) {
+                // The steps keep at most most of the room (a long error scrolls), the log the rest.
+                val stepsMax = maxHeight * 0.6f
+                Column(verticalArrangement = Arrangement.spacedBy(Spacing.row)) {
+                    steps(Modifier.heightIn(max = stepsMax))
+                    logBox(Modifier.weight(1f))
                 }
             }
         }
@@ -148,8 +177,6 @@ private fun OverallProgress(ui: SetupUi) {
         )
     }
 }
-
-private val OUTPUT_HEIGHT = 400.dp
 
 private val MARK_SIZE = 24.dp
 /** The circle inside a 24 dp check-circle icon, so empty, running and done line up. */

@@ -11,8 +11,6 @@
     <string name="setup_start">Start setup</string>
     <string name="setup_resume">Resume setup</string>
     <string name="setup_retry">Retry</string>
-    <string name="setup_show_log">Show full log</string>
-    <string name="setup_hide_log">Hide full log</string>
     <string name="setup_failed">Failed: %1$s</string>
 
     <string name="setup_step_rootfs">Download and extract Alpine</string>
@@ -26,6 +24,7 @@
     <string name="setup_progress_proot">Checking that proot runs</string>
     <string name="setup_progress_upgrade">Upgrading Alpine</string>
     <string name="setup_progress_packages">Installing packages</string>
+    <string name="setup_progress_user_packages">Adding back your Alpine packages</string>
     <string name="setup_progress_fix">Running failed package scripts again</string>
     <string name="setup_progress_flathub">Adding Flathub</string>
     <string name="setup_progress_flathub_retry">Adding Flathub (attempt %1$d of %2$d)</string>
@@ -212,7 +211,7 @@
     <string name="reset_keep">Keep installed Flatpaks</string>
     <string name="reset_remove">Remove Flatpaks, keep app data</string>
     <string name="reset_wipe">Wipe everything</string>
-    <string name="reset_keep_hint">Flatpaks and their data (settings, homes, etc) stay downloaded within Flatdroid to be used again after the reset. Caches are cleared.</string>
+    <string name="reset_keep_hint">Flatpaks and their data (settings, homes, etc) stay downloaded within Flatdroid to be used again after the reset. Alpine packages you added are downloaded and added again. Caches are cleared.</string>
     <string name="reset_remove_hint">Flatpaks and all runtimes are removed, however their data stays (settings, home, etc). Caches are cleared.</string>
     <string name="reset_wipe_hint">Everything in Flatdroid is wiped (Alpine, Flatpak apps and data), and you start from a clean slate. The only thing that remains the same is Flatdroid\'s own global settings.</string>
     <string name="reset_confirm">Reset</string>
@@ -823,6 +822,13 @@
     <string name="security_level_hardened_hint">Narrows what apps can reach as far as Flatdroid can. Slower, and some apps may lose features.</string>
     <string name="security_level_custom_hint">Your own selected settings.</string>
     <string name="security_not_sandboxed">Flatpaks are not sandboxed at any level. Any Flatpak may read and change any other Flatpak.</string>
+    <string name="performance_level">Performance</string>
+    <string name="performance_level_battery">Battery</string>
+    <string name="performance_level_balanced">Balanced</string>
+    <string name="performance_level_quality">Quality</string>
+    <string name="performance_level_battery_hint">Smaller screens for apps, smaller and slower camera frames, and fewer animations. Uses less CPU and battery.</string>
+    <string name="performance_level_balanced_hint">Flatdroid\'s balance of quality and battery use.</string>
+    <string name="performance_level_quality_hint">Full-size screens for apps, 60 frames per second, low latency and higher quality sound, and larger camera frames. Uses more CPU and battery.</string>
     <string name="security_change_later">You may change each setting yourself later.</string>
     <string name="security_hide_helpers">Hide helper processes</string>
     <string name="security_hide_helpers_hint">Blocks apps from opening the memory of Flatdroid\'s helpers through /proc. Helper processes started after the app aren\'t covered.</string>

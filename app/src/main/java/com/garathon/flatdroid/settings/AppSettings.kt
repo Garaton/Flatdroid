@@ -84,7 +84,7 @@ data class AppDefaults(
 ) {
     companion object {
         val DEFAULT_RESOLUTION = Resolution.THREE_QUARTERS
-        const val DEFAULT_INTERFACE_SIZE = 150
+        const val DEFAULT_INTERFACE_SIZE = 125
         /** The resolutions a default can be: the shares (a custom size is the app's own). */
         val DEFAULT_RESOLUTIONS = Resolution.entries.filter { it.percent != null }
     }

@@ -107,14 +107,14 @@ class AppSettingsTest {
 
     @Test
     fun resolutionAndInterfaceSizeFollowTheDefaultsUntilChosen() {
-        // Flatdroid's own defaults: 75% and 150%.
-        assertEquals(Resolution.THREE_QUARTERS to 150, AppSettings().let { it.resolution to it.interfaceSize })
-        val defaults = AppDefaults(resolution = Resolution.HALF, interfaceSize = 125)
+        // Flatdroid's own defaults: 75% and 125%.
+        assertEquals(Resolution.THREE_QUARTERS to 125, AppSettings().let { it.resolution to it.interfaceSize })
+        val defaults = AppDefaults(resolution = Resolution.HALF, interfaceSize = 100)
         val file = File(tmp.root, "r.properties")
         AppSettingsStore(file, defaults).save(AppSettings(defaults = defaults))
-        assertEquals(Resolution.HALF to 125, AppSettingsStore(file, defaults).load().let { it.resolution to it.interfaceSize })
+        assertEquals(Resolution.HALF to 100, AppSettingsStore(file, defaults).load().let { it.resolution to it.interfaceSize })
         // An app's own choice stays; one equal to the default is read as following it, so it follows a new default.
-        AppSettingsStore(file, defaults).save(AppSettings(defaults = defaults, resolutionChoice = Resolution.FULL, interfaceSizeChoice = 125))
+        AppSettingsStore(file, defaults).save(AppSettings(defaults = defaults, resolutionChoice = Resolution.FULL, interfaceSizeChoice = 100))
         val reread = AppSettingsStore(file, defaults).load()
         assertEquals(Resolution.FULL to null, reread.resolutionChoice to reread.interfaceSizeChoice)
         AppSettingsStore(file, defaults).save(reread)

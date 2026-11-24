@@ -115,7 +115,15 @@ class AlpinePrograms(
             val desktop = runCatching { file.readTextUpTo()?.let(Keyfile::parse) }.getOrNull() ?: return@mapNotNull null
             program(id, owner, desktop, packages)
         }
-        return withFreedBytes(programs, packages, allWorld)
+        return withFreedBytes(withoutVariants(programs), packages, allWorld)
+    }
+
+    /**
+     * [programs] without an entry that runs another entry of its package with arguments added (a
+     * terminal's server mode, say): the user can add arguments to the plain one themselves.
+     */
+    internal fun withoutVariants(programs: List<AlpineProgram>): List<AlpineProgram> = programs.filterNot { p ->
+        programs.any { q -> q !== p && q.packageName == p.packageName && q.command.size < p.command.size && p.command.take(q.command.size) == q.command }
     }
 
     /** [programs] with [AlpineProgram.freedBytes], worked out once per package. */
@@ -178,9 +186,19 @@ class AlpinePrograms(
         private val PATH = listOf("/usr/bin", "/bin", "/usr/sbin", "/sbin")
         private const val MAX_DB_BYTES = 64L shl 20
 
-        /** Flatdroid's own packages, never listed (their desktop files are the helpers'). */
-        val FLATDROID_PACKAGES: Set<String> =
-            (AlpineSetup.PACKAGES + PackageGroup.entries.flatMap { it.packages(true) + it.packages(false) }).toSet()
+        /**
+         * Flatdroid's own packages as Alpine's world names them, never listed (their desktop files are
+         * the helpers'): setup's, and each group's virtual package. A group's package the user also
+         * added by name is in the world under its own name, so it is the user's.
+         */
+        val FLATDROID_PACKAGES: Set<String> = (AlpineSetup.PACKAGES + PackageGroup.entries.map { it.virtualName }).toSet()
+
+        /** The packages the user added to the Alpine at [rootfs]: its world without Flatdroid's own (Alpine's own base packages are among them, which a fresh Alpine has anyway); empty when it can't be read. */
+        fun userPackages(rootfs: File): List<String> = worldOf(rootfs).filter { it !in FLATDROID_PACKAGES && AlpinePackages.isPackageName(it) }
+
+        /** The names in the world file of the Alpine at [rootfs], without versions; empty when it can't be read. */
+        fun worldOf(rootfs: File): Set<String> =
+            runCatching { File(rootfs, AlpinePackages.WORLD).readTextUpTo()?.let(AlpinePackages::parseWorld) }.getOrNull().orEmpty()
 
         /** The programs in [rootfs] as the app reads it: Alpine's links are guest paths, so a link counts as there. */
         fun of(rootfs: File) = AlpinePrograms(rootfs, exists = { it.exists() || AndroidTarFs.isSymlink(it) })

@@ -126,6 +126,22 @@ data class UserSettings(
     /** The level [security] matches; null for Custom. */
     val securityLevel: SecurityLevel? get() = SecurityLevel.of(security)
 
+    /** The settings a performance level sets, as they are now. */
+    val performance: PerformanceSettings get() = PerformanceSettings(
+        appResolution = appResolution, appInterfaceSize = appInterfaceSize, frameRate60 = frameRate60,
+        lowLatencyAudio = lowLatencyAudio, highQualityAudio = highQualityAudio, cameraResolution = cameraResolution,
+        cameraFrameRate = cameraFrameRate, screenScale = screenScale, reduceMotion = reduceMotion,
+    )
+
+    val performanceLevel: PerformanceLevel? get() = PerformanceLevel.of(performance)
+
+    /** These settings with [p]'s performance settings. */
+    fun withPerformance(p: PerformanceSettings): UserSettings = copy(
+        appResolution = p.appResolution, appInterfaceSize = p.appInterfaceSize, frameRate60 = p.frameRate60,
+        lowLatencyAudio = p.lowLatencyAudio, highQualityAudio = p.highQualityAudio, cameraResolution = p.cameraResolution,
+        cameraFrameRate = p.cameraFrameRate, screenScale = p.screenScale, reduceMotion = p.reduceMotion,
+    )
+
     /** Whether the shell is filtered; the developer setting counts only while developer options are on. */
     val filterShell: Boolean get() = !developerOptions || shellFilter
 
@@ -217,7 +233,7 @@ class UserSettingsStore(private val file: File) {
         if (!file.isFile) return null
         val props = Properties().apply { file.inputStream().use { load(it) } }
         val languages = props.getProperty(KEY_LANGUAGES) ?: return null
-        return UserSettings(
+        val loaded = UserSettings(
             flatpakLanguages = languages,
             developerOptions = props.getProperty(KEY_DEVELOPER) == "true",
             externalViewer = props.getProperty(KEY_EXTERNAL_VIEWER) == "true",
@@ -250,6 +266,10 @@ class UserSettingsStore(private val file: File) {
             alpineSafeLaunch = props.getProperty(KEY_ALPINE_SAFE_LAUNCH) != "false",
             alpineShellUser = AlpineShellUser.entries.firstOrNull { it.key == props.getProperty(KEY_ALPINE_SHELL_USER) } ?: AlpineShellUser.ROOT,
         )
+        // As the security level: a performance level saved by name sets its settings as Flatdroid
+        // defines them now; Custom (or none saved) keeps each setting as saved.
+        val level = PerformanceLevel.entries.firstOrNull { it.name.lowercase() == props.getProperty(KEY_PERFORMANCE_LEVEL) }
+        return level?.let { loaded.withPerformance(it.settings) } ?: loaded
     }
 
     /**
@@ -301,6 +321,7 @@ class UserSettingsStore(private val file: File) {
         if (settings.highQualityAudio) props.setProperty(KEY_HIGH_QUALITY_AUDIO, "true")
         settings.sharedHome?.let { props.setProperty(KEY_SHARED_HOME, it) }
         if (settings.flatpakTheme != FlatpakTheme.SYSTEM) props.setProperty(KEY_THEME, settings.flatpakTheme.name.lowercase())
+        props.setProperty(KEY_PERFORMANCE_LEVEL, settings.performanceLevel?.name?.lowercase() ?: CUSTOM)
         val level = settings.securityLevel
         props.setProperty(KEY_SECURITY_LEVEL, level?.name?.lowercase() ?: CUSTOM)
         if (level == null) {
@@ -328,6 +349,7 @@ class UserSettingsStore(private val file: File) {
     private companion object {
         private const val CUSTOM = "custom"
         private const val KEY_SECURITY_LEVEL = "security.level"
+        private const val KEY_PERFORMANCE_LEVEL = "performance.level"
         private const val KEY_EXTRA_SYSCALLS = "security.extraSyscalls"
         private const val KEY_HIDE_HELPERS = "security.hideHelpers"
         private const val KEY_PERMISSIONS_FROM_METADATA = "security.permissionsFromMetadata"

@@ -75,7 +75,11 @@ object SetupController {
             AppData.root(context), AppData.launcherDir(context), AppData.settingsDir(context), File(context.filesDir, SETTINGS_FILE),
         ),
         fs = AndroidTarFs,
+        userPackages = userPackagesFile(context),
     )
+
+    /** The Alpine packages a reset noted for setup to add back. */
+    fun userPackagesFile(context: Context) = File(context.filesDir, "alpine/user-packages")
 
     /**
      * Loads finished steps from disk, unless setup is running in this process. A pending reset
