@@ -26,7 +26,7 @@ import kotlinx.coroutines.launch
  * that hasn't opened its first window yet keeps running until the question comes (two minutes). Where
  * nobody counts the windows (the viewer never connected), that time passes before the hidden pause.
  *
- * The pause is [ProotFreeze]'s.
+ * The pause is [ProotFreeze]'s. The sound player stops reading meanwhile ([AudioPlayer.paused]).
  */
 object HiddenPause {
     /** How long the viewer stays hidden before the app is paused: switching to another app and back for a moment doesn't pause it. */
@@ -58,7 +58,7 @@ object HiddenPause {
     /**
      * A session started with Flatdroid's own viewer. With [pauseWhenHidden] (the app's "Continue
      * while hidden" off) it also goes quiet and pauses while hidden. [onPaused] hears each pause (true)
-     * and each time the app goes on (false), so what feeds the app (its cameras) can stop meanwhile.
+     * and each time the app goes on (false), so what feeds the app (its cameras, its microphone) can stop meanwhile.
      * Not on the main thread.
      */
     @Synchronized
@@ -215,6 +215,7 @@ object HiddenPause {
         if (stopped) return true
         val traced = ProotFreeze.stop(now.prootPid) ?: return false
         stopped = true
+        now.player?.paused = true
         now.onPaused?.invoke(true)
         DebugLog.i("Paused: the app is stopped ($traced processes)")
         return true
@@ -223,6 +224,7 @@ object HiddenPause {
     private fun go(now: Session) {
         if (!stopped) return
         stopped = false
+        now.player?.paused = false
         ProotFreeze.go(now.prootPid)
         now.onPaused?.invoke(false)
         DebugLog.i("Shown: the app goes on")

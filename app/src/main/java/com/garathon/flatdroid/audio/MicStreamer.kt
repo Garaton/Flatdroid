@@ -30,7 +30,8 @@ import java.io.FileDescriptor
  * shrunk to one page, so what waits in it stays short (on 4 KB pages, 40 ms of silence at 48 kHz).
  * While nothing reads it, it fills and this thread sleeps in poll(); silence is written at the
  * clock's pace only while an app records without the microphone (until it is allowed, or for
- * good when denied).
+ * good when denied). While the app is paused ([paused]) nothing is written and Android's microphone
+ * is let go; it is taken again when the app goes on, if it was in use.
  */
 class MicStreamer(
     private val context: Context,
@@ -41,6 +42,8 @@ class MicStreamer(
 ) {
     @Volatile private var streaming = false
     @Volatile private var closed = false
+    private val lock = Object()
+    @Volatile private var paused = false
     private val thread = Thread(::run, "microphone").apply {
         isDaemon = true
         start()
@@ -64,7 +67,14 @@ class MicStreamer(
     fun close() {
         closed = true
         streaming = false
+        synchronized(lock) { lock.notifyAll() }
         thread.join(STOP_WAIT_MS)
+    }
+
+    /** The app is paused ([on]) or goes on. */
+    fun paused(on: Boolean) = synchronized(lock) {
+        paused = on
+        lock.notifyAll()
     }
 
     private fun run() {
@@ -86,6 +96,17 @@ class MicStreamer(
         val reading = Reading(capacity)
         try {
             while (!closed) {
+                if (paused) {
+                    record?.let(::release)
+                    record = null
+                    synchronized(lock) {
+                        while (paused && !closed) lock.wait()
+                    }
+                    // The time paused counts neither way.
+                    reading.resumed()
+                    next = System.nanoTime()
+                    continue
+                }
                 if (streaming && record == null) {
                     record = record(chunk)
                     if (record == null) streaming = false
@@ -153,6 +174,11 @@ class MicStreamer(
             fullSince = 0L
             sinceFull += bytes
             if (sinceFull > capacity) set(true)
+        }
+
+        fun resumed() {
+            sinceFull = 0L
+            fullSince = 0L
         }
 
         fun full() {

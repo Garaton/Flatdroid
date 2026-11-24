@@ -19,6 +19,10 @@ import java.io.IOException
  * Android output path [outputMode] asks for (whose own latency adds to it). It asks for no audio
  * focus, so it mixes with other apps' sound. PulseAudio sends silence while nothing
  * plays; after [SILENCE_PAUSE_MS] of it the track is paused, so Android's audio output can idle.
+ *
+ * While the app is paused ([paused]) the socket isn't read: PulseAudio queues what it records (only
+ * silence then) up to its limit and drops the rest, and the thread sleeps instead of waking for each
+ * chunk. Once the app goes on, what waited in the socket is skipped as silence.
  */
 class AudioPlayer(
     private val socket: File,
@@ -31,6 +35,13 @@ class AudioPlayer(
     @Volatile var muted = false
     @Volatile private var connection: LocalSocket? = null
     private var thread: Thread? = null
+    private val lock = Object()
+    /** The app is paused: nothing is read until it goes on. */
+    var paused = false
+        set(value) = synchronized(lock) {
+            field = value
+            lock.notifyAll()
+        }
 
     fun start() {
         running = true
@@ -43,6 +54,7 @@ class AudioPlayer(
     /** Stops playing and waits briefly for the thread to end. */
     fun stop() {
         running = false
+        synchronized(lock) { lock.notifyAll() }
         runCatching { connection?.shutdownInput() }
         thread?.interrupt()
         thread?.join(STOP_WAIT_MS)
@@ -67,11 +79,28 @@ class AudioPlayer(
             val pauseAfter = Pcm.bytesFor(rate, CHANNELS, SILENCE_PAUSE_MS)
             var silentBytes = 0
             var playing = false
+            // Back from a pause: what waits in the socket is from before it.
+            var behind = false
             while (running) {
+                if (paused) {
+                    if (playing) {
+                        track.pause()
+                        track.flush()
+                        playing = false
+                    }
+                    silentBytes = pauseAfter
+                    synchronized(lock) {
+                        while (paused && running) lock.wait()
+                    }
+                    behind = true
+                }
                 input.readFully(buffer)
+                // Another chunk already waits: this one is old, and skipped until the newest is reached.
+                if (behind && input.available() < buffer.size) behind = false
+                val quiet = muted || behind
                 // Muted: silence from this chunk on, also for the stretch before the track pauses.
-                if (muted) buffer.fill(0)
-                if (muted || Pcm.isSilent(buffer, buffer.size)) {
+                if (quiet) buffer.fill(0)
+                if (quiet || Pcm.isSilent(buffer, buffer.size)) {
                     silentBytes = (silentBytes + buffer.size).coerceAtMost(pauseAfter)
                     if (playing && silentBytes >= pauseAfter) {
                         track.pause()
@@ -88,6 +117,8 @@ class AudioPlayer(
                 }
                 track.write(buffer, 0, buffer.size)
             }
+        } catch (_: InterruptedException) {
+            // Stopped while paused.
         } catch (_: EOFException) {
             // PulseAudio has gone: the session is ending.
         } catch (e: IOException) {

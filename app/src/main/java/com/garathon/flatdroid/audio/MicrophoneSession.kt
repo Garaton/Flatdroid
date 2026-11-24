@@ -27,6 +27,9 @@ class MicrophoneSession(
     // Last: its thread starts at once and may call back.
     private val streamer: MicStreamer = MicStreamer(context.applicationContext, pipe, rate, question::inUse)
 
+    /** The app is paused ([on]) or goes on: no microphone and no silence meanwhile. */
+    fun paused(on: Boolean) = streamer.paused(on)
+
     fun stop() {
         question.stop()
         // Outside the question's lock: the streamer's thread may be waiting for it.

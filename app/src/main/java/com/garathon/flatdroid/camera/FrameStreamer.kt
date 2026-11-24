@@ -38,7 +38,9 @@ import java.io.IOException
  * it reads (an app encoding a recording can pause for seconds), unless it read nothing for
  * [STALE_MS] (paused or killed). Before the library said either, the pipe tells: emptied means the
  * app reads it, a frame left in it for [NOT_READ_MS] means it stopped. Opening the device to list
- * it isn't use. The size stays as it started: a V4L2 app fixes it when it starts streaming.
+ * it isn't use. The size stays as it started: a V4L2 app fixes it when it starts streaming. The
+ * device is looked at every [WATCH_MS] while the app uses it, every [IDLE_WATCH_MS] otherwise, and
+ * not at all while the app is paused.
  */
 abstract class FrameStreamer(
     private val pipe: File,
@@ -91,7 +93,7 @@ abstract class FrameStreamer(
     private val watch = object : Runnable {
         override fun run() {
             watchDevice()
-            handler.postDelayed(this, WATCH_MS)
+            handler.postDelayed(this, if (reading) WATCH_MS else IDLE_WATCH_MS)
         }
     }
     protected var users = 0
@@ -178,18 +180,31 @@ abstract class FrameStreamer(
         update()
     }
 
-    /** The app is paused: it takes no frames, so the source stops, linked or not, until it goes on. */
+    /**
+     * The app is paused: it takes no frames, so a camera stops, linked or not, until it goes on (the
+     * screen's share goes on: ending it would ask again). In device mode the device isn't looked at
+     * meanwhile, and the time paused doesn't count as the app not reading.
+     */
     fun setPaused(on: Boolean) = handler.post {
         if (closed || on == paused) return@post
         paused = on
+        if (deviceEnd != null) {
+            handler.removeCallbacks(watch)
+            if (!on) {
+                val now = SystemClock.uptimeMillis()
+                if (lastEmpty > 0) lastEmpty = now
+                if (streaming == true) streamingSince = now
+                handler.postDelayed(watch, WATCH_MS)
+            }
+        }
         update()
     }
 
-    /** The source while linked and allowed, black frames while linked and not, nothing while not linked or paused. */
+    /** The source while linked and allowed, black frames while linked and not, nothing while not linked or a paused camera. */
     private fun update() {
         handler.removeCallbacks(blackFrames)
         when {
-            paused -> stopSource()
+            paused && sensor == Sensor.CAMERA -> stopSource()
             users > 0 && allowed -> startSource()
             users > 0 -> {
                 stopSource()
@@ -233,7 +248,7 @@ abstract class FrameStreamer(
             }
             meter.reset()
             opened()
-            handler.postDelayed(watch, WATCH_MS)
+            if (!paused) handler.postDelayed(watch, WATCH_MS)
             // The frame the app's first read takes, which shows it reads.
             sendBlack()
         } catch (e: Exception) {
@@ -439,11 +454,13 @@ abstract class FrameStreamer(
         /** gst's jpegenc default. */
         const val JPEG_QUALITY = 85
         /**
-         * Device mode: how often the pipe is looked at, how long a frame left in it means the app
-         * stopped reading (before the library said it streams; while it streams, [STALE_MS]), and
-         * after how long without a frame one is put in.
+         * Device mode: how often the pipe is looked at while the app uses the device and while it
+         * doesn't (an app starting to stream gets the frame waiting at once, and the source follows
+         * within this), how long a frame left in it means the app stopped reading (before the library
+         * said it streams; while it streams, [STALE_MS]), and after how long without a frame one is put in.
          */
         const val WATCH_MS = 100L
+        const val IDLE_WATCH_MS = 500L
         const val NOT_READ_MS = 1000L
         const val STALE_MS = 30_000L
         const val REFILL_MS = 500L
