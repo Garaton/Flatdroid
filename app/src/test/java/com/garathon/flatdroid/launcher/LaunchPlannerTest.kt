@@ -228,6 +228,21 @@ class LaunchPlannerTest {
     }
 
     @Test
+    fun onlyAnX11SessionDrawnThroughGlGetsGlx() {
+        runtimeWithGl()
+        val wayland = tmp.newFolder("wayland")
+        fun plan(id: String, sockets: String, software: Boolean): LaunchPlan {
+            val files = inst.app(id, metadata = appMetadata(id, "app", extra = "[Context]\nsockets=$sockets\n"))
+            File(files, "bin").mkdirs()
+            File(files, "bin/app").writeBytes(ExecutableTest.elf(0xb7))
+            return Ready(planner.plan(id, dirs.copy(waylandSockets = wayland), LaunchOptions(softwareRendering = software)))
+        }
+        assertTrue(plan("org.example.GlX11", "x11;", software = false).glx)
+        assertFalse(plan("org.example.SoftwareX11", "x11;", software = true).glx)
+        assertFalse(plan("org.example.GlWayland", "wayland;", software = false).glx)
+    }
+
+    @Test
     fun aTerminalAppGetsAWaylandSessionWithoutX11() {
         val runtime = runtimeWithGl()
         val wayland = tmp.newFolder("wayland")

@@ -139,6 +139,11 @@ data class LaunchPlan(
     /** The session is Wayland (labwc and wayvnc) instead of Xvnc: the app takes Wayland, or runs in a terminal. */
     val wayland: Boolean = false,
     /**
+     * Xvnc offers GLX: an X11 session drawn through GL ([LaunchOptions.softwareRendering] off). Apps
+     * that make their GL context only through GLX (LWJGL 2, GLFW by default) need it; the rest use EGL.
+     */
+    val glx: Boolean = false,
+    /**
      * The app runs in a terminal, a Wayland window of the session's: it gets the Wayland socket only
      * if it takes Wayland itself, and never X11.
      */
@@ -366,6 +371,7 @@ class LaunchPlanner(
                 isElectron = isElectron,
                 zypakStandIn = zypakStandIn,
                 wayland = waylandSession,
+                glx = !waylandSession && !options.softwareRendering,
                 terminal = options.terminal,
                 filter = Fdsec.Filter(extraSyscalls = options.extraSyscalls, noInternet = !options.network),
                 ldCache = ldCache,

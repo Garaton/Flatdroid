@@ -6,8 +6,10 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
@@ -15,6 +17,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import androidx.core.content.IntentCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -72,6 +75,26 @@ class SessionService : Service() {
     private var screenType = false
     /** The screen share the service took last, while it runs. */
     private var projection: MediaProjection? = null
+
+    /** The screen turning off pauses a hidden app at once ([HiddenPause.screenOff]). */
+    private val screen = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            when (intent.action) {
+                Intent.ACTION_SCREEN_OFF -> HiddenPause.screenOff(true)
+                Intent.ACTION_SCREEN_ON -> HiddenPause.screenOff(false)
+            }
+        }
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        HiddenPause.screenOff(!getSystemService(PowerManager::class.java).isInteractive)
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_SCREEN_ON)
+        }
+        ContextCompat.registerReceiver(this, screen, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -228,6 +251,7 @@ class SessionService : Service() {
     }
 
     override fun onDestroy() {
+        unregisterReceiver(screen)
         scope.cancel()
         removeNotification()
         if (SessionController.isBusy) SessionController.ended(null)

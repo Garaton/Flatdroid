@@ -13,7 +13,9 @@ import kotlinx.coroutines.launch
 /**
  * What a running app does while Flatdroid's viewer isn't on screen, unless the app's "Continue while
  * hidden" is on ([attach]'s pauseWhenHidden): its sound is muted at once, and after [GRACE_MS] it is
- * paused until the viewer is back, so it uses no CPU meanwhile. Nothing new runs for it: the wait is a
+ * paused until the viewer is back, so it uses no CPU meanwhile. With the screen off there is no grace
+ * ([screenOff]): nobody switches back to it in a moment then, and some devices freeze Flatdroid's own
+ * process soon after the screen goes off (its children run on), before the grace would end. Nothing new runs for it: the wait is a
  * coroutine on the shared threads. With an external viewer Flatdroid can't tell what is on screen, so
  * nothing happens.
  *
@@ -30,7 +32,13 @@ object HiddenPause {
     /** How long the viewer stays hidden before the app is paused: switching to another app and back for a moment doesn't pause it. */
     const val GRACE_MS = 30_000L
 
-    private class Session(val prootPid: Int, val player: AudioPlayer?, val pauseWhenHidden: Boolean, val wait: NoWindowWait)
+    private class Session(
+        val prootPid: Int,
+        val player: AudioPlayer?,
+        val pauseWhenHidden: Boolean,
+        val wait: NoWindowWait,
+        val onPaused: ((Boolean) -> Unit)?,
+    )
 
     private var session: Session? = null
     private var shown = false
@@ -44,14 +52,18 @@ object HiddenPause {
     private var noWindowStop = false
     private var waiting: Job? = null
     private var windowWait: Job? = null
+    /** Android's screen is off ([screenOff]). */
+    @Volatile private var screenIsOff = false
 
     /**
      * A session started with Flatdroid's own viewer. With [pauseWhenHidden] (the app's "Continue
-     * while hidden" off) it also goes quiet and pauses while hidden. Not on the main thread.
+     * while hidden" off) it also goes quiet and pauses while hidden. [onPaused] hears each pause (true)
+     * and each time the app goes on (false), so what feeds the app (its cameras) can stop meanwhile.
+     * Not on the main thread.
      */
     @Synchronized
-    fun attach(prootPid: Int, player: AudioPlayer?, pauseWhenHidden: Boolean) {
-        session = Session(prootPid, player, pauseWhenHidden, NoWindowWait(SystemClock.elapsedRealtime()))
+    fun attach(prootPid: Int, player: AudioPlayer?, pauseWhenHidden: Boolean, onPaused: ((Boolean) -> Unit)? = null) {
+        session = Session(prootPid, player, pauseWhenHidden, NoWindowWait(SystemClock.elapsedRealtime()), onPaused)
         stopped = false
         hiddenStop = false
         noWindowStop = false
@@ -77,6 +89,17 @@ object HiddenPause {
             settle(it)
         }
         session = null
+    }
+
+    /**
+     * The screen went off ([off]) or on. Off, a hidden app pauses now instead of after [GRACE_MS] (and
+     * one shown is paused as soon as the viewer hides). On changes nothing: the viewer's return does. Main thread.
+     */
+    @Synchronized
+    fun screenOff(off: Boolean) {
+        if (off == screenIsOff) return
+        screenIsOff = off
+        if (off && !shown) hidden()
     }
 
     /** Flatdroid's viewer became visible or hidden. Main thread. */
@@ -165,7 +188,7 @@ object HiddenPause {
         settle(now)
         waiting?.cancel()
         waiting = appScope.launch(Dispatchers.Default) {
-            delay(GRACE_MS)
+            if (!screenIsOff) delay(GRACE_MS)
             // An app nobody counts the windows of (the viewer never connected) keeps running until its
             // first-window time is over: a slow start has no window for long, and stopping it stalls it.
             now.wait.firstWindowLeft(SystemClock.elapsedRealtime()).takeIf { it > 0 }?.let { delay(it) }
@@ -192,6 +215,7 @@ object HiddenPause {
         if (stopped) return true
         val traced = ProotFreeze.stop(now.prootPid) ?: return false
         stopped = true
+        now.onPaused?.invoke(true)
         DebugLog.i("Paused: the app is stopped ($traced processes)")
         return true
     }
@@ -200,6 +224,7 @@ object HiddenPause {
         if (!stopped) return
         stopped = false
         ProotFreeze.go(now.prootPid)
+        now.onPaused?.invoke(false)
         DebugLog.i("Shown: the app goes on")
     }
 }

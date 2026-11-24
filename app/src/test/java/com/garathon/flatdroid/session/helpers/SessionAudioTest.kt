@@ -27,7 +27,7 @@ class SessionAudioTest {
     @Test
     fun helpersGetSoundAndResampler() {
         assertEquals(
-            listOf("/bin/sh", SessionScript.GUEST_SCRIPT, "1000x1400", "14400", "30", "on", "speex-float-0", "on", "on", "on", "off", "off", "1.00", "on", "off"),
+            listOf("/bin/sh", SessionScript.GUEST_SCRIPT, "1000x1400", "14400", "30", "on", "speex-float-0", "on", "on", "on", "off", "off", "1.00", "on", "off", "off"),
             SessionScript.command("1000x1400", 30, sound = true, Resampler.FAST, sessionBus = true, camera = true),
         )
         assertEquals(
@@ -62,6 +62,18 @@ class SessionAudioTest {
         assertTrue(foot.endsWith("-- /run/flatdroid/fdsec --no-inet --hold-tty /run/flatdroid/vnc/tty &"))
         // Only once the compositor and wayvnc are up.
         assertTrue(lines.indexOfFirst { "/usr/bin/foot " in it } > lines.indexOf("wait_socket /run/flatdroid/vnc/wayvncctl wayvnc"))
+    }
+
+    @Test
+    fun xvncOffersGlxOnlyWhenAsked() {
+        assertEquals("on", SessionScript.command("1000x1400", 30, sound = false, Resampler.FAST, sessionBus = true, glx = true)[15])
+        assertEquals("off", SessionScript.command("1000x1400", 30, sound = false, Resampler.FAST, sessionBus = true)[15])
+        assertEquals("off", SessionScript.command("1000x1400", 30, sound = false, Resampler.FAST, sessionBus = true, wayland = true, glx = true)[15])
+        val lines = SessionScript.TEXT.lines().map { it.trim() }
+        assertTrue("glx_args=\"-extension GLX\"" in lines)
+        assertTrue("[ \"${'$'}{14}\" = on ] && glx_args=" in lines)
+        val xvnc = lines.single { "-AllowOverride=" in it }
+        assertTrue(xvnc.endsWith("-extension MIT-SHM ${'$'}glx_args -SendPrimary=0 ${'$'}clipboard_args &"))
     }
 
     @Test

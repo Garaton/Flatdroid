@@ -201,7 +201,17 @@ class AlpineSetup(
                 if (attempt == 1) context.getString(R.string.setup_progress_flathub)
                 else context.getString(R.string.setup_progress_flathub_retry, attempt, REMOTE_ADD_ATTEMPTS),
             )
-            val result = run(FlatpakCommands.addFlathub, reporter, 5 * 60)
+            // A remote-add that hangs (an IPv6 route that connects and then sends nothing) is tried
+            // again like one that failed, not the end of setup.
+            val result = try {
+                run(FlatpakCommands.addFlathub, reporter, REMOTE_ADD_TIMEOUT_SECONDS)
+            } catch (e: IOException) {
+                if (attempt == REMOTE_ADD_ATTEMPTS) throw e
+                reporter.log(e.message ?: "remote-add failed")
+                run(FlatpakCommands.deleteFlathub, reporter)
+                Thread.sleep(RETRY_DELAY_MS * attempt)
+                continue
+            }
             if (result.exitCode == 0 && key.isFile) {
                 // The remote is listed, not only written: the repository can be read.
                 val remotes = run(FlatpakCommands.listRemotes, reporter)
@@ -289,6 +299,8 @@ class AlpineSetup(
         private const val ROOTFS_BYTES = 20L shl 20
         private const val PACKAGES_BYTES = 600L shl 20
         private const val REMOTE_ADD_ATTEMPTS = 3
+        /** Per attempt: remote-add takes under a second when the network answers. */
+        private const val REMOTE_ADD_TIMEOUT_SECONDS = 2 * 60L
         private const val RETRY_DELAY_MS = 2_000L
     }
 }

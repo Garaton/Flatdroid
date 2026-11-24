@@ -93,7 +93,7 @@ class CameraStreamer(
             manager.openCamera(camera.id, object : CameraDevice.StateCallback() {
                 override fun onOpened(opened: CameraDevice) {
                     opening = false
-                    if (closed || users == 0) return opened.close()
+                    if (closed || users == 0 || paused) return opened.close()
                     device = opened
                     // Made only now: a reader made with an earlier open could be closed already.
                     val imageReader = ImageReader.newInstance(camera.width, camera.height, ImageFormat.YUV_420_888, 3)
@@ -119,9 +119,12 @@ class CameraStreamer(
         }
     }
 
-    /** After Android took the camera away or couldn't open it, while an app is still linked. */
+    /**
+     * After Android took the camera away or couldn't open it, while an app is still linked. Not while
+     * the app is paused: closing the camera for the pause makes Android report it available again.
+     */
     private fun retry() {
-        if (!closed && users > 0 && allowed && !failedSetup) startSource()
+        if (!closed && users > 0 && allowed && !paused && !failedSetup) startSource()
     }
 
     /**

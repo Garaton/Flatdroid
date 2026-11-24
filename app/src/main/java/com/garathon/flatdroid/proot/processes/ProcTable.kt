@@ -21,6 +21,22 @@ object ProcTable {
             readOne(dir, uidOf)?.let { pid to it }
         }?.toMap().orEmpty()
 
+    /** The state letter of each of [pid]'s threads (field 3 of `task/<tid>/stat`), unreadable ones left out. */
+    fun threadStates(pid: Int, procDir: File = File("/proc")): List<Char> =
+        threads(pid, procDir).mapNotNull { tid ->
+            try {
+                stateOf(File(procDir, "$pid/task/$tid/stat").readText())
+            } catch (e: java.io.IOException) {
+                null
+            }
+        }
+
+    /** The state in a `stat` line: the first letter after the command's closing parenthesis (a command may hold one). */
+    fun stateOf(stat: String): Char? = stat.substringAfterLast(')', "").trim().firstOrNull()
+
+    /** Stopped (`T`), stopped by its tracer (`t`), or ended (`Z`, `X`): not running any more. */
+    fun isStopped(state: Char): Boolean = state in "tTZXx"
+
     /** The thread IDs of [pid] (its own included). */
     fun threads(pid: Int, procDir: File = File("/proc")): List<Int> =
         File(procDir, "$pid/task").list()?.mapNotNull { it.toIntOrNull() }.orEmpty()

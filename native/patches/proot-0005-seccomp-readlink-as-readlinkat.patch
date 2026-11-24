@@ -1,0 +1,22 @@
+diff --git a/src/tracee/seccomp.c b/src/tracee/seccomp.c
+--- a/src/tracee/seccomp.c
++++ b/src/tracee/seccomp.c
+@@ -487,6 +487,18 @@
+ 		restart_syscall_after_seccomp(tracee);
+ 		break;
+ 
++	case PR_readlink:
++		/* Android 8's x86_64 app seccomp policy blocks readlink(2)
++		 * (bionic only uses readlinkat), and musl and glibc both call
++		 * it on x86_64: re-issue it as readlinkat(AT_FDCWD, ...).  */
++		set_sysnum(tracee, PR_readlinkat);
++		poke_reg(tracee, SYSARG_4, peek_reg(tracee, CURRENT, SYSARG_3));
++		poke_reg(tracee, SYSARG_3, peek_reg(tracee, CURRENT, SYSARG_2));
++		poke_reg(tracee, SYSARG_2, peek_reg(tracee, CURRENT, SYSARG_1));
++		poke_reg(tracee, SYSARG_1, AT_FDCWD);
++		restart_syscall_after_seccomp(tracee);
++		break;
++
+ 	case PR_mkdir:
+ 		set_sysnum(tracee, PR_mkdirat);
+ 		poke_reg(tracee, SYSARG_3, peek_reg(tracee, CURRENT, SYSARG_2));

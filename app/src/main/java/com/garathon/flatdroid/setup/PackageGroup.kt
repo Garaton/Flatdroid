@@ -8,8 +8,13 @@ import java.io.File
  * already has them needs nothing; from then on Alpine's updates keep it ([AlpineSetup.updateList]).
  */
 enum class PackageGroup(private val packages: List<String>, val files: List<String>, private val downloadMb: Int) {
-    /** Xvnc and Openbox, for an app that only takes X11 (or is set to Force X11): 31 packages, 54 MiB installed. */
-    X11(listOf("tigervnc", "openbox"), listOf("usr/bin/Xvnc", "usr/bin/openbox"), downloadMb = 14),
+    /**
+     * Xvnc and Openbox, for an app that only takes X11 (or is set to Force X11): 32 packages, 54 MiB
+     * installed. Mesa's DRI driver links (136 KiB, beside the `libgallium` setup has) are for Xvnc's
+     * GLX, offered when the session draws through GL ([com.garathon.flatdroid.launcher.LaunchPlan.glx]);
+     * an Alpine that added the group before gets them with its next update.
+     */
+    X11(listOf("tigervnc", "openbox", "mesa-dri-gallium"), listOf("usr/bin/Xvnc", "usr/bin/openbox"), downloadMb = 14),
 
     /**
      * foot, the terminal of an app whose desktop file says `Terminal=true`. Its font is Android's

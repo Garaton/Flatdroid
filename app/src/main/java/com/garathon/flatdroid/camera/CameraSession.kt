@@ -109,6 +109,12 @@ class CameraSession(
         streamer.setUsers(count)
     }
 
+    /**
+     * The app was paused ([on]) or goes on: its cameras stop meanwhile, since in portal mode the helpers
+     * would go on taking frames nobody reads. The screen's share stays: ending it would ask again.
+     */
+    fun paused(on: Boolean) = streamers.values.filter { it.sensor == Sensor.CAMERA }.forEach { it.setPaused(on) }
+
     /** The screen's share ended: the next use asks again. */
     fun screenEnded() {
         questions[Sensor.SCREEN]?.forget()

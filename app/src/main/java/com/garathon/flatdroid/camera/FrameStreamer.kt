@@ -98,6 +98,8 @@ abstract class FrameStreamer(
         private set
     protected var allowed = false
         private set
+    protected var paused = false
+        private set
     /** A black frame with its part header, at the size and in the format it was made for (the size changes when the display turns). */
     private var black: Pair<Triple<Int, Int, Fdv4l2.Format>, ByteArray>? = null
     private val blackFrames = object : Runnable {
@@ -176,10 +178,18 @@ abstract class FrameStreamer(
         update()
     }
 
-    /** The source while linked and allowed, black frames while linked and not, nothing while not linked. */
+    /** The app is paused: it takes no frames, so the source stops, linked or not, until it goes on. */
+    fun setPaused(on: Boolean) = handler.post {
+        if (closed || on == paused) return@post
+        paused = on
+        update()
+    }
+
+    /** The source while linked and allowed, black frames while linked and not, nothing while not linked or paused. */
     private fun update() {
         handler.removeCallbacks(blackFrames)
         when {
+            paused -> stopSource()
             users > 0 && allowed -> startSource()
             users > 0 -> {
                 stopSource()

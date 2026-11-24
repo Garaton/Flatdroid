@@ -46,18 +46,18 @@ object SessionScript {
      * sets up). With [sessionBus], the app's
      * bus and its proxy ([SessionBus]) start too, and with [camera] PipeWire, for the camera's
      * own helpers ([CameraScript]). Without [clipboard], Xvnc neither takes the viewer's clipboard
-     * nor sends its own.
+     * nor sends its own. With [glx] (X11 only), Xvnc offers GLX.
      */
     fun command(
         geometry: String, frameRate: Int, sound: Boolean, resampler: Resampler, sessionBus: Boolean,
         camera: Boolean = false, clipboard: Boolean = true, wayland: Boolean = false, externalViewer: Boolean = false,
-        interfaceSize: Int = 100, memfd: Boolean = true, terminal: Boolean = false,
+        interfaceSize: Int = 100, memfd: Boolean = true, terminal: Boolean = false, glx: Boolean = false,
     ): List<String> =
         listOf(
             "/bin/sh", GUEST_SCRIPT, geometry, VNC_PORT.toString(), frameRate.toString(),
             onOff(sound), resampler.pulseName, onOff(sessionBus), onOff(sessionBus && camera),
             onOff(clipboard), onOff(wayland), onOff(externalViewer), scale(interfaceSize),
-            onOff(memfd), onOff(wayland && terminal),
+            onOff(memfd), onOff(wayland && terminal), onOff(!wayland && glx),
         )
 
     /**
@@ -97,8 +97,9 @@ object SessionScript {
      * builds them; off adds `-AcceptCutText=0 -SendCutText=0` to Xvnc), "on" for a Wayland session (labwc and wayvnc instead of
      * Xvnc and Openbox), "on" for an external viewer (the TCP port and login; else the viewer's Unix
      * socket), the Wayland output's scale ([scale]), "on" when PulseAudio may share memory through memfd ([kernelHasMemfd]), and "on"
-     * for a terminal app's terminal (foot, in a Wayland session only); title bars come from Openbox's and labwc's configurations. Exits when the display does; Flatdroid ends the session by stopping this proot.
-     * `-extension GLX` turns GLX off in Alpine's Xvnc, which has it (apps use EGL). `-nolisten local` drops the abstract socket
+     * for a terminal app's terminal (foot, in a Wayland session only), "on" for GLX in Xvnc; title bars come from Openbox's and labwc's configurations. Exits when the display does; Flatdroid ends the session by stopping this proot.
+     * `-extension GLX` turns GLX off in Alpine's Xvnc, which has it (apps use EGL), unless the session draws through GL and
+     * asks for it: its software driver (`mesa-dri-gallium`) comes with [com.garathon.flatdroid.setup.PackageGroup.X11]. `-nolisten local` drops the abstract socket
      * `@/tmp/.X11-unix/X1`: proot doesn't translate abstract names, so it would be open to other
      * users of the device, with no authentication; clients use the socket file in private storage
      * instead. `-NeverShared -DisconnectClients=1`: one viewer at a time, and a new one that logs in
@@ -132,6 +133,8 @@ object SessionScript {
         |scale=${'$'}{11}
         |memfd=${'$'}{12}
         |terminal=${'$'}{13}
+        |glx_args="-extension GLX"
+        |[ "${'$'}{14}" = on ] && glx_args=
         |clipboard_args=
         |[ "${'$'}clipboard" = on ] || clipboard_args="-AcceptCutText=0 -SendCutText=0"
         |rm -f /tmp/.X1-lock ${GuestPaths.X11_DIR}/$X_SOCKET ${GuestPaths.PULSE_DIR}/* $GUEST_VNC_DIR/$VNC_SOCKET
@@ -212,7 +215,7 @@ object SessionScript {
         |  # No parameters changeable through the VNC extension: any X client could otherwise turn the clipboard back on.
         |  # Only copies reach the viewer, not every selection (PRIMARY).
         |  ${'$'}guard /usr/bin/Xvnc :1 -geometry "${'$'}geometry" -depth 24 ${'$'}listen -NeverShared -DisconnectClients=1 -FrameRate "${'$'}frame_rate" \
-        |    -AllowOverride= -nolisten local -extension MIT-SHM -extension GLX -SendPrimary=0 ${'$'}clipboard_args &
+        |    -AllowOverride= -nolisten local -extension MIT-SHM ${'$'}glx_args -SendPrimary=0 ${'$'}clipboard_args &
         |  display=${'$'}!
         |  wait_socket ${GuestPaths.X11_DIR}/$X_SOCKET Xvnc
         |

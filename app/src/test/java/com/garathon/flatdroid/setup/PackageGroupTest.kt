@@ -37,8 +37,12 @@ class PackageGroupTest {
         // An Alpine set up before X11 was left out of setup already has it.
         for (path in PackageGroup.X11.files) File(rootfs, path).apply { parentFile!!.mkdirs() }.writeText("")
         assertTrue(PackageGroup.X11.addedIn(rootfs))
-        assertEquals(AlpineSetup.PACKAGES + listOf("tigervnc", "openbox"), AlpineSetup.updateList(rootfs, androidMonospace = true))
+        // Packages the group gained since (Mesa's DRI driver links) come with the next update.
+        assertEquals(AlpineSetup.PACKAGES + listOf("tigervnc", "openbox", "mesa-dri-gallium"), AlpineSetup.updateList(rootfs, androidMonospace = true))
         File(rootfs, "usr/bin/foot").writeText("")
-        assertEquals(AlpineSetup.PACKAGES + listOf("tigervnc", "openbox", "foot", PackageGroup.DEJAVU), AlpineSetup.updateList(rootfs, androidMonospace = false))
+        assertEquals(
+            AlpineSetup.PACKAGES + listOf("tigervnc", "openbox", "mesa-dri-gallium", "foot", PackageGroup.DEJAVU),
+            AlpineSetup.updateList(rootfs, androidMonospace = false),
+        )
     }
 }

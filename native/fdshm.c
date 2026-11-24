@@ -105,16 +105,34 @@ static void fd_path(int fd, char *out)
     *out = 0;
 }
 
+/* Writes n in decimal at out, then '-'; returns the position after it. */
+static char *number(char *out, unsigned long n)
+{
+    char digits[24];
+    int count = 0;
+    do { digits[count++] = (char)('0' + n % 10); n /= 10; } while (n);
+    while (count) *out++ = digits[--count];
+    *out++ = '-';
+    return out;
+}
+
+static unsigned long temp_count;
+
 /*
  * Kernels before 3.17 (some Android 7 phones) have no memfd: an unlinked file in the helpers' /tmp
  * instead, which reopens the same way. The page cache holds what is in use, but it can reach flash.
+ * Each file's name is its own (process, then a count): wayvnc gives every buffer the same name, and
+ * where the unlink right after the open didn't happen (seen on a 3.10 kernel in the compositor and
+ * wayvnc, cause not known), its second buffer failed with EEXIST and the viewer stayed black.
  */
 static long temp_file(const char *key)
 {
     const char *prefix = "/tmp/.fdshm-";
-    char path[16 + NAME_MAX_LEN];
+    char path[16 + 2 * 24 + NAME_MAX_LEN];
     size_t at = 0;
     while (prefix[at]) { path[at] = prefix[at]; at++; }
+    at = (size_t)(number(number(path + at, (unsigned long)syscall3(__NR_getpid, 0, 0, 0)),
+        __atomic_fetch_add(&temp_count, 1, __ATOMIC_RELAXED)) - path);
     for (size_t i = 0; key[i] && i < NAME_MAX_LEN; i++) path[at++] = key[i] == '/' ? '_' : key[i];
     path[at] = 0;
     long fd = syscall4(__NR_openat, AT_FDCWD, (long)path, O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
