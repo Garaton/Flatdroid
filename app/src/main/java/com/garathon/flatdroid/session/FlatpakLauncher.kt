@@ -846,6 +846,7 @@ class FlatpakLauncher(private val context: Context) {
             electronSwap = app?.takeIf { alpine == null }?.let { electronSwap(appId).preparedFor(it) },
             wholeDev = settings.wholeDev,
             flatpakInfo = alpine == null && !settings.withoutFlatpakInfo,
+            flatpakVersion = if (alpine == null && !settings.withoutFlatpakInfo) flatpakVersion() else null,
             languageTags = if (security.shareLocale) context.resources.configuration.locales.toLanguageTags().split(',').filter { it.isNotBlank() } else emptyList(),
             audio = settings.audioAllowed(app?.metadata?.context?.sockets.orEmpty()),
             network = settings.networkAllowed(app?.metadata?.context?.shared.orEmpty()),
@@ -862,6 +863,11 @@ class FlatpakLauncher(private val context: Context) {
             },
         )
     }
+
+    /** Alpine's Flatpak version, from apk's database (read up to Flatpak's entry); null if it can't be read. */
+    private fun flatpakVersion(): String? = runCatching {
+        File(rootfs, AlpinePackages.INSTALLED_DB).useLines { AlpinePackages.version(FLATPAK_PACKAGE, it) }
+    }.getOrNull()
 
     /** The app asked for the camera portal in a session without it: the portal runs from its next launch ([AppSettings.videoFor]). */
     private fun cameraPortalSeen(store: AppSettingsStore) {
@@ -1181,6 +1187,8 @@ class FlatpakLauncher(private val context: Context) {
     }
 
     private companion object {
+        /** Alpine's Flatpak package, whose version /.flatpak-info gives. */
+        const val FLATPAK_PACKAGE = "flatpak"
         /** An Alpine program's own link2symlink store, in its data folder ([prootPaths]). */
         const val ALPINE_L2S_DIR = "l2s"
         /** An Alpine program's bwrap stand-in, beside the host-command stand-ins. */

@@ -36,6 +36,7 @@ data class FlatpakContext(
     val shared: List<String> = emptyList(),
     val sockets: List<String> = emptyList(),
     val devices: List<String> = emptyList(),
+    val features: List<String> = emptyList(),
     val filesystems: List<String> = emptyList(),
     val persistent: List<String> = emptyList(),
     /**
@@ -98,6 +99,7 @@ class FlatpakMetadata(
             shared = keyfile.list(CONTEXT, "shared"),
             sockets = keyfile.list(CONTEXT, "sockets"),
             devices = keyfile.list(CONTEXT, "devices"),
+            features = keyfile.list(CONTEXT, "features"),
             filesystems = keyfile.list(CONTEXT, "filesystems"),
             persistent = keyfile.list(CONTEXT, "persistent"),
             readsVideoDevices = readsVideoDevices,

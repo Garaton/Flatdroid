@@ -11,6 +11,7 @@ import com.garathon.flatdroid.proot.DevNodes
 import com.garathon.flatdroid.proot.Fdsec
 import com.garathon.flatdroid.proot.FlatpakBinds
 import com.garathon.flatdroid.proot.GuestPaths
+import com.garathon.flatdroid.session.helpers.SessionBus
 import java.io.File
 import java.security.MessageDigest
 import com.garathon.flatdroid.util.io.readTextUpTo
@@ -106,8 +107,10 @@ data class LaunchOptions(
     val extraSyscalls: Boolean = true,
     /** Only CPU and memory information from /sys, and `devices=all` gives no device group ([DevNodes.forApp]). */
     val limitDevices: Boolean = false,
-    /** The root gets /.flatpak-info ([LaunchPlanner.flatpakInfo]). */
+    /** The root gets /.flatpak-info ([FlatpakInfo]). */
     val flatpakInfo: Boolean = true,
+    /** Alpine's Flatpak version for /.flatpak-info ([FlatpakInfo.Instance.flatpakVersion]); null leaves it out. */
+    val flatpakVersion: String? = null,
     /** The device's languages (BCP 47) for the app's locale; empty gives the generic C.UTF-8. */
     val languageTags: List<String> = emptyList(),
     /** GTK 4 and Qt Quick draw on the CPU instead of through GL ([com.garathon.flatdroid.settings.Rendering]). */
@@ -128,7 +131,7 @@ data class LaunchPlan(
     val binds: FlatpakBinds,
     val environment: Map<String, String>,
     val command: List<String>,
-    /** Content of the root's /.flatpak-info; null for none ([flatpakInfo]). */
+    /** Content of the root's /.flatpak-info; null for none ([FlatpakInfo]). */
     val flatpakInfo: String?,
     /** Top-level names that are links into /usr (bin, lib, …), as Flatpak makes them. */
     val usrLinks: List<String>,
@@ -362,10 +365,8 @@ class LaunchPlanner(
                 binds = binds,
                 environment = environment,
                 command = command,
-                flatpakInfo = if (!options.flatpakInfo || alpine != null) null else flatpakInfo(
-                    appId, runtimeRef, options.network,
-                    hostAllowed = HostCommands.hostAllowed(app.metadata.sessionBusPolicy, app.metadata.context.sockets),
-                ),
+                flatpakInfo = if (!options.flatpakInfo || alpine != null) null
+                    else flatpakInfo(appId, runtimeRef, app, runtime, extensions, binds, options, dirs, wayland).text(),
                 // Alpine's /bin, /lib and /sbin are folders of their own, bound beside /usr.
                 usrLinks = if (alpine != null) emptyList() else USR_LINKS.filter { File(runtime.files, it).exists() },
                 isElectron = isElectron,
@@ -402,6 +403,63 @@ class LaunchPlanner(
      * `exec` ([Electron.execTarget]), in that order, at most [MAX_SCRIPTS]: an IDE's command
      * script may set up its tools and only then call zypak, in a wrapper of its own.
      */
+    /**
+     * The root's /.flatpak-info: what the app's metadata asks for and this launch gives it (an
+     * X11 socket only in an X11 session, the device groups bound, the bus names the proxy lets
+     * through), the deployments as Alpine's Flatpak has them.
+     */
+    private fun flatpakInfo(
+        appId: String, runtimeRef: FlatpakRef, app: Deployment, runtime: Deployment, extensions: List<Pair<String, MountedExtension>>,
+        binds: FlatpakBinds, options: LaunchOptions, dirs: HostDirs, wayland: Boolean,
+    ): FlatpakInfo {
+        val context = app.metadata.context
+        val x11 = binds.x11Sockets != null && context.sockets.any { it == "x11" || it == "fallback-x11" }
+        val sockets = buildList {
+            if (x11 && "x11" in context.sockets) add("x11")
+            if (wayland) add("wayland")
+            if (binds.pulseSockets != null && "pulseaudio" in context.sockets) add("pulseaudio")
+            if ((x11 || wayland) && "fallback-x11" in context.sockets) add("fallback-x11")
+        }
+        val groups = DevNodes.GROUPS.filterValues { paths -> paths.any { it in binds.dev } }.keys
+        val devices = when {
+            options.wholeDev -> listOf(DevNodes.ALL)
+            else -> groups.filter { it in context.devices || DevNodes.ALL in context.devices } + listOfNotNull("shm".takeIf { it in context.devices })
+        }
+        val policy = LinkedHashMap<String, String>()
+        if (dirs.sessionBus != null) policy += SessionBus.granted(app.metadata.sessionBusPolicy, SessionBus.WHOLE_BUS in context.sockets)
+        if (HostCommands.hostAllowed(app.metadata.sessionBusPolicy, context.sockets) && policy[HostCommands.FLATPAK_NAME] != "own") {
+            policy[HostCommands.FLATPAK_NAME] = "talk"
+        }
+        fun ids(base: String) = extensions.filter { it.first == base }.associate { (_, ext) -> ext.deployment.ref.name to commit(ext.deployment) }
+        return FlatpakInfo(
+            appId = appId,
+            runtime = runtimeRef,
+            shared = listOfNotNull("network".takeIf { options.network }, "ipc".takeIf { "ipc" in context.shared }),
+            sockets = sockets,
+            devices = devices,
+            features = context.features.filter { it == PER_APP_DEV_SHM },
+            filesystems = FlatpakInfo.filesystems(context.filesystems, sdcard = dirs.sdcard != null),
+            persistent = context.persistent,
+            sessionBusPolicy = policy,
+            environment = runtime.metadata.environment + app.metadata.environment + options.environment,
+            instance = FlatpakInfo.Instance(
+                appPath = installation.alpinePath(app.files),
+                appCommit = commit(app),
+                runtimePath = installation.alpinePath(runtime.files),
+                runtimeCommit = commit(runtime),
+                appExtensions = ids("/app"),
+                runtimeExtensions = ids("/usr"),
+                branch = app.ref.branch,
+                arch = app.ref.arch,
+                flatpakVersion = options.flatpakVersion,
+                sessionBusProxy = dirs.sessionBus != null,
+            ),
+        )
+    }
+
+    /** The commit a deployment was checked out from: its folder's name, without the `-<languages>` a partial (locale) checkout adds. */
+    private fun commit(deployment: Deployment): String = deployment.dir.name.let { COMMIT.find(it)?.value ?: it }
+
     private fun launchScripts(app: Deployment, commandPath: String): List<String> {
         val scripts = mutableListOf<String>()
         var path: String? = commandPath
@@ -493,22 +551,14 @@ class LaunchPlanner(
         fun runtimeCacheScratch(base: File, guest: String): File =
             File(base, guest.removePrefix("/").replace('/', '_'))
 
+        /** `features=` entry for a private /dev/shm, which every app has here. */
+        const val PER_APP_DEV_SHM = "per-app-dev-shm"
+
+        /** An OSTree commit (SHA-256) at the start of a deployment's folder name. */
+        private val COMMIT = Regex("^[0-9a-f]{64}")
+
         /** Flatpak links these to /usr when the runtime has them. */
         val USR_LINKS = listOf("bin", "lib", "lib32", "lib64", "sbin")
-
-        /**
-         * `.Devel` and `build=true` turn off old glycin's sandbox (GTK dialogs crash with it); the
-         * file's presence also makes GLib use portals, hence GDK_DEBUG=no-portals. GLib then takes
-         * the network state and proxies from the portal, and sees a network only where `shared`
-         * names it: written for an app with the [network]. KDE's frameworks run processes through
-         * `flatpak-spawn --host` (here [HostCommands]) only where the file's session bus policy
-         * lets the app talk to Flatpak: written for an app that may ([hostAllowed]).
-         */
-        fun flatpakInfo(appId: String, runtime: FlatpakRef, network: Boolean, hostAllowed: Boolean = false): String =
-            "[Application]\nname=$appId.Devel\nruntime=runtime/$runtime\n\n" +
-                (if (network) "[Context]\nshared=network;\n\n" else "") +
-                (if (hostAllowed) "[Session Bus Policy]\n${HostCommands.FLATPAK_NAME}=talk\n\n" else "") +
-                "[Instance]\nbuild=true\n"
 
         /**
          * Printed by KDE's frameworks (KSandbox) when /.flatpak-info makes them run a process on

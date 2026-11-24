@@ -78,6 +78,24 @@ object AlpinePackages {
         return packages
     }
 
+    /**
+     * [name]'s version in apk's database ([INSTALLED_DB] as [lines]), without apk's release
+     * (`1.16.1-r0` gives `1.16.1`, as the program reports itself); null if it isn't installed.
+     */
+    fun version(name: String, lines: Sequence<String>): String? {
+        var current: String? = null
+        for (line in lines) {
+            when {
+                line.isEmpty() -> current = null
+                line.startsWith("P:") -> current = line.substring(2)
+                line.startsWith("V:") && current == name -> return line.substring(2).replace(RELEASE, "")
+            }
+        }
+        return null
+    }
+
+    private val RELEASE = Regex("-r\\d+$")
+
     /** The names in the world file: each line's package, without its version or repository tag. */
     fun parseWorld(text: String): Set<String> =
         text.split(Regex("\\s+")).filter { it.isNotEmpty() && !it.startsWith('!') }.map { withoutVersion(it).substringBefore('@') }.toSet()

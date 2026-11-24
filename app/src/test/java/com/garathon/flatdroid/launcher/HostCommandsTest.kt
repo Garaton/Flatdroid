@@ -129,6 +129,5 @@ class HostCommandsTest {
         assertTrue(HostCommands.hostAllowed(emptyMap(), listOf("wayland", "session-bus")))
         assertFalse(HostCommands.hostAllowed(mapOf("org.freedesktop.Flatpak" to "see"), emptyList()))
         assertFalse(HostCommands.hostAllowed(emptyMap(), listOf("wayland")))
-        assertTrue("[Session Bus Policy]\norg.freedesktop.Flatpak=talk\n" in LaunchPlanner.flatpakInfo("a.B", com.garathon.flatdroid.flatpak.FlatpakRef.parse("org.kde.Platform/aarch64/6.10")!!, network = false, hostAllowed = true))
     }
 }

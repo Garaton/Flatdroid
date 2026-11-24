@@ -134,4 +134,11 @@ class AlpinePackagesTest {
         assertFalse(AlpinePackages.matches("Q1qvTGHdzF6KLavt4PO0gs2a6pQ00=", "hellO".byteInputStream()))
         assertFalse(AlpinePackages.matches("X1qvTGHdzF6KLavt4PO0gs2a6pQ00=", "hello".byteInputStream()))
     }
+
+    @Test
+    fun aPackagesVersionWithoutItsRelease() {
+        val db = "C:Q1x\nP:flatpak-libs\nV:1.16.1-r0\n\nC:Q1y\nP:flatpak\nV:1.16.1-r2\nA:aarch64\n\n"
+        assertEquals("1.16.1", AlpinePackages.version("flatpak", db.lineSequence()))
+        assertEquals(null, AlpinePackages.version("dbus", db.lineSequence()))
+    }
 }

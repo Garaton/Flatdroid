@@ -66,15 +66,26 @@ object SessionBus {
         )
         // An Alpine program's bus name is its desktop file's, when that is one.
         if (isPolicyName("$appId.*")) args += listOf("--own=$appId.*", "--own=org.mpris.MediaPlayer2.$appId.*")
-        for ((name, level) in policy) {
-            if (level !in LEVELS || !isPolicyName(name) || isReserved(name)) continue
-            args += "--${if (level == "own" && FLATDROID_NAMES.any { covers(name, it) }) "talk" else level}=$name"
-        }
-        if (wholeBus) for (name in FLATDROID_NAMES) args += "--talk=$name"
+        for ((name, level) in granted(policy, wholeBus)) args += "--$level=$name"
         args += PORTAL_RULES
         args += if (camera) CAMERA_RULES else LINK_RULES
         if (watchCamera && !camera) args += CAMERA_CALLS
         return args
+    }
+
+    /**
+     * The metadata's [policy] as the proxy applies it, in order: valid entries only, none naming
+     * or covering the services Flatdroid runs ([RESERVED]), owning Flatdroid's names turned into
+     * talking to them, and with [wholeBus] talking to every name Flatdroid owns.
+     */
+    fun granted(policy: Map<String, String>, wholeBus: Boolean): Map<String, String> {
+        val granted = LinkedHashMap<String, String>()
+        for ((name, level) in policy) {
+            if (level !in LEVELS || !isPolicyName(name) || isReserved(name)) continue
+            granted[name] = if (level == "own" && FLATDROID_NAMES.any { covers(name, it) }) "talk" else level
+        }
+        if (wholeBus) for (name in FLATDROID_NAMES) if (granted[name] != "own") granted[name] = "talk"
+        return granted
     }
 
     /** [args] as `--args` reads them: each followed by a NUL. */

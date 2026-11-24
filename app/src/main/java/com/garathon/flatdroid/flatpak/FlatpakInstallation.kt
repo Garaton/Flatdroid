@@ -140,6 +140,9 @@ class FlatpakInstallation(root: File, private val arch: String) {
         return Deployment(ref, dir, metadata, kind)
     }
 
+    /** [file], a path in this installation, as Flatpak in Alpine sees it. */
+    fun alpinePath(file: File): String = ALPINE_PATH + file.path.removePrefix(root.path)
+
     /** [file] resolved, or null if it doesn't exist or resolves outside the installation. */
     private fun inside(file: File): File? {
         val resolved = try {
@@ -151,4 +154,9 @@ class FlatpakInstallation(root: File, private val arch: String) {
     }
 
     private fun isValidId(part: String) = part.isNotEmpty() && part != "." && part != ".." && '/' !in part && ':' !in part
+
+    companion object {
+        /** The installation inside Alpine (Flatpak's user installation of Alpine's root). */
+        const val ALPINE_PATH = "/root/.local/share/flatpak"
+    }
 }

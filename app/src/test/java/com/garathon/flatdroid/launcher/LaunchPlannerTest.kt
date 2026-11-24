@@ -69,7 +69,11 @@ class LaunchPlannerTest {
         assertFalse(plan.isElectron)
         assertEquals(listOf("bin", "lib"), plan.usrLinks)
         assertEquals(
-            "[Application]\nname=org.supertuxproject.SuperTux.Devel\nruntime=runtime/org.freedesktop.Platform/aarch64/26.08\n\n[Context]\nshared=network;\n\n[Instance]\nbuild=true\n",
+            "[Application]\nname=org.supertuxproject.SuperTux.Devel\nruntime=runtime/org.freedesktop.Platform/aarch64/26.08\n\n" +
+                "[Instance]\napp-path=/root/.local/share/flatpak/app/org.supertuxproject.SuperTux/aarch64/stable/0123abcd/files\n" +
+                "app-commit=0123abcd\nruntime-path=/root/.local/share/flatpak/runtime/org.freedesktop.Platform/aarch64/26.08/0123abcd/files\n" +
+                "runtime-commit=0123abcd\nruntime-extensions=org.freedesktop.Platform.GL.default=0123abcd\nbranch=stable\narch=aarch64\nbuild=true\n\n" +
+                "[Context]\nshared=network;\n\n[Environment]\nLD_LIBRARY_PATH=/app/lib/x\n",
             plan.flatpakInfo,
         )
         assertEquals(listOf("/usr/lib/aarch64-linux-gnu/GL/default"), plan.binds.extensions.map { it.second })
@@ -450,6 +454,36 @@ class LaunchPlannerTest {
         // GLib, which reads it, sees a network only where the app has one.
         assertTrue("[Context]\nshared=network;\n" in Ready(planner.plan("org.kde.konsole", dirs)).flatpakInfo!!)
         assertFalse("shared=network" in Ready(planner.plan("org.kde.konsole", dirs, LaunchOptions(network = false))).flatpakInfo!!)
+    }
+
+    @Test
+    fun flatpakInfoListsWhatTheAppAskedForAndGets() {
+        runtimeWithGl()
+        val id = "org.example.Browser"
+        val context = "[Context]\nshared=network;ipc;\nsockets=x11;wayland;pulseaudio;fallback-x11;cups;session-bus;\n" +
+            "devices=all;shm;\nfeatures=devel;per-app-dev-shm;\nfilesystems=xdg-download;/media;host-os;xdg-run/pipewire-0;~/Games:create;host:ro;\n" +
+            "persistent=.example;\n\n[Session Bus Policy]\norg.freedesktop.Notifications=talk\norg.freedesktop.portal.*=talk\n" +
+            "[Extension org.example.Browser.Plugin]\ndirectory=plugins\nsubdirectories=true\n"
+        File(inst.app(id, metadata = appMetadata(id, "browser", extra = context)), "bin").mkdirs()
+        inst.runtime("org.example.Browser.Plugin.One", "stable")
+        val all = LaunchPlanner(FlatpakInstallation(inst.root, "aarch64"), "aarch64", l2s, TestInstallation::readlink, devExists = { true })
+        val withBus = dirs.copy(sessionBus = File(tmp.root, "bus"), sdcard = File(tmp.root, "sdcard"))
+        val info = Ready(all.plan(id, withBus, LaunchOptions(flatpakVersion = "1.16.1"))).flatpakInfo!!
+        assertTrue("app-extensions=org.example.Browser.Plugin.One=0123abcd\n" in info)
+        assertTrue("flatpak-version=1.16.1\nsession-bus-proxy=true\nbuild=true\n" in info)
+        // A Wayland session: no X11 socket. No cups, no whole bus; the private /dev/shm is always the app's.
+        assertTrue(
+            "[Context]\nshared=network;ipc;\nsockets=wayland;pulseaudio;fallback-x11;\ndevices=dri;input;kvm;usb;shm;\nfeatures=per-app-dev-shm;\n" +
+                "filesystems=xdg-download;~/Games:create;home:ro;/sdcard;\npersistent=.example;\n\n" in info,
+        )
+        // The portal's names stay Flatdroid's; the whole bus reaches Flatdroid's own names, and Flatpak for the host.
+        assertTrue(
+            "[Session Bus Policy]\norg.freedesktop.Notifications=talk\norg.freedesktop.ScreenSaver=talk\n" +
+                "org.freedesktop.FileManager1=talk\norg.freedesktop.Flatpak=talk\n" in info,
+        )
+        val x11 = Ready(all.plan(id, dirs, LaunchOptions(forceX11 = true, audio = false, wholeDev = true))).flatpakInfo!!
+        assertTrue("sockets=x11;fallback-x11;\ndevices=all;\n" in x11)
+        assertFalse("session-bus-proxy" in x11)
     }
 
     @Test
