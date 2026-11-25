@@ -441,7 +441,8 @@ static void take_tty(const char *path)
 	long fd = sys6(__NR_openat, AT_FDCWD, (long)path, O_RDWR, 0, 0, 0);
 	if (fd < 0) tty_failed("fdsec: cannot open ", path);
 	sys3(__NR_ioctl, fd, TIOCSCTTY, 0);
-	if (controlling_tty() == 0) tty_failed("fdsec: could not take the terminal ", path);
+	/* Unreadable counts as not taken: the app would run without job control or a hangup on close. */
+	if (controlling_tty() <= 0) tty_failed("fdsec: could not take the terminal ", path);
 	for (int std = 0; std < 3; std++) {
 		if (fd != std && sys3(__NR_dup3, fd, std, 0) < 0) tty_failed("fdsec: could not use the terminal ", path);
 	}

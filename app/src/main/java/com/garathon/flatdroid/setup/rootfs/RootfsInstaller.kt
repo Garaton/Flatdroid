@@ -1,5 +1,6 @@
 package com.garathon.flatdroid.setup.rootfs
 
+import com.garathon.flatdroid.util.io.Confined
 import java.io.File
 import java.io.IOException
 import java.security.MessageDigest
@@ -111,9 +112,7 @@ class RootfsInstaller(alpineDir: File, private val cacheDir: File, private val f
 
     /** Refuses a path that leaves [base] through a symlinked parent. */
     private fun requireInside(base: File, source: File) {
-        val root = base.canonicalPath
-        val parent = source.parentFile!!.canonicalPath
-        if (parent != root && !parent.startsWith(root + File.separator)) throw IOException("$source is outside ${base.name}")
+        if (!Confined.within(source.parentFile!!, base.canonicalPath)) throw IOException("$source is outside ${base.name}")
     }
 
     private fun lexists(file: File) = fs.isSymlink(file) || file.exists()

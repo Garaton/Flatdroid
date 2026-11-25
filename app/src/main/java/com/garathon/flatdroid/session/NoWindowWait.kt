@@ -8,7 +8,8 @@ package com.garathon.flatdroid.session
  * - An app that has not opened one yet gets [FIRST_WINDOW_MS] from [startedAt]: a slow start has no
  *   window for a long time, and pausing it then would stall the very thing it waits for. A window
  *   open for less than [BRIEF_MS] doesn't count as one: a splash, or a first start that restarts
- *   itself, is followed by a while with none.
+ *   itself, is followed by a while with none. The wait then still ends no sooner than [WAIT_MS]
+ *   after that window closed.
  * - Time the app spends stopped for another reason doesn't count ([suspended]).
  * - Each [resumed] doubles the wait, up to [MAX_WAIT_MS], and counts from the resume. A window
  *   opening resets the doubling: the situation has changed, so the earlier answer no longer applies.
@@ -50,7 +51,9 @@ class NoWindowWait(private val startedAt: Long) {
         }
         if (before > 0) {
             if (now - (shownAt ?: now) >= BRIEF_MS) opened = true
-            if (opened) since = now
+            // A brief window keeps the first-window time, but leaves at least the short wait after it
+            // closes: a splash closing as the first-window time ends isn't paused on the spot.
+            since = if (opened) now else maxOf(since, now + WAIT_MS - waitMs)
         }
         shownAt = null
         return since + waitMs

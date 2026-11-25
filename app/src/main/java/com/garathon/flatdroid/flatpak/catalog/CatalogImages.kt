@@ -14,13 +14,14 @@ import coil3.request.Options
 import com.garathon.flatdroid.flatpak.flathub.FlathubHosts
 import com.garathon.flatdroid.settings.MobileData
 import com.garathon.flatdroid.settings.mobileDataPolicy
-import kotlinx.coroutines.runInterruptible
-import okio.Buffer
-import okio.Path.Companion.toOkioPath
+import com.garathon.flatdroid.util.io.readBytesUpTo
 import java.io.File
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
+import kotlinx.coroutines.runInterruptible
+import okio.Buffer
+import okio.Path.Companion.toOkioPath
 
 /**
  * Screenshots for the browser: Coil with Flatdroid's own fetcher (Android's HttpURLConnection, no
@@ -114,17 +115,7 @@ object CatalogImages {
                 // Only https all the way: a redirect to another scheme isn't followed by HttpURLConnection anyway.
                 if (connection.responseCode != 200) throw IOException("Answered ${connection.responseCode}")
                 if (connection.url.protocol != "https") throw IOException("Not https")
-                return connection.inputStream.use { stream ->
-                    val out = java.io.ByteArrayOutputStream()
-                    val buffer = ByteArray(16 * 1024)
-                    while (true) {
-                        val read = stream.read(buffer)
-                        if (read < 0) break
-                        if (out.size() + read > MAX_BYTES) throw IOException("Picture too large")
-                        out.write(buffer, 0, read)
-                    }
-                    out.toByteArray()
-                }
+                return connection.inputStream.use { it.readBytesUpTo(MAX_BYTES.toLong()) } ?: throw IOException("Picture too large")
             } finally {
                 connection.disconnect()
             }

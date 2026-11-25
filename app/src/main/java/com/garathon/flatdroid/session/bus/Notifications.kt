@@ -1,5 +1,7 @@
 package com.garathon.flatdroid.session.bus
 
+import com.garathon.flatdroid.util.io.Confined
+import com.garathon.flatdroid.util.io.readBytesUpTo
 import java.io.FileDescriptor
 import java.io.FileInputStream
 
@@ -222,9 +224,10 @@ class Notifications(private val shower: Shower) {
         val content = (struct.values.getOrNull(1) as? Variant)?.value
         return when (kind) {
             "bytes" -> (content as? List<*>)?.let(::bytes)?.let { Image.Encoded(it) }
-            "file-descriptor" -> (content as? UnixFd)?.let { fds.getOrNull(it.index) }?.let { fd ->
-                runCatching { FileInputStream(fd).readNBytesCompat(MAX_IMAGE_BYTES + 1) }.getOrNull()
-                    ?.takeIf { it.size <= MAX_IMAGE_BYTES }?.let { Image.Encoded(it) }
+            // A regular file only (the real portal asks for a sealed memfd, one too): a pipe the app
+            // never writes to would stop this reader, and so the whole bus.
+            "file-descriptor" -> (content as? UnixFd)?.let { fds.getOrNull(it.index) }?.takeIf(Confined::isRegular)?.let { fd ->
+                runCatching { FileInputStream(fd).readBytesUpTo(MAX_IMAGE_BYTES.toLong()) }.getOrNull()?.let { Image.Encoded(it) }
             }
             else -> null
         }
@@ -264,16 +267,4 @@ class Notifications(private val shower: Shower) {
         fun withoutMarkup(markup: String): String =
             markup.replace(Regex("<[^>]*>"), "").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'").replace("&amp;", "&")
     }
-}
-
-/** Up to [max] bytes ([java.io.InputStream.readNBytes] needs Android 13). */
-private fun FileInputStream.readNBytesCompat(max: Int): ByteArray {
-    val out = java.io.ByteArrayOutputStream()
-    val buffer = ByteArray(64 * 1024)
-    while (out.size() < max) {
-        val n = read(buffer, 0, minOf(buffer.size, max - out.size()))
-        if (n < 0) break
-        out.write(buffer, 0, n)
-    }
-    return out.toByteArray()
 }

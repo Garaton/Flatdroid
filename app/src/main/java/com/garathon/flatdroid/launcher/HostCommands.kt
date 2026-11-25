@@ -7,6 +7,9 @@ package com.garathon.flatdroid.launcher
  * the app ship can run. As in Flatpak, running "on the host" needs the metadata's
  * `org.freedesktop.Flatpak` (or the whole session bus); without it both fail as there. Flatpak's
  * sandbox options (`--sandbox` and the rest) are refused: Flatdroid can't start a Flatpak sandbox.
+ * A host command runs without the app's `XDG_*_HOME` ([HOST_UNSET]), as on a desktop, so it
+ * finds what the app wrote for the host in `~/.config`, `~/.local` and `~/.cache` (the app's
+ * own folders here, in every home mode).
  */
 object HostCommands {
     const val FLATPAK_SPAWN = "flatpak-spawn"
@@ -25,6 +28,13 @@ object HostCommands {
      */
     fun hostAllowed(policy: Map<String, String>, sockets: List<String>): Boolean =
         WHOLE_BUS in sockets || policy[FLATPAK_NAME] == "talk" || policy[FLATPAK_NAME] == "own"
+
+    /**
+     * What Flatpak sets only inside the sandbox, pointing into `~/.var/app/<ID>`: a host command
+     * goes by the defaults instead, where an app puts files meant for the host (an app menu entry
+     * in `~/.local/share/applications`, found by `gtk-launch`).
+     */
+    private const val HOST_UNSET = "XDG_CONFIG_HOME XDG_DATA_HOME XDG_CACHE_HOME XDG_STATE_HOME"
 
     /** The message Flatpak's tools print when [FLATPAK_NAME] isn't reachable. */
     private const val NOT_PROVIDED =
@@ -104,9 +114,10 @@ object HostCommands {
         |  echo "Portal call failed: $NOT_PROVIDED" >&2
         |  exit 1
         |fi
+        |# --env still sets them: it is applied after this.
+        |[ "${'$'}_fs_host" = 1 ] && unset $HOST_UNSET
         |if [ -n "${'$'}_fs_dir" ]; then cd -- "${'$'}_fs_dir" || exit 1; fi
-        |# A command whose name holds '=' would be taken for a variable.
-        |case ${'$'}1 in *=*) set -- /bin/sh -euc 'exec "${'$'}@"' sh "${'$'}@";; esac
+        |$PLAIN_COMMAND
         |# env's options and the variables go before the command: the command and its arguments are rotated behind them.
         |_fs_m=${'$'}#
         |for _fs_name in ${'$'}_fs_names; do eval "set -- \"\${'$'}@\" \"${'$'}_fs_name=\${'$'}{_fs_v_${'$'}_fs_name}\""; done
@@ -120,7 +131,7 @@ object HostCommands {
     /**
      * `host-spawn`: Go-style flags (`-x` or `--x`, values as `-x value` or `-x=value`) up to the
      * first other argument or `--`; `-cwd`; `-env`, `-pty` and `-no-pty` change nothing here (the
-     * command keeps the app's environment and the caller's terminal). No command: the user's shell.
+     * command keeps the app's environment but [HOST_UNSET], and the caller's terminal). No command: the user's shell.
      * Called under another name (a link to it standing in for a host tool such as `podman`), it
      * refuses: that tool doesn't exist here, and running the name again would loop.
      */
@@ -158,11 +169,23 @@ object HostCommands {
         |  echo "$NOT_PROVIDED" >&2
         |  exit 127
         |fi
+        |unset $HOST_UNSET
         |if [ -n "${'$'}_fs_cwd" ]; then cd -- "${'$'}_fs_cwd" || exit 127; fi
         |[ ${'$'}# -gt 0 ] || set -- "${'$'}{SHELL:-/bin/sh}"
+        |$PLAIN_COMMAND
         |$NEW_SESSION
         |exec "${'$'}@"
         |""".trimMargin()
+
+    /**
+     * A command `env`, `setsid` or `exec` would take for one of their options (its name starts with
+     * `-`), or `env` for a variable (it holds `=`): given as its path instead (found as `execvp`
+     * finds it), and run through `sh` when that holds `=`. Not found: exit status 127, as a shell.
+     */
+    private val PLAIN_COMMAND = "case ${'$'}1 in -*|*=*) " +
+        "_fs_c=${'$'}(command -v -- \"${'$'}1\") || { echo \"${'$'}{0##*/}: ${'$'}1: command not found\" >&2; exit 127; }; " +
+        "case ${'$'}_fs_c in /*) ;; *) _fs_c=./${'$'}_fs_c;; esac; shift; set -- \"${'$'}_fs_c\" \"${'$'}@\"; " +
+        "case ${'$'}_fs_c in *=*) set -- /bin/sh -euc 'exec \"${'$'}@\"' sh \"${'$'}@\";; esac;; esac"
 
     /**
      * As Flatpak's host helper starts a command: with the terminal on its standard input (if any)

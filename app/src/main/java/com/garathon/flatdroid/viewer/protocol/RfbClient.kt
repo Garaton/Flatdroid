@@ -22,6 +22,8 @@ interface RfbListener {
     fun clipboardRequested() {}
     /** The server moved the pointer itself (an app warped it). */
     fun pointerMoved(x: Int, y: Int) {}
+    /** The app's pointer shape is [hidden] (nothing drawn: games hide it while they steer by the mouse) or not. */
+    fun cursorHidden(hidden: Boolean) {}
 }
 
 class RfbException(message: String) : IOException(message)
@@ -220,8 +222,13 @@ class RfbClient(
                     if (!answered && (w != framebuffer.width || h != framebuffer.height)) resize(w, h, listener)
                 }
                 // Asked for only so the server leaves the pointer out of the screen; never drawn
-                // (touch needs none, and Android draws a mouse's own).
-                Rfb.CURSOR -> input.skipFully(w * h * Rfb.BYTES_PER_PIXEL + (w + 7) / 8 * h)
+                // (touch needs none, and Android draws a mouse's own). Only whether it shows
+                // anything is read: a mask without a bit set hides the pointer.
+                Rfb.CURSOR -> {
+                    input.skipFully(w * h * Rfb.BYTES_PER_PIXEL)
+                    val mask = ByteArray(((w + 7) / 8 * h).also(::checkLength)).also(input::readFully)
+                    listener.cursorHidden(mask.all { it == 0.toByte() })
+                }
                 Rfb.CURSOR_POSITION -> listener.pointerMoved(x, y)
                 Rfb.LAST_RECT -> break
                 else -> throw RfbException("unrequested encoding $encoding")

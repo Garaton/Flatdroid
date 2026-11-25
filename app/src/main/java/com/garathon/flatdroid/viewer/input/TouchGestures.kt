@@ -14,6 +14,8 @@ interface PointerOutput {
     fun scroll(x: Float, y: Float, down: Int, right: Int)
     /** The hold was recognised (the moment to vibrate). */
     fun held()
+    /** While [TouchGestures.steering]: the finger travelled [dx], [dy] (screen px); the pointer moves by as much. */
+    fun look(dx: Float, dy: Float) {}
 }
 
 /**
@@ -25,6 +27,10 @@ interface PointerOutput {
  * [slop]: movement (px) that still counts as holding still; [scrollStep]: finger travel (px) per
  * wheel notch, which may change between moves. A drag let go with speed goes on through [flingTo]
  * (the viewer moves a virtual finger on, slowing down).
+ *
+ * While [steering] (the app has hidden its pointer and moves it back itself, as a game does to
+ * turn the view by the mouse), a drag moves the pointer by the finger's travel ([PointerOutput.look])
+ * instead of scrolling, also during a held drag; taps and holds stay clicks.
  */
 class TouchGestures(private val output: PointerOutput, private val slop: Float, scrollStep: Float) {
     /** Changed during a drag, the notches already sent count at the new step: the content stays with the finger. */
@@ -32,8 +38,11 @@ class TouchGestures(private val output: PointerOutput, private val slop: Float, 
     /** As [scrollStep], sideways (apps may scroll a different distance across than down). */
     var scrollStepAcross = scrollStep
 
-    /** [SCROLLED]: a drag ended; [flingTo] still scrolls on from it. */
-    private enum class State { IDLE, DOWN, SCROLLING, SCROLLED, HELD, DRAGGING, CANCELLED }
+    /** The app steers by the pointer: drags move it by their travel instead of scrolling. */
+    var steering = false
+
+    /** [SCROLLED]: a drag ended; [flingTo] still scrolls on from it. [STEERING]: a drag while [steering]. */
+    private enum class State { IDLE, DOWN, SCROLLING, SCROLLED, STEERING, HELD, DRAGGING, CANCELLED }
 
     private var state = State.IDLE
     private var downX = 0f
@@ -45,6 +54,9 @@ class TouchGestures(private val output: PointerOutput, private val slop: Float, 
     private var sentRight = 0
     private var lastX = 0f
     private var lastY = 0f
+    /** Where the finger was at the last [PointerOutput.look]. */
+    private var lookX = 0f
+    private var lookY = 0f
 
     /** The finger is down and scrolling (a lift now may fling). */
     val scrolling: Boolean get() = state == State.SCROLLING
@@ -71,19 +83,34 @@ class TouchGestures(private val output: PointerOutput, private val slop: Float, 
         lastX = x; lastY = y
         when (state) {
             State.DOWN -> if (moved(x, y)) {
-                state = State.SCROLLING
-                // Scrolling starts where the finger crossed the slop: no jump of a slop's worth.
-                scrollX = x; scrollY = y
+                // Either starts where the finger crossed the slop: no jump of a slop's worth.
+                if (steering) {
+                    state = State.STEERING
+                    lookX = x; lookY = y
+                } else {
+                    state = State.SCROLLING
+                    scrollX = x; scrollY = y
+                }
             }
             State.SCROLLING -> sendNotches(x, y)
+            State.STEERING -> look(x, y)
             State.HELD -> if (moved(x, y)) {
                 state = State.DRAGGING
                 output.press(BUTTON_LEFT, downX, downY)
-                output.move(x, y)
+                if (steering) {
+                    lookX = x; lookY = y
+                } else {
+                    output.move(x, y)
+                }
             }
-            State.DRAGGING -> output.move(x, y)
+            State.DRAGGING -> if (steering) look(x, y) else output.move(x, y)
             State.SCROLLED, State.IDLE, State.CANCELLED -> Unit
         }
+    }
+
+    private fun look(x: Float, y: Float) {
+        output.look(x - lookX, y - lookY)
+        lookX = x; lookY = y
     }
 
     /**
@@ -117,7 +144,7 @@ class TouchGestures(private val output: PointerOutput, private val slop: Float, 
                 state = State.SCROLLED
                 return
             }
-            State.SCROLLED, State.IDLE, State.CANCELLED -> Unit
+            State.STEERING, State.SCROLLED, State.IDLE, State.CANCELLED -> Unit
         }
         state = State.IDLE
     }

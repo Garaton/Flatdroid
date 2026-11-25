@@ -1,5 +1,6 @@
 package com.garathon.flatdroid.flatpak
 
+import com.garathon.flatdroid.util.io.Confined
 import com.garathon.flatdroid.util.io.readTextUpTo
 import java.io.File
 
@@ -150,14 +151,7 @@ class FlatpakInstallation(root: File, private val arch: String) {
     fun alpinePath(file: File): String = ALPINE_PATH + file.path.removePrefix(root.path)
 
     /** [file] resolved, or null if it doesn't exist or resolves outside the installation. */
-    private fun inside(file: File): File? {
-        val resolved = try {
-            file.canonicalFile
-        } catch (_: Exception) {
-            return null
-        }
-        return resolved.takeIf { it.exists() && it.path.startsWith(root.path + "/") }
-    }
+    private fun inside(file: File): File? = Confined.resolve(file, root)?.takeIf { it.exists() && it != root }
 
     private fun isValidId(part: String) = part.isNotEmpty() && part != "." && part != ".." && '/' !in part && ':' !in part
 

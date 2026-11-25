@@ -80,7 +80,7 @@ object AlpineChanges {
      * entries (something was made in it and removed again, as proot's stand-ins for binds are; its
      * entries' own changes are reported each). Also left out: new folders that hold nothing but
      * other new empty folders, and a folder's changed entries when those are all such folders
-     * (LibreOffice makes its extension cache in its own install at its first start). Nothing in an
+     * (an office suite making its extension cache in its own install at its first start). Nothing in an
      * empty folder can be loaded or run; a file made in one is reported.
      */
     fun real(changed: List<String>, before: Map<String, Stamp>, after: Map<String, Stamp>, sameAsInstalled: (String) -> Boolean): List<String> {

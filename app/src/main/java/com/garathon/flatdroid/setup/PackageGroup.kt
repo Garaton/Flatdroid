@@ -11,10 +11,11 @@ enum class PackageGroup(private val packages: List<String>, val files: List<Stri
     /**
      * Xvnc and Openbox, for an app that only takes X11 (or is set to Force X11): 32 packages, 54 MiB
      * installed. Mesa's DRI driver links (136 KiB, beside the `libgallium` setup has) are for Xvnc's
-     * GLX, offered when the session draws through GL ([com.garathon.flatdroid.launcher.LaunchPlan.glx]);
-     * an Alpine that added the group before gets them with its next update.
+     * GLX, offered when the session draws through GL ([com.garathon.flatdroid.launcher.LaunchPlan.glx]).
+     * They are among [files]: an Alpine that has Xvnc from before (from an older setup, without the
+     * group's virtual package) is asked for the group at its next X11 launch, which adds only them.
      */
-    X11(listOf("tigervnc", "openbox", "mesa-dri-gallium"), listOf("usr/bin/Xvnc", "usr/bin/openbox"), downloadMb = 14),
+    X11(listOf("tigervnc", "openbox", "mesa-dri-gallium"), listOf("usr/bin/Xvnc", "usr/bin/openbox", "usr/lib/dri/swrast_dri.so"), downloadMb = 14),
 
     /**
      * foot, the terminal of an app whose desktop file says `Terminal=true`. Its font is Android's

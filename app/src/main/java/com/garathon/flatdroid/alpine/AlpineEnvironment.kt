@@ -3,6 +3,7 @@ package com.garathon.flatdroid.alpine
 import android.annotation.SuppressLint
 import android.content.Context
 import android.os.SystemClock
+import android.provider.Settings
 import android.system.ErrnoException
 import android.system.Os
 import com.garathon.flatdroid.alpine.dns.NetworkDns
@@ -226,9 +227,11 @@ class AlpineEnvironment private constructor(private val context: Context) {
      */
     private fun bootId(bootEpochSeconds: Long): String {
         val record = File(generatedDir, "boot-id")
-        GuestFiles.storedBootId(record.takeIf { it.isFile }?.readText(), bootEpochSeconds)?.let { return it }
+        // Android's count of boots, where it keeps one: a clock change doesn't move it.
+        val bootCount = runCatching { Settings.Global.getInt(context.contentResolver, Settings.Global.BOOT_COUNT) }.getOrNull()
+        GuestFiles.storedBootId(record.takeIf { it.isFile }?.readText(), bootEpochSeconds, bootCount)?.let { return it }
         val id = java.util.UUID.randomUUID().toString()
-        record.writeTextAtomically(GuestFiles.bootIdRecord(bootEpochSeconds, id), durable = false)
+        record.writeTextAtomically(GuestFiles.bootIdRecord(bootEpochSeconds, id, bootCount), durable = false)
         return id
     }
 

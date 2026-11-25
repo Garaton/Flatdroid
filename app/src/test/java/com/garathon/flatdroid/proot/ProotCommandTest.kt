@@ -196,6 +196,27 @@ class ProotCommandTest {
         }
     }
 
+    @Test
+    fun hostPathsDontFollowLinksOutOfTheirBind() {
+        val base = java.nio.file.Files.createTempDirectory("hostof").toFile().canonicalFile
+        try {
+            val home = java.io.File(base, "home").apply { mkdirs() }
+            val other = java.io.File(base, "other").apply { mkdirs() }
+            java.io.File(other, "secret.png").writeText("x")
+            java.io.File(home, "inside.png").writeText("x")
+            java.nio.file.Files.createSymbolicLink(java.io.File(home, "out.png").toPath(), java.io.File(other, "secret.png").toPath())
+            java.nio.file.Files.createSymbolicLink(java.io.File(home, "in.png").toPath(), java.io.File(home, "inside.png").toPath())
+            java.nio.file.Files.createSymbolicLink(java.io.File(home, "outdir").toPath(), other.toPath())
+            val binds = flatpakBinds.copy(home = home.path, appDirs = emptyList(), extra = emptyList())
+            assertNull(binds.hostOf("/home/user/out.png"))
+            assertNull(binds.hostOf("/home/user/outdir/secret.png"))
+            assertEquals("${home.path}/inside.png", binds.hostOf("/home/user/in.png"))
+            assertEquals("${home.path}/inside.png", binds.hostOf("/home/user/inside.png"))
+        } finally {
+            base.deleteRecursively()
+        }
+    }
+
     /** The same binds, in the same order, as the tested shell launcher (fdrun). */
     @Test
     fun flatpakArgvMatchesTheTestedLauncher() {

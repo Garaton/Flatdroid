@@ -1,5 +1,6 @@
 package com.garathon.flatdroid.setup.rootfs
 
+import com.garathon.flatdroid.util.io.Confined
 import java.io.EOFException
 import java.io.File
 import java.io.IOException
@@ -101,10 +102,7 @@ class TarExtractor(private val fs: TarFs) {
 
     /** Refuses paths that would leave [root] through an already extracted symlink. */
     private fun ensureInside(root: File, file: File) {
-        val path = file.canonicalPath
-        if (path != root.path && !path.startsWith(root.path + File.separator)) {
-            throw IOException("Tar entry escapes the destination: $file")
-        }
+        if (!Confined.within(file, root.path)) throw IOException("Tar entry escapes the destination: $file")
     }
 
     /** An entry's header, its pax or GNU long-name headers applied. */

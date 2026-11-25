@@ -14,6 +14,7 @@ class TouchGesturesTest {
         override fun release(x: Float, y: Float) { events += "release ${x.toInt()},${y.toInt()}" }
         override fun scroll(x: Float, y: Float, down: Int, right: Int) { events += "scroll ${x.toInt()},${y.toInt()} down $down right $right" }
         override fun held() { events += "held" }
+        override fun look(dx: Float, dy: Float) { events += "look ${dx.toInt()},${dy.toInt()}" }
     }
 
     private val out = Recorder()
@@ -125,5 +126,28 @@ class TouchGesturesTest {
         assertEquals(listOf(true, false, true, true, false, true), TouchGestures.interleave(-4, 2))
         assertEquals(listOf(false, false, false), TouchGestures.interleave(0, 3))
         assertEquals(emptyList<Boolean>(), TouchGestures.interleave(0, 0))
+    }
+
+    @Test
+    fun whileSteeringADragMovesThePointerByItsTravelAndTapsStayClicks() {
+        touch.steering = true
+        touch.down(100f, 500f)
+        touch.move(100f, 480f) // past the slop: steering starts here, no jump
+        touch.move(130f, 460f)
+        touch.move(140f, 460f)
+        touch.up(140f, 460f)
+        assertEquals(listOf("look 30,-20", "look 10,0"), out.events)
+        out.events.clear()
+        touch.down(300f, 300f)
+        touch.up(300f, 300f)
+        assertEquals(listOf("click 0 300,300"), out.events)
+        out.events.clear()
+        // A hold then a drag holds the left button while turning.
+        touch.down(300f, 300f)
+        touch.holdRecognised()
+        touch.move(330f, 300f)
+        touch.move(340f, 310f)
+        touch.up(340f, 310f)
+        assertEquals(listOf("held", "press 0 300,300", "look 10,10", "release 340,310"), out.events)
     }
 }

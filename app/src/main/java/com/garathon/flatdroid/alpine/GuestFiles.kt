@@ -140,14 +140,18 @@ object GuestFiles {
 
     /**
      * labwc's configuration, as [openboxRc]'s: normal windows maximised, the same keys, no
-     * minimise button, tapping the empty desktop lists the windows. Without [titleBars] windows
-     * have none, and apps are asked not to draw their own. Only these key bindings and no root
-     * menu: labwc's defaults start a terminal and offer to exit. Primary selection off: only
-     * copies are a clipboard here, as with X11.
+     * minimise button. Without [titleBars] windows have none, and apps are asked not to draw
+     * their own. Only these key bindings. A tap on the empty desktop brings back minimised windows
+     * (apps can still minimise themselves) and does nothing else: labwc's defaults open a menu
+     * that starts a terminal and offers to exit, and its window list always shows a desktop and
+     * "Go there...", which a tap before the app's window is up would open. Primary selection off:
+     * only copies are a clipboard here, as with X11.
      */
     fun labwcRc(titleBars: Boolean = true): String {
-        fun list(button: String) =
-            "<mousebind button=\"$button\" action=\"Press\"><action name=\"ShowMenu\" menu=\"client-list-combined-menu\"/></mousebind>"
+        fun none(button: String) = "<mousebind button=\"$button\" action=\"Press\"><action name=\"None\"/></mousebind>"
+        // Focus brings a minimised window back.
+        val restore = "<mousebind button=\"Left\" action=\"Press\"><action name=\"ForEach\"><query iconified=\"yes\"/>" +
+            "<then><action name=\"Focus\"/></then></action></mousebind>"
         return """
             |<?xml version="1.0" encoding="UTF-8"?>
             |<labwc_config>
@@ -158,7 +162,7 @@ object GuestFiles {
             |<keybind key="A-F4"><action name="Close"/></keybind>
             |<keybind key="A-Tab"><action name="NextWindow"/></keybind>
             |</keyboard>
-            |<mouse><default/><context name="Root">${list("Left")}${list("Right")}${list("Middle")}</context></mouse>
+            |<mouse><default/><context name="Root">$restore${none("Right")}${none("Middle")}</context></mouse>
             |<windowRules><windowRule identifier="*" type="normal"${if (titleBars) "" else " serverDecoration=\"no\""}><action name="Maximize"/></windowRule></windowRules>
             |</labwc_config>
             |""".trimMargin()
@@ -250,8 +254,8 @@ object GuestFiles {
      * Openbox's whole configuration (a user rc.xml replaces Openbox's defaults, it isn't merged):
      * normal windows maximised with their title bars kept (GTK3/Qt windows need them to close);
      * no minimise button, since there is no taskbar to bring a window back; tapping the empty
-     * desktop lists the windows, minimised ones included (apps can still minimise themselves);
-     * close and maximise buttons, moving and resizing. Without [titleBars] windows have no
+     * desktop brings back minimised windows (apps can still minimise themselves) and does nothing
+     * else (Openbox's window list also shows its desktops); close and maximise buttons, moving and resizing. Without [titleBars] windows have no
      * decorations at all (apps then close through their own menus). Written for every session and
      * bound into Alpine when Openbox starts.
      */
@@ -259,7 +263,8 @@ object GuestFiles {
         fun bind(button: String, event: String, actions: String) =
             "<mousebind button=\"$button\" action=\"$event\">$actions</mousebind>"
         val focus = "<action name=\"Focus\"/><action name=\"Raise\"/>"
-        val windowList = "<action name=\"ShowMenu\"><menu>client-list-combined-menu</menu></action>"
+        // Focus brings a minimised window back.
+        val restore = "<action name=\"ForEach\"><iconified>yes</iconified><then><action name=\"Focus\"/></then></action>"
         val resize = listOf("Top", "Bottom", "Left", "Right", "TLCorner", "TRCorner", "BLCorner", "BRCorner")
             .joinToString("") { "<context name=\"$it\">${bind("Left", "Drag", "<action name=\"Resize\"/>")}</context>" }
         return """
@@ -282,7 +287,7 @@ object GuestFiles {
             |<context name="Client">${bind("Left", "Press", focus)}${bind("Middle", "Press", focus)}${bind("Right", "Press", focus)}</context>
             |<context name="Close">${bind("Left", "Click", "<action name=\"Close\"/>")}</context>
             |<context name="Maximize">${bind("Left", "Click", "<action name=\"ToggleMaximize\"/>")}</context>
-            |<context name="Root">${bind("Left", "Press", windowList)}${bind("Right", "Press", windowList)}</context>
+            |<context name="Root">${bind("Left", "Press", restore)}</context>
             |</mouse>
             |<applications><application class="*" type="normal"><maximized>yes</maximized>${if (titleBars) "" else "<decor>no</decor>"}</application></applications>
             |</openbox_config>
@@ -339,8 +344,8 @@ object GuestFiles {
 
     /**
      * The PCI devices' list, which Android lets apps see but not read (10 and later; 7.0 lets them).
-     * libpci exits the program when it can't (Chromium before about version 90 reads the GPU
-     * through it: Electron 9's GPU process died at start, and the app with it). Phones have no PCI
+     * libpci exits the program when it can't (older Chromium-based programs read the GPU through
+     * it: an Electron 9 app's GPU process died at start, and the app with it). Phones have no PCI
      * bus, so an empty list is what most would show anyway.
      */
     const val PCI_DEVICES = "/proc/bus/pci/devices"
@@ -359,18 +364,23 @@ object GuestFiles {
     const val BOOT_ID = "/proc/sys/kernel/random/boot_id"
 
     /**
-     * The boot ID stored as `<boot time> <ID>` ([bootIdRecord]) if it belongs to the boot that
-     * started at [bootEpochSeconds], else null. The boot time is only known to the second, so it
-     * may move by a few seconds within one boot; a different boot starts minutes later at least.
+     * The boot ID stored as `<boot time> <ID> [<boot count>]` ([bootIdRecord]) if it belongs to
+     * this boot, else null. Android's boot count ([bootCount], when both have one) decides: it
+     * changes only with a boot. Otherwise the boot time, [bootEpochSeconds]: the wall clock less
+     * the uptime, known only to the second, so it may move by a few seconds within one boot, and
+     * a change of the clock by more than a minute takes it for another boot.
      */
-    fun storedBootId(stored: String?, bootEpochSeconds: Long): String? {
+    fun storedBootId(stored: String?, bootEpochSeconds: Long, bootCount: Int? = null): String? {
         val parts = stored?.trim()?.split(' ') ?: return null
         val time = parts.firstOrNull()?.toLongOrNull() ?: return null
         val id = parts.getOrNull(1)?.takeIf { BOOT_ID_FORMAT.matches(it) } ?: return null
+        val count = parts.getOrNull(2)?.toIntOrNull()
+        if (count != null && bootCount != null) return id.takeIf { count == bootCount }
         return id.takeIf { kotlin.math.abs(time - bootEpochSeconds) <= BOOT_TIME_SLACK_SECONDS }
     }
 
-    fun bootIdRecord(bootEpochSeconds: Long, id: String) = "$bootEpochSeconds $id\n"
+    fun bootIdRecord(bootEpochSeconds: Long, id: String, bootCount: Int? = null) =
+        "$bootEpochSeconds $id" + (bootCount?.let { " $it" } ?: "") + "\n"
 
     private const val BOOT_TIME_SLACK_SECONDS = 60
     private val BOOT_ID_FORMAT = Regex("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")

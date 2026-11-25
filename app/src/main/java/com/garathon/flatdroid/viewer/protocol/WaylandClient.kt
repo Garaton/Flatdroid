@@ -235,7 +235,7 @@ class WaylandClient(
 
     /**
      * What a step typically moves, in framebuffer pixels: where a drag starts until the viewer has
-     * learnt the app's own (measured: GTK 4 about 2.5 times the step's pixels, Firefox 4, Qt 4.4,
+     * learnt the app's own (measured: GTK 4 about 2.5 times the step's pixels, Gecko 4, Qt 4.4,
      * GTK 3 about 7 in a 1000 pixel tall window, growing with the window).
      */
     val stepPixels: Float get() = SCROLL_STEP * outputScale * TYPICAL_STEP_FACTOR

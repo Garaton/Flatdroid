@@ -10,6 +10,8 @@ import com.garathon.flatdroid.util.ENV_NAME
  */
 object LaunchEnvironment {
     const val DISPLAY = ":1"
+    /** Xwayland's display in a Wayland session ([build]'s xwayland): the first, the helpers' X socket folder starts empty. */
+    const val XWAYLAND_DISPLAY = ":0"
 
     /**
      * [triplet] is e.g. `aarch64-linux-gnu`. [glDefault] is where GL.default is bound, under /usr
@@ -35,6 +37,11 @@ object LaunchEnvironment {
         flatpakContainer: Boolean = false,
         /** The session is Wayland: the toolkits are pointed at it instead of X11. */
         wayland: Boolean = false,
+        /**
+         * The Wayland session also offers X11 through Xwayland: DISPLAY for programs that take only
+         * X11. The toolkits stay on Wayland.
+         */
+        xwayland: Boolean = false,
         /** GTK 4 and Qt Quick draw on the CPU instead of through GL ([Rendering]). */
         softwareRendering: Boolean = true,
         /** Whether the runtime has a folder at a `/usr` path ([multiarchPaths]). */
@@ -94,6 +101,14 @@ object LaunchEnvironment {
             env["GDK_BACKEND"] = "wayland"
             env["QT_QPA_PLATFORM"] = "wayland"
             env["SDL_VIDEODRIVER"] = "wayland"
+            if (xwayland) {
+                env["DISPLAY"] = XWAYLAND_DISPLAY
+                // Xwayland runs among the helpers, in another proot: no MIT-SHM, as with Xvnc.
+                env["QT_X11_NO_MITSHM"] = "1"
+                // The compositor's X window manager doesn't reparent windows. Java's AWT assumes one that does
+                // when it doesn't know the manager by name, and then never resizes its content to the window's size.
+                env["_JAVA_AWT_WM_NONREPARENTING"] = "1"
+            }
         }
         if (terminal != null) {
             env["TERM"] = terminal

@@ -90,6 +90,17 @@ class HostCommandsTest {
     }
 
     @Test
+    fun hostCommandsGoByTheDefaultFolders() {
+        val homes = mapOf("XDG_CONFIG_HOME" to "c", "XDG_DATA_HOME" to "d", "XDG_CACHE_HOME" to "k", "XDG_STATE_HOME" to "s")
+        val show = arrayOf("sh", "-c", "echo \"\${XDG_CONFIG_HOME-}|\${XDG_DATA_HOME-}|\${XDG_CACHE_HOME-}|\${XDG_STATE_HOME-}\"")
+        assertEquals("|||\n", spawn("--host", *show, env = homes).out)
+        // Given with --env, it stays; a new sandbox of the app keeps the app's.
+        assertEquals("|x||\n", spawn("--host", "--env=XDG_DATA_HOME=x", *show, env = homes).out)
+        assertEquals("c|d|k|s\n", spawn(*show, env = homes).out)
+        assertEquals("|||\n", hostSpawn(*show, env = homes).out)
+    }
+
+    @Test
     fun malformedCalls() {
         assertTrue("No command specified" in spawn("--host").err)
         assertEquals(1, spawn("--env=1A=b", "true").code)
@@ -99,6 +110,19 @@ class HostCommandsTest {
         // Arguments after the command are its own, and -- ends the options.
         assertEquals("--host\n", spawn("--", "echo", "--host").out)
         assertEquals("-n x\n", spawn("printf", "%s\\n", "-n x").out)
+    }
+
+    @Test
+    fun commandsThatLookLikeOptionsOrVariables() {
+        val dash = File(tmp.root, "-tool").apply { writeText("#!/bin/sh\necho dash \"\$@\"\n"); setExecutable(true) }
+        val equals = File(tmp.newFolder("a=b"), "tool").apply { writeText("#!/bin/sh\necho equals \"\$@\"\n"); setExecutable(true) }
+        val path = mapOf("PATH" to "${tmp.root.path}:/usr/bin:/bin")
+        assertEquals("dash x\n", spawn("--", "-tool", "x", env = path).out)
+        assertEquals("dash x\n", spawn("--clear-env", "--", "-tool", "x", env = path).out)
+        assertEquals("equals y\n", spawn("--env=A=1", equals.path, "y").out)
+        assertEquals("dash z\n", hostSpawn("--", "-tool", "z", env = path).out)
+        assertEquals(127, spawn("--", "-missing").code)
+        assertTrue(dash.exists())
     }
 
     private fun hostSpawn(vararg args: String, allowed: Boolean = true, name: String = "host-spawn", env: Map<String, String> = emptyMap()) =

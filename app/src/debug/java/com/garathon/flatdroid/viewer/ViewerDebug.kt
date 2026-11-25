@@ -38,6 +38,9 @@ object ViewerDebug {
         copyRectNanos += time
     }
 
+    /** `clickReleaseMs=10`: how long a tap holds the button, read at each tap (tuning). */
+    fun clickReleaseMs(cacheDir: File): Long? = read(cacheDir).getProperty("clickReleaseMs")?.trim()?.toLongOrNull()?.takeIf { it >= 0 }
+
     /** `tiles=192`: [TileFrames] of that size, whatever the device could do. */
     fun tileSize(cacheDir: File): Int? = read(cacheDir).getProperty("tiles")?.trim()?.toIntOrNull()?.takeIf { it > 0 }
 

@@ -1,6 +1,8 @@
 package com.garathon.flatdroid.proot
 
 import com.garathon.flatdroid.util.ENV_NAME
+import com.garathon.flatdroid.util.io.Confined
+import java.io.File
 /** Host paths proot needs. All must be absolute. */
 data class ProotPaths(
     /** nativeLibraryDir/libproot.so */
@@ -160,9 +162,10 @@ private val CAMERA_GUEST = Regex(
 /**
  * The host path behind [guest] in the app's root, among the home and the binds over and beside it
  * ([FlatpakBinds.home], [FlatpakBinds.appDirs], [FlatpakBinds.privateFiles], [FlatpakBinds.extra]):
- * the last bind at the longest matching path wins, as in proot. Null elsewhere (the runtime, the
- * app, /tmp) and for paths that aren't absolute or have `.` or `..` in them. Symbolic links in the
- * app's files aren't followed: whoever opens the result sees what is there on the host.
+ * the last bind at the longest matching path wins, as in proot. Resolved, and null unless it stays
+ * inside that bind: the app's links are host links here, and could lead to any file Flatdroid can
+ * read. Null elsewhere too (the runtime, the app, /tmp) and for paths that aren't absolute or have
+ * `.` or `..` in them. Open the result with [Confined.openRegular] to keep a link swapped in later out.
  */
 fun FlatpakBinds.hostOf(guest: String): String? {
     if (!guest.startsWith("/") || guest.split('/').any { it == "." || it == ".." }) return null
@@ -175,7 +178,7 @@ fun FlatpakBinds.hostOf(guest: String): String? {
         if (best == null || mount.length >= best.second.trimEnd('/').length) best = host to mount
     }
     val (host, mount) = best ?: return null
-    return host.trimEnd('/') + path.removePrefix(mount)
+    return Confined.resolve(File(host.trimEnd('/') + path.removePrefix(mount)), File(host))?.path
 }
 
 /** A complete process description: argv and the whole environment (nothing is inherited). */

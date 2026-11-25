@@ -88,6 +88,7 @@ class AlpineShell(private val context: Context) {
                 sound = false,
                 Fdsec.Filter(extraSyscalls = security.extraSyscallFilter),
                 terminal = true,
+                x11 = false,
             )
             helpers.awaitDisplay(wayland = true)
             val tty = helpers.awaitTerminal()

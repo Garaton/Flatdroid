@@ -9,6 +9,7 @@ import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.RectF
+import android.os.Build
 import android.os.SystemClock
 import android.view.HapticFeedbackConstants
 import android.text.InputType
@@ -627,6 +628,7 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (event.getToolType(0) == MotionEvent.TOOL_TYPE_MOUSE) return mouse(event)
+        mouseInUse = false
         if (twoFingers) velocity?.addMovement(event)
         if (twoFingers && event.actionMasked == MotionEvent.ACTION_MOVE) pan(event)
         if (threeFingerTap && event.actionMasked == MotionEvent.ACTION_MOVE) {
@@ -784,6 +786,8 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
 
     override fun onDetachedFromWindow() {
         surfaceChanged(null)
+        // Its delayed send would be dropped with the view's callbacks, leaving the button held.
+        flushRelease()
         releaseKeys()
         stopFling()
         stopPanFling()
@@ -802,30 +806,88 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
     }
 
     private fun pointer(buttons: Int, x: Float, y: Float) {
+        flushRelease()
         val (rx, ry) = remote(x, y)
         connection.pointer(buttons, rx, ry)
     }
 
+    /** A tap's release still to be sent ([click]). */
+    private var pendingRelease: Runnable? = null
+
+    /** Sends a tap's release now: anything after it (a double tap's second press) has to come after it. */
+    private fun flushRelease() {
+        val release = pendingRelease ?: return
+        pendingRelease = null
+        removeCallbacks(release)
+        release.run()
+    }
+
+    /**
+     * A tap: the button is let go [CLICK_RELEASE_MS] after it went down, not in the same instant,
+     * about as long as a finger on a mouse button. Programs that look at their input a few times a
+     * second (an old game's menus) missed a press that was already over. Any input meanwhile sends
+     * the release first ([flushRelease]).
+     */
     override fun click(button: Int, x: Float, y: Float) {
-        pointer(0, x, y)
-        pointer(1 shl button, x, y)
-        pointer(0, x, y)
+        touch(0, x, y)
+        touch(1 shl button, x, y)
+        val delay = ViewerDebug.clickReleaseMs(context.cacheDir) ?: CLICK_RELEASE_MS
+        val (rx, ry) = remote(x, y)
+        val here = steering
+        val release = Runnable { if (here) connection.pointerBy(0, 0, 0, frameWidth, frameHeight) else connection.pointer(0, rx, ry) }
+        if (delay == 0L) {
+            release.run()
+        } else {
+            pendingRelease = release
+            postDelayed({ if (pendingRelease === release) flushRelease() }, delay)
+        }
     }
 
     override fun press(button: Int, x: Float, y: Float) {
-        pointer(0, x, y)
+        touch(0, x, y)
         mouseButtons = 1 shl button
-        pointer(mouseButtons, x, y)
+        touch(mouseButtons, x, y)
     }
 
-    override fun move(x: Float, y: Float) = pointer(mouseButtons, x, y)
+    override fun move(x: Float, y: Float) = touch(mouseButtons, x, y)
 
     override fun release(x: Float, y: Float) {
         mouseButtons = 0
-        pointer(0, x, y)
+        touch(0, x, y)
+    }
+
+    /**
+     * The app's pointer is hidden ([pointerHidden]), as a game's is while it steers by it: a finger's
+     * drag moves it by its travel ([look]) instead of scrolling, and taps and holds act where it is,
+     * so a tap doesn't swing the view to the finger.
+     */
+    private var steering = false
+
+    /** A touch gesture's pointer at [x], [y], or where the pointer is while [steering]. */
+    private fun touch(buttons: Int, x: Float, y: Float) {
+        if (!steering) return pointer(buttons, x, y)
+        flushRelease()
+        connection.pointerBy(buttons, 0, 0, frameWidth, frameHeight)
+    }
+
+    /** What is left of a finger's travel below a framebuffer pixel ([look]). */
+    private var lookRestX = 0f
+    private var lookRestY = 0f
+
+    override fun look(dx: Float, dy: Float) {
+        flushRelease()
+        val s = scale()
+        lookRestX += dx / s
+        lookRestY += dy / s
+        val mx = lookRestX.toInt()
+        val my = lookRestY.toInt()
+        lookRestX -= mx
+        lookRestY -= my
+        connection.pointerBy(mouseButtons, mx, my, frameWidth, frameHeight)
     }
 
     override fun scroll(x: Float, y: Float, down: Int, right: Int) {
+        flushRelease()
         measureDown.sent(down)
         measureAcross.sent(right)
         if (connection.scrollsInSteps) {
@@ -925,8 +987,69 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
             (if (state and MotionEvent.BUTTON_SECONDARY != 0) 4 else 0)
 
     private fun mouse(event: MotionEvent): Boolean {
+        mouseInUse = true
         mouseButtons = buttons(event.buttonState)
         pointer(mouseButtons, event.x, event.y)
+        return true
+    }
+
+    /** The last pointer input came from a mouse: only a mouse is captured ([pointerLock]). */
+    private var mouseInUse = false
+    /** What is left of captured movements below a framebuffer pixel. */
+    private var capturedRestX = 0f
+    private var capturedRestY = 0f
+
+    /**
+     * While the app steers by the mouse (its pointer hidden, and moved back by the app itself):
+     * Android's pointer capture (Android 8 and later) has a mouse give movements without an edge.
+     * Released when the app shows its pointer again, and by Android when Flatdroid loses focus.
+     */
+    override fun pointerHidden(hidden: Boolean) {
+        steering = hidden
+        gestures.steering = hidden
+    }
+
+    override fun pointerLock(locked: Boolean) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        if (locked) {
+            if (mouseInUse && hasWindowFocus() && !hasPointerCapture()) {
+                capturedRestX = 0f
+                capturedRestY = 0f
+                requestPointerCapture()
+            }
+        } else if (hasPointerCapture()) {
+            releasePointerCapture()
+        }
+    }
+
+    override fun onCapturedPointerEvent(event: MotionEvent): Boolean {
+        if (!event.isFromSource(InputDevice.SOURCE_MOUSE_RELATIVE)) return false
+        flushRelease()
+        mouseButtons = buttons(event.buttonState)
+        if (event.actionMasked == MotionEvent.ACTION_SCROLL) {
+            val v = event.getAxisValue(MotionEvent.AXIS_VSCROLL).toInt()
+            val bit = if (v > 0) WHEEL_UP else WHEEL_DOWN
+            repeat(kotlin.math.abs(v)) {
+                connection.pointerBy(mouseButtons or (1 shl bit), 0, 0, frameWidth, frameHeight)
+                connection.pointerBy(mouseButtons, 0, 0, frameWidth, frameHeight)
+            }
+            return true
+        }
+        // Each sample is a movement of its own, the batched ones included.
+        var dx = event.x
+        var dy = event.y
+        for (i in 0 until event.historySize) {
+            dx += event.getHistoricalX(i)
+            dy += event.getHistoricalY(i)
+        }
+        val s = scale()
+        capturedRestX += dx / s
+        capturedRestY += dy / s
+        val mx = capturedRestX.toInt()
+        val my = capturedRestY.toInt()
+        capturedRestX -= mx
+        capturedRestY -= my
+        connection.pointerBy(mouseButtons, mx, my, frameWidth, frameHeight)
         return true
     }
 
@@ -953,6 +1076,11 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
 
     companion object {
         private const val MAX_ZOOM = 8f
+        /**
+         * How long a tap holds the button ([click]). Minecraft 1.0's world list at 3 frames/s on a
+         * Cortex-A53 took 100 ms in every try, 75 ms in most, 50 ms and less rarely.
+         */
+        private const val CLICK_RELEASE_MS = 100L
         /** After the last notch, how long the content may still move (apps that scroll smoothly animate it). */
         private const val SCROLL_SETTLE_MS = 600L
         /** Notches sent this long after the content last moved: it had reached its end. */

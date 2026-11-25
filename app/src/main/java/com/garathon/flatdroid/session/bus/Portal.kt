@@ -199,9 +199,9 @@ class Portal(
         "AccessCamera" -> {
             val options = call.args("a{sv}")[0] as Map<*, *>
             cameraAsked?.invoke()
-            val token = ((options["handle_token"] as? Variant)?.value as? String)?.takeIf { TOKEN.matches(it) } ?: "flatdroid${++requests}"
-            val handle = requestPath(call.sender ?: "", token)
+            val handle = requestHandle(call, options)
             signals += Message.signal(handle, REQUEST, "Response", "ua{sv}", RESPONSE_OTHER, emptyMap<String, Variant>())
+                .copy(destination = call.sender)
             call.reply("o", handle)
         }
         "OpenPipeWireRemote" -> call.args("a{sv}").let {
@@ -284,8 +284,7 @@ class Portal(
             }
             else -> return unknown(call)
         }
-        val token = ((options["handle_token"] as? Variant)?.value as? String)?.takeIf { TOKEN.matches(it) } ?: "flatdroid${++requests}"
-        val handle = requestPath(call.sender ?: "", token)
+        val handle = requestHandle(call, options)
         signals += Message.signal(handle, REQUEST, "Response", "ua{sv}", if (shown) RESPONSE_SUCCESS else RESPONSE_OTHER, emptyMap<String, Variant>())
             .copy(destination = call.sender)
         return call.reply("o", handle)
@@ -324,10 +323,8 @@ class Portal(
     private fun inhibit(call: Message): Message = when (call.member) {
         "Inhibit" -> {
             val args = call.args("sua{sv}")
-            val token = ((args[2] as Map<*, *>)["handle_token"] as? Variant)?.value as? String
-            val handle = requestPath(call.sender ?: "", token?.takeIf { TOKEN.matches(it) } ?: "flatdroid${++requests}")
-            inhibitions.add(call.sender ?: "", handle, args[1] as UInt)
-            call.reply("o", handle)
+            val handle = requestHandle(call, args[2] as Map<*, *>)
+            if (inhibitions.add(call.sender ?: "", handle, args[1] as UInt)) call.reply("o", handle) else call.error(LIMITS_EXCEEDED, "Too many inhibits")
         }
         else -> unknown(call)
     }
@@ -338,8 +335,7 @@ class Portal(
             val args = call.args("ossua{sv}")
             val handle = args[0] as String
             if (!handle.startsWith("$PATH/request/")) throw ArgumentException("Not a request: $handle")
-            inhibitions.add(call.sender ?: "", handle, args[3] as UInt)
-            call.reply()
+            if (inhibitions.add(call.sender ?: "", handle, args[3] as UInt)) call.reply() else call.error(LIMITS_EXCEEDED, "Too many inhibits")
         }
         else -> unknown(call)
     }
@@ -477,6 +473,12 @@ class Portal(
             call.reply()
         }
         else -> unknown(call)
+    }
+
+    /** A request's object path: the app's `handle_token` from [options] when valid, else one of Flatdroid's. */
+    private fun requestHandle(call: Message, options: Map<*, *>): String {
+        val token = ((options["handle_token"] as? Variant)?.value as? String)?.takeIf { TOKEN.matches(it) } ?: "flatdroid${++requests}"
+        return requestPath(call.sender ?: "", token)
     }
 
     private fun introspection(interfaces: Map<String, UInt>): String = buildString {

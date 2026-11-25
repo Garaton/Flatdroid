@@ -45,9 +45,10 @@ class GuestFilesTest {
         assertTrue("<maximized>yes</maximized>" in rc)
         assertTrue("type=\"normal\"" in rc)
         assertTrue("<decor>" !in rc)
-        // No minimise button (I); the empty desktop lists windows.
+        // No minimise button (I); the empty desktop brings minimised windows back, with no window list.
         assertTrue("<titleLayout>NLMC</titleLayout>" in rc)
-        assertTrue("<context name=\"Root\"><mousebind button=\"Left\" action=\"Press\"><action name=\"ShowMenu\"><menu>client-list-combined-menu</menu>" in rc)
+        assertTrue("<context name=\"Root\"><mousebind button=\"Left\" action=\"Press\"><action name=\"ForEach\"><iconified>yes</iconified><then><action name=\"Focus\"/>" in rc)
+        assertFalse("ShowMenu" in rc)
         val doc = javax.xml.parsers.DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(rc.byteInputStream())
         assertEquals(8 + 6, doc.getElementsByTagName("context").length)
     }
@@ -90,6 +91,12 @@ class GuestFilesTest {
         assertEquals(null, GuestFiles.storedBootId(null, 1_700_000_000))
         assertEquals(null, GuestFiles.storedBootId("1700000000 not-an-id\n", 1_700_000_000))
         assertEquals(null, GuestFiles.storedBootId("garbage", 1_700_000_000))
+        // With Android's boot count, the clock moving doesn't matter, and the count alone tells a new boot.
+        val counted = GuestFiles.bootIdRecord(1_700_000_000, id, 12)
+        assertEquals(id, GuestFiles.storedBootId(counted, 1_700_003_600, 12))
+        assertEquals(null, GuestFiles.storedBootId(counted, 1_700_000_000, 13))
+        // A record from before the count was stored: the boot time decides.
+        assertEquals(id, GuestFiles.storedBootId(record, 1_700_000_001, 12))
     }
 
     @Test
@@ -106,6 +113,11 @@ class GuestFilesTest {
         assertFalse("<default/></keyboard>" in rc || "<keyboard><default" in rc)
         assertTrue("serverDecoration=\"no\"" in rc)
         assertFalse("serverDecoration" in GuestFiles.labwcRc(titleBars = true))
+        // The empty desktop only brings minimised windows back: no window list with its desktops, no default menu.
+        assertFalse("client-list-combined-menu" in rc)
+        assertTrue("<context name=\"Root\"><mousebind button=\"Left\" action=\"Press\"><action name=\"ForEach\"><query iconified=\"yes\"/><then><action name=\"Focus\"/>" in rc)
+        assertTrue("<mousebind button=\"Right\" action=\"Press\"><action name=\"None\"/>" in rc)
+        javax.xml.parsers.DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(rc.byteInputStream())
     }
 
     @Test

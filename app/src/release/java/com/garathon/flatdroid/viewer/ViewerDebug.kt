@@ -11,6 +11,8 @@ object ViewerDebug {
 
     fun tileSize(cacheDir: File): Int? = null
 
+    fun clickReleaseMs(cacheDir: File): Long? = null
+
     fun postMeter(): ((Long) -> Unit)? = null
 
     fun connected(client: RfbClient, cacheDir: File, zoom: (Float) -> Unit) {}

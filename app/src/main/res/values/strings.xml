@@ -121,6 +121,10 @@
     <string name="storage_part_runtimes">Runtimes</string>
     <string name="storage_part_apps">Apps</string>
     <string name="storage_part_app_data">App data</string>
+    <string name="app_settings_xwayland">Xwayland</string>
+    <string name="app_settings_xwayland_hint">Also offers X11 while the app runs on Wayland, for programs it starts that only use X11, such as a launcher\'s games. They run slower than with Force X11.</string>
+    <string name="app_settings_app_home_hint">The app\'s own home as a zip: the files and folders it saved, with Documents, Downloads and the rest.</string>
+    <string name="app_settings_app_data_hint">The app\'s own settings and data, without its home. The zip has desktop Flatpak\'s layout, so it can move to another device or a computer.</string>
     <string name="storage_part_home">App home</string>
     <string name="storage_part_homes">App homes</string>
     <string name="storage_part_cache">Cache</string>

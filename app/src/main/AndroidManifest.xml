@@ -154,14 +154,14 @@
             android:name=".session.bus.NotificationActionReceiver"
             android:exported="false" />
 
-        <!-- Private homes in the Files app. MANAGE_DOCUMENTS: only Android's own Files app and
-             picker can browse it; other apps get only what the user picks. -->
         <!-- Files an app opens through Android's chooser; reached only through a URI grant. -->
         <provider
             android:name=".session.links.OpenedFilesProvider"
             android:authorities="com.garathon.flatdroid.opened"
             android:exported="false"
             android:grantUriPermissions="true" />
+        <!-- Private homes in the Files app. MANAGE_DOCUMENTS: only Android's own Files app and
+             picker can browse it; other apps get only what the user picks. -->
         <provider
             android:name=".storage.HomesProvider"
             android:authorities="com.garathon.flatdroid.homes"

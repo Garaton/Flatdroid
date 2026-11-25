@@ -4,11 +4,12 @@ import android.system.Os
 import com.garathon.flatdroid.flatpak.FlatpakMetadata
 import com.garathon.flatdroid.flatpak.InstalledApps
 import com.garathon.flatdroid.flatpak.Keyfile
-import com.garathon.flatdroid.settings.AppSettings
 import com.garathon.flatdroid.session.helpers.SessionBus
+import com.garathon.flatdroid.settings.AppSettings
 import com.garathon.flatdroid.setup.AlpineSetup
 import com.garathon.flatdroid.setup.PackageGroup
 import com.garathon.flatdroid.setup.rootfs.AndroidTarFs
+import com.garathon.flatdroid.util.io.Confined
 import com.garathon.flatdroid.util.io.readTextUpTo
 import java.io.File
 import java.util.Locale
@@ -22,7 +23,7 @@ data class AlpineProgram(
     val id: String,
     /**
      * The package the user added that brought it: the world's entry for its desktop file's package,
-     * or the world's entry built from the same source (`libreoffice` for `libreoffice-writer`'s).
+     * or the world's entry built from the same source (the suite's package for one of its parts' packages).
      * Removing the program removes this package.
      */
     val packageName: String,
@@ -128,7 +129,7 @@ class AlpinePrograms(
             val owner = owners["$APPLICATIONS/$name"] ?: return@mapNotNull null
             val packageName = added(owner) ?: return@mapNotNull null
             val id = AlpineProgramIds.of(name.removeSuffix(DESKTOP)) ?: return@mapNotNull null
-            // Alpine's links are guest paths (LibreOffice's entries lead into /usr/lib).
+            // Alpine's links are guest paths (an entry may lead into /usr/lib).
             val file = guestFile("/$APPLICATIONS/$name")?.takeIf { it.isFile } ?: return@mapNotNull null
             val desktop = runCatching { file.readTextUpTo()?.let(Keyfile::parse) }.getOrNull() ?: return@mapNotNull null
             program(id, packageName, desktop, packages)?.copy(owner = owner)
@@ -139,7 +140,7 @@ class AlpinePrograms(
     /**
      * [programs] without an entry that runs another entry of the same package with arguments added (a
      * terminal's server mode, say): the user can add arguments to the plain one themselves. Entries
-     * of a meta-package's parts (LibreOffice's Writer and its start center) come from different packages and stay.
+     * of a meta-package's parts (an office suite's word processor and its start center) come from different packages and stay.
      */
     internal fun withoutVariants(programs: List<AlpineProgram>): List<AlpineProgram> = programs.filterNot { p ->
         programs.any { q -> q !== p && q.owner == p.owner && q.command.size < p.command.size && p.command.take(q.command.size) == q.command }
@@ -214,7 +215,7 @@ class AlpinePrograms(
     private fun inRootfs(path: String) = path.startsWith("/") && path.split('/').none { it == ".." }
 
     /** Followed links still end in the rootfs (one to a guest path would end on Android's own). */
-    private fun within(file: File): Boolean = runCatching { file.canonicalPath.startsWith(rootfs.canonicalPath + "/") }.getOrDefault(false)
+    private fun within(file: File): Boolean = runCatching { Confined.within(file, rootfs.canonicalPath, orBase = false) }.getOrDefault(false)
 
     companion object {
         const val APPLICATIONS = "usr/share/applications"

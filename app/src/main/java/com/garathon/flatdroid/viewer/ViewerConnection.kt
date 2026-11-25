@@ -35,6 +35,19 @@ interface ViewerSink {
     fun clipboardText(): String?
     /** Zooms in by [zoom] (1 = fitted), around the screen's centre. */
     fun zoomTo(zoom: Float) {}
+    /**
+     * The app steers by the mouse ([locked]: its pointer is hidden and it moves the pointer back
+     * itself, as games do), or no longer. A mouse then sends movements, not positions
+     * ([ViewerConnection.pointerBy]): at the edge of Android's screen a position stops changing
+     * while the app keeps moving its pointer back, and each move would be a jump across the screen.
+     */
+    fun pointerLock(locked: Boolean) {}
+    /**
+     * The app's pointer is [hidden]: touch then steers ([ViewerView]'s steering). LWJGL 2's games
+     * move the pointer back only near the window's edge, so a hidden pointer is the only sign there
+     * is in the middle of the screen.
+     */
+    fun pointerHidden(hidden: Boolean) {}
     /** The connection ended; [error] says why when it wasn't closed on purpose. */
     fun closed(error: String?)
 }
@@ -122,6 +135,8 @@ object ViewerConnection {
             // isn't the server's: start where X puts it (the centre) and follow its own moves.
             pointerX = client.framebuffer.width / 2
             pointerY = client.framebuffer.height / 2
+            cursorHidden = false
+            cursorShown = false
             client.pointer(0, pointerX, pointerY)
             main.post { if (this.client === client) awaiting = true } // connect() asked for the first, full update
             val listener = object : RfbListener {
@@ -137,6 +152,22 @@ object ViewerConnection {
                     pointerX = x
                     pointerY = y
                     send { client.pointer(buttons, x, y) }
+                    if (cursorHidden) main.post { if (this@ViewerConnection.client === client) sink?.pointerLock(true) }
+                }
+
+                override fun cursorHidden(hidden: Boolean) {
+                    DebugLog.i { "Viewer: the app's pointer is ${if (hidden) "hidden" else "shown"}" }
+                    // Hidden counts only after the app has shown one: Xvnc's own pointer is blank, so
+                    // an app that never sets one (GTK 4 on X11) would look hidden from the start.
+                    if (!hidden) cursorShown = true
+                    val steers = hidden && cursorShown
+                    if (cursorHidden == steers) return
+                    cursorHidden = steers
+                    main.post {
+                        if (this@ViewerConnection.client !== client) return@post
+                        sink?.pointerHidden(steers)
+                        if (!steers) sink?.pointerLock(false)
+                    }
                 }
 
                 override fun resized(width: Int, height: Int) {
@@ -273,6 +304,20 @@ object ViewerConnection {
 
     private fun input() {
         lastInputAt = android.os.SystemClock.elapsedRealtime()
+    }
+
+    /** The app's pointer is hidden ([RfbListener.cursorHidden]) after it had shown one ([cursorShown]). */
+    @Volatile private var cursorHidden = false
+    /** The app has shown a pointer since the connection began. */
+    @Volatile private var cursorShown = false
+
+    /**
+     * Moves the pointer by [dx], [dy] framebuffer pixels from where the server has it (after the
+     * app's own moves), inside [width] by [height], with [buttons] held.
+     */
+    fun pointerBy(buttons: Int, dx: Int, dy: Int, width: Int, height: Int) {
+        if (width <= 0 || height <= 0) return
+        pointer(buttons, (pointerX + dx).coerceIn(0, width - 1), (pointerY + dy).coerceIn(0, height - 1))
     }
 
     fun pointer(buttons: Int, x: Int, y: Int) = client?.let { c ->

@@ -93,6 +93,10 @@ class SessionHelpers(private val context: Context, private val env: AlpineEnviro
             Os.chmod(wayvncConfig.path, 0x180) // 0600
         }
         File(sessionDir, SCRIPT).writeTextAtomically(SessionScript.TEXT, durable = false)
+        File(vncDir, File(SessionScript.GUEST_XWAYLAND).name).apply {
+            writeTextAtomically(SessionScript.XWAYLAND_WRAPPER, durable = false)
+            Os.chmod(path, 0x1c0) // 0700
+        }
         File(sessionDir, OPENBOX_RC).writeTextAtomically(GuestFiles.openboxRc(files.titleBars), durable = false)
         val themerc = GuestFiles.themerc(files.darkDecorations)
         File(sessionDir, OPENBOX_THEMERC).writeTextAtomically(themerc, durable = false)
@@ -112,11 +116,14 @@ class SessionHelpers(private val context: Context, private val env: AlpineEnviro
     /**
      * Starts [command] ([SessionScript.command]) behind [filter], with PulseAudio's script bound when
      * there is [sound] and Android's fonts for a [terminal]; [onLine] also gets each line of the
-     * helpers' output, before it is logged.
+     * helpers' output, before it is logged. Without [x11] (a Wayland session without Xwayland) the
+     * X socket folder is a file: wlroots then makes no X display at all, where it would otherwise
+     * offer one on an abstract socket every process of Flatdroid's user can reach, the app's
+     * included, whatever its metadata asks for.
      */
-    fun start(command: List<String>, sound: Boolean, filter: Fdsec.Filter, terminal: Boolean = false, onLine: (String) -> Unit = {}): ProotProcess {
+    fun start(command: List<String>, sound: Boolean, filter: Fdsec.Filter, x11: Boolean, terminal: Boolean = false, onLine: (String) -> Unit = {}): ProotProcess {
         val binds = listOf(
-            x11Dir.path to GuestPaths.X11_DIR,
+            (if (x11) x11Dir.path else NO_X11) to GuestPaths.X11_DIR,
             pulseDir.path to GuestPaths.PULSE_DIR,
             vncDir.path to SessionScript.GUEST_VNC_DIR,
             waylandDir.path to GuestPaths.WAYLAND_DIR,
@@ -132,6 +139,8 @@ class SessionHelpers(private val context: Context, private val env: AlpineEnviro
             // The terminal's fonts: Android's own, read-only on the device (an app can't list the helpers' files).
             (if (terminal && ANDROID_FONTS.isDirectory) listOf(ANDROID_FONTS.path to SessionScript.GUEST_ANDROID_FONTS) else emptyList())
         return env.start(command, binds, asAppUser = true, filter = filter) { line ->
+            // Without X11, wlroots says so once for each display number it tries; labwc's own line after them stays.
+            if (!x11 && NO_X11_LINE in line) return@start
             if (Fdsec.refused(line)) filterRefused.set(true)
             if (line == SessionScript.DISPLAY_READY) started.countDown()
             onLine(line)
@@ -257,6 +266,9 @@ class SessionHelpers(private val context: Context, private val env: AlpineEnviro
     }
 
     companion object {
+        /** What the helpers' X socket folder is without X11: a file, which wlroots refuses ([start]). */
+        private const val NO_X11 = "/dev/null"
+        private const val NO_X11_LINE = "/tmp/.X11-unix is not a directory"
         /** Android's own fonts, readable by every app. */
         val ANDROID_FONTS = File("/system/fonts")
         const val DISPLAY_TIMEOUT_MS = 30_000L

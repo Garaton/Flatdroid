@@ -5,6 +5,7 @@ import com.garathon.flatdroid.launcher.PlanResult
 import com.garathon.flatdroid.setup.rootfs.TarFs
 import com.garathon.flatdroid.setup.rootfs.deleteTree
 import com.garathon.flatdroid.setup.rootfs.useOwnGroupTree
+import com.garathon.flatdroid.util.io.Confined
 import com.garathon.flatdroid.util.io.readTextUpTo
 import com.garathon.flatdroid.util.io.replaceWith
 import com.garathon.flatdroid.util.io.writeTextAtomically
@@ -138,7 +139,7 @@ class ElectronSwap(
      */
     private fun copyResolved(from: File, to: File) {
         if (!from.isDirectory) throw IOException("The app has no resources directory at $from")
-        val allowed = allowedSources.map { it.canonicalPath + "/" }
+        val allowed = allowedSources.map { it.canonicalPath }
         to.mkdirs()
         from.walkTopDown().onEnter { it == from || !fs.isSymlink(it) }.forEach { src ->
             if (Thread.interrupted()) throw InterruptedException()
@@ -149,8 +150,7 @@ class ElectronSwap(
                 fs.isSymlink(src) && src.isDirectory -> throw IOException("$relative links to a directory; not copied")
                 src.isDirectory -> dst.mkdirs()
                 else -> {
-                    val real = src.canonicalPath
-                    if (allowed.none { real.startsWith(it) }) throw IOException("$relative links outside the app ($real)")
+                    if (allowed.none { Confined.within(src, it, orBase = false) }) throw IOException("$relative links outside the app (${src.canonicalPath})")
                     src.copyTo(dst, overwrite = true)
                 }
             }

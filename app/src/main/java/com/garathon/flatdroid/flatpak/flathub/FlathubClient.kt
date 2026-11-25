@@ -3,14 +3,15 @@ package com.garathon.flatdroid.flatpak.flathub
 import com.garathon.flatdroid.flatpak.FlatpakRef
 import com.garathon.flatdroid.flatpak.InstalledApp
 import com.garathon.flatdroid.flatpak.InstalledApps
-import org.json.JSONArray
-import org.json.JSONException
-import org.json.JSONObject
+import com.garathon.flatdroid.util.io.readBytesUpTo
 import java.io.FileNotFoundException
 import java.io.IOException
 import java.net.HttpURLConnection
-import kotlin.concurrent.thread
 import java.net.URL
+import kotlin.concurrent.thread
+import org.json.JSONArray
+import org.json.JSONException
+import org.json.JSONObject
 
 /** What an app's install confirmation shows. Sizes are bytes, null when Flathub doesn't say. */
 data class FlathubApp(
@@ -182,7 +183,7 @@ object FlathubClient {
                 else -> throw FlathubHttpException(code)
             }
             return connection.inputStream.use { stream ->
-                val bytes = stream.readNBytesLimited(MAX_BYTES)
+                val bytes = stream.readBytesUpTo(MAX_BYTES.toLong()) ?: throw IOException("Answer too large")
                 String(bytes, Charsets.UTF_8)
             }
         } catch (_: FileNotFoundException) {
@@ -190,18 +191,6 @@ object FlathubClient {
         } finally {
             connection.disconnect()
         }
-    }
-
-    private fun java.io.InputStream.readNBytesLimited(limit: Int): ByteArray {
-        val out = java.io.ByteArrayOutputStream()
-        val buffer = ByteArray(8192)
-        while (true) {
-            val read = read(buffer)
-            if (read < 0) break
-            if (out.size() + read > limit) throw IOException("Answer too large")
-            out.write(buffer, 0, read)
-        }
-        return out.toByteArray()
     }
 
     private fun JSONObject?.longOrNull(key: String): Long? = this?.takeIf { has(key) && !isNull(key) }?.optLong(key)?.takeIf { it >= 0 }

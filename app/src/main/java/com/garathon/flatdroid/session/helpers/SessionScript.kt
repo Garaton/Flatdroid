@@ -46,18 +46,21 @@ object SessionScript {
      * sets up). With [sessionBus], the app's
      * bus and its proxy ([SessionBus]) start too, and with [camera] PipeWire, for the camera's
      * own helpers ([CameraScript]). Without [clipboard], Xvnc neither takes the viewer's clipboard
-     * nor sends its own. With [glx] (X11 only), Xvnc offers GLX.
+     * nor sends its own. With [glx] (X11 only), Xvnc offers GLX. With [xwayland] (Wayland only),
+     * labwc offers X11 through Xwayland ([XWAYLAND_WRAPPER]); without it the helpers' X socket
+     * folder is a file ([com.garathon.flatdroid.session.SessionHelpers.start]) and there is none.
      */
     fun command(
         geometry: String, frameRate: Int, sound: Boolean, resampler: Resampler, sessionBus: Boolean,
         camera: Boolean = false, clipboard: Boolean = true, wayland: Boolean = false, externalViewer: Boolean = false,
         interfaceSize: Int = 100, memfd: Boolean = true, terminal: Boolean = false, glx: Boolean = false,
+        xwayland: Boolean = false,
     ): List<String> =
         listOf(
             "/bin/sh", GUEST_SCRIPT, geometry, VNC_PORT.toString(), frameRate.toString(),
             onOff(sound), resampler.pulseName, onOff(sessionBus), onOff(sessionBus && camera),
             onOff(clipboard), onOff(wayland), onOff(externalViewer), scale(interfaceSize),
-            onOff(memfd), onOff(wayland && terminal), onOff(!wayland && glx),
+            onOff(memfd), onOff(wayland && terminal), onOff(!wayland && glx), onOff(wayland && xwayland),
         )
 
     /**
@@ -79,6 +82,14 @@ object SessionScript {
     const val GUEST_WAYVNC_CONFIG = "$GUEST_VNC_DIR/wayvnc.conf"
     /** labwc's configuration directory ([com.garathon.flatdroid.alpine.GuestFiles.labwcRc]). */
     const val GUEST_LABWC_DIR = "$GUEST_VNC_DIR/labwc"
+    /** Xwayland's wrapper ([XWAYLAND_WRAPPER]), which wlroots starts instead of Xwayland itself (`WLR_XWAYLAND`). */
+    const val GUEST_XWAYLAND = "$GUEST_VNC_DIR/xwayland"
+
+    /**
+     * Xwayland as labwc starts it, without MIT-SHM: the app and the helpers run in separate proots,
+     * whose emulated SysV shared memory they can't share (Xvnc runs without it for the same reason).
+     */
+    const val XWAYLAND_WRAPPER = "#!/bin/sh\nexec /usr/bin/Xwayland \"$@\" -extension MIT-SHM\n"
     /** A terminal app's terminal: foot's configuration, its fonts, and where its command writes the terminal's name ([Fdsec.holdTerminal]). */
     const val GUEST_FOOT_CONFIG = "$GUEST_VNC_DIR/foot.ini"
     const val GUEST_TERMINAL_FONTS = "$GUEST_VNC_DIR/fonts.conf"
@@ -135,9 +146,14 @@ object SessionScript {
         |terminal=${'$'}{13}
         |glx_args="-extension GLX"
         |[ "${'$'}{14}" = on ] && glx_args=
+        |# wlroots starts Xwayland when the first X client connects, through the wrapper ($GUEST_XWAYLAND).
+        |if [ "${'$'}{15}" = on ]; then
+        |  rm -f /tmp/.X0-lock
+        |  export WLR_XWAYLAND=$GUEST_XWAYLAND
+        |fi
         |clipboard_args=
         |[ "${'$'}clipboard" = on ] || clipboard_args="-AcceptCutText=0 -SendCutText=0"
-        |rm -f /tmp/.X1-lock ${GuestPaths.X11_DIR}/$X_SOCKET ${GuestPaths.PULSE_DIR}/* $GUEST_VNC_DIR/$VNC_SOCKET
+        |rm -f /tmp/.X1-lock ${GuestPaths.X11_DIR}/$X_SOCKET ${GuestPaths.PULSE_DIR}/* $GUEST_VNC_DIR/$VNC_SOCKET 2>/dev/null
         |
         |# Waits for the socket $1 of $2, which the display's process stands or falls with.
         |wait_socket() {

@@ -71,6 +71,7 @@ import com.garathon.flatdroid.ui.storage.StorageBar
 import com.garathon.flatdroid.ui.storage.StorageConfirm
 import com.garathon.flatdroid.ui.storage.StorageConfirmDialog
 import com.garathon.flatdroid.ui.storage.StorageConfirmed
+import com.garathon.flatdroid.ui.theme.Spacing
 import com.garathon.flatdroid.ui.storage.StorageRow
 import com.garathon.flatdroid.ui.storage.StorageSegment
 import com.garathon.flatdroid.ui.storage.storageColors
@@ -148,6 +149,8 @@ fun AppOverviewPage(s: AppPageState) = SettingsPageColumn(null) {
             )
         }
     }
+    // The same as on the Storage page, where moving an app's data to another device starts.
+    ZipCard(s, R.string.storage_part_app_data, R.string.app_settings_app_data_hint, StorageAction.IMPORT_SETTINGS, StorageAction.EXPORT_SETTINGS, (s.env.storage?.settings ?: 0L) > 0L)
     SettingsCard(title = stringResource(R.string.settings_section_danger), danger = true) {
         OutlinedButton(onClick = { confirm = OverviewConfirm.APP_DATA }, enabled = s.env.canChangeFiles) {
             Text(stringResource(R.string.storage_reset_app_data), color = MaterialTheme.colorScheme.error)
@@ -289,6 +292,39 @@ fun AppHomePage(s: AppPageState) = SettingsPageColumn(R.string.app_page_home) {
             developer = true,
         )
     }
+    // The same as on the Storage page, for an app with its own home.
+    if (mode == HomeMode.PRIVATE) {
+        ZipCard(s, R.string.storage_part_home, R.string.app_settings_app_home_hint, StorageAction.IMPORT_HOME, StorageAction.EXPORT_HOME, (s.env.storage?.privateHome ?: 0L) > 0L)
+    }
+}
+
+/**
+ * A card with [title] and [hint] that imports a zip ([import], confirmed as on the Storage page:
+ * it replaces what is there) and exports one ([export], while [hasFiles]).
+ */
+@Composable
+private fun ZipCard(s: AppPageState, title: Int, hint: Int, import: StorageAction, export: StorageAction, hasFiles: Boolean) {
+    var confirm by rememberSaveable { mutableStateOf<String?>(null) }
+    confirm?.let { key ->
+        StorageConfirmDialog(
+            key, { s.app.name }, null, null,
+            confirmed = StorageConfirmed(onAppAction = { _, action -> s.env.onStorage(action) }, onGlobal = {}),
+            onDismiss = { confirm = null },
+        )
+    }
+    SettingsCard(title = stringResource(title)) {
+        Text(stringResource(hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.small)) {
+            OutlinedButton(onClick = { confirm = StorageConfirm.app(s.app.id, import) }, enabled = s.env.canChangeFiles) {
+                Icon(Icons.Filled.UploadFile, contentDescription = null, modifier = Modifier.size(18.dp))
+                Text(stringResource(R.string.storage_import), modifier = Modifier.padding(start = Spacing.small))
+            }
+            OutlinedButton(onClick = { s.env.onStorage(export) }, enabled = hasFiles) {
+                Icon(Icons.Filled.SaveAlt, contentDescription = null, modifier = Modifier.size(18.dp))
+                Text(stringResource(R.string.storage_export), modifier = Modifier.padding(start = Spacing.small))
+            }
+        }
+    }
 }
 
 @Composable
@@ -346,6 +382,16 @@ fun AppDisplayPage(s: AppPageState) = SettingsPageColumn(R.string.app_page_displ
                 s.settings.forceX11 && app.waylandAndX11, { v -> s.editSettings { copy(forceX11 = v) } },
                 stringResource(R.string.app_settings_force_x11),
                 stringResource(if (app.waylandAndX11) R.string.app_settings_force_x11_hint else R.string.app_settings_force_x11_unavailable),
+            )
+        }
+        // A Wayland session's own X11: for programs the app starts that take only X11.
+        if (app.wayland || app.terminal) {
+            SwitchRow(
+                s.settings.xwayland, { v -> s.editSettings { copy(xwayland = v) } },
+                stringResource(R.string.app_settings_xwayland),
+                stringResource(R.string.app_settings_xwayland_hint),
+                enabled = !(s.settings.forceX11 && app.waylandAndX11 && !app.terminal),
+                developer = true,
             )
         }
     }

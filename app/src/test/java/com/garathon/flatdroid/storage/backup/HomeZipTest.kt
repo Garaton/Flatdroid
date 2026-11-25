@@ -85,6 +85,17 @@ class HomeZipTest {
     }
 
     @Test
+    fun programsAreExecutableAgainAfterExtracting() {
+        val home = tmp.newFolder("programs")
+        val bytes = zip("bin/run" to "#!/bin/sh\necho\n", "bin/java" to "\u007fELF....", "notes.txt" to "plain", "short" to "#")
+        HomeZip.extract(bytes.inputStream(), home, { File(home, it) }, HomeZip.Clash.RENAME, minFreeBytes = 0)
+        assertTrue(File(home, "bin/run").canExecute())
+        assertTrue(File(home, "bin/java").canExecute())
+        assertFalse(File(home, "notes.txt").canExecute())
+        assertFalse(File(home, "short").canExecute())
+    }
+
+    @Test
     fun extractDoesNotFollowLinksOut() {
         val home = tmp.newFolder("linked")
         val elsewhere = tmp.newFolder("elsewhere")

@@ -20,6 +20,7 @@ import com.garathon.flatdroid.flatpak.InstalledApps
 import com.garathon.flatdroid.setup.rootfs.AndroidTarFs
 import com.garathon.flatdroid.setup.rootfs.deleteTree
 import com.garathon.flatdroid.storage.sizes.SavedSizes
+import com.garathon.flatdroid.util.io.Confined
 import java.io.File
 import java.io.FileNotFoundException
 
@@ -244,10 +245,7 @@ class HomesProvider : DocumentsProvider() {
     }
 
     /** [file] is the home at [homePath] (resolved) or inside it once links are resolved. */
-    private fun inside(file: File, homePath: String): Boolean {
-        val path = file.canonicalPath
-        return path == homePath || path.startsWith("$homePath/")
-    }
+    private fun inside(file: File, homePath: String): Boolean = Confined.within(file, homePath)
 
     /** The private home [documentId] is in is changing, or has [changed] and is measured again ([SavedSizes]). */
     private fun forgetSize(documentId: String, changed: Boolean = false) {

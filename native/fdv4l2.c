@@ -21,10 +21,11 @@
  * with formats as "mjpeg,nv12" in the order they are offered.
  *
  * The calls wrapped are those of PipeWire's pw-v4l2 (read for its behavior only) but munmap,
- * plus the stat family, and the C library's syscall() for the same calls (libv4l2, which many
+ * plus the stat family, the other ways a descriptor is copied or closed (dup2, dup3, fcntl's
+ * F_DUPFD, close_range), and the C library's syscall() for the same calls (libv4l2, which many
  * camera programs use, makes its calls through it). Other paths, descriptors and system calls go
- * straight to the kernel. Known misses: static binaries, and system call instructions of a
- * program's own.
+ * straight to the kernel. Known misses: static binaries, system call instructions of a
+ * program's own, and the C library's own internal closes (fclose of a stream opened on a device).
  *
  * Also socket(): Android refuses apps the kernel's device event socket (NETLINK_KOBJECT_UEVENT,
  * EACCES), and eudev's udev_monitor_new_from_netlink() then gives no monitor, which programs
@@ -409,6 +410,12 @@ struct stream {
     unsigned sequence;
     unsigned char *staging; /* what was read from the pipe and not used yet */
     unsigned long staged, staging_size;
+    /*
+     * A dequeue is working on the staging area outside the lock. Meanwhile STREAMOFF only asks
+     * for it to be emptied (reset), and a close of the last descriptor leaves its unmapping and
+     * the stream's release to the dequeue (orphaned).
+     */
+    int reading, reset, orphaned;
 };
 
 static struct stream streams[MAX_STREAMS];
@@ -515,14 +522,50 @@ static void forget_fd(int fd)
             /* Closed while streaming: the app stopped. */
             if (s->kind == VIDEO && s->streaming) stopped = s->camera;
             s->streaming = 0;
-            if (s->staging) sys2(__NR_munmap, s->staging, s->staging_size);
             free_buffers(s);
-            s->used = 0;
+            if (s->reading) {
+                s->orphaned = 1;
+            } else {
+                if (s->staging) sys2(__NR_munmap, s->staging, s->staging_size);
+                s->used = 0;
+            }
         }
         break;
     }
     unlock();
     if (stopped >= 0) announce(camera(stopped), OFF);
+}
+
+/* Each descriptor from first to last, both included, no longer refers to a stream. */
+static void forget_fds(unsigned first, unsigned last)
+{
+    int found;
+    do {
+        found = -1;
+        lock();
+        for (int i = 0; i < fd_count; i++) {
+            if ((unsigned)fds[i].fd >= first && (unsigned)fds[i].fd <= last) {
+                found = fds[i].fd;
+                break;
+            }
+        }
+        unlock();
+        if (found >= 0) forget_fd(found);
+    } while (found >= 0);
+}
+
+/* copy, a new descriptor for what fd refers to, refers to fd's stream too (when it has one). */
+static void copied_fd(int fd, int copy)
+{
+    if (!stream_of(fd)) return;
+    lock();
+    for (int i = 0; i < fd_count; i++) {
+        if (fds[i].fd == fd) {
+            add_fd(copy, fds[i].stream);
+            break;
+        }
+    }
+    unlock();
 }
 
 /*
@@ -640,8 +683,8 @@ static void *destination(struct stream *s, unsigned index, unsigned long *room)
     return b->own;
 }
 
-/* Waits for a whole frame into the first queued buffer and dequeues it into b. */
-static long dequeue(int fd, struct stream *s, struct v4l2_buffer *b)
+/* [dequeue] with the staging area to itself. */
+static long dequeue_frame(int fd, struct stream *s, struct v4l2_buffer *b)
 {
     const struct camera *c = camera(s->camera);
     if (!s->staging) {
@@ -718,6 +761,45 @@ static long dequeue(int fd, struct stream *s, struct v4l2_buffer *b)
         b->length = s->length;
     }
     return 0;
+}
+
+/*
+ * Waits for a whole frame into the first queued buffer and dequeues it into b. One dequeue at a
+ * time per stream (a second waits for the first); STREAMOFF and close meanwhile leave the
+ * staging area to it ([struct stream]'s reading).
+ */
+static long dequeue(int fd, struct stream *s, struct v4l2_buffer *b)
+{
+    for (;;) {
+        lock();
+        if (!s->streaming) {
+            unlock();
+            return fail(EINVAL);
+        }
+        if (!s->reading) break;
+        unlock();
+        struct { long sec, nsec; } pause = { 0, 1000000 };
+        sys2(__NR_nanosleep, &pause, 0);
+    }
+    s->reading = 1;
+    unlock();
+    long r = dequeue_frame(fd, s, b);
+    int saved = *__errno_location();
+    lock();
+    s->reading = 0;
+    if (s->reset) {
+        s->staged = 0;
+        s->reset = 0;
+    }
+    if (s->orphaned) {
+        if (s->staging) sys2(__NR_munmap, s->staging, s->staging_size);
+        s->staging = 0;
+        s->orphaned = 0;
+        s->used = 0;
+    }
+    unlock();
+    *__errno_location() = saved;
+    return r;
 }
 
 /* ---------- V4L2 ---------- */
@@ -957,7 +1039,8 @@ static long v4l2(int fd, struct stream *s, unsigned request, void *arg)
             s->streaming = 0;
             for (unsigned i = 0; i < s->count; i++) s->buffers[i].queued = 0;
             s->queue_head = s->queue_len = 0;
-            s->staged = 0;
+            if (s->reading) s->reset = 1;
+            else s->staged = 0;
         }
         unlock();
         if (request == VIDIOC_STREAMON) {
@@ -1110,25 +1193,72 @@ V int __openat64_2(int dirfd, const char *path, int flags) { return open_at(dirf
 
 V int dup(int fd)
 {
-    long copy_fd = sys1(__NR_dup, fd);
-    if (failed(copy_fd)) return (int)result(copy_fd);
-    if (stream_of(fd)) {
-        lock();
-        for (int i = 0; i < fd_count; i++) {
-            if (fds[i].fd == fd) {
-                add_fd((int)copy_fd, fds[i].stream);
-                break;
-            }
-        }
-        unlock();
+    long copy = sys1(__NR_dup, fd);
+    if (failed(copy)) return (int)result(copy);
+    copied_fd(fd, (int)copy);
+    return (int)copy;
+}
+
+/* dup2 and dup3: to is closed first by the kernel, so its stream (if any) is forgotten. */
+static int dup_to(int fd, int to, int flags, int same_fails)
+{
+    if (fd == to) {
+        if (same_fails) return (int)fail(EINVAL);
+        long r = sys2(__NR_fcntl, fd, F_GETFD);
+        return failed(r) ? (int)result(r) : to;
     }
-    return (int)copy_fd;
+    long copy = sys3(__NR_dup3, fd, to, flags);
+    if (failed(copy)) return (int)result(copy);
+    forget_fd(to);
+    copied_fd(fd, to);
+    return to;
+}
+
+V int dup2(int fd, int to) { return dup_to(fd, to, 0, 0); }
+V int dup3(int fd, int to, int flags) { return dup_to(fd, to, flags, 1); }
+
+static long fcntl_call(int fd, int cmd, long arg)
+{
+    long r = sys3(__NR_fcntl, fd, cmd, arg);
+    if (!failed(r) && (cmd == F_DUPFD || cmd == F_DUPFD_CLOEXEC)) copied_fd(fd, (int)r);
+    return result(r);
+}
+
+V int fcntl(int fd, int cmd, ...)
+{
+    va_list ap;
+    va_start(ap, cmd);
+    long arg = va_arg(ap, long);
+    va_end(ap);
+    return (int)fcntl_call(fd, cmd, arg);
+}
+
+/* glibc 2.28 and later: what fcntl() calls with a 64-bit file offset in the program's build. */
+V int fcntl64(int fd, int cmd, ...)
+{
+    va_list ap;
+    va_start(ap, cmd);
+    long arg = va_arg(ap, long);
+    va_end(ap);
+    return (int)fcntl_call(fd, cmd, arg);
 }
 
 V int close(int fd)
 {
     forget_fd(fd);
     return (int)result(sys1(__NR_close, fd));
+}
+
+#ifndef CLOSE_RANGE_CLOEXEC
+#define CLOSE_RANGE_CLOEXEC (1U << 2)
+#endif
+
+/* Only marking them close-on-exec (CLOSE_RANGE_CLOEXEC) leaves the descriptors open. */
+V int close_range(unsigned first, unsigned last, int flags)
+{
+    long r = sys3(__NR_close_range, first, last, flags);
+    if (!failed(r) && !(flags & CLOSE_RANGE_CLOEXEC)) forget_fds(first, last);
+    return (int)result(r);
 }
 
 V int ioctl(int fd, unsigned long request, ...)
@@ -1273,7 +1403,13 @@ V long syscall(long n, ...)
     case __NR_open: return open_at(AT_FDCWD, (const char *)a, (int)b, (int)c);
 #endif
     case __NR_close: return close((int)a);
+    case __NR_close_range: return close_range((unsigned)a, (unsigned)b, (int)c);
     case __NR_dup: return dup((int)a);
+#ifdef __NR_dup2
+    case __NR_dup2: return dup2((int)a, (int)b);
+#endif
+    case __NR_dup3: return dup3((int)a, (int)b, (int)c);
+    case __NR_fcntl: return fcntl_call((int)a, (int)b, c);
     case __NR_ioctl: return ioctl((int)a, (unsigned long)b, (void *)c);
     case __NR_mmap: return (long)map_call((void *)a, (unsigned long)b, (int)c, (int)d, (int)e, f);
     case __NR_newfstatat: return stat_at((int)a, (const char *)b, (struct stat *)c, (int)d);

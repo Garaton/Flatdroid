@@ -105,6 +105,8 @@ data class LaunchOptions(
     val extraArgs: List<String> = emptyList(),
     /** An X11 session for an app that asks for both Wayland and X11 (its Force X11 setting); ignored for others. */
     val forceX11: Boolean = false,
+    /** A Wayland session also offers X11 through Xwayland (the app's developer setting); ignored in an X11 session. */
+    val xwayland: Boolean = false,
     val environment: Map<String, String> = emptyMap(),
     /** The host's whole /dev, Binder included, whatever the app asks for (the app's own setting). */
     val wholeDev: Boolean = false,
@@ -150,6 +152,8 @@ data class LaunchPlan(
     val zypakStandIn: String? = null,
     /** The session is Wayland (labwc and wayvnc) instead of Xvnc: the app takes Wayland, or runs in a terminal. */
     val wayland: Boolean = false,
+    /** The Wayland session also offers X11 through Xwayland ([LaunchOptions.xwayland]). */
+    val xwayland: Boolean = false,
     /**
      * Xvnc offers GLX: an X11 session drawn through GL ([LaunchOptions.softwareRendering] off). Apps
      * that make their GL context only through GLX (LWJGL 2, GLFW by default) need it; the rest use EGL.
@@ -224,6 +228,7 @@ class LaunchPlanner(
         val context = app.metadata.context
         val wayland = context.wayland && !(options.forceX11 && context.waylandAndX11 && !options.terminal)
         val waylandSession = wayland || options.terminal
+        val xwayland = waylandSession && options.xwayland
         var command = listOf(commandPath)
         var isElectron = false
         var zypakStandIn: String? = null
@@ -333,6 +338,7 @@ class LaunchPlanner(
             runtimeDir = runtimeDir ?: "/tmp",
             flatpakContainer = options.flatpakInfo,
             wayland = wayland,
+            xwayland = xwayland,
             softwareRendering = options.softwareRendering,
             terminal = if (!options.terminal) null else if (File(runtime.files, FOOT_TERMINFO).isFile) FOOT_TERM else FALLBACK_TERM,
             usrHas = { path -> path.startsWith("/usr/") && File(runtime.files, path.removePrefix("/usr/")).isDirectory },
@@ -359,7 +365,7 @@ class LaunchPlanner(
             extensions = extensions.map { (base, ext) -> ext.deployment.files.path to "$base/${ext.guestPath}" },
             tmp = dirs.tmp.path,
             shm = dirs.shm.path,
-            x11Sockets = dirs.x11Sockets.path.takeIf { !waylandSession },
+            x11Sockets = dirs.x11Sockets.path.takeIf { !waylandSession || xwayland },
             waylandSockets = dirs.waylandSockets?.path?.takeIf { wayland },
             pulseSockets = dirs.pulseSockets?.takeIf { options.audio }?.path,
             home = dirs.home.path,
@@ -385,6 +391,7 @@ class LaunchPlanner(
                 isElectron = isElectron,
                 zypakStandIn = zypakStandIn,
                 wayland = waylandSession,
+                xwayland = xwayland,
                 glx = !waylandSession && !options.softwareRendering,
                 terminal = options.terminal,
                 filter = Fdsec.Filter(extraSyscalls = options.extraSyscalls, noInternet = !options.network),

@@ -5,6 +5,7 @@
  *
  *   fdv4l2-test <dir>
  */
+#define _GNU_SOURCE
 #include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -61,6 +62,18 @@ static void *race(void *ok)
     struct stat st;
     pthread_barrier_wait(&start_line);
     *(int *)ok = stat(race_path, &st) == 0 && S_ISCHR(st.st_mode);
+    return NULL;
+}
+
+/* A blocking dequeue on waiting_fd in its own thread. */
+static int waiting_fd;
+static int waited, waited_errno;
+static void *wait_frame(void *unused)
+{
+    (void)unused;
+    struct v4l2_buffer b = { .type = V4L2_BUF_TYPE_VIDEO_CAPTURE, .memory = V4L2_MEMORY_MMAP };
+    waited = ioctl(waiting_fd, VIDIOC_DQBUF, &b);
+    waited_errno = errno;
     return NULL;
 }
 
@@ -252,6 +265,63 @@ int main(int argc, char **argv)
     close(again);
     memset(said, 0, sizeof(said));
     CHECK(read(control, said, sizeof(said) - 1) > 0 && strcmp(said, "nv12\non\noff\n") == 0);
+
+    /* Copies made by dup2, dup3 and fcntl are the device; a number replaced or closed by them, or by close_range, no longer is. */
+    int cam = open(path, O_RDWR);
+    CHECK(cam >= 0 && dup2(cam, 60) == 60 && ioctl(60, VIDIOC_QUERYCAP, &cap) == 0);
+    CHECK(dup3(cam, 61, O_CLOEXEC) == 61 && ioctl(61, VIDIOC_QUERYCAP, &cap) == 0);
+    int dupfd = fcntl(cam, F_DUPFD_CLOEXEC, 62);
+    CHECK(dupfd >= 62 && ioctl(dupfd, VIDIOC_QUERYCAP, &cap) == 0);
+    int null = open("/dev/null", O_RDONLY);
+    CHECK(dup2(null, 60) == 60 && ioctl(60, VIDIOC_QUERYCAP, &cap) < 0 && errno == ENOTTY);
+    CHECK(fstat(60, &st) == 0 && major(st.st_rdev) == 1);
+    CHECK(close_range(61, 61, 0) == 0 && dup2(null, 61) == 61 && ioctl(61, VIDIOC_QUERYCAP, &cap) < 0 && errno == ENOTTY);
+    CHECK(dup2(cam, cam) == cam && ioctl(cam, VIDIOC_QUERYCAP, &cap) == 0);
+    close(60);
+    close(61);
+    close(dupfd);
+    close(null);
+
+    /* Stopped and closed while another thread waits for a frame: the waiting dequeue fails, nothing breaks, the old frame isn't kept. */
+    struct v4l2_requestbuffers two = { .count = 2, .type = V4L2_BUF_TYPE_VIDEO_CAPTURE, .memory = V4L2_MEMORY_MMAP };
+    CHECK(ioctl(cam, VIDIOC_REQBUFS, &two) == 0);
+    for (unsigned i = 0; i < 2; i++) {
+        struct v4l2_buffer q = { .index = i, .type = V4L2_BUF_TYPE_VIDEO_CAPTURE, .memory = V4L2_MEMORY_MMAP };
+        CHECK(ioctl(cam, VIDIOC_QBUF, &q) == 0);
+    }
+    CHECK(ioctl(cam, VIDIOC_STREAMON, &type) == 0);
+    waiting_fd = cam;
+    pthread_t waiter;
+    CHECK(pthread_create(&waiter, NULL, wait_frame, NULL) == 0);
+    usleep(100000);
+    CHECK(ioctl(cam, VIDIOC_STREAMOFF, &type) == 0);
+    frame(writer, "video/nv12", "stale");
+    pthread_join(waiter, NULL);
+    CHECK(waited < 0 && waited_errno == EINVAL);
+    struct v4l2_buffer q0 = { .index = 0, .type = V4L2_BUF_TYPE_VIDEO_CAPTURE, .memory = V4L2_MEMORY_MMAP };
+    CHECK(ioctl(cam, VIDIOC_QBUF, &q0) == 0 && ioctl(cam, VIDIOC_STREAMON, &type) == 0);
+    frame(writer, "video/nv12", "fresh");
+    struct v4l2_buffer got = { .type = V4L2_BUF_TYPE_VIDEO_CAPTURE, .memory = V4L2_MEMORY_MMAP };
+    void *m0 = mmap(NULL, 4096, PROT_READ, MAP_SHARED, cam, 0);
+    CHECK(ioctl(cam, VIDIOC_DQBUF, &got) == 0 && got.bytesused == 5 && m0 != MAP_FAILED && memcmp(m0, "fresh", 5) == 0);
+    munmap(m0, 4096);
+    CHECK(ioctl(cam, VIDIOC_QBUF, &got) == 0);
+    CHECK(pthread_create(&waiter, NULL, wait_frame, NULL) == 0);
+    usleep(100000);
+    close(cam);
+    frame(writer, "video/nv12", "after close");
+    pthread_join(waiter, NULL);
+    CHECK(waited < 0);
+    memset(said, 0, sizeof(said));
+    CHECK(read(control, said, sizeof(said) - 1) > 0 && strcmp(said, "nv12\non\noff\nnv12\non\noff\n") == 0);
+    /* Its stream was released: every stream can be opened again. */
+    int many[16];
+    for (int i = 0; i < 16; i++) many[i] = open(path, O_RDWR);
+    CHECK(ioctl(many[15], VIDIOC_QUERYCAP, &cap) == 0);
+    for (int i = 0; i < 16; i++) close(many[i]);
+    /* Drain what the writer left. */
+    char drain[4096];
+    while (kernel(SYS_read, writer, (long)drain, sizeof(drain), 0) > 0) {}
 
     /* Opened past the C library's open() (libcamera does): known by its inode at the first V4L2 call. */
     int raw = (int)kernel(SYS_openat, AT_FDCWD, (long)path, O_RDWR | O_NONBLOCK, 0);

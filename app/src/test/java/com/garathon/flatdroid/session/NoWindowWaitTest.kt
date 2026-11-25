@@ -104,4 +104,18 @@ class NoWindowWaitTest {
         assertEquals(90_000L, wait.windows(0, 80_000))
         assertTrue(wait.opened)
     }
+
+    @Test
+    fun aBriefWindowClosingAsTheFirstWindowTimeEndsGetsTheShortWait() {
+        // A 3-second splash closing just past the two minutes: not paused at once.
+        val wait = NoWindowWait(startedAt = 0)
+        assertNull(wait.windows(1, 118_000))
+        assertEquals(131_000L, wait.windows(0, 121_000))
+        assertFalse(wait.opened)
+        assertEquals(131_000L, wait.deadline)
+        // An early splash still leaves the whole first-window time.
+        val early = NoWindowWait(startedAt = 0)
+        early.windows(1, 1_000)
+        assertEquals(120_000L, early.windows(0, 2_000))
+    }
 }

@@ -361,10 +361,12 @@ class FlatpakLauncher(private val context: Context) {
                     camera = portalNodes.isNotEmpty(), clipboard = settings.sharesClipboard, wayland = plan.wayland,
                     externalViewer = externalViewer, interfaceSize = settings.interfaceSize,
                     memfd = SessionScript.kernelHasMemfd(Os.uname().release), terminal = plan.terminal, glx = plan.glx,
+                    xwayland = plan.xwayland,
                 ),
                 audio,
                 Fdsec.Filter(extraSyscalls = security.extraSyscallFilter),
                 terminal = plan.terminal,
+                x11 = !plan.wayland || plan.xwayland,
             )
             for (index in cameraNodes.indices) {
                 val node = cameraNodes[index]
@@ -853,6 +855,7 @@ class FlatpakLauncher(private val context: Context) {
             newerElectronFlags = settings.newerElectronFlags,
             extraArgs = if (developerOptions) settings.launchArgs else emptyList(),
             forceX11 = settings.forceX11,
+            xwayland = developerOptions && settings.xwayland,
             electronSwap = app?.takeIf { alpine == null }?.let { electronSwap(appId).preparedFor(it) },
             wholeDev = settings.wholeDev,
             flatpakInfo = alpine == null && !settings.withoutFlatpakInfo,

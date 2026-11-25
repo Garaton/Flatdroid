@@ -115,4 +115,16 @@ class LaunchEnvironmentTest {
         assertEquals("/usr/lib/girepository-1.0:/usr/lib/../lib/gstreamer-1.0:/usr/lib/aarch64-linux-gnu/gstreamer-1.0", env["GST_PLUGIN_PATH"])
         assertEquals("/usr/lib/gstreamer-1.0", env["OTHER_PATH"])
     }
+
+    @Test
+    fun xwaylandAddsADisplayToAWaylandSession() {
+        val plain = LaunchEnvironment.build("org.xfce.mousepad", "aarch64-linux-gnu", emptyMap(), glDefault = null, wayland = true)
+        assertEquals(null, plain["DISPLAY"])
+        val withX = LaunchEnvironment.build("org.xfce.mousepad", "aarch64-linux-gnu", emptyMap(), glDefault = null, wayland = true, xwayland = true)
+        assertEquals(LaunchEnvironment.XWAYLAND_DISPLAY, withX["DISPLAY"])
+        assertEquals("wayland", withX["GDK_BACKEND"])
+        assertEquals("1", withX["QT_X11_NO_MITSHM"])
+        assertEquals("1", withX["_JAVA_AWT_WM_NONREPARENTING"])
+        assertEquals(null, plain["_JAVA_AWT_WM_NONREPARENTING"])
+    }
 }

@@ -52,6 +52,8 @@ object HiddenPause {
     private var noWindowStop = false
     private var waiting: Job? = null
     private var windowWait: Job? = null
+    /** Held while the app is being stopped ([freeze]), outside this object's own lock. */
+    private val freezing = Any()
     /** Android's screen is off ([screenOff]). */
     @Volatile private var screenIsOff = false
 
@@ -170,10 +172,8 @@ object HiddenPause {
         if (deadline == null) return
         windowWait = appScope.launch(Dispatchers.Default) {
             delay((deadline - SystemClock.elapsedRealtime()).coerceAtLeast(0))
-            synchronized(this@HiddenPause) {
-                // Stopped for being hidden: the wait goes on when the viewer is back ([viewerShown]).
-                if (session !== now || noWindowStop || hiddenStop || !now.wait.empty) return@synchronized
-                if (!stop(now)) return@synchronized
+            // Stopped for being hidden: the wait goes on when the viewer is back ([viewerShown]).
+            freeze(now, wanted = { !noWindowStop && !hiddenStop && now.wait.empty }) {
                 noWindowStop = true
                 settle(now)
                 DebugLog.i { "No window: the app is paused after ${now.wait.waitMs} ms" }
@@ -192,33 +192,53 @@ object HiddenPause {
             // An app nobody counts the windows of (the viewer never connected) keeps running until its
             // first-window time is over: a slow start has no window for long, and stopping it stalls it.
             now.wait.firstWindowLeft(SystemClock.elapsedRealtime()).takeIf { it > 0 }?.let { delay(it) }
-            synchronized(this@HiddenPause) {
-                if (session !== now || shown || hiddenStop) return@synchronized
-                // Windows counted and none open: the wait for a window decides (it asks the user, who can let the app
-                // go on). Stopping it here as well would hide that question, and Resume would change nothing.
-                if (now.wait.known && now.wait.empty) return@synchronized
-                if (stop(now)) {
-                    hiddenStop = true
-                    hiddenStopAt = SystemClock.elapsedRealtime()
-                }
+            // Windows counted and none open: the wait for a window decides (it asks the user, who can let the app
+            // go on). Stopping it here as well would hide that question, and Resume would change nothing.
+            freeze(now, wanted = { !shown && !hiddenStop && !(now.wait.known && now.wait.empty) }) {
+                hiddenStop = true
+                hiddenStopAt = SystemClock.elapsedRealtime()
             }
         }
     }
 
-    /** The sound and the signals follow the reasons that hold. */
+    /**
+     * The sound and the signals follow the reasons that hold. A reason is only set once the app is
+     * stopped ([freeze]), so here it can only go on.
+     */
     private fun settle(now: Session) {
         now.player?.muted = (!shown && now.pauseWhenHidden) || noWindowStop
-        if (hiddenStop || noWindowStop) stop(now) else go(now)
+        if (!hiddenStop && !noWindowStop) go(now)
     }
 
-    private fun stop(now: Session): Boolean {
-        if (stopped) return true
-        val traced = ProotFreeze.stop(now.prootPid) ?: return false
-        stopped = true
-        now.player?.paused = true
-        now.onPaused?.invoke(true)
-        DebugLog.i { "Paused: the app is stopped ($traced processes)" }
-        return true
+    /**
+     * Stops the app when [wanted] holds, then runs [then] (both under the lock). The stopping itself
+     * takes a few hundred ms for a browser ([ProotFreeze.stop]) and runs outside the lock, so the main
+     * thread's calls ([viewerShown], [screenOff]) don't wait for it; [wanted] is checked again
+     * afterwards, and an app no longer to be stopped (shown meanwhile) goes on at once. One at a
+     * time ([freezing]). Not on the main thread.
+     */
+    private fun freeze(now: Session, wanted: () -> Boolean, then: () -> Unit): Unit = synchronized(freezing) {
+        synchronized(this) {
+            if (session !== now || !wanted()) return
+            if (stopped) {
+                then()
+                return
+            }
+        }
+        val traced = ProotFreeze.stop(now.prootPid) ?: return
+        synchronized(this) {
+            if (session !== now) {
+                // Ended meanwhile (or another app started): this one's processes aren't kept stopped.
+                ProotFreeze.go(now.prootPid)
+                return
+            }
+            stopped = true
+            now.player?.paused = true
+            now.onPaused?.invoke(true)
+            DebugLog.i { "Paused: the app is stopped ($traced processes)" }
+            if (wanted()) then()
+            settle(now)
+        }
     }
 
     private fun go(now: Session) {

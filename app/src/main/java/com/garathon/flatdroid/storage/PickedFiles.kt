@@ -5,6 +5,7 @@ import android.net.Uri
 import android.os.Build
 import android.provider.DocumentsContract
 import android.provider.MediaStore
+import com.garathon.flatdroid.util.io.Confined
 import java.io.File
 
 /** Where a file picked in Android's picker is, when its provider says. */
@@ -41,9 +42,5 @@ object PickedFiles {
         file.parentFile?.list()?.contains(file.name) == true && runCatching { file.inputStream().close() }.isSuccess
 
     /** [file] is inside [dir] (not [dir] itself), links resolved. */
-    fun inside(file: File, dir: File): Boolean {
-        val path = file.canonicalPath
-        val base = dir.canonicalPath
-        return path.startsWith("$base/")
-    }
+    fun inside(file: File, dir: File): Boolean = Confined.within(file, dir.canonicalPath, orBase = false)
 }

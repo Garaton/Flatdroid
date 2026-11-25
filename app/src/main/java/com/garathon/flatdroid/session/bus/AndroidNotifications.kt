@@ -10,12 +10,15 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
+import android.os.ParcelFileDescriptor
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.garathon.flatdroid.R
 import com.garathon.flatdroid.flatpak.InstalledApps
 import com.garathon.flatdroid.ui.home.appIconBitmap
 import com.garathon.flatdroid.util.debug.DebugLog
+import com.garathon.flatdroid.util.io.Confined
+import com.garathon.flatdroid.util.io.readBytesUpTo
 import com.garathon.flatdroid.viewer.ViewerActivity
 import java.io.File
 import java.util.concurrent.atomic.AtomicInteger
@@ -99,9 +102,10 @@ class AndroidNotifications(
             null -> null
             is Notifications.Image.Pixels -> pixels(image)
             is Notifications.Image.Encoded -> decode(BitmapFactory.Options()) { BitmapFactory.decodeByteArray(image.bytes, 0, image.bytes.size, it) }
-            is Notifications.Image.Path -> hostPath(image.guestPath)?.let(::File)?.takeIf { it.isFile && it.length() <= MAX_FILE_BYTES }?.let { file ->
-                decode(BitmapFactory.Options()) { BitmapFactory.decodeFile(file.path, it) }
-            }
+            // Read from what was opened: the path is resolved inside the app's binds ([hostPath]).
+            is Notifications.Image.Path -> hostPath(image.guestPath)?.let { Confined.openRegular(File(it)) }
+                ?.let { held -> ParcelFileDescriptor.AutoCloseInputStream(held).use { it.readBytesUpTo(MAX_FILE_BYTES) } }
+                ?.let { bytes -> decode(BitmapFactory.Options()) { BitmapFactory.decodeByteArray(bytes, 0, bytes.size, it) } }
         }
     }.getOrNull()
 

@@ -1,13 +1,14 @@
 package com.garathon.flatdroid.storage.backup
 
 import com.garathon.flatdroid.storage.Names
+import com.garathon.flatdroid.util.io.Confined
+import com.garathon.flatdroid.util.io.copySparse
+import com.garathon.flatdroid.util.io.copyWithProgress
+import com.garathon.flatdroid.util.io.writeAtomically
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
-import com.garathon.flatdroid.util.io.copySparse
-import com.garathon.flatdroid.util.io.copyWithProgress
-import com.garathon.flatdroid.util.io.writeAtomically
 import java.util.zip.Deflater
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
@@ -151,6 +152,7 @@ object HomeZip {
                                 }
                             }
                         }
+                        if (runnable(target)) target.setExecutable(true, true)
                         files++
                     }
                 }
@@ -160,9 +162,18 @@ object HomeZip {
         return Extracted(files, skipped, kept)
     }
 
-    private fun inside(file: File, basePath: String): Boolean {
-        val path = file.canonicalPath
-        return path == basePath || path.startsWith("$basePath/")
+    private fun inside(file: File, basePath: String): Boolean = Confined.within(file, basePath)
+
+    /**
+     * A program by its first bytes (an ELF file, or a script's `#!`): the zip doesn't keep modes
+     * (Java's zip writes none, and a zip from elsewhere may not either), so everything is made
+     * without them, and a program has to be executable again to run (a Java runtime in app data).
+     */
+    internal fun runnable(file: File): Boolean {
+        val head = ByteArray(4)
+        val n = runCatching { file.inputStream().use { it.read(head) } }.getOrDefault(-1)
+        return (n >= 4 && head[0] == 0x7f.toByte() && head[1] == 'E'.code.toByte() && head[2] == 'L'.code.toByte() && head[3] == 'F'.code.toByte()) ||
+            (n >= 2 && head[0] == '#'.code.toByte() && head[1] == '!'.code.toByte())
     }
 
     private const val MIN_FREE_BYTES = 200L shl 20

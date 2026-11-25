@@ -27,7 +27,7 @@ class SessionAudioTest {
     @Test
     fun helpersGetSoundAndResampler() {
         assertEquals(
-            listOf("/bin/sh", SessionScript.GUEST_SCRIPT, "1000x1400", "14400", "30", "on", "speex-float-0", "on", "on", "on", "off", "off", "1.00", "on", "off", "off"),
+            listOf("/bin/sh", SessionScript.GUEST_SCRIPT, "1000x1400", "14400", "30", "on", "speex-float-0", "on", "on", "on", "off", "off", "1.00", "on", "off", "off", "off"),
             SessionScript.command("1000x1400", 30, sound = true, Resampler.FAST, sessionBus = true, camera = true),
         )
         assertEquals(
@@ -35,6 +35,9 @@ class SessionAudioTest {
             listOf("off", "speex-float-1", "off", "off"),
             SessionScript.command("1000x1400", 30, sound = false, Resampler.STANDARD, sessionBus = false, camera = true).subList(5, 9),
         )
+        // Xwayland only in a Wayland session.
+        assertEquals("on", SessionScript.command("1000x1400", 30, sound = false, Resampler.FAST, sessionBus = false, wayland = true, xwayland = true).last())
+        assertEquals("off", SessionScript.command("1000x1400", 30, sound = false, Resampler.FAST, sessionBus = false, wayland = false, xwayland = true).last())
     }
 
     @Test

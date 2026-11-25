@@ -200,6 +200,11 @@ data class AppSettings(
     val continueWhileHidden: Boolean = false,
     /** X11 for an app that takes both (by default such an app gets Wayland). */
     val forceX11: Boolean = false,
+    /**
+     * A Wayland session also offers X11 through Xwayland, for programs the app starts that take
+     * only X11 (a launcher's games, an AppImage manager's AppImages). A developer setting.
+     */
+    val xwayland: Boolean = false,
     /** On Wayland, how large the app draws everything, in percent ([INTERFACE_SIZES]); X11 apps keep their size. Null follows [defaults] ([interfaceSize]). */
     val interfaceSizeChoice: Int? = null,
     /** How GTK 4 and Qt Quick apps draw; null follows [defaults] ([rendering]). */
@@ -389,6 +394,7 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
                 .associateWith { props.getProperty(KEY_ENV_PREFIX + it) },
             launchArgs = LaunchArgs.parse(props.getProperty(KEY_LAUNCH_ARGS).orEmpty()),
             forceX11 = props.getProperty(KEY_FORCE_X11) == "true",
+            xwayland = props.getProperty(KEY_XWAYLAND) == "true",
             continueWhileHidden = props.getProperty(KEY_CONTINUE_HIDDEN) == "true",
             interfaceSizeChoice = props.getProperty(KEY_INTERFACE_SIZE)?.toIntOrNull()?.takeIf { it in AppSettings.INTERFACE_SIZES && it != appDefaults.interfaceSize },
             renderingChoice = Rendering.entries.firstOrNull { it.key == props.getProperty(KEY_RENDERING) }?.takeIf { it != appDefaults.rendering },
@@ -430,6 +436,7 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
         for ((name, value) in settings.environment) props.setProperty(KEY_ENV_PREFIX + name, value)
         if (settings.launchArgs.isNotEmpty()) props.setProperty(KEY_LAUNCH_ARGS, LaunchArgs.format(settings.launchArgs))
         if (settings.forceX11) props.setProperty(KEY_FORCE_X11, "true")
+        if (settings.xwayland) props.setProperty(KEY_XWAYLAND, "true")
         settings.interfaceSizeChoice?.let { props.setProperty(KEY_INTERFACE_SIZE, it.toString()) }
         settings.renderingChoice?.let { props.setProperty(KEY_RENDERING, it.key) }
         if (settings.continueWhileHidden) props.setProperty(KEY_CONTINUE_HIDDEN, "true")
@@ -488,6 +495,7 @@ class AppSettingsStore(private val file: File, private val appDefaults: AppDefau
         private const val KEY_ENV_PREFIX = "env."
         private const val KEY_LAUNCH_ARGS = "launch.args"
         private const val KEY_FORCE_X11 = "display.x11"
+        private const val KEY_XWAYLAND = "display.xwayland"
         private const val KEY_INTERFACE_SIZE = "display.interfaceSize"
         private const val KEY_RENDERING = "display.rendering"
         private const val KEY_CONTINUE_HIDDEN = "session.continueWhileHidden"
