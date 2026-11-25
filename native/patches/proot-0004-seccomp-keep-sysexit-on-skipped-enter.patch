@@ -1,8 +1,9 @@
 diff --git a/src/tracee/event.c b/src/tracee/event.c
+index aa82689..8a51fc7 100644
 --- a/src/tracee/event.c
 +++ b/src/tracee/event.c
-@@ -584,7 +584,23 @@
-
+@@ -595,7 +595,23 @@ int handle_tracee_event(Tracee *tracee, int tracee_status)
+ 
  			switch (tracee->seccomp) {
  			case ENABLED:
 -				if (IS_IN_SYSENTER(tracee)) {

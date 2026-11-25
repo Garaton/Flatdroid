@@ -1,17 +1,17 @@
 diff --git a/src/cli/cli.c b/src/cli/cli.c
-index bbc6400..a99df75 100644
+index ffd069a..d2b531e 100644
 --- a/src/cli/cli.c
 +++ b/src/cli/cli.c
 @@ -30,6 +30,7 @@
  #include <sys/types.h>     /* getpid(2),  */
- #include <unistd.h>        /* getpid(2),  */
+ #include <unistd.h>        /* getpid(2), _exit(2), */
  #include <errno.h>         /* errno(3), */
 +#include <sys/prctl.h>     /* prctl(2), PR_SET_DUMPABLE, */
  #include <libgen.h>        /* basename(3), */
  #ifdef __GLIBC__
  #include <execinfo.h>      /* backtrace_symbols(3), */
-@@ -450,6 +451,17 @@ int main(int argc, char *const argv[])
- 	Tracee *tracee;
+@@ -447,6 +448,17 @@ int main(int argc, char *const argv[])
+ 	pid_t pid;
  	int status;
  
 +	/* Not dumpable: other processes of the same user (tracees
@@ -29,7 +29,7 @@ index bbc6400..a99df75 100644
  	talloc_enable_leak_report();
  
 diff --git a/src/tracee/event.c b/src/tracee/event.c
-index 6141e19..9e198c4 100644
+index 9b8993f..aa82689 100644
 --- a/src/tracee/event.c
 +++ b/src/tracee/event.c
 @@ -23,6 +23,7 @@
@@ -40,7 +40,7 @@ index 6141e19..9e198c4 100644
  #include <sys/types.h>  /* waitpid(2), */
  #include <sys/wait.h>   /* waitpid(2), */
  #include <sys/utsname.h> /* uname(2), */
-@@ -118,6 +119,15 @@ int launch_process(Tracee *tracee, char *const argv[])
+@@ -120,6 +121,15 @@ int launch_process(Tracee *tracee, char *const argv[])
  		 * system, like container runtimes do.  */
  		signal(SIGPIPE, SIG_DFL);
  

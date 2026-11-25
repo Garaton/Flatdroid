@@ -17,7 +17,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-/* Path/mount system calls proot (pinned at 5.1.107.97) does not translate: its table stops at
+/* Path/mount system calls the pinned proot does not translate: its table stops at
  * open_tree_attr (467). fdsec returns ENOSYS for these and for every number above 467, so they
  * can never reach the host's files. Numbered the same on arm64 and x86_64 (Linux >= 5.1); older
  * kernel headers (the NDK's, musl's) may not name them yet, so define them here. */

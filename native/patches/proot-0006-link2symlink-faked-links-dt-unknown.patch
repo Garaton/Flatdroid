@@ -1,0 +1,102 @@
+diff --git a/src/extension/link2symlink/link2symlink.c b/src/extension/link2symlink/link2symlink.c
+index 11f27bd..cbaab27 100644
+--- a/src/extension/link2symlink/link2symlink.c
++++ b/src/extension/link2symlink/link2symlink.c
+@@ -10,7 +10,7 @@
+ #include <limits.h>    /* PATH_MAX, */
+ #include <ctype.h>     /* isdigit, */
+ #include <stdbool.h>   /* bool, true, false, */
+-#include <dirent.h>    /* DT_LNK, IFTODT, */
++#include <dirent.h>    /* DT_LNK, DT_UNKNOWN, */
+ #include <talloc.h>    /* talloc_*, */
+ 
+ #include "cli/note.h"
+@@ -41,10 +41,6 @@
+ #define RENAME_EXCHANGE (1 << 1)
+ #endif
+ 
+-#ifndef IFTODT
+-#define IFTODT(mode) (((mode) & S_IFMT) >> 12)
+-#endif
+-
+ static int decrement_intermediate_count(Tracee *tracee, const char original[PATH_MAX],
+ 					const char intermediate[PATH_MAX]);
+ 
+@@ -1204,40 +1200,36 @@ static void forget_removed_link(Extension *extension)
+ }
+ 
+ /**
+- * Return the d_type of what lstat(2) reports to the tracee for @path --
+- * a host path -- if it is a faked hard link, that is, the type of its
+- * file, c.f. translated_path().  This function returns -errno if @path
+- * is not a faked hard link, or if its file can't be reached.
++ * Tell whether @path -- a host path -- is a faked hard link, that is, a
++ * symbolic link to an intermediate this extension made.  One readlink(2)
++ * of @path, nothing in the l2s directory: lookups there cost a lot once
++ * it holds many files, c.f. handle_getdents_exit().
+  */
+-static int get_faked_hard_link_type(const char path[PATH_MAX])
++static bool is_faked_hard_link(const char path[PATH_MAX])
+ {
+-	char final[PATH_MAX];
+-	struct stat statl;
+-	int status;
+-
+-	status = resolve_faked_hard_link(path, final);
+-	if (status < 0)
+-		return status;
+-
+-	/* The paths this extension records are absolute; a relative one
+-	 * would be resolved against the directory of PRoot.  */
+-	if (final[0] != '/')
+-		return -EINVAL;
+-
+-	if (l2s_lstat(final, &statl) < 0)
+-		return -errno;
++	char intermediate[PATH_MAX];
+ 
+-	return IFTODT(statl.st_mode);
++	return read_faked_hard_link(path, intermediate) == 0;
+ }
+ 
+ /**
+  * Give the faked hard links listed by the getdents(2) or getdents64(2)
+- * @tracee has just performed the type lstat(2) reports for them, instead
+- * of DT_LNK, the type of the symbolic links they really are.  Programs
+- * that rely on d_type -- "find -type f", ripgrep, Rust's
+- * DirEntry::file_type(), Python's DirEntry.is_symlink() -- otherwise see
+- * a symbolic link where lstat(2) sees a regular file, then skip it or
+- * trip over the contradiction.
++ * @tracee has just performed the type DT_UNKNOWN, instead of DT_LNK, the
++ * type of the symbolic links they really are.  Programs that rely on
++ * d_type -- "find -type f", ripgrep, Rust's DirEntry::file_type(),
++ * Python's DirEntry.is_symlink() -- otherwise see a symbolic link where
++ * lstat(2) sees a regular file, then skip it or trip over the
++ * contradiction.  On DT_UNKNOWN they call lstat(2), which this extension
++ * answers with the file.
++ *
++ * DT_UNKNOWN rather than the type of the file: finding the file costs a
++ * readlink(2) of the intermediate and an lstat(2) of the file, both in
++ * the l2s directory.  Once that directory holds many files (a Flatpak
++ * installation: hundreds of thousands), each lookup there takes a large
++ * fraction of a millisecond on a phone, and a walk of Flatpak's
++ * repository took eight times as long.  Telling a faked hard link costs
++ * one readlink(2) of the listed entry, and only programs that need the
++ * type pay for the lookups.
+  *
+  * Intermediates are left alone: they are symbolic links to statx(2),
+  * hence to most recent programs, even though the stat(2) family reports
+@@ -1333,11 +1325,10 @@ static int handle_getdents_exit(Tracee *tracee)
+ 		if (status < 0 || status >= PATH_MAX)
+ 			continue;
+ 
+-		status = get_faked_hard_link_type(path);
+-		if (status < 0 || status == DT_LNK)
++		if (!is_faked_hard_link(path))
+ 			continue;
+ 
+-		buffer[offset + type_offset] = status;
++		buffer[offset + type_offset] = DT_UNKNOWN;
+ 
+ 		if (first_modified == length)
+ 			first_modified = offset + type_offset;

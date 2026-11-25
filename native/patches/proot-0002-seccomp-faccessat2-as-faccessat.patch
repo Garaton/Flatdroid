@@ -1,5 +1,5 @@
 diff --git a/src/tracee/seccomp.c b/src/tracee/seccomp.c
-index f2fe7ba..9ee3167 100644
+index ab9d4a1..0f9afa0 100644
 --- a/src/tracee/seccomp.c
 +++ b/src/tracee/seccomp.c
 @@ -1,4 +1,5 @@
@@ -8,7 +8,7 @@ index f2fe7ba..9ee3167 100644
  #include <signal.h>    /* SIGSYS, */
  #include <unistd.h>    /* getpgid, */
  #include <utime.h>     /* utimbuf, */
-@@ -626,6 +627,29 @@ static int handle_seccomp_event_common(Tracee *tracee)
+@@ -669,6 +670,29 @@ static int handle_seccomp_event_common(Tracee *tracee)
  		break;
  	}
  
@@ -36,5 +36,5 @@ index f2fe7ba..9ee3167 100644
 +	}
 +
  	case PR_fork:
- 	{
- 		/* Android's app seccomp policy allows clone(2) but not
+ 		/* Android's app seccomp policy only allows fork(2) on
+ 		 * 32-bit ABIs, yet musl calls it directly on x86_64.
