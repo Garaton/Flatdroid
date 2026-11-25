@@ -34,7 +34,7 @@ object Shortcuts {
         return try {
             context.getSystemService(ShortcutManager::class.java)?.requestPinShortcut(info(context, app), null) == true
         } catch (e: Exception) {
-            DebugLog.w("Shortcut for ${app.id} refused: $e")
+            DebugLog.w { "Shortcut for ${app.id} refused: $e" }
             false
         }
     }
@@ -60,7 +60,7 @@ object Shortcuts {
             }
             if (changed.isNotEmpty()) manager.updateShortcuts(changed.map { info(context, it) })
         } catch (e: Exception) {
-            DebugLog.w("Shortcuts not updated: $e")
+            DebugLog.w { "Shortcuts not updated: $e" }
         }
     }
 

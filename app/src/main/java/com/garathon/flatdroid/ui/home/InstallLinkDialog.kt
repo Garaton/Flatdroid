@@ -85,7 +85,7 @@ fun InstallLinkDialog(
             } catch (_: FlathubNotFoundException) {
                 LinkApp.NotFound
             } catch (e: Exception) {
-                DebugLog.w("Asking Flathub about $appId failed: $e")
+                DebugLog.w { "Asking Flathub about $appId failed: $e" }
                 when (e) {
                     is FlathubHttpException -> LinkApp.Failed(R.string.install_link_server_error, e.code)
                     is FlathubBadAnswerException -> LinkApp.Failed(R.string.install_link_bad_answer)

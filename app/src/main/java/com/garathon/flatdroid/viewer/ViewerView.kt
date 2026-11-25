@@ -447,17 +447,17 @@ class ViewerView(context: Context, private val connection: ViewerConnection) : V
                 ScrollMeter.blank(before, after, lines) -> "nothing to follow (a blank page)"
                 else -> ""
             }
-            if (skipped != "") return run { skipped?.let { DebugLog.i("Viewer: scroll $way not measured: $it") } }
+            if (skipped != "") return run { skipped?.let { DebugLog.i { "Viewer: scroll $way not measured: $it" } } }
             val typical = connection.typicalUnit
             val min = ceil(count * typical / ScrollSpeed.PLAUSIBLE).toInt()
             val max = floor(count * typical * ScrollSpeed.PLAUSIBLE).toInt()
-            if (min > lines * ScrollMeter.MAX_MOVE) return DebugLog.i("Viewer: scroll $way not measured: moved too far to compare")
+            if (min > lines * ScrollMeter.MAX_MOVE) return DebugLog.i { "Viewer: scroll $way not measured: moved too far to compare" }
             val t0 = System.nanoTime()
             val moved = ScrollMeter.shift(before, after, lines, notches > 0, min, max)
             val tookMs = (System.nanoTime() - t0) / 1_000_000
             val unit = moved?.let { abs(it).toFloat() / count }
             val result = connection.scrollMeasured(across, unit)
-            DebugLog.i("Viewer: scroll $way of $count units measured ${unit?.let { "%.1f px a unit".format(java.util.Locale.ROOT, it) } ?: "nothing recognisable"} in $tookMs ms: $result")
+            DebugLog.i { "Viewer: scroll $way of $count units measured ${unit?.let { "%.1f px a unit".format(java.util.Locale.ROOT, it) } ?: "nothing recognisable"} in $tookMs ms: $result" }
             setScrollSteps()
         }
     }

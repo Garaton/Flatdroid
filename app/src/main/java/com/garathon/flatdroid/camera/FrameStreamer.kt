@@ -111,7 +111,7 @@ abstract class FrameStreamer(
                 // In device mode not while the app hasn't taken the last one; the next turn tries again.
                 sendBlack()
             } catch (e: IOException) {
-                if (!closed) DebugLog.w("$label: ${e.message}")
+                if (!closed) DebugLog.w { "$label: ${e.message}" }
                 return
             }
             handler.postDelayed(this, 1000L / frameRate)
@@ -155,13 +155,13 @@ abstract class FrameStreamer(
             // proot). Os.fcntlInt is public from Android 11; before, the pipe keeps its size.
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 runCatching { Os.fcntlInt(stream.fd, F_SETPIPE_SZ, CameraScript.PIPE_BYTES) }
-                    .onFailure { DebugLog.w("$label: pipe size: ${it.message}") }
+                    .onFailure { DebugLog.w { "$label: pipe size: ${it.message}" } }
             }
             sendBlack()
             meter.reset()
             opened()
         } catch (e: IOException) {
-            DebugLog.w("$label: ${e.message}")
+            DebugLog.w { "$label: ${e.message}" }
         }
     }
 
@@ -244,7 +244,7 @@ abstract class FrameStreamer(
             media?.let { mediaEnd = Os.open(it.path, OsConstants.O_RDWR or OsConstants.O_NONBLOCK, 0) }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 runCatching { Os.fcntlInt(end, F_SETPIPE_SZ, CameraScript.PIPE_BYTES) }
-                    .onFailure { DebugLog.w("$label: pipe size: ${it.message}") }
+                    .onFailure { DebugLog.w { "$label: pipe size: ${it.message}" } }
             }
             meter.reset()
             opened()
@@ -252,7 +252,7 @@ abstract class FrameStreamer(
             // The frame the app's first read takes, which shows it reads.
             sendBlack()
         } catch (e: Exception) {
-            DebugLog.w("$label: ${e.message}")
+            DebugLog.w { "$label: ${e.message}" }
         }
     }
 
@@ -292,7 +292,7 @@ abstract class FrameStreamer(
         }
         Fdv4l2.streaming(text)?.let { now ->
             if (now && streaming != true) streamingSince = SystemClock.uptimeMillis()
-            if (now != streaming) DebugLog.i("$label: the app ${if (now) "streams" else "stopped streaming"}")
+            if (now != streaming) DebugLog.i { "$label: the app ${if (now) "streams" else "stopped streaming"}" }
             streaming = now
         }
         val chosen = Fdv4l2.chosenFormat(text) ?: return
@@ -301,7 +301,7 @@ abstract class FrameStreamer(
         // The last frame is in the other format.
         lastIsPart = false
         lastRaw = null
-        DebugLog.i("$label: the app takes ${chosen.id}")
+        DebugLog.i { "$label: the app takes ${chosen.id}" }
     }
 
     /** Device mode: nothing waits in the pipe (the app took the last frame, once one was written). */

@@ -65,7 +65,7 @@ enum class BrowseCategory(val appStream: String, val label: Int) {
  * The browser's list, prepared once per index and set of Flathub's lists so a keystroke only
  * filters: each app's search text lowercased into one string, and the list sorted in every
  * [BrowseOrder], both ways. [ListSpec.apply] would lowercase and sort the thousands of apps again at
- * every keystroke (110 to 290 ms on a Cortex-A53, against 8 to 25 ms).
+ * every keystroke, too slow for typing on a slow phone.
  */
 class BrowseItems(apps: List<CatalogApp>, lists: FlathubLists, descriptions: List<String>? = null) {
     /** [description]: the app's description, lowercase, searched as [text] is ([select]). */
@@ -137,7 +137,7 @@ class BrowseItems(apps: List<CatalogApp>, lists: FlathubLists, descriptions: Lis
             val started = System.currentTimeMillis()
             BrowseItems(index.apps, lists, index.descriptions()).also {
                 last = Triple(index, lists, it)
-                DebugLog.i("Browser: ${index.apps.size} apps prepared in ${System.currentTimeMillis() - started} ms")
+                DebugLog.i { "Browser: ${index.apps.size} apps prepared in ${System.currentTimeMillis() - started} ms" }
             }
         }
     }

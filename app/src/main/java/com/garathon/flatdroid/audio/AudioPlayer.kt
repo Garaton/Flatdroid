@@ -67,7 +67,7 @@ class AudioPlayer(
             buildTrack()
         } catch (e: RuntimeException) {
             // An output Android won't open: the session goes on without sound rather than Flatdroid stopping.
-            DebugLog.w("Audio player: ${e.message}")
+            DebugLog.w { "Audio player: ${e.message}" }
             runCatching { sock.close() }
             connection = null
             return
@@ -122,16 +122,16 @@ class AudioPlayer(
         } catch (_: EOFException) {
             // PulseAudio has gone: the session is ending.
         } catch (e: IOException) {
-            if (running) DebugLog.w("Audio player: ${e.message}")
+            if (running) DebugLog.w { "Audio player: ${e.message}" }
         } catch (e: RuntimeException) {
-            DebugLog.w("Audio player: ${e.message}")
+            DebugLog.w { "Audio player: ${e.message}" }
         } finally {
             underruns = track.underrunCount
             track.release()
             runCatching { sock.close() }
             connection = null
         }
-        DebugLog.i("Audio player stopped ($underruns underruns)")
+        DebugLog.i { "Audio player stopped ($underruns underruns)" }
     }
 
     private fun buildTrack(): AudioTrack {
@@ -154,7 +154,7 @@ class AudioPlayer(
         }
         return builder.build().also { track ->
             // Android may make the buffer larger than asked (its minimum, or its own rounding).
-            DebugLog.i("Audio player: ${track.bufferSizeInFrames * 1000L / rate} ms buffer (asked $latencyMs ms, $outputMode)")
+            DebugLog.i { "Audio player: ${track.bufferSizeInFrames * 1000L / rate} ms buffer (asked $latencyMs ms, $outputMode)" }
         }
     }
 
@@ -186,7 +186,7 @@ class AudioPlayer(
                     return null
                 }
             }
-            DebugLog.w("Could not connect to ${file.name}")
+            DebugLog.w { "Could not connect to ${file.name}" }
             return null
         }
     }

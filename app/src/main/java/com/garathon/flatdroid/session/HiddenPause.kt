@@ -176,7 +176,7 @@ object HiddenPause {
                 if (!stop(now)) return@synchronized
                 noWindowStop = true
                 settle(now)
-                DebugLog.i("No window: the app is paused after ${now.wait.waitMs} ms")
+                DebugLog.i { "No window: the app is paused after ${now.wait.waitMs} ms" }
                 SessionController.noWindow(true, neverOpened = !now.wait.opened)
             }
         }
@@ -217,7 +217,7 @@ object HiddenPause {
         stopped = true
         now.player?.paused = true
         now.onPaused?.invoke(true)
-        DebugLog.i("Paused: the app is stopped ($traced processes)")
+        DebugLog.i { "Paused: the app is stopped ($traced processes)" }
         return true
     }
 

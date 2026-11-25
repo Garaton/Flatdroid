@@ -108,13 +108,13 @@ object ViewerConnection {
             val tileSize = ViewerDebug.tileSize(cacheDir)
             native = if (tileSize == null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) NativeFrames.open(socket) else null
             frames = native ?: TileFrames(tileSize ?: TileFrames.SIZE)
-            DebugLog.i("Viewer: drawing through ${frames?.javaClass?.simpleName}")
+            DebugLog.i { "Viewer: drawing through ${frames?.javaClass?.simpleName}" }
             val client = RfbClient(
                 socket.inputStream, socket.outputStream, rawMeter = ViewerDebug.rawMeter(),
                 copyRectMeter = ViewerDebug.copyRectMeter(), pixelSink = native,
             )
             client.connect()
-            DebugLog.i("Viewer: connected to ${client.name} (${client.framebuffer.width}x${client.framebuffer.height})")
+            DebugLog.i { "Viewer: connected to ${client.name} (${client.framebuffer.width}x${client.framebuffer.height})" }
             this.client = client
             if (clipboardOffered) client.announceClipboard()
             ViewerDebug.connected(client, cacheDir) { zoom -> main.postDelayed({ sink?.zoomTo(zoom) }, 1_000) }
@@ -140,7 +140,7 @@ object ViewerConnection {
                 }
 
                 override fun resized(width: Int, height: Int) {
-                    DebugLog.i("Viewer: screen ${width}x$height")
+                    DebugLog.i { "Viewer: screen ${width}x$height" }
                     SessionController.onDisplayResized?.invoke(width, height)
                     waylandClient?.outputResized(width, height)
                     // X keeps the pointer inside a smaller screen: follow it there, as above.
@@ -177,7 +177,7 @@ object ViewerConnection {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) native?.close()
         main.post {
             if (this.socket === socket) {
-                DebugLog.i("Viewer: disconnected${error?.let { ": $it" }.orEmpty()}")
+                DebugLog.i { "Viewer: disconnected${error?.let { ": $it" }.orEmpty()}" }
                 val current = sink
                 close()
                 current?.closed(error)
@@ -244,7 +244,7 @@ object ViewerConnection {
         val new = if (whole) null else intArrayOf(x, y, width, height)
         if (old.contentEquals(new)) return
         region = new
-        DebugLog.i("Viewer: asking for ${new?.joinToString(",") ?: "all"}")
+        DebugLog.i { "Viewer: asking for ${new?.joinToString(",") ?: "all"}" }
         val grew = new == null || old != null && !contains(old, new)
         val client = client
         if (!grew || !shown || client == null) return
@@ -346,7 +346,7 @@ object ViewerConnection {
         if (pixels != null && file != null && key != null) {
             val all = speeds()
             all.setProperty(if (across) "$key$ACROSS" else key, speed.saved())
-            runCatching { file.outputStream().use { all.store(it, null) } }.onFailure { DebugLog.w("Viewer: scroll speeds not saved: $it") }
+            runCatching { file.outputStream().use { all.store(it, null) } }.onFailure { DebugLog.w { "Viewer: scroll speeds not saved: $it" } }
         }
         return result
     }

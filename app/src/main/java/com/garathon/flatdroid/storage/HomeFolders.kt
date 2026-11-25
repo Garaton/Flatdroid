@@ -3,8 +3,8 @@ package com.garathon.flatdroid.storage
 import java.io.File
 
 /**
- * The folders a desktop gives every user, which apps find through `user-dirs.dirs` (Kamoso asks
- * for Pictures). English names, as `xdg-user-dirs` makes them without a locale.
+ * The folders a desktop gives every user, which apps find through `user-dirs.dirs` (camera apps
+ * ask for Pictures). English names, as `xdg-user-dirs` makes them without a locale.
  */
 object HomeFolders {
     /** XDG name to folder, in `user-dirs.dirs` order. */

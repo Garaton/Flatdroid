@@ -85,7 +85,7 @@ class CameraSession(
                 }
             }
         } catch (e: IOException) {
-            if (!closed) DebugLog.w("Camera events: ${e.message}")
+            if (!closed) DebugLog.w { "Camera events: ${e.message}" }
         }
     }
 

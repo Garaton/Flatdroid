@@ -44,7 +44,7 @@ object ProotFreeze {
             }
             running = running.keys.associateWith { runningThreads(it) }.filterValues { it > 0 }
         }
-        if (running.isNotEmpty()) DebugLog.w("Pause: threads still running in ${running.map { (pid, n) -> "$pid ($n)" }}")
+        if (running.isNotEmpty()) DebugLog.w { "Pause: threads still running in ${running.map { (pid, n) -> "$pid ($n)" }}" }
     }
 
     /** How many of [pid]'s threads aren't stopped ([ProcTable.threadStates]); 0 when it ended. */
@@ -59,7 +59,7 @@ object ProotFreeze {
         Os.kill(pid, signal)
         true
     } catch (e: ErrnoException) {
-        DebugLog.w("Signal $signal to $pid: $e")
+        DebugLog.w { "Signal $signal to $pid: $e" }
         false
     }
 

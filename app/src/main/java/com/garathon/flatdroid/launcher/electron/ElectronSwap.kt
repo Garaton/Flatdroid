@@ -14,7 +14,7 @@ import java.util.zip.ZipFile
 
 /**
  * An Electron build for this device standing in for one an app ships for another architecture
- * (Flathub's aarch64 Unofficial Homestuck Collection contains x86_64 Electron 9.4.4). Same
+ * (some aarch64 builds on Flathub contain an x86_64 Electron). Same
  * version, the app's own `resources/` copied in, renamed to the app's binary name, and bound over
  * the app's Electron directory. Built in the cache and moved to `files/electron/<ID>` when
  * complete; prepared again when the app updates.
@@ -111,7 +111,7 @@ class ElectronSwap(
 
     /**
      * Extracts [zip] into [dest] through ZipFile (its central directory and Android's zlib):
-     * about 3.5 times as fast as reading it as a stream on a Cortex-A53.
+     * several times as fast as reading it as a stream.
      */
     private fun extract(zip: File, dest: File) {
         val root = dest.canonicalFile

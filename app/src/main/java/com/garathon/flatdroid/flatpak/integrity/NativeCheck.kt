@@ -6,8 +6,7 @@ import java.io.IOException
 /**
  * The file check's walk and compare in C (`native/fdcheck.c`, in libfdwalk.so): a deployment's
  * tree walked, every leaf's link and followed stat read on [compare]'s threads, its manifest read,
- * and only what differs handed back. On a Cortex-A53 a runtime of 21,000 files takes about 0.5 s
- * warm this way against about 2 s with the walk and the compare in Kotlin.
+ * and only what differs handed back. Several times as fast as the walk and the compare in Kotlin.
  */
 object NativeCheck {
     init {

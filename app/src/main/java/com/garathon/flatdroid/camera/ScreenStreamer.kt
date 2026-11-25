@@ -64,7 +64,7 @@ class ScreenStreamer(
                 try {
                     repeatLast()
                 } catch (e: IOException) {
-                    if (!closed) DebugLog.w("$label: ${e.message}")
+                    if (!closed) DebugLog.w { "$label: ${e.message}" }
                 }
             }
             handler.postDelayed(this, REPEAT_MS)
@@ -74,7 +74,7 @@ class ScreenStreamer(
         override fun onStop() {
             // The user (or Android) stopped the share; the app keeps the last frame.
             if (projection == null) return
-            DebugLog.i("$label: the share was stopped")
+            DebugLog.i { "$label: the share was stopped" }
             release()
             projection = null
             onEnded()
@@ -115,7 +115,7 @@ class ScreenStreamer(
     override fun startSource() {
         handler.removeCallbacks(end)
         if (display != null) return
-        val share = projection ?: ScreenShare.take() ?: return DebugLog.w("$label: no share to use")
+        val share = projection ?: ScreenShare.take() ?: return DebugLog.w { "$label: no share to use" }
         projection = share
         try {
             share.registerCallback(stopped, handler)
@@ -130,9 +130,9 @@ class ScreenStreamer(
                 imageReader.surface, null, handler,
             )
             if (!deviceMode && Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) displays?.registerDisplayListener(turned, handler)
-            DebugLog.i("$label: on (${width}x$height)")
+            DebugLog.i { "$label: on (${width}x$height)" }
         } catch (e: Exception) {
-            DebugLog.w("$label: ${e.message}")
+            DebugLog.w { "$label: ${e.message}" }
             endShare()
         }
     }
@@ -150,7 +150,7 @@ class ScreenStreamer(
         release()
         share.unregisterCallback(stopped)
         share.stop()
-        DebugLog.i("$label: off")
+        DebugLog.i { "$label: off" }
         onEnded()
     }
 
@@ -176,11 +176,11 @@ class ScreenStreamer(
         shown.resize(w, h, density())
         shown.surface = imageReader.surface
         runCatching { old?.close() }
-        DebugLog.i("$label: now ${w}x$h")
+        DebugLog.i { "$label: now ${w}x$h" }
     }
 
     private fun newReader(): ImageReader =
-        // RGBA: a share into a YUV reader gave no frames (Cortex-A53 tablet, Android 13).
+        // RGBA: a share into a YUV reader gave no frames (seen on Android 13).
         ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2).also {
             it.setOnImageAvailableListener({ meter.count(); pull() }, handler)
             reader = it
@@ -223,7 +223,7 @@ class ScreenStreamer(
             writeFrame(frame)
             meter.round()
         } catch (e: IOException) {
-            if (!closed) DebugLog.w("$label: ${e.message}")
+            if (!closed) DebugLog.w { "$label: ${e.message}" }
         } finally {
             image.close()
         }
@@ -233,8 +233,8 @@ class ScreenStreamer(
         /** The sizes the frames can have, in percent of the screen's own. */
         val SCALES = listOf(100, 75, 50, 25)
         /**
-         * Half: an app encoding video in software falls far behind at the full size on a Cortex-A53
-         * (one core at 720x1440), and Flatdroid itself makes twice the frames (19 a second against 9).
+         * Half: an app encoding video in software falls far behind at the full size on a slow
+         * phone, and Flatdroid itself makes about twice the frames.
          */
         const val DEFAULT_SCALE = 50
         const val FRAME_RATE = 30

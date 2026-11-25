@@ -112,7 +112,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 runInterruptible {
                     val env = AlpineEnvironment.get(app)
                     for (command in commands) {
-                        DebugLog.i("$ ${command.joinToString(" ")}")
+                        DebugLog.i { "$ ${command.joinToString(" ")}" }
                         val result = env.run(command, timeoutSeconds = UserSettings.APPLY_TIMEOUT_SECONDS, onLine = DebugLog::i)
                         if (result.exitCode != 0) {
                             throw IOException(result.output.lines().lastOrNull { it.isNotBlank() } ?: "exit ${result.exitCode}")
@@ -141,7 +141,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (command.isBlank() || _running.value) return
         outputLines.clear()
         _running.value = true
-        DebugLog.i("$ $command")
+        DebugLog.i { "$ $command" }
         log("$ $command")
         interrupted = false
         viewModelScope.launch(Dispatchers.IO) {

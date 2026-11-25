@@ -641,7 +641,7 @@ class StorageTaskService : Service() {
                     (if (permission.isWritePermission) Intent.FLAG_GRANT_WRITE_URI_PERMISSION else 0)
                 if (runCatching { context.contentResolver.releasePersistableUriPermission(permission.uri, flags) }.isSuccess) released++
             }
-            if (released > 0) DebugLog.i("released access to $released picked files; ${context.contentResolver.persistedUriPermissions.size} still kept")
+            if (released > 0) DebugLog.i { "released access to $released picked files; ${context.contentResolver.persistedUriPermissions.size} still kept" }
         }
 
         /** Where the last exported file's URI is kept ([keepForOpening]). */

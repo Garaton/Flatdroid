@@ -4,10 +4,8 @@ import java.nio.ByteBuffer
 
 /**
  * The camera's per-frame work in C (`native/fdframe.c`): turning a frame, trading its chroma
- * order (NV21 and NV12), and the screen's RGBA pixels as NV21 or NV12. On a Cortex-A53 a 1280x720
- * turn takes about 3 ms with NEON against about 11 ms in Kotlin, and the RGBA conversion about
- * 7 ms against about 15. Trading the chroma order costs nothing extra during a turn, against
- * about 2 ms in Kotlin.
+ * order (NV21 and NV12), and the screen's RGBA pixels as NV21 or NV12. With NEON each is a few
+ * times as fast as in Kotlin, and trading the chroma order costs nothing extra during a turn.
  */
 object NativeFrames {
     init {

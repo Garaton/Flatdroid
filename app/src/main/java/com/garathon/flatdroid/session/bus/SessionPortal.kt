@@ -72,7 +72,7 @@ class SessionPortal private constructor(
      * settings (Theme for apps, Reduce motion).
      */
     private fun watchAppearance() {
-        DebugLog.i("Bus: serving $appearance")
+        DebugLog.i { "Bus: serving $appearance" }
         val app = context.applicationContext
         val callbacks = object : ComponentCallbacks {
             override fun onConfigurationChanged(newConfig: Configuration) = appearanceChanged(newConfig)
@@ -103,7 +103,7 @@ class SessionPortal private constructor(
         val changes = appearance.changes(next)
         appearance = next
         for ((key, value) in changes) {
-            DebugLog.i("Bus: SettingChanged $key $value")
+            DebugLog.i { "Bus: SettingChanged $key $value" }
             client?.send(portal.settingChanged(Portal.APPEARANCE, key, value))
         }
     }
@@ -142,13 +142,13 @@ class SessionPortal private constructor(
     private fun notificationEvent(key: Int, action: String?, dismissed: Boolean) {
         val shown = notifications ?: return
         val signals = if (dismissed) shown.dismissed(key) else shown.activated(key, action)
-        DebugLog.i("Bus: notification $key ${if (dismissed) "dismissed" else action ?: "tapped"}")
+        DebugLog.i { "Bus: notification $key ${if (dismissed) "dismissed" else action ?: "tapped"}" }
         for (signal in signals) client?.send(signal)
     }
 
     /** What the app holds off now: the screen's timeout, the processor's sleep (released at the session's end at the latest). */
     private fun inhibited(state: Inhibitions.State) {
-        DebugLog.i("Bus: inhibits now $state")
+        DebugLog.i { "Bus: inhibits now $state" }
         keepScreenOn(state.idle)
         wakeLock?.let { lock ->
             runCatching { if (state.suspend) lock.acquire() else if (lock.isHeld) lock.release() }

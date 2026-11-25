@@ -44,6 +44,16 @@ object DebugLog {
         }
     }
 
+    /** [message] is built only in debug builds: release drops the call with its string. */
+    inline fun i(message: () -> String) {
+        if (BuildConfig.DEBUG) i(message())
+    }
+
+    /** [message] is built only in debug builds: release drops the call with its string. */
+    inline fun w(message: () -> String) {
+        if (BuildConfig.DEBUG) w(message())
+    }
+
     private fun append(level: String, message: String) {
         val target = file ?: return
         val line = "${synchronized(time) { time.format(Date()) }} $level $message\n"

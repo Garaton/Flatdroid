@@ -28,8 +28,7 @@ import java.io.InputStream
  * Pixels read from the socket straight into one frame in native memory (native/fdview.c), and
  * each update's changed area copied from there into the next buffer of a surface's queue, which
  * Android's compositor shows as it is, placed and scaled by the compositor: no copy into a bitmap,
- * no upload and no drawing in the app (on a 720x1440 phone 5 to 10% of a core less than drawing
- * hardware buffers, measured). The queue paces the copies, copies forward what an update left
+ * no upload and no drawing in the app (less CPU than drawing hardware buffers). The queue paces the copies, copies forward what an update left
  * alone, and is ordinary rendering to Android, so the system's frame-based CPU boosts still see
  * the app working (frames handed to the compositor without a queue lost them: measured, the
  * session's processes moved to slow cores). Nothing is shown until [useSurface]. Android 10 and later.
@@ -181,7 +180,7 @@ class NativeFrames private constructor(private val descriptor: ParcelFileDescrip
             return runCatching {
                 System.loadLibrary("fdview")
                 NativeFrames(ParcelFileDescriptor.dup(socket.fileDescriptor))
-            }.onFailure { DebugLog.w("Viewer: no native frames: $it") }.getOrNull()
+            }.onFailure { DebugLog.w { "Viewer: no native frames: $it" } }.getOrNull()
         }
 
         @JvmStatic private external fun readByte(fd: Int, frame: Long): Int

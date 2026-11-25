@@ -114,7 +114,7 @@ class FileIntegrityCheck(
         }
         if (cancelled()) return skipped
         if (BuildConfig.DEBUG) {
-            DebugLog.i("File check: ${found.leaves} files in ${(System.nanoTime() - started) / 1_000_000} ms, ${found.current.size} differ, ${toHash.size} hashed, ${found.removed.size} removed")
+            DebugLog.i { "File check: ${found.leaves} files in ${(System.nanoTime() - started) / 1_000_000} ms, ${found.current.size} differ, ${toHash.size} hashed, ${found.removed.size} removed" }
         }
         // Entries recorded without a hash (a link broken then) that read now: looked up in the
         // manifests only when there are any.
@@ -144,7 +144,7 @@ class FileIntegrityCheck(
         for ((rel, entry) in adopted) {
             val name = entry.link?.let(store::storedName) ?: continue
             val counted = runCatching { links.countOneMore(name) }.getOrDefault(false)
-            if (BuildConfig.DEBUG) DebugLog.i("File check: $rel took a recorded hash; its link ${if (counted) "is counted now" else "couldn't be counted"}")
+            if (BuildConfig.DEBUG) DebugLog.i { "File check: $rel took a recorded hash; its link ${if (counted) "is counted now" else "couldn't be counted"}" }
         }
     }
 
@@ -334,7 +334,7 @@ class FileIntegrityCheck(
         const val METADATA_SUFFIX = ".metadata"
         const val POLL_MS = 50L
         const val CHUNK = 64
-        /** Threads for the hashing and the check's reads: 8 gained 5 to 16% on a Cortex-A53, and older phones have fewer cores. */
+        /** Threads for the hashing and the check's reads: more gained little on a slow phone, and older phones have fewer cores. */
         const val MAX_THREADS = 4
 
 

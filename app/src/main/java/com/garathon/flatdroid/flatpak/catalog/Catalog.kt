@@ -140,7 +140,7 @@ object Catalog {
             _state.value = try {
                 synchronized(lock) { load(app) }
             } catch (e: Exception) {
-                DebugLog.w("Catalog: reading failed: $e")
+                DebugLog.w { "Catalog: reading failed: $e" }
                 CatalogState.Failed(e.message ?: e.toString())
             }
             if (_state.value is CatalogState.Ready && !listsFile(app).isFile) synchronized(lock) { fetchLists(app) }
@@ -197,7 +197,7 @@ object Catalog {
             parser.setInput(gz.buffered(64 * 1024), "UTF-8")
             CatalogIndex.write(indexDir(context), version) { add -> reader.read(parser, add) }
         }
-        DebugLog.i("Catalog: ${index.apps.size} apps read in ${System.currentTimeMillis() - started} ms")
+        DebugLog.i { "Catalog: ${index.apps.size} apps read in ${System.currentTimeMillis() - started} ms" }
         return index
     }
 
@@ -229,11 +229,11 @@ object Catalog {
             )
             // Written by earlier versions: three lists of 250 apps.
             File(dir(context), "lists").delete()
-            DebugLog.i("Catalog: Flathub's ${apps.size} apps fetched in ${System.currentTimeMillis() - started} ms")
+            DebugLog.i { "Catalog: Flathub's ${apps.size} apps fetched in ${System.currentTimeMillis() - started} ms" }
             val lists = readLists(context)
             (_state.value as? CatalogState.Ready)?.takeIf { it.lists != lists }?.let { _state.value = it.copy(lists = lists) }
         } catch (e: IOException) {
-            DebugLog.w("Catalog: Flathub's lists couldn't be fetched: $e")
+            DebugLog.w { "Catalog: Flathub's lists couldn't be fetched: $e" }
         }
     }
 

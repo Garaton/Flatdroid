@@ -142,7 +142,7 @@ object SetupController {
             _state.update { it.copy(completed = it.completed + step, current = null, fraction = null, detail = "") }
 
         override fun failed(step: SetupStep, message: String) {
-            DebugLog.w("Setup step $step failed: $message")
+            DebugLog.w { "Setup step $step failed: $message" }
             _state.update { it.copy(failed = step, error = message, current = null, fraction = null) }
         }
     }

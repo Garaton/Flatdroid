@@ -18,7 +18,7 @@ fun Service.startDataSyncForeground(id: Int, notification: Notification): Boolea
         ServiceCompat.startForeground(this, id, notification, type)
         true
     } catch (e: IllegalStateException) {
-        DebugLog.w("Foreground start refused: $e")
+        DebugLog.w { "Foreground start refused: $e" }
         false
     }
 }

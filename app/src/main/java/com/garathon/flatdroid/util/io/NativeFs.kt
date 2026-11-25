@@ -4,8 +4,8 @@ import java.io.File
 
 /**
  * [DirReader] in C (`native/fdwalk.c`): a folder is opened once and its entries read relative to
- * it, one JNI call per folder. On a Cortex-A53 a link read costs about 7 µs this way against about
- * 38 µs through `Os.readlink`, whose path is also looked up from `/` each time. Names cross as
+ * it, one JNI call per folder: several times as fast as `Os.readlink`, whose path is looked up
+ * from `/` each time. Names cross as
  * UTF-8 bytes, decoded as `File.list` decodes them; a listing's own bytes go back as they came.
  */
 object NativeFs : DirReader {

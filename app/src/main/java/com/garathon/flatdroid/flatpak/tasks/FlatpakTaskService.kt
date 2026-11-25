@@ -674,7 +674,7 @@ class FlatpakTaskService : Service() {
         if (relinked.isEmpty()) return 0
         FlatpakTasks.log(resources.getQuantityString(R.plurals.task_log_relinked, relinked.size, relinked.size))
         val reread = FileIntegrityCheck(AppData.integrityDir(applicationContext), File(env.paths().l2sDir)).rereadRepaired(relinked)
-        if (reread > 0) DebugLog.i("Baseline entries read again after the repair: $reread")
+        if (reread > 0) DebugLog.i { "Baseline entries read again after the repair: $reread" }
         return relinked.size
     }
 
@@ -882,7 +882,7 @@ class FlatpakTaskService : Service() {
             } catch (e: IllegalStateException) {
                 // Android 12 and later refuse it while Flatdroid is in the background (an app ended
                 // there, and installs were waiting): they wait until Flatdroid is in front again.
-                DebugLog.w("Task not started from the background: $e")
+                DebugLog.w { "Task not started from the background: $e" }
                 FlatpakTasks.abandon(task)
                 return false
             }

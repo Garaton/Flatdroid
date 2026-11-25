@@ -111,11 +111,11 @@ class CameraStreamer(
 
                 override fun onError(opened: CameraDevice, error: Int) = lost(opened, "error $error")
             }, handler)
-            DebugLog.i("$label: on (${camera.width}x${camera.height})")
+            DebugLog.i { "$label: on (${camera.width}x${camera.height})" }
         } catch (e: Exception) {
             // In use or disabled: tried again once Android reports it available.
             opening = false
-            DebugLog.w("$label: ${e.message}")
+            DebugLog.w { "$label: ${e.message}" }
         }
     }
 
@@ -136,7 +136,7 @@ class CameraStreamer(
         if (setupFailed) failedSetup = true
         opened.close()
         if (device == opened) stopSource()
-        DebugLog.w("$label: $why; " + if (setupFailed) "tried again when the app links again" else "tried again once Android reports a camera available")
+        DebugLog.w { "$label: $why; " + if (setupFailed) "tried again when the app links again" else "tried again once Android reports a camera available" }
     }
 
     private fun capture(manager: CameraManager, opened: CameraDevice, imageReader: ImageReader) {
@@ -209,7 +209,7 @@ class CameraStreamer(
             writeFrame(if (rotation != 0) turned else frame)
             meter.round()
         } catch (e: IOException) {
-            if (!closed) DebugLog.w("$label: ${e.message}")
+            if (!closed) DebugLog.w { "$label: ${e.message}" }
         } finally {
             image.close()
         }
@@ -219,7 +219,7 @@ class CameraStreamer(
         runCatching { session?.close() }
         runCatching { device?.close() }
         runCatching { reader?.close() }
-        if (device != null) DebugLog.i("$label: off")
+        if (device != null) DebugLog.i { "$label: off" }
         session = null
         device = null
         reader = null

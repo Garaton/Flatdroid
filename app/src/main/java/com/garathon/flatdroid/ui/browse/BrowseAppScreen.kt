@@ -203,7 +203,7 @@ fun BrowseAppScreen(
             } catch (_: FlathubNotFoundException) {
                 Summary.NotFound
             } catch (e: Exception) {
-                DebugLog.w("Asking Flathub about $appId failed: $e")
+                DebugLog.w { "Asking Flathub about $appId failed: $e" }
                 when (e) {
                     is FlathubHttpException -> Summary.Failed(R.string.install_link_server_error, e.code)
                     is FlathubBadAnswerException -> Summary.Failed(R.string.install_link_bad_answer)

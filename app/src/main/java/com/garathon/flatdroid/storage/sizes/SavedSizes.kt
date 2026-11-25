@@ -204,7 +204,7 @@ object SavedSizes {
     private val stop = { changingAll.get() > 0 }
 
     private fun store(context: Context): SizeStore =
-        store ?: synchronized(this) { store ?: SizeStore(sizesDir(context)) { name, millis -> DebugLog.i("Measured $name in $millis ms") }
+        store ?: synchronized(this) { store ?: SizeStore(sizesDir(context)) { name, millis -> DebugLog.i { "Measured $name in $millis ms" } }
             .also { store = it } }
 
     private fun sizesDir(context: Context) = File(context.filesDir, "storage-sizes")
@@ -310,7 +310,7 @@ object SavedSizes {
         }
         val total = context.filesDir.canonicalFile.listFiles().orEmpty().filter { it.canonicalPath !in perApp }.sumOf { StorageSizes.of(it, stop, instead) }
         val all = (System.nanoTime() - started) / 1_000_000
-        DebugLog.i("Measured files: link2symlink's store ${millis[0]} ms, repository objects ${millis[1]} ms, deployments ${millis[2]} ms, the rest ${all - millis.sum()} ms")
+        DebugLog.i { "Measured files: link2symlink's store ${millis[0]} ms, repository objects ${millis[1]} ms, deployments ${millis[2]} ms, the rest ${all - millis.sum()} ms" }
         return total
     }
 
@@ -490,7 +490,7 @@ object SavedSizes {
                             else -> app(appContext, name)
                         }
                     } catch (e: Exception) {
-                        DebugLog.w("Measuring $name failed: $e")
+                        DebugLog.w { "Measuring $name failed: $e" }
                     }
                 }
                 if (last) _updates.update { it + 1 }

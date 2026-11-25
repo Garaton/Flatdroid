@@ -59,9 +59,9 @@ class ResolvConfRefresher(private val context: Context, private val files: List<
             try {
                 file.writeTextAtomically(text, durable = false)
                 written[file] = text
-                DebugLog.i("resolv.conf updated for the new network: ${text.lines().filter { it.isNotBlank() }.joinToString(", ")}")
+                DebugLog.i { "resolv.conf updated for the new network: ${text.lines().filter { it.isNotBlank() }.joinToString(", ")}" }
             } catch (e: Exception) {
-                DebugLog.w("resolv.conf not updated: $e")
+                DebugLog.w { "resolv.conf not updated: $e" }
             }
         }
     }

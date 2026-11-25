@@ -219,7 +219,7 @@ private fun GlobalSettingsScreenPreview() {
         GlobalSettingsScreen(
             page = GlobalPage.STORAGE, onPage = {}, draft = draft,
             env = GlobalSettingsEnv(
-                deviceLanguages = "de;en", viewers = listOf(ExternalViewer.App("com.gaurav.avnc", "AVNC")), applying = false, error = null,
+                deviceLanguages = "de;en", viewers = listOf(ExternalViewer.App("org.example.viewer", "VNC Viewer")), applying = false, error = null,
                 sharedHome = "Documents/Flatdroid", allFilesAccess = false,
                 storage = FlatdroidStorage(
                     runtimes = 800L shl 20, apps = 200L shl 20, appData = 5L shl 20, privateHomes = 30L shl 20, cache = 3L shl 20,

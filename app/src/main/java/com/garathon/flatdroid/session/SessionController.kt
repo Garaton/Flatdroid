@@ -169,7 +169,7 @@ object SessionController {
     /** Back to idle, with [message] describing the outcome (null for a plain stop). */
     fun ended(message: String?, failed: Boolean = false) {
         ViewerConnection.closeOnMain()
-        message?.let { DebugLog.i("Session: $it") }
+        message?.let { DebugLog.i { "Session: $it" } }
         _keepScreenOn.value = false
         _ui.update { it.copy(state = SessionState.Idle, message = message, failed = failed && message != null, asks = emptySet()) }
     }

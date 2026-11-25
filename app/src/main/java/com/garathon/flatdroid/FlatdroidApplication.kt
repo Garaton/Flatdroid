@@ -39,7 +39,7 @@ class FlatdroidApplication : Application() {
             Os.prctl(OsConstants.PR_SET_DUMPABLE, 0, 0, 0, 0)
             nonDumpable = Os.prctl(OsConstants.PR_GET_DUMPABLE, 0, 0, 0, 0) == 0
         } catch (e: ErrnoException) {
-            DebugLog.w("Could not make the process non-dumpable: $e")
+            DebugLog.w { "Could not make the process non-dumpable: $e" }
         }
         super.attachBaseContext(base)
     }
@@ -58,7 +58,7 @@ class FlatdroidApplication : Application() {
         AlpineChanges.refresh(this)
         // Before anything of this run starts: every process of Flatdroid's that is running now is left over.
         val killed = LeftoverProcesses.kill()
-        if (killed > 0) DebugLog.i("Ended $killed processes left by an earlier run")
+        if (killed > 0) DebugLog.i { "Ended $killed processes left by an earlier run" }
         val trash = setAsideLeftoverWork()
         appScope.launch(Dispatchers.IO) {
             AndroidTarFs.deleteTree(trash)
@@ -80,7 +80,7 @@ class FlatdroidApplication : Application() {
         for ((i, file) in env.leftoverFiles().withIndex()) {
             if (!file.exists() && !AndroidTarFs.isSymlink(file)) continue
             trash.mkdirs()
-            if (!file.renameTo(File(trash, "${System.nanoTime()}-$i"))) DebugLog.w("Could not set aside ${file.path}")
+            if (!file.renameTo(File(trash, "${System.nanoTime()}-$i"))) DebugLog.w { "Could not set aside ${file.path}" }
         }
         return trash
     }
@@ -101,12 +101,12 @@ class FlatdroidApplication : Application() {
             ).clean()
             SavedSizes.removeStale(this)
             for (file in removed) {
-                DebugLog.i("Removed leftover ${file.path}")
+                DebugLog.i { "Removed leftover ${file.path}" }
                 // An Electron swap counts in its app's size.
                 if (file.parentFile?.canonicalPath == AppData.electronDir(this).path) SavedSizes.changed(this, file.name)
             }
         } catch (e: Exception) {
-            DebugLog.w("Leftover clean-up failed: $e")
+            DebugLog.w { "Leftover clean-up failed: $e" }
         }
     }
 }

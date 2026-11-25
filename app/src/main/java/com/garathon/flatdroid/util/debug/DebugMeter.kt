@@ -52,7 +52,7 @@ class DebugMeter(
         val extra = counted?.let { " ($it ${others * 1000 / elapsed})" }.orEmpty()
         val each = steps.indices.joinToString(", ") { "${steps[it]} %.1f".format(Locale.ROOT, ms[it]) }
         val total = "%.1f".format(Locale.ROOT, ms.sum())
-        DebugLog.i("$name: ${rounds * 1000 / elapsed} $unit/s$extra, $total ms each: $each")
+        DebugLog.i { "$name: ${rounds * 1000 / elapsed} $unit/s$extra, $total ms each: $each" }
         reset()
         since = now
     }

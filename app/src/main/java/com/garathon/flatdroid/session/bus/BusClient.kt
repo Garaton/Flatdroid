@@ -55,12 +55,12 @@ class BusClient private constructor(
                     // Calls, and the bus's own signals Flatdroid subscribed to (connections leaving).
                     if (message.type != DBusWire.METHOD_CALL && message.type != DBusWire.SIGNAL) continue
                     if (message.type == DBusWire.METHOD_CALL) {
-                        DebugLog.i("Bus: ${message.sender} called ${message.iface}.${message.member}(${message.signature}) ${message.body.toString().take(240)}")
+                        DebugLog.i { "Bus: ${message.sender} called ${message.iface}.${message.member}(${message.signature}) ${message.body.toString().take(240)}" }
                     }
                     val replies = try {
                         handler(message, fds)
                     } catch (e: Exception) {
-                        DebugLog.w("Bus: ${message.iface}.${message.member} failed: $e")
+                        DebugLog.w { "Bus: ${message.iface}.${message.member} failed: $e" }
                         listOfNotNull(message.error("org.freedesktop.DBus.Error.Failed", "Failed").takeIf { message.expectsReply })
                     }
                     for (reply in replies) send(reply)
@@ -183,7 +183,7 @@ class BusClient private constructor(
                 val length = DBusWire.messageLength(head)
                 if (length > DBusWire.MAX_MESSAGE) {
                     skipFully(socket, input, length - head.size, fds)
-                    DebugLog.w("Bus: skipped a message of $length bytes")
+                    DebugLog.w { "Bus: skipped a message of $length bytes" }
                     closeAll(fds)
                     return null
                 }
@@ -192,11 +192,11 @@ class BusClient private constructor(
                 val message = try {
                     DBusWire.decode(bytes)
                 } catch (e: WireException) {
-                    DebugLog.w("Bus: skipped a message: ${e.message}")
+                    DebugLog.w { "Bus: skipped a message: ${e.message}" }
                     null
                 }
                 if (message == null || message.unixFds != fds.size) {
-                    if (message != null) DebugLog.w("Bus: skipped a message with ${fds.size} files for ${message.unixFds}")
+                    if (message != null) DebugLog.w { "Bus: skipped a message with ${fds.size} files for ${message.unixFds}" }
                     closeAll(fds)
                     return null
                 }

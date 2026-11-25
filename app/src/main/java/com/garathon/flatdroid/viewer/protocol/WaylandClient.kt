@@ -299,7 +299,7 @@ class WaylandClient(
                 }.get()
             }
         } catch (e: Exception) {
-            if (!closed) DebugLog.w("Wayland client: $e")
+            if (!closed) DebugLog.w { "Wayland client: $e" }
         } finally {
             canType = false
             runCatching { socket.close() }
@@ -309,7 +309,7 @@ class WaylandClient(
     /** Sender's thread, unless closed; a failure only ends what it was doing. */
     private fun post(action: () -> Unit) {
         runCatching {
-            sender.execute { runCatching(action).onFailure { if (!closed) DebugLog.w("Wayland client: $it") } }
+            sender.execute { runCatching(action).onFailure { if (!closed) DebugLog.w { "Wayland client: $it" } } }
         }
     }
 
@@ -336,7 +336,7 @@ class WaylandClient(
             event.target == DISPLAY && event.opcode == DISPLAY_ERROR -> {
                 val target = event.int()
                 val code = event.int()
-                DebugLog.w("Wayland client: error $code on $target: ${event.string()}")
+                DebugLog.w { "Wayland client: error $code on $target: ${event.string()}" }
             }
             event.target == REGISTRY && event.opcode == REGISTRY_GLOBAL -> {
                 val name = event.int()
@@ -396,7 +396,7 @@ class WaylandClient(
     }
 
     private fun reportWindows() {
-        DebugLog.i("Wayland client: ${windows.size} windows")
+        DebugLog.i { "Wayland client: ${windows.size} windows" }
         onWindows?.invoke(windows.size)
     }
 
@@ -410,7 +410,7 @@ class WaylandClient(
             bind(clipboardName, clipboardInterface, clipboard)
             device = id()
             send(WaylandWire.message(clipboard, MANAGER_GET_DEVICE, device, seat))
-            DebugLog.i("Wayland client: clipboard through $clipboardInterface")
+            DebugLog.i { "Wayland client: clipboard through $clipboardInterface" }
         }
         // Also without a refresh to set: the scale comes from it.
         if (outputName != 0) {
@@ -457,7 +457,7 @@ class WaylandClient(
             DebugLog.i("Wayland client: an app pastes")
             text()?.let { FileOutputStream(fd).write(it.toByteArray()) }
         } catch (e: IOException) {
-            DebugLog.w("Wayland client: ${e.message}")
+            DebugLog.w { "Wayland client: ${e.message}" }
         } finally {
             // A stream made from a descriptor doesn't close it, and the app reads until it is closed.
             closeFd(fd)

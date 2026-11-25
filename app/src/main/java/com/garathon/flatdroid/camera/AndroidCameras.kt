@@ -112,7 +112,7 @@ object AndroidCameras {
         return try {
             manager.cameraIdList.map { it to manager.getCameraCharacteristics(it) }
         } catch (e: Exception) {
-            DebugLog.w("Cameras: ${e.message}")
+            DebugLog.w { "Cameras: ${e.message}" }
             emptyList()
         }
     }

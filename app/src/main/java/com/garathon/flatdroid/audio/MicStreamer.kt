@@ -21,8 +21,7 @@ import java.io.FileDescriptor
  * [start], Android's microphone (an [AudioRecord]) from then until [stop], until [close]. Android
  * shows its microphone indicator only while the microphone streams.
  *
- * PulseAudio reads the pipe only while an app records (measured: about 100 KB/s while recording at
- * 48 kHz, next to nothing otherwise), so an app gets sound the moment it starts recording, before
+ * PulseAudio reads the pipe only while an app records (next to nothing otherwise), so an app gets sound the moment it starts recording, before
  * Flatdroid has heard of it, and the pipe itself tells whether an app records ([onRecording]):
  * more than the pipe holds written without it filling up means it is read; full for
  * [STOPPED_AFTER_MS] means it isn't any more. No process among the helpers has to watch
@@ -121,7 +120,7 @@ class MicStreamer(
                     } catch (e: RuntimeException) {
                         // Android stopped the recording (another app took the microphone, the
                         // permission was revoked): silence rather than Flatdroid stopping.
-                        DebugLog.w("Microphone: ${e.message}")
+                        DebugLog.w { "Microphone: ${e.message}" }
                         -1
                     }
                     if (n < 0) {
@@ -153,7 +152,7 @@ class MicStreamer(
             }
         } catch (e: ErrnoException) {
             // PulseAudio is gone (the session ends).
-            if (!closed) DebugLog.w("Microphone: ${e.message}")
+            if (!closed) DebugLog.w { "Microphone: ${e.message}" }
         } finally {
             record?.let(::release)
             runCatching { Os.close(fd) }
@@ -209,7 +208,7 @@ class MicStreamer(
                         // The kernel rounds this up to one page.
                         Os.fcntlInt(fd, F_SETPIPE_SZ, 1)
                     } catch (e: ErrnoException) {
-                        DebugLog.w("Microphone: the pipe keeps its size: ${e.message}")
+                        DebugLog.w { "Microphone: the pipe keeps its size: ${e.message}" }
                     }
                 }
                 return fd
@@ -249,7 +248,7 @@ class MicStreamer(
             AudioRecord(MediaRecorder.AudioSource.MIC, rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(minimum, chunk * 4))
                 .apply { startRecording() }
         } catch (e: Exception) {
-            DebugLog.w("Microphone: ${e.message}")
+            DebugLog.w { "Microphone: ${e.message}" }
             null
         }
     }

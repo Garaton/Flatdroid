@@ -390,7 +390,7 @@ private fun HomeScreenPreview() {
         HomeScreen(
             apps = listOf(
                 InstalledApp("org.xfce.mousepad", "Mousepad", null, 1_760_000_000_000),
-                InstalledApp("org.audacityteam.Audacity", "Audacity", null, null),
+                InstalledApp("org.example.Player", "Player", null, null),
             ),
             session = SessionUi(SessionState.Starting("org.xfce.mousepad", "Starting the display")),
             task = FlatpakTaskUi(),

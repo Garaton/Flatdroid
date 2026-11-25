@@ -63,7 +63,7 @@ class AndroidNotifications(
         (picture(notification.image) ?: appIcon)?.let(builder::setLargeIcon)
         notification.timeoutMillis?.let(builder::setTimeoutAfter)
         for ((i, button) in notification.buttons.withIndex()) builder.addAction(0, button.label, broadcast(key, i + 1, button.action, dismissed = false))
-        runCatching { manager.notify(TAG, key, builder.build()) }.onFailure { DebugLog.i("Notifications: not shown: $it") }
+        runCatching { manager.notify(TAG, key, builder.build()) }.onFailure { DebugLog.i { "Notifications: not shown: $it" } }
     }
 
     override fun remove(key: Int) {

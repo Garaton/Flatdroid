@@ -235,7 +235,7 @@ class BrokenLinks(private val l2sDir: File, private val fs: LinkFs) {
 
         /** Store entries read per call: an interrupt is noticed between them. */
         private const val BATCH = 4096
-        /** Threads for [removeUnder]'s walk: on a Cortex-A53's storage 4 gained as much as 8. */
+        /** Threads for [removeUnder]'s walk: more gained nothing on a slow phone's storage. */
         const val WALK_THREADS = 4
 
         private val OBJECT = Regex("""\b[0-9a-f]{2}/[0-9a-f]{62}\.(file|dirtree|dirmeta|commit)\b""")

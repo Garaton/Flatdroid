@@ -14,11 +14,11 @@ import com.garathon.flatdroid.util.WHITESPACE
  * Either way Chromium's sandboxes and GPU are off.
  */
 object Electron {
-    /** Works for Electron 9 (Homestuck). */
+    /** Works for Electron 9. */
     val BASE_FLAGS = listOf("--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage")
 
     /**
-     * Newer Electron (Obsidian) also needs these, or its GPU process fails a /proc check and it
+     * Newer Electron also needs these, or its GPU process fails a /proc check and it
      * exits; they break Electron 9 (no window). Added only after [GPU_FAILURE] shows up.
      */
     val NEWER_FLAGS = listOf("--no-zygote", "--disable-gpu-sandbox", "--in-process-gpu")
@@ -107,8 +107,8 @@ object Electron {
     private const val COBALT = "cobalt"
 
     /**
-     * The binary a script hands to zypak, e.g. `exec zypak-wrapper.sh /app/obsidian "$@"` or
-     * `exec /app/bin/zypak-helper host - /app/share/codium/codium "$@"` gives the binary's path.
+     * The binary a script hands to zypak, e.g. `exec zypak-wrapper.sh /app/editor "$@"` or
+     * `exec /app/bin/zypak-helper host - /app/share/editor/editor "$@"` gives the binary's path.
      * Null if the script doesn't use zypak or names no absolute path.
      */
     fun zypakTarget(script: String): String? {
@@ -142,7 +142,7 @@ object Electron {
      * The browser a command script hands to cobalt (`exec cobalt "$@"`), when [exists] finds it:
      * the `EntryPoint` of cobalt's configuration ([config], the text of [COBALT_CONFIG], read only
      * for a script that uses cobalt), as a browser built from source sets it; else cobalt's default,
-     * `/app/extra/<name>` with the name from the app ID's last part (`chrome` for `com.google.Chrome`).
+     * `/app/extra/<name>` with the name from the app ID's last part (`browser` for `org.example.Browser`).
      * Null if the script doesn't use cobalt.
      */
     fun cobaltTarget(script: String, appId: String, config: () -> String? = { null }, exists: (String) -> Boolean): String? {

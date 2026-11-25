@@ -113,7 +113,7 @@ internal class MeteredGate(private val context: Context, private val onWait: (wa
                 lock.notifyAll()
             }
         }
-        DebugLog.i("Download on a metered network: ${next ?: "goes on"}")
+        DebugLog.i { "Download on a metered network: ${next ?: "goes on"}" }
         onWait(next, closed)
     }
 
