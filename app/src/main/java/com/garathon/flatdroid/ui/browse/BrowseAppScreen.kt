@@ -10,6 +10,8 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.runtime.derivedStateOf
@@ -182,6 +184,8 @@ fun BrowseAppScreen(
     /** The title the shared top bar shows for this page ([BrowseAppPager]): the name once the header has scrolled away, else null. */
     onTitle: (String?) -> Unit,
     modifier: Modifier = Modifier,
+    /** The page is the one on screen, not a neighbor built ahead ([BrowseAppPager]): its screenshots load only then. */
+    onScreen: Boolean = true,
 ) {
     val context = LocalContext.current
     val details by produceState<CatalogDetails?>(null, appId, index) {
@@ -321,12 +325,19 @@ fun BrowseAppScreen(
 
     Column(modifier.fillMaxSize()) {
         Column(Modifier.weight(1f).verticalScroll(scroll).padding(top = 8.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            // Header: the icon, the name, who made it, the ID.
+            // Header: the icon, the name, who made it, the ID; one line each, so pages swiped side by
+            // side keep the rest in place. The name shrinks to fit, then each ends in "…" (the ID in
+            // the middle: its start and end tell apps apart).
             Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 AppIcon(iconFile, Modifier.size(80.dp))
                 Column(Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(name, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f, fill = false))
+                        val nameStyle = MaterialTheme.typography.headlineSmall
+                        Text(
+                            name, style = nameStyle, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            autoSize = TextAutoSize.StepBased(minFontSize = nameStyle.fontSize * NAME_MIN_SCALE, maxFontSize = nameStyle.fontSize, stepSize = 1.sp),
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
                         if (verified) {
                             Icon(
                                 Icons.Filled.Verified, contentDescription = stringResource(R.string.flathub_verified),
@@ -334,8 +345,8 @@ fun BrowseAppScreen(
                             )
                         }
                     }
-                    app?.developer?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary) }
-                    Text(appId, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    app?.developer?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                    Text(appId, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
                 }
                 // Centered in the room beside the name.
                 if (landscape) Box(Modifier.weight(1f), contentAlignment = Alignment.Center) { installButtons(Modifier.widthIn(max = 320.dp)) }
@@ -386,6 +397,8 @@ fun BrowseAppScreen(
             if (shots.isNotEmpty()) {
                 val policy = remember(appId) { mobileData() }
                 when {
+                    // A neighbor built ahead keeps their room, so nothing moves when it comes on screen.
+                    !onScreen -> Spacer(Modifier.height(SCREENSHOT_HEIGHT))
                     policy == MobileData.ALWAYS || loadScreenshots -> {
                         val loader = CatalogImages.loader(context)
                         LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -504,6 +517,9 @@ fun BrowseAppScreen(
  * its place in [ids]. An app not in [ids] (opened from a link) has no neighbors. The top bar (Back,
  * and the app's name once its header has scrolled away) stays put while pages slide.
  *
+ * [BUILT_AHEAD] pages each side of the one shown are built ahead (text and details, not
+ * screenshots: [page]'s `onScreen`), so a swipe doesn't wait for them.
+ *
  * Only the apps around the one shown are pages ([WINDOW] each way, moving with it): a pager asked
  * to fill a viewport that has no width (measured while the window is resized) composes page after
  * page, a whole app page each, until memory runs out, however many apps the list has.
@@ -515,7 +531,7 @@ fun BrowseAppPager(
     onSettled: (id: String, index: Int) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
-    page: @Composable (id: String, onTitle: (String?) -> Unit) -> Unit,
+    page: @Composable (id: String, onScreen: Boolean, onTitle: (String?) -> Unit) -> Unit,
 ) {
     // Each app once: the pager's keys are the IDs, and a repeated one ends Flatdroid.
     val order = remember(ids, current) { ids?.takeIf { current in it }?.distinct() ?: listOf(current) }
@@ -547,9 +563,9 @@ fun BrowseAppPager(
                 if (title != null) Text(title, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 4.dp))
             }
         }
-        HorizontalPager(pager, Modifier.weight(1f), key = { pages[it] }, verticalAlignment = Alignment.Top) { at ->
+        HorizontalPager(pager, Modifier.weight(1f), key = { pages[it] }, verticalAlignment = Alignment.Top, beyondViewportPageCount = BUILT_AHEAD) { at ->
             val id = pages[at]
-            page(id) { titles[id] = it }
+            page(id, at == pager.settledPage) { titles[id] = it }
         }
     }
 }
@@ -565,8 +581,17 @@ fun pagerWindow(order: List<String>, current: String, radius: Int): PagerWindow 
     return PagerWindow(first, order.subList(first, minOf(order.size, centre + radius + 1)), centre - first)
 }
 
-/** How many apps each side of the one shown the pager holds as pages ([BrowseAppPager]). */
-private const val WINDOW = 3
+/** The smallest the app's name shrinks to in its header before it is cut, as a share of its size. */
+private const val NAME_MIN_SCALE = 0.75f
+
+/**
+ * How many apps each side of the one shown the pager holds as pages ([BrowseAppPager]). The window
+ * moves only once a swipe settles, so quick swipes in a row run this far before meeting its end.
+ */
+private const val WINDOW = 6
+
+/** How many pages each side of the one shown are built before they are swiped to. */
+private const val BUILT_AHEAD = 2
 
 /**
  * Screenshots full size over everything, starting at [start]; swiped through. The original picture

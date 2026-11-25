@@ -316,6 +316,18 @@ class ProotCommandTest {
         ProotCommand.flatpak(paths, flatpakBinds, mapOf("--help" to "x"), listOf("/app/bin/x"), Fdsec.Filter())
     }
 
+    @Test
+    fun memfdFallbackBindsTheLibraryAndPreloadsItForEveryProcess() {
+        val binds = Fdshm.withMemfdFallback(flatpakBinds, "/lib/libfdmemfd.so", "/session/etc/ld.so.preload")
+        val argv = ProotCommand.flatpak(paths, binds, emptyMap(), listOf("/app/bin/x"), Fdsec.Filter()).argv
+        assertTrue("--bind=/lib/libfdmemfd.so:/.flatdroid/fdmemfd.so" in argv)
+        assertTrue("--bind=/session/etc/ld.so.preload:/etc/ld.so.preload" in argv)
+        assertEquals("/.flatdroid/fdmemfd.so\n", Fdshm.PRELOAD_LIST)
+        // The rest stays: the generated /etc files and the binds before it.
+        assertEquals(flatpakBinds.etc, binds.etc - Fdshm.PRELOAD_FILE)
+        assertEquals(flatpakBinds.extra, binds.extra.dropLast(1))
+    }
+
     @Test(expected = IllegalArgumentException::class)
     fun flatpakEtcNameCannotLeaveEtc() {
         flatpakBinds.copy(etc = mapOf("../usr/x" to "/files/x"))

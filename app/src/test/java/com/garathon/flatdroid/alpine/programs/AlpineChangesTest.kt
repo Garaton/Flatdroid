@@ -40,6 +40,25 @@ class AlpineChangesTest {
     }
 
     @Test
+    fun newEmptyFoldersAreLeftOut() {
+        val before = mapOf("usr/lib/office" to Stamp(1, 2, 0, dir), "usr/lib/office/share" to Stamp(1, 3, 0, dir), "usr/lib/office/share/a" to Stamp(1, 4, 9, file))
+        // LibreOffice's first start: its extension cache, folders only.
+        val after = before + mapOf(
+            "usr/lib/office/share" to Stamp(2, 3, 0, dir),
+            "usr/lib/office/share/uno_packages" to Stamp(2, 5, 0, dir),
+            "usr/lib/office/share/uno_packages/cache" to Stamp(2, 6, 0, dir),
+            "usr/lib/office/share/uno_packages/cache/uno_packages" to Stamp(2, 7, 0, dir),
+        )
+        assertEquals(emptyList<String>(), AlpineChanges.real(AlpineChanges.changes(before, after), before, after) { false })
+        // A file anywhere under them is reported, with the folders that lead to it.
+        val withFile = after + ("usr/lib/office/share/uno_packages/cache/x.so" to Stamp(2, 8, 1, file))
+        assertEquals(
+            listOf("usr/lib/office/share", "usr/lib/office/share/uno_packages", "usr/lib/office/share/uno_packages/cache", "usr/lib/office/share/uno_packages/cache/x.so"),
+            AlpineChanges.real(AlpineChanges.changes(before, withFile), before, withFile) { false },
+        )
+    }
+
+    @Test
     fun theSummaryListsFilesAndGroupsLargeFolders() {
         assertEquals(listOf("usr/bin/b", "usr/bin/c"), AlpineChanges.summary(listOf("usr/bin", "usr/bin/b", "usr/bin/c")))
         val many = (1..12).map { "usr/lib/x$it" }

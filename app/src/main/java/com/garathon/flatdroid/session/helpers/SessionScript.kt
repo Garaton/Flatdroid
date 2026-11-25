@@ -231,7 +231,10 @@ object SessionScript {
         |    $NO_INTERNET /usr/bin/xdg-dbus-proxy --args=3 3< ${SessionBus.GUEST_PROXY_ARGS} &
         |    if [ "${'$'}camera" = on ]; then
         |      rm -f ${CameraScript.GUEST_PIPEWIRE_DIR}/*
-        |      XDG_RUNTIME_DIR=${CameraScript.GUEST_PIPEWIRE_DIR} \
+        |      # PipeWire's memory pools are memfd: fdshm's fallback where the kernel has none.
+        |      pw_preload=
+        |      [ "${'$'}memfd" = on ] || pw_preload=${Fdshm.ALPINE_PATH}
+        |      XDG_RUNTIME_DIR=${CameraScript.GUEST_PIPEWIRE_DIR} LD_PRELOAD=${'$'}pw_preload \
         |        DBUS_SESSION_BUS_ADDRESS=unix:path=${SessionBus.GUEST_DAEMON_DIR}/${SessionBus.SOCKET} $NO_INTERNET /usr/bin/pipewire &
         |    fi
         |  else

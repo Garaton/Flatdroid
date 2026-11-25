@@ -78,17 +78,22 @@ object AlpineChanges {
      * mode: a regular file of the same size whose content apk recorded ([sameAsInstalled]: a
      * `touch` or a `chmod` to the same mode moves ctime alone), and a folder that holds the same
      * entries (something was made in it and removed again, as proot's stand-ins for binds are; its
-     * entries' own changes are reported each).
+     * entries' own changes are reported each). Also left out: new folders that hold nothing but
+     * other new empty folders, and a folder's changed entries when those are all such folders
+     * (LibreOffice makes its extension cache in its own install at its first start). Nothing in an
+     * empty folder can be loaded or run; a file made in one is reported.
      */
     fun real(changed: List<String>, before: Map<String, Stamp>, after: Map<String, Stamp>, sameAsInstalled: (String) -> Boolean): List<String> {
         val entriesBefore by lazy { entries(before.keys) }
         val entriesAfter by lazy { entries(after.keys) }
+        val empty = emptyNewFolders(before, after)
         return changed.filterNot { path ->
+            if (path in empty) return@filterNot true
             val was = before[path] ?: return@filterNot false
             val now = after[path] ?: return@filterNot false
             if (was.inode != now.inode || was.mode != now.mode) return@filterNot false
             when (now.mode and DirReader.S_IFMT) {
-                DirReader.S_IFDIR -> entriesBefore[path].orEmpty() == entriesAfter[path].orEmpty()
+                DirReader.S_IFDIR -> entriesBefore[path].orEmpty() == entriesAfter[path].orEmpty().filterNot { "$path/$it" in empty }.toSet()
                 DirReader.S_IFREG -> was.size == now.size && sameAsInstalled(path)
                 else -> false
             }
@@ -106,6 +111,23 @@ object AlpineChanges {
         return shown.groupBy { it.substringBeforeLast('/', "") }.toSortedMap().flatMap { (folder, paths) ->
             if (paths.size > GROUP_LIMIT && folder.isNotEmpty()) listOf("$folder/ (${paths.size})") else paths.sorted()
         }
+    }
+
+    /** Folders in [after] but not [before] with no new file, link or other entry anywhere under them. */
+    private fun emptyNewFolders(before: Map<String, Stamp>, after: Map<String, Stamp>): Set<String> {
+        fun isFolder(path: String) = (after.getValue(path).mode and DirReader.S_IFMT) == DirReader.S_IFDIR
+        val added = after.keys.filter { it !in before }
+        // Every folder above something new that isn't a folder holds something.
+        val holding = HashSet<String>()
+        for (path in added) {
+            if (isFolder(path)) continue
+            var slash = path.lastIndexOf('/')
+            while (slash > 0) {
+                holding += path.substring(0, slash)
+                slash = path.lastIndexOf('/', slash - 1)
+            }
+        }
+        return added.filter { isFolder(it) && it !in holding }.toSet()
     }
 
     /** Each folder's entry names, from every path under the walk. */

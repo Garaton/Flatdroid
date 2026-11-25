@@ -1,6 +1,7 @@
 package com.garathon.flatdroid.camera
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
@@ -46,6 +47,17 @@ class CameraScriptTest {
             String(CameraScript.frameHeader(9, "video/nv12")),
         )
         assertEquals("\r\n", String(CameraScript.FRAME_END))
+    }
+
+    @Test
+    fun pipeWireMemoryThroughFdshmOnlyWithoutMemfd() {
+        val nodes = listOf(CameraScript.Node("flatdroid-camera-0", "Back camera", 640, 480, 30))
+        assertFalse("LD_PRELOAD" in CameraScript.text(nodes))
+        val lines = CameraScript.text(nodes, memfd = false).lines()
+        val preload = lines.indexOf("export LD_PRELOAD=/run/flatdroid/fdshm.so")
+        assertTrue(preload > 0 && preload < lines.indexOfFirst { it.startsWith("wireplumber") })
+        // Everything else stays: the permission store still starts first.
+        assertEquals(CameraScript.text(nodes).lines(), lines - lines[preload])
     }
 
     @Test

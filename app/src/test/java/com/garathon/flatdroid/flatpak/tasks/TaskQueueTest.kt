@@ -1,5 +1,7 @@
 package com.garathon.flatdroid.flatpak.tasks
 
+import com.garathon.flatdroid.flatpak.tasks.FlatpakTask.AlpineInstall
+import com.garathon.flatdroid.flatpak.tasks.FlatpakTask.AlpineRemove
 import com.garathon.flatdroid.flatpak.tasks.FlatpakTask.Install
 import com.garathon.flatdroid.flatpak.tasks.FlatpakTask.Reinstall
 import com.garathon.flatdroid.flatpak.tasks.FlatpakTask.Uninstall
@@ -74,6 +76,32 @@ class TaskQueueTest {
             listOf(Uninstall("org.xfce.mousepad", deleteData = true), FlatpakTask.UpdateAll),
             queue(Reinstall("org.xfce.mousepad"), Uninstall("org.xfce.mousepad", deleteData = false), FlatpakTask.UpdateAll, Uninstall("org.xfce.mousepad", deleteData = true)),
         )
+    }
+
+    @Test
+    fun alpineAddsWaitAsOne() {
+        assertEquals(
+            listOf(AlpineInstall(listOf("foot", "htop", "mc")), FlatpakTask.UpdateAll),
+            queue(AlpineInstall(listOf("foot", "htop")), FlatpakTask.UpdateAll, AlpineInstall(listOf("htop", "mc"))),
+        )
+        // What is being added now isn't added again.
+        assertEquals(listOf(AlpineInstall(listOf("mc"))), queue(AlpineInstall(listOf("htop", "mc")), running = AlpineInstall(listOf("htop"))))
+        assertEquals(emptyList<FlatpakTask>(), queue(AlpineInstall(listOf("htop")), running = AlpineInstall(listOf("htop"))))
+    }
+
+    @Test
+    fun anAlpineAddCancelsTheWaitingRemovalOfThatPackage() {
+        assertEquals(
+            listOf(AlpineRemove("alpine+mc", "mc", deleteData = false), AlpineInstall(listOf("foot"))),
+            queue(AlpineRemove("alpine+htop", "htop", deleteData = true), AlpineRemove("alpine+mc", "mc", deleteData = false), AlpineInstall(listOf("htop", "foot"))),
+        )
+    }
+
+    @Test
+    fun aPackageTakenOutOfTheWaitingAlpineAdd() {
+        val q = queue(AlpineInstall(listOf("htop", "mc")), FlatpakTask.UpdateAll)
+        assertEquals(listOf(AlpineInstall(listOf("mc")), FlatpakTask.UpdateAll), TaskQueue.withoutAlpinePackage(q, "htop"))
+        assertEquals(listOf(FlatpakTask.UpdateAll), TaskQueue.withoutAlpinePackage(TaskQueue.withoutAlpinePackage(q, "htop"), "mc"))
     }
 
     @Test

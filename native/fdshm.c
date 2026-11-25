@@ -18,6 +18,11 @@
  *
  * No C library, like fdsec: raw system calls, so the one library loads into musl programs. Only
  * errno is the program's own (__errno_location, which musl exports).
+ *
+ * Built a second time with FDSHM_MEMFD_ONLY as libfdmemfd.so: memfd_create's fallback alone, for
+ * an app's processes on kernels without memfd (loaded through /etc/ld.so.preload, which reaches
+ * programs started with an empty environment too). shm_open stays the C library's there, so
+ * processes that share named memory keep working.
  */
 #include <asm/unistd.h>
 #include <linux/errno.h>
@@ -59,6 +64,7 @@ static long fail(long ret)
     return -1;
 }
 
+#ifndef FDSHM_MEMFD_ONLY
 static struct {
     char name[NAME_MAX_LEN + 1];
     int fd;
@@ -104,6 +110,7 @@ static void fd_path(int fd, char *out)
     while (n) *out++ = digits[--n];
     *out = 0;
 }
+#endif
 
 /* Writes n in decimal at out, then '-'; returns the position after it. */
 static char *number(char *out, unsigned long n)
@@ -119,8 +126,8 @@ static char *number(char *out, unsigned long n)
 static unsigned long temp_count;
 
 /*
- * Kernels before 3.17 (some Android 7 phones) have no memfd: an unlinked file in the helpers' /tmp
- * instead, which reopens the same way. The page cache holds what is in use, but it can reach flash.
+ * Kernels before 3.17 (some Android 7 phones) have no memfd: an unlinked file in /tmp (the helpers'
+ * or the app's) instead, which reopens the same way. The page cache holds what is in use, but it can reach flash.
  * Each file's name is its own (process, then a count): wayvnc gives every buffer the same name, and
  * where the unlink right after the open didn't happen (seen on a 3.10 kernel in the compositor and
  * wayvnc, cause not known), its second buffer failed with EEXIST and the viewer stayed black.
@@ -140,7 +147,7 @@ static long temp_file(const char *key)
     return fd;
 }
 
-/* wayvnc asks for memfd itself. */
+/* wayvnc asks for memfd itself, and so do apps' image loaders. */
 int memfd_create(const char *name, unsigned flags)
 {
     long fd = syscall3(__NR_memfd_create, (long)name, flags, 0);
@@ -148,6 +155,7 @@ int memfd_create(const char *name, unsigned flags)
     return fd < 0 ? (int)fail(fd) : (int)fd;
 }
 
+#ifndef FDSHM_MEMFD_ONLY
 int shm_open(const char *name, int flags, unsigned mode)
 {
     (void)mode;
@@ -216,3 +224,4 @@ int shm_unlink(const char *name)
     give();
     return 0;
 }
+#endif

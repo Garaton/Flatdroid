@@ -333,15 +333,24 @@ object GuestFiles {
             "/proc/sys/fs/inotify/max_user_watches" to "8192\n",
             "/proc/sys/kernel/overflowuid" to "65534\n",
             "/proc/sys/kernel/overflowgid" to "65534\n",
+            PCI_DEVICES to "",
         )
     }
 
     /**
-     * The stand-ins ([fakeProc]) that hold the real values: the kernel's version (from uname), its
-     * last capability, and Linux's fixed overflow IDs. Flatpaks get these too; the others (frozen
-     * counters, a load of 0) would only mislead an app that reads them.
+     * The PCI devices' list, which Android lets apps see but not read (10 and later; 7.0 lets them).
+     * libpci exits the program when it can't (Chromium before about version 90 reads the GPU
+     * through it: Electron 9's GPU process died at start, and the app with it). Phones have no PCI
+     * bus, so an empty list is what most would show anyway.
      */
-    val REAL_PROC = setOf("/proc/version", "/proc/sys/kernel/cap_last_cap", "/proc/sys/kernel/overflowuid", "/proc/sys/kernel/overflowgid")
+    const val PCI_DEVICES = "/proc/bus/pci/devices"
+
+    /**
+     * The stand-ins ([fakeProc]) that hold the real values: the kernel's version (from uname), its
+     * last capability, Linux's fixed overflow IDs, and no PCI devices ([PCI_DEVICES]). Flatpaks get
+     * these too; the others (frozen counters, a load of 0) would only mislead an app that reads them.
+     */
+    val REAL_PROC = setOf("/proc/version", "/proc/sys/kernel/cap_last_cap", "/proc/sys/kernel/overflowuid", "/proc/sys/kernel/overflowgid", PCI_DEVICES)
 
     /**
      * The kernel's ID of this boot, which OSTree needs to create Flatpak's repository. Android 8

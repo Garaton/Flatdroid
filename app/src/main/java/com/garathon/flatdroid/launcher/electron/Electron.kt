@@ -14,14 +14,18 @@ import com.garathon.flatdroid.util.WHITESPACE
  * Either way Chromium's sandboxes and GPU are off.
  */
 object Electron {
-    /** Works for Electron 9. */
-    val BASE_FLAGS = listOf("--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage")
+    /**
+     * Every Electron app's. The GPU work runs in the main process (`--in-process-gpu`): a separate
+     * GPU process fails a /proc check in newer Electron, and on x86_64 Android 10 and later it dies
+     * at start in Electron 9 too; in the main process both open, with one process fewer.
+     */
+    val BASE_FLAGS = listOf("--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--in-process-gpu")
 
     /**
-     * Newer Electron also needs these, or its GPU process fails a /proc check and it
-     * exits; they break Electron 9 (no window). Added only after [GPU_FAILURE] shows up.
+     * Tried when an app still reports [GPU_FAILURE] with the base flags; they break Electron 9
+     * (no window).
      */
-    val NEWER_FLAGS = listOf("--no-zygote", "--disable-gpu-sandbox", "--in-process-gpu")
+    val NEWER_FLAGS = listOf("--no-zygote", "--disable-gpu-sandbox")
     const val OZONE_X11 = "--ozone-platform=x11"
     const val OZONE_WAYLAND = "--ozone-platform=wayland"
     /** Chromium's switch for pages that follow `prefers-reduced-motion`. */

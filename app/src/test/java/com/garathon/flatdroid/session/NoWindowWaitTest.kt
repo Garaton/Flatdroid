@@ -22,22 +22,22 @@ class NoWindowWaitTest {
     fun aWindowOpeningCancelsTheWaitAndEndsTheDoubling() {
         val wait = NoWindowWait(startedAt = 0)
         wait.windows(1, 1_000)
-        wait.windows(0, 2_000)
-        assertEquals(27_000L, wait.resumed(now = 7_000)) // 10 s doubled
+        wait.windows(0, 7_000)
+        assertEquals(32_000L, wait.resumed(now = 12_000)) // 10 s doubled
         assertEquals(20_000L, wait.waitMs)
-        assertNull(wait.windows(2, 8_000))
+        assertNull(wait.windows(2, 13_000))
         assertFalse(wait.empty)
         assertEquals(10_000L, wait.waitMs)
         // One of two closing isn't none.
-        assertNull(wait.windows(1, 9_000))
-        assertEquals(20_000L, wait.windows(0, 10_000))
+        assertNull(wait.windows(1, 14_000))
+        assertEquals(30_000L, wait.windows(0, 20_000))
     }
 
     @Test
     fun eachResumeDoublesTheWaitUpToFiveMinutes() {
         val wait = NoWindowWait(startedAt = 0)
         wait.windows(1, 0)
-        wait.windows(0, 0)
+        wait.windows(0, 5_000)
         val waits = (1..10).map { wait.resumed(now = 0); wait.waitMs }
         assertEquals(listOf(20_000L, 40_000L, 80_000L, 160_000L, 300_000L), waits.take(5))
         assertTrue(waits.drop(5).all { it == 300_000L })
@@ -73,7 +73,7 @@ class NoWindowWaitTest {
     fun aResumeInsideTheStopCountsFromTheEndOfIt() {
         val wait = NoWindowWait(startedAt = 0)
         wait.windows(1, 0)
-        wait.windows(0, 1_000)
+        wait.windows(0, 6_000)
         wait.resumed(now = 60_000) // doubled: 20 s from the resume
         wait.suspended(from = 40_000, until = 100_000)
         assertEquals(120_000L, wait.deadline)
@@ -88,7 +88,20 @@ class NoWindowWaitTest {
         // Counted: the wait for a window decides, not this.
         wait.windows(0, now = 2_000)
         assertEquals(0L, wait.firstWindowLeft(now = 3_000))
-        val opened = NoWindowWait(startedAt = 0).apply { windows(1, 0) }
-        assertEquals(0L, opened.firstWindowLeft(now = 1_000))
+        val opened = NoWindowWait(startedAt = 0).apply { windows(1, 0); windows(0, 6_000) }
+        assertEquals(0L, opened.firstWindowLeft(now = 7_000))
+    }
+
+    @Test
+    fun aBriefWindowIsNotTheAppStarting() {
+        // A splash for under a second, then a restart with no window: the first-window time goes on.
+        val wait = NoWindowWait(startedAt = 0)
+        assertNull(wait.windows(1, 10_000))
+        assertEquals(120_000L, wait.windows(0, 10_600))
+        assertFalse(wait.opened)
+        // The real window, open for long: from then on its closing starts the short wait.
+        assertNull(wait.windows(1, 70_000))
+        assertEquals(90_000L, wait.windows(0, 80_000))
+        assertTrue(wait.opened)
     }
 }

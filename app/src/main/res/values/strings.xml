@@ -355,6 +355,7 @@
     <string name="queued_alpine_remove">Remove the Alpine package %1$s</string>
     <string name="queued_install_group">Install</string>
     <string name="queued_uninstall_group">Uninstall</string>
+    <string name="queued_alpine_install_group">Add Alpine packages</string>
     <string name="queued_reinstall">Reinstall %1$s</string>
     <string name="queued_remove_runtime">Uninstall the runtime %1$s</string>
     <string name="queued_update_all">Update all apps</string>

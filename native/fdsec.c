@@ -37,6 +37,11 @@
  * program, and musl then fails AT_SYMLINK_NOFOLLOW with EINVAL (GLib takes the file as missing).
  * When faccessat2 answers ENOSYS here, the filter traps it the same way.
  *
+ * Kernels before 3.17 have no memfd, and so no seals: there apps make their shared memory through
+ * libfdmemfd.so's fallback file, and glycin (GNOME's image loader) seals it with raw system calls
+ * and gives up when that fails. When memfd_create answers ENOSYS here, fcntl's F_ADD_SEALS and
+ * F_GET_SEALS succeed without doing anything (no seals: nothing was sealed before either).
+ *
  * The check: a rule only this filter has answers getpriority(CHECK_WHICH, 0) with CHECK_ERRNO
  * (the kernel itself would say EINVAL); where the kernel reports Seccomp_filters (5.9 and
  * later), the count must also have gone up by one. If either fails, nothing is executed and a
@@ -223,10 +228,10 @@ static const struct rule EXTRA[] = {
 /* Big enough for every rule build() can emit; the _Static_assert below fails the build if a
  * future rule would overflow the stack array. */
 #define MAX_FILTER 96
-/* base (arch check, nr load) + x32 guard + newer-than-proot guard + the faccessat2 trap + ALWAYS + EXTRA + the
- * no_connect block + the socket block (test, argument load, two EACCES rules for --no-inet, the
- * families, EAFNOSUPPORT) + the check rule. */
-_Static_assert(5 + 2 + 2 + 2 + 2 * (sizeof ALWAYS / sizeof *ALWAYS) + 2 * (sizeof EXTRA / sizeof *EXTRA) + 2
+/* base (arch check, nr load) + x32 guard + newer-than-proot guard + the faccessat2 trap + the seal
+ * block + ALWAYS + EXTRA + the no_connect block + the socket block (test, argument load, two EACCES
+ * rules for --no-inet, the families, EAFNOSUPPORT) + the check rule. */
+_Static_assert(5 + 2 + 2 + 2 + 6 + 2 * (sizeof ALWAYS / sizeof *ALWAYS) + 2 * (sizeof EXTRA / sizeof *EXTRA) + 2
                    + (2 + 4 + 2 * (sizeof FAMILIES / sizeof *FAMILIES) + 1) + 5 <= MAX_FILTER,
                "fdsec filter would overflow MAX_FILTER");
 #define LOAD(field) BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, field))
@@ -235,7 +240,7 @@ _Static_assert(5 + 2 + 2 + 2 + 2 * (sizeof ALWAYS / sizeof *ALWAYS) + 2 * (sizeo
 #define RETURN(action) BPF_STMT(BPF_RET | BPF_K, (action))
 #define IF_EQUAL(k, skip_if_not) BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, (k), 0, (skip_if_not))
 
-static unsigned build(struct sock_filter *f, int extra, int no_inet, int no_connect, int trap_faccessat2)
+static unsigned build(struct sock_filter *f, int extra, int no_inet, int no_connect, int trap_faccessat2, int answer_seals)
 {
 	unsigned n = 0;
 	f[n++] = (struct sock_filter)LOAD(arch);
@@ -252,6 +257,16 @@ static unsigned build(struct sock_filter *f, int extra, int no_inet, int no_conn
 	if (trap_faccessat2) {
 		f[n++] = (struct sock_filter)IF_EQUAL(__NR_faccessat2, 1);
 		f[n++] = (struct sock_filter)RETURN(SECCOMP_RET_TRAP);
+	}
+	/* fcntl's seal commands succeed without effect; every other fcntl is allowed (no later rule
+	 * names it). The argument load clobbers the accumulator, so every path out returns. */
+	if (answer_seals) {
+		f[n++] = (struct sock_filter)IF_EQUAL(__NR_fcntl, 5);
+		f[n++] = (struct sock_filter)LOAD_ARG(1);
+		f[n++] = (struct sock_filter)BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, F_ADD_SEALS, 1, 0);
+		f[n++] = (struct sock_filter)BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, F_GET_SEALS, 0, 1);
+		f[n++] = (struct sock_filter)RETURN(SECCOMP_RET_ERRNO | 0);
+		f[n++] = (struct sock_filter)RETURN(SECCOMP_RET_ALLOW);
 	}
 	for (unsigned i = 0; i < sizeof ALWAYS / sizeof *ALWAYS; i++) {
 		f[n++] = (struct sock_filter)IF_EQUAL(ALWAYS[i].nr, 1);
@@ -468,8 +483,11 @@ __attribute__((used)) static void start(long *sp)
 
 	/* Asked before the filter exists: under Android's own filter proot already answers it. */
 	int trap_faccessat2 = sys6(__NR_faccessat2, AT_FDCWD, (long)"/", 0 /* F_OK */, 0, 0, 0) == -ENOSYS;
+	long memfd = sys3(__NR_memfd_create, (long)"fdsec", 1 /* MFD_CLOEXEC */, 0);
+	if (memfd >= 0) sys3(__NR_close, memfd, 0, 0);
+	int answer_seals = memfd == -ENOSYS;
 	struct sock_filter filter[MAX_FILTER];
-	struct sock_fprog prog = { .len = (unsigned short)build(filter, extra, no_inet, no_connect, trap_faccessat2), .filter = filter };
+	struct sock_fprog prog = { .len = (unsigned short)build(filter, extra, no_inet, no_connect, trap_faccessat2, answer_seals), .filter = filter };
 	long before = filter_count();
 	if (sys3(__NR_prctl, PR_SET_NO_NEW_PRIVS, 1, 0) != 0) {
 		say("fdsec: refused: prctl(PR_SET_NO_NEW_PRIVS) failed", 0);

@@ -111,16 +111,26 @@ fun StatusBar(
                 text = {
                     Column(Modifier.verticalScroll(rememberScrollState())) {
                         task.queue.forEachIndexed { i, waiting ->
-                            // An install or uninstall of several apps: its apps below it, each removable on its own.
-                            val apps = (waiting as? FlatpakTask.Install)?.appIds ?: (waiting as? FlatpakTask.Uninstall)?.appIds
+                            // An install, uninstall or Alpine add of several: its apps (packages) below it, each removable on its own.
+                            val apps = when (waiting) {
+                                is FlatpakTask.Install -> waiting.appIds
+                                is FlatpakTask.Uninstall -> waiting.appIds
+                                is FlatpakTask.AlpineInstall -> waiting.packages
+                                else -> null
+                            }
                             if (apps != null && apps.size > 1) {
+                                val group = when (waiting) {
+                                    is FlatpakTask.Install -> R.string.queued_install_group
+                                    is FlatpakTask.AlpineInstall -> R.string.queued_alpine_install_group
+                                    else -> R.string.queued_uninstall_group
+                                }
                                 Text(
-                                    "${i + 1}. ${stringResource(if (waiting is FlatpakTask.Install) R.string.queued_install_group else R.string.queued_uninstall_group)}",
+                                    "${i + 1}. ${stringResource(group)}",
                                     modifier = Modifier.heightIn(min = 36.dp).wrapContentHeight(Alignment.CenterVertically),
                                 )
                                 for (id in apps) {
                                     Row(Modifier.padding(start = 24.dp), verticalAlignment = Alignment.CenterVertically) {
-                                        Text(queuedName(id), modifier = Modifier.weight(1f))
+                                        Text(if (waiting is FlatpakTask.AlpineInstall) id else queuedName(id), modifier = Modifier.weight(1f))
                                         IconAction(Icons.Filled.Close, R.string.task_queue_remove, { onUnqueueApp(waiting, id) }, size = 36.dp)
                                     }
                                 }

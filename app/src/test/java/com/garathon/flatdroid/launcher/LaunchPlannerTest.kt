@@ -367,9 +367,9 @@ class LaunchPlannerTest {
             listOf(standIn.path to "/app/bin/zypak-wrapper.sh", standIn.path to "/app/bin/zypak-helper"),
             plan.binds.extra.filter { it.first == standIn.path },
         )
-        assertTrue("exec \"\$binary\" '--no-sandbox' '--disable-gpu' '--disable-dev-shm-usage' \"\$@\"" in plan.zypakStandIn!!)
+        assertTrue("exec \"\$binary\" '--no-sandbox' '--disable-gpu' '--disable-dev-shm-usage' '--in-process-gpu' \"\$@\"" in plan.zypakStandIn!!)
         // Electron as Node: the newer flags from the start, its window's failure being out of sight.
-        assertTrue("'--disable-dev-shm-usage' '--no-zygote' '--disable-gpu-sandbox' '--in-process-gpu' '--ozone-platform=x11'; placed=1" in plan.zypakStandIn!!)
+        assertTrue("'--disable-dev-shm-usage' '--in-process-gpu' '--no-zygote' '--disable-gpu-sandbox' '--ozone-platform=x11'; placed=1" in plan.zypakStandIn!!)
         // Without a stand-in's place, the binary itself.
         assertEquals(listOf("/app/obsidian") + Electron.BASE_FLAGS, Ready(planner.plan("md.obsidian.Obsidian", dirs)).command)
     }

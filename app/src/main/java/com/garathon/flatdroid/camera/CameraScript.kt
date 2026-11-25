@@ -1,5 +1,6 @@
 package com.garathon.flatdroid.camera
 
+import com.garathon.flatdroid.proot.Fdshm
 import com.garathon.flatdroid.session.bus.Notifications
 import com.garathon.flatdroid.session.bus.Portal
 import com.garathon.flatdroid.session.helpers.SessionBus
@@ -119,7 +120,7 @@ object CameraScript {
      * The script for [nodes]. Their names come from [nodeName], their sizes are numbers and their
      * descriptions are reduced to letters, digits and spaces, so none can break out of the quoting.
      */
-    fun text(nodes: List<Node>): String {
+    fun text(nodes: List<Node>, memfd: Boolean = true): String {
         require(nodes.all { NAME.matches(it.name) && it.width > 0 && it.height > 0 && it.frameRate > 0 })
         val sources = nodes.joinToString("\n") { node ->
             val description = node.description.filter { it.isLetterOrDigit() || it == ' ' }.trim().ifEmpty { node.name }
@@ -132,11 +133,13 @@ object CameraScript {
                 "! pipewiresink mode=provide use-bufferpool=false 'stream-properties=\"$properties\"' client-name=${node.name} ) &"
         }
         val names = nodes.joinToString(" ") { it.name }
+        // No memfd in the kernel: WirePlumber's and the sources' PipeWire memory through fdshm's fallback.
+        val preload = if (memfd) "" else "\nexport LD_PRELOAD=${Fdshm.ALPINE_PATH}"
         return """
             |#!/bin/sh
             |export XDG_RUNTIME_DIR=$GUEST_PIPEWIRE_DIR DBUS_SESSION_BUS_ADDRESS=unix:path=${SessionBus.GUEST_DAEMON_DIR}/${SessionBus.SOCKET}
             |export XDG_CURRENT_DESKTOP=flatdroid XDG_CONFIG_DIRS=$GUEST_CONFIG_DIR XDG_DESKTOP_PORTAL_DIR=$GUEST_CONFIG_DIR/portals
-            |export XDG_DATA_DIRS=$GUEST_CONFIG_DIR:/usr/local/share:/usr/share
+            |export XDG_DATA_DIRS=$GUEST_CONFIG_DIR:/usr/local/share:/usr/share$preload
             |/usr/libexec/xdg-permission-store &
             |i=0
             |until gdbus call --session --dest org.freedesktop.impl.portal.PermissionStore \

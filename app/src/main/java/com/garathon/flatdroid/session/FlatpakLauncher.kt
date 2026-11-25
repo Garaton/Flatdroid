@@ -59,6 +59,7 @@ import com.garathon.flatdroid.launcher.RootLayout
 import com.garathon.flatdroid.flatpak.InstalledApps
 import com.garathon.flatdroid.proot.DevNodes
 import com.garathon.flatdroid.proot.Fdsec
+import com.garathon.flatdroid.proot.Fdshm
 import com.garathon.flatdroid.proot.Fdv4l2
 import com.garathon.flatdroid.proot.FlatpakBinds
 import com.garathon.flatdroid.proot.hostOf
@@ -435,6 +436,10 @@ class FlatpakLauncher(private val context: Context) {
             // An Alpine program gets the library without cameras too: it stands in for the device
             // event socket Android refuses, which Alpine's libudev needs (Fdv4l2).
             val preload = cameraBinds.isNotEmpty() || alpineRoot != null
+            // Kernels without memfd: the app's processes get memfd_create's fallback (Fdshm).
+            val memfdFallback = alpineRoot == null && !SessionScript.kernelHasMemfd(Os.uname().release)
+            val preloadList = File(etcDir, Fdshm.PRELOAD_FILE)
+            if (memfdFallback) preloadList.writeTextAtomically(Fdshm.PRELOAD_LIST, durable = false)
             fun forSession(plan: LaunchPlan) = plan.copy(
                 binds = plan.binds.copy(
                     fakeProc = procStandIns,
@@ -442,6 +447,9 @@ class FlatpakLauncher(private val context: Context) {
                     fdv4l2 = preload,
                 ).let { binds ->
                     if (hidden.isEmpty()) binds else binds.copy(hiddenProc = hidden, emptyDir = emptyDir.path)
+                }.let { binds ->
+                    if (!memfdFallback) binds
+                    else Fdshm.withMemfdFallback(binds, File(File(env.paths().fdshm).parentFile, Fdshm.MEMFD_LIBRARY).path, preloadList.path)
                 },
                 environment = if (!preload) plan.environment
                     else plan.environment + (if (cameraBinds.isEmpty()) emptyMap() else Fdv4l2.ENVIRONMENT) + (PRELOAD to Fdv4l2.preload(plan.environment[PRELOAD])),
@@ -586,7 +594,7 @@ class FlatpakLauncher(private val context: Context) {
                 val changes = AlpineChanges.real(suspects, alpineBefore.stamps, after) { rel ->
                     installed[rel]?.let { sum -> runCatching { File(rootfs, rel).inputStream().use { AlpinePackages.matches(sum, it) } }.getOrDefault(false) } == true
                 }
-                if (changes.size < suspects.size) SessionController.log("[flatdroid] ${suspects.size - changes.size} of Alpine's entries changed only their times; left out")
+                if (changes.size < suspects.size) SessionController.log("[flatdroid] ${suspects.size - changes.size} of Alpine's entries changed only their times or are new empty folders; left out")
                 SessionController.log("[flatdroid] Alpine's files compared in ${SystemClock.elapsedRealtime() - started} ms")
                 if (changes.isNotEmpty()) {
                     AlpineChanges.keep(context, alpineProgram!!.name, changes)
@@ -1108,7 +1116,7 @@ class FlatpakLauncher(private val context: Context) {
         if (cameraNodes.isEmpty()) {
             cameraScript.delete()
         } else {
-            cameraScript.writeTextAtomically(CameraScript.text(cameraNodes), durable = false)
+            cameraScript.writeTextAtomically(CameraScript.text(cameraNodes, memfd = SessionScript.kernelHasMemfd(Os.uname().release)), durable = false)
             for ((path, text) in CameraScript.CONFIG_FILES) {
                 File(cameraConfigDir, path).apply { parentFile!!.mkdirs() }.writeTextAtomically(text, durable = false)
             }

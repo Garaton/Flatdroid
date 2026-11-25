@@ -339,6 +339,17 @@ class MainActivity : ComponentActivity() {
         // The viewer opened some other way (the notification's Open app): this window has nothing left to open.
         val viewerOpen by SessionController.viewerVisible.collectAsState()
         LaunchedEffect(viewerOpen) { if (viewerOpen) home.autoOpenApp = null }
+        // A relaunch (newer Electron's flags, or without /.flatpak-info) closes the viewer with the
+        // first process: the app it showed is opened again once it is back up.
+        var viewedApp by remember { mutableStateOf<String?>(null) }
+        LaunchedEffect(sessionState, viewerOpen) {
+            when (val s = sessionState) {
+                is SessionState.Running -> if (viewerOpen) viewedApp = s.appId
+                is SessionState.Starting -> if (s.appId == viewedApp) { viewedApp = null; home.autoOpenApp = s.appId }
+                is SessionState.Idle -> viewedApp = null
+                else -> Unit
+            }
+        }
         var wasBusy by remember { mutableStateOf(false) }
         LaunchedEffect(sessionBusy) {
             if (sessionBusy) wasBusy = true else if (wasBusy) { wasBusy = false; home.autoOpenApp = null }
@@ -793,10 +804,11 @@ class MainActivity : ComponentActivity() {
                         go(Screen.BrowseApp(id))
                     },
                     onBack = { go(Screen.Browse) },
-                ) { id, onTitle ->
+                ) { id, onScreen, onTitle ->
                     val entry = catalogIndex?.app(id)
                     BrowseAppScreen(
                         appId = id,
+                        onScreen = onScreen,
                         app = entry,
                         index = catalogIndex,
                         catalogLoading = catalog is CatalogState.Loading || catalog is CatalogState.Idle,

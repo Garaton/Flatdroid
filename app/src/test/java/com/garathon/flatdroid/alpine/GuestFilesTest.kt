@@ -74,6 +74,8 @@ class GuestFilesTest {
         assertTrue(proc.keys.all { it.startsWith("/proc/") })
         assertEquals("37\n", proc.getValue("/proc/sys/kernel/cap_last_cap"))
         assertTrue(proc.keys.containsAll(GuestFiles.REAL_PROC))
+        // No PCI devices: an empty list, which libpci reads as none.
+        assertEquals("", proc.getValue(GuestFiles.PCI_DEVICES))
     }
 
     @Test

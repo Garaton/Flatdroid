@@ -6,16 +6,20 @@ package com.garathon.flatdroid.session
  *
  * - After a window has existed, the wait counts from the moment the last one closed: [WAIT_MS].
  * - An app that has not opened one yet gets [FIRST_WINDOW_MS] from [startedAt]: a slow start has no
- *   window for a long time, and pausing it then would stall the very thing it waits for.
+ *   window for a long time, and pausing it then would stall the very thing it waits for. A window
+ *   open for less than [BRIEF_MS] doesn't count as one: a splash, or a first start that restarts
+ *   itself, is followed by a while with none.
  * - Time the app spends stopped for another reason doesn't count ([suspended]).
  * - Each [resumed] doubles the wait, up to [MAX_WAIT_MS], and counts from the resume. A window
  *   opening resets the doubling: the situation has changed, so the earlier answer no longer applies.
  */
 class NoWindowWait(private val startedAt: Long) {
     private var count = 0
-    /** A window has been open at some time: the app started. */
+    /** A window has been open for [BRIEF_MS] or more at some time: the app started. */
     var opened = false
         private set
+    /** When the windows went from none to some; null while none is open. */
+    private var shownAt: Long? = null
     private var resumes = 0
     /** Where the wait counts from. */
     private var since = startedAt
@@ -40,11 +44,15 @@ class NoWindowWait(private val startedAt: Long) {
         this.count = count
         known = true
         if (count > 0) {
-            opened = true
+            if (before == 0) shownAt = now
             resumes = 0
             return null
         }
-        if (before > 0) since = now
+        if (before > 0) {
+            if (now - (shownAt ?: now) >= BRIEF_MS) opened = true
+            if (opened) since = now
+        }
+        shownAt = null
         return since + waitMs
     }
 
@@ -70,6 +78,7 @@ class NoWindowWait(private val startedAt: Long) {
         const val WAIT_MS = 10_000L
         const val FIRST_WINDOW_MS = 120_000L
         const val MAX_WAIT_MS = 300_000L
+        const val BRIEF_MS = 5_000L
         private const val MAX_DOUBLINGS = 16
     }
 }

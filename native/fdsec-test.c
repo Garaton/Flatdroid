@@ -9,6 +9,7 @@
  */
 #define _GNU_SOURCE
 #include <errno.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -74,6 +75,16 @@ int main(int argc, char **argv)
 	expect("file_setattr", syscall(469, -1, "", 0, 0, 0), base, ENOSYS);
 	/* open_tree_attr is the last one proot translates, so it stays allowed (EBADF here). */
 	expect("open_tree_attr", syscall(467, -1, "", 0, 0, 0), 0, ENOSYS);
+	/* This kernel has memfd, so seals stay real under the filter: a sealed memfd can't grow. */
+	{
+		int fd = (int)syscall(SYS_memfd_create, "fdsec-test", 2 /* MFD_ALLOW_SEALING */);
+		if (fd < 0 || fcntl(fd, F_ADD_SEALS, F_SEAL_GROW) != 0 || fcntl(fd, F_GET_SEALS) != F_SEAL_GROW
+		    || ftruncate(fd, 4096) != -1 || errno != EPERM) {
+			printf("FAIL seals: not real on a kernel with memfd\n");
+			failures++;
+		}
+		if (fd >= 0) close(fd);
+	}
 	expect("check rule", syscall(SYS_getpriority, 0x66647365, 0), base, ENOTRECOVERABLE);
 	expect("getpriority", syscall(SYS_getpriority, 0 /* PRIO_PROCESS */, 0), 0, 0);
 

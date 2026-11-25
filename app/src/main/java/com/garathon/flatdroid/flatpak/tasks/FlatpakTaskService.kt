@@ -365,6 +365,7 @@ class FlatpakTaskService : Service() {
         val cache = env.apkCacheDir.apply { mkdirs() }
         try {
             val command = AlpineSetup.apkCommand(args)
+            FlatpakTasks.newCommand(null)
             FlatpakTasks.log("$ ${command.joinToString(" ")}", status = false)
             val result = gated { pausedMillis, onStarted ->
                 env.run(

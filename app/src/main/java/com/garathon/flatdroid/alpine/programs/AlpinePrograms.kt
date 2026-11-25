@@ -1,5 +1,6 @@
 package com.garathon.flatdroid.alpine.programs
 
+import android.system.Os
 import com.garathon.flatdroid.flatpak.FlatpakMetadata
 import com.garathon.flatdroid.flatpak.InstalledApps
 import com.garathon.flatdroid.flatpak.Keyfile
@@ -19,7 +20,11 @@ import java.util.Locale
 data class AlpineProgram(
     /** [AlpineProgramIds.of] its desktop file's name. */
     val id: String,
-    /** The package that installed its desktop file. */
+    /**
+     * The package the user added that brought it: the world's entry for its desktop file's package,
+     * or the world's entry built from the same source (`libreoffice` for `libreoffice-writer`'s).
+     * Removing the program removes this package.
+     */
     val packageName: String,
     val name: String,
     /** An absolute guest path, then its arguments. */
@@ -27,6 +32,8 @@ data class AlpineProgram(
     val terminal: Boolean,
     val icon: File?,
     val display: AlpinePackages.Display,
+    /** The package that installed its desktop file. */
+    val owner: String = packageName,
     /** When its desktop file was written (apk keeps a package's own times, so its change time); null if unknown. */
     val installed: Long? = null,
     /**
@@ -74,15 +81,18 @@ object AlpineProgramIds {
 
 /**
  * The Alpine programs installed in [rootfs]: desktop files of packages the user asked for by name
- * (apk's world), not Flatdroid's own packages, and not hidden ones (`NoDisplay`, `Hidden`,
+ * (apk's world) or built from the same source as one (a meta-package's parts), not Flatdroid's own
+ * packages, and not hidden ones (`NoDisplay`, `Hidden`,
  * `OnlyShowIn` a desktop, not `Type=Application`, or a `TryExec` that isn't there). [exists] tells
  * whether a rootfs file is there without following a link (Alpine's links are guest paths);
- * [changedAt] is a file's change time in milliseconds, when it can be read.
+ * [changedAt] is a file's change time in milliseconds, when it can be read; [readLink] a link's
+ * target, null for a file that isn't one (desktop files and icons are followed inside the rootfs).
  */
 class AlpinePrograms(
     private val rootfs: File,
     private val exists: (File) -> Boolean = { it.exists() },
     private val changedAt: (File) -> Long? = { null },
+    private val readLink: (File) -> String? = { null },
 ) {
     fun list(): List<AlpineProgram> {
         val db = File(rootfs, AlpinePackages.INSTALLED_DB)
@@ -92,7 +102,7 @@ class AlpinePrograms(
         val programs = synchronized(cache) { cache[rootfs.path]?.takeIf { it.first == key }?.second }
             ?: scan(db, world, apps).also { synchronized(cache) { cache[rootfs.path] = key to it } }
         // Read for each list, not cached: callers differ in how they read it.
-        return programs.map { it.copy(installed = changedAt(File(apps, it.id.removePrefix(AlpineProgramIds.PREFIX) + DESKTOP))) }
+        return programs.map { p -> p.copy(installed = guestFile("/$APPLICATIONS/${p.id.removePrefix(AlpineProgramIds.PREFIX)}$DESKTOP")?.let(changedAt)) }
     }
 
     /** apk's checksum of every installed file, by path relative to the rootfs; empty when its database can't be read. */
@@ -108,22 +118,31 @@ class AlpinePrograms(
         val wanted = allWorld - FLATDROID_PACKAGES
         if (wanted.isEmpty()) return emptyList()
         val owners = AlpinePackages.owners(packages)
-        val files = apps.listFiles { f -> f.name.endsWith(DESKTOP) && f.isFile }.orEmpty().sortedBy { it.name }
-        val programs = files.mapNotNull { file ->
-            val owner = owners["$APPLICATIONS/${file.name}"]?.takeIf { it in wanted } ?: return@mapNotNull null
-            val id = AlpineProgramIds.of(file.name.removeSuffix(DESKTOP)) ?: return@mapNotNull null
+        val byName = packages.associateBy { it.name }
+        // A package the user added, else the one they added that was built from the same source.
+        val bySource = wanted.mapNotNull { w -> byName[w]?.let { it.origin to w } }.toMap()
+        fun added(owner: String): String? = owner.takeIf { it in wanted }
+            ?: owner.takeIf { it !in FLATDROID_PACKAGES }?.let { byName[it]?.origin }?.let(bySource::get)
+        val names = apps.list { _, name -> name.endsWith(DESKTOP) }.orEmpty().sorted()
+        val programs = names.mapNotNull { name ->
+            val owner = owners["$APPLICATIONS/$name"] ?: return@mapNotNull null
+            val packageName = added(owner) ?: return@mapNotNull null
+            val id = AlpineProgramIds.of(name.removeSuffix(DESKTOP)) ?: return@mapNotNull null
+            // Alpine's links are guest paths (LibreOffice's entries lead into /usr/lib).
+            val file = guestFile("/$APPLICATIONS/$name")?.takeIf { it.isFile } ?: return@mapNotNull null
             val desktop = runCatching { file.readTextUpTo()?.let(Keyfile::parse) }.getOrNull() ?: return@mapNotNull null
-            program(id, owner, desktop, packages)
+            program(id, packageName, desktop, packages)?.copy(owner = owner)
         }
         return withFreedBytes(withoutVariants(programs), packages, allWorld)
     }
 
     /**
-     * [programs] without an entry that runs another entry of its package with arguments added (a
-     * terminal's server mode, say): the user can add arguments to the plain one themselves.
+     * [programs] without an entry that runs another entry of the same package with arguments added (a
+     * terminal's server mode, say): the user can add arguments to the plain one themselves. Entries
+     * of a meta-package's parts (LibreOffice's Writer and its start center) come from different packages and stay.
      */
     internal fun withoutVariants(programs: List<AlpineProgram>): List<AlpineProgram> = programs.filterNot { p ->
-        programs.any { q -> q !== p && q.packageName == p.packageName && q.command.size < p.command.size && p.command.take(q.command.size) == q.command }
+        programs.any { q -> q !== p && q.owner == p.owner && q.command.size < p.command.size && p.command.take(q.command.size) == q.command }
     }
 
     /** [programs] with [AlpineProgram.freedBytes], worked out once per package. */
@@ -168,7 +187,28 @@ class AlpinePrograms(
             InstalledApps.ICON_SIZES.map { "$ICONS/$it/apps/$base.png" } + "$ICONS/scalable/apps/$base.svg" +
                 listOf("$PIXMAPS/$base.png", "$PIXMAPS/$base.svg")
         }
-        return candidates.filter(::inRootfs).map { File(rootfs, it) }.firstOrNull { it.isFile && within(it) }
+        return candidates.filter(::inRootfs).mapNotNull(::guestFile).firstOrNull { it.isFile && within(it) }
+    }
+
+    /**
+     * The rootfs file at guest [path], its links followed inside the rootfs: an absolute target is a
+     * guest path, a relative one is taken from the link's folder. Null after [MAX_LINKS] links.
+     */
+    private fun guestFile(path: String): File? {
+        val pending = ArrayDeque(path.split('/').filter { it.isNotEmpty() })
+        val done = ArrayList<String>()
+        var links = 0
+        while (pending.isNotEmpty()) {
+            val part = pending.removeFirst()
+            if (part == ".") continue
+            if (part == "..") { done.removeLastOrNull(); continue }
+            val target = readLink(File(rootfs, (done + part).joinToString("/")))
+            if (target == null) { done += part; continue }
+            if (++links > MAX_LINKS) return null
+            if (target.startsWith("/")) done.clear()
+            target.split('/').filter { it.isNotEmpty() }.asReversed().forEach(pending::addFirst)
+        }
+        return File(rootfs, done.joinToString("/"))
     }
 
     private fun inRootfs(path: String) = path.startsWith("/") && path.split('/').none { it == ".." }
@@ -185,6 +225,8 @@ class AlpinePrograms(
         /** Alpine's PATH for a user, without /usr/local (apk installs nothing there). */
         private val PATH = listOf("/usr/bin", "/bin", "/usr/sbin", "/sbin")
         private const val MAX_DB_BYTES = 64L shl 20
+        /** Links followed for one path, as the kernel's limit (ELOOP after 40). */
+        private const val MAX_LINKS = 40
 
         /**
          * Flatdroid's own packages as Alpine's world names them, never listed (their desktop files are
@@ -201,7 +243,14 @@ class AlpinePrograms(
             runCatching { File(rootfs, AlpinePackages.WORLD).readTextUpTo()?.let(AlpinePackages::parseWorld) }.getOrNull().orEmpty()
 
         /** The programs in [rootfs] as the app reads it: Alpine's links are guest paths, so a link counts as there. */
-        fun of(rootfs: File) = AlpinePrograms(rootfs, exists = { it.exists() || AndroidTarFs.isSymlink(it) })
+        fun of(rootfs: File) = AlpinePrograms(
+            rootfs,
+            exists = { it.exists() || AndroidTarFs.isSymlink(it) },
+            readLink = READ_LINK,
+        )
+
+        /** A link's target through android.system.Os; null for anything that isn't a link. */
+        val READ_LINK: (File) -> String? = { file -> if (AndroidTarFs.isSymlink(file)) runCatching { Os.readlink(file.path) }.getOrNull() else null }
 
         /** The last list per rootfs, kept while apk's records and the desktop files are unchanged. */
         private val cache = HashMap<String, Pair<String, List<AlpineProgram>>>()

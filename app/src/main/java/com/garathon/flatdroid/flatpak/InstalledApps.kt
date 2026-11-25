@@ -80,6 +80,7 @@ class InstalledApps(private val context: Context) {
         File(env.paths().rootfs),
         exists = { it.exists() || AndroidTarFs.isSymlink(it) },
         changedAt = { file -> runCatching { Os.lstat(file.path).st_ctime * 1000 }.getOrNull() },
+        readLink = AlpinePrograms.READ_LINK,
     )
 
     private fun alpineProgram(id: String): AlpineProgram? = if (AlpineProgramIds.isId(id)) alpine.program(id) else null

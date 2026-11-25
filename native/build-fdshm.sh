@@ -1,11 +1,12 @@
 #!/bin/sh
-# Builds libfdshm.so, the shm_open preload for the Wayland helpers (fdshm.c), for one Android ABI:
-# a shared library without a C library, loaded into Alpine's musl programs. It may need only
-# __errno_location from the program's libc.
+# Builds libfdshm.so, the shm_open preload for the Wayland helpers (fdshm.c), and libfdmemfd.so,
+# its memfd_create alone for apps on kernels without memfd, for one Android ABI: shared libraries
+# without a C library, loaded into musl and glibc programs. They may need only __errno_location
+# from the program's libc.
 #
 #   build-fdshm.sh <abi> <ndk dir> <output dir>
 #
-# abi: arm64-v8a or x86_64. Outputs <output dir>/libfdshm.so.
+# abi: arm64-v8a or x86_64. Outputs <output dir>/libfdshm.so and libfdmemfd.so.
 set -eu
 
 API=24
@@ -26,25 +27,28 @@ TC=$NDK/toolchains/llvm/prebuilt/linux-x86_64
 [ -x "$TC/bin/clang" ] || { echo "NDK toolchain not found in $TC" >&2; exit 1; }
 mkdir -p "$OUT"
 
-# shellcheck disable=SC2086
-"$TC/bin/clang" --target=$TRIPLE$API -O2 -Wall -Wextra -Werror \
-    -ffreestanding -fno-builtin -fno-stack-protector -fPIC $ARCH_FLAGS \
-    -nostdlib -shared -Wl,-soname,libfdshm.so -Wl,-z,relro,-z,now -Wl,-z,max-page-size=$PAGE_SIZE -Wl,--build-id=none \
-    -o "$OUT/libfdshm.so" "$HERE/fdshm.c"
-"$TC/bin/llvm-strip" --strip-all "$OUT/libfdshm.so"
-
-RE=$TC/bin/llvm-readelf
-F=$OUT/libfdshm.so
+# libfdshm.so for the helpers; libfdmemfd.so, memfd_create alone, for apps on kernels without memfd.
 fail=0
-"$RE" -dW "$F" | grep -q NEEDED && { echo "FAIL libfdshm.so: needs a library" >&2; fail=1; }
-undefined=$("$RE" --dyn-syms -W "$F" | awk '$7 == "UND" && $8 != "" {print $8}')
-[ "$undefined" = "__errno_location" ] || { echo "FAIL libfdshm.so: undefined symbols: $undefined" >&2; fail=1; }
-for sym in shm_open shm_unlink fchmod; do
-    "$RE" --dyn-syms -W "$F" | awk -v s=$sym '$8 == s && $7 != "UND"' | grep -q . || { echo "FAIL libfdshm.so: no $sym" >&2; fail=1; }
-done
-"$RE" -lW "$F" | grep -q GNU_RELRO || { echo "FAIL libfdshm.so: no RELRO" >&2; fail=1; }
-for align in $("$RE" -lW "$F" | awk '$1 == "LOAD" {print $NF}'); do
-    [ $((align)) -ge $PAGE_SIZE ] || { echo "FAIL libfdshm.so: LOAD align $align" >&2; fail=1; }
-done
+build() {
+    name=$1 defines=$2 symbols=$3
+    F=$OUT/$name
+    "$TC/bin/clang" --target=$TRIPLE$API -O2 -Wall -Wextra -Werror \
+        -ffreestanding -fno-builtin -fno-stack-protector -fPIC $ARCH_FLAGS $defines \
+        -nostdlib -shared -Wl,-soname,$name -Wl,-z,relro,-z,now -Wl,-z,max-page-size=$PAGE_SIZE -Wl,--build-id=none \
+        -o "$F" "$HERE/fdshm.c"
+    "$TC/bin/llvm-strip" --strip-all "$F"
+    RE=$TC/bin/llvm-readelf
+    "$RE" -dW "$F" | grep -q NEEDED && { echo "FAIL $name: needs a library" >&2; fail=1; }
+    undefined=$("$RE" --dyn-syms -W "$F" | awk '$7 == "UND" && $8 != "" {print $8}')
+    [ "$undefined" = "__errno_location" ] || { echo "FAIL $name: undefined symbols: $undefined" >&2; fail=1; }
+    exported=$("$RE" --dyn-syms -W "$F" | awk '$7 != "UND" && $5 == "GLOBAL" {print $8}' | sort | tr '\n' ' ')
+    [ "$exported" = "$symbols " ] || { echo "FAIL $name: exports $exported, not $symbols" >&2; fail=1; }
+    "$RE" -lW "$F" | grep -q GNU_RELRO || { echo "FAIL $name: no RELRO" >&2; fail=1; }
+    for align in $("$RE" -lW "$F" | awk '$1 == "LOAD" {print $NF}'); do
+        [ $((align)) -ge $PAGE_SIZE ] || { echo "FAIL $name: LOAD align $align" >&2; fail=1; }
+    done
+    echo "built $name [$ABI] into $OUT ($(wc -c < "$F") bytes)"
+}
+build libfdshm.so "" "fchmod memfd_create shm_open shm_unlink"
+build libfdmemfd.so -DFDSHM_MEMFD_ONLY "memfd_create"
 [ $fail -eq 0 ] || exit 1
-echo "built libfdshm.so [$ABI] into $OUT ($(wc -c < "$F") bytes)"

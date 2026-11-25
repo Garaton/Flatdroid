@@ -12,6 +12,8 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.Paths
 
 class AlpineProgramsTest {
     @get:Rule val tmp = TemporaryFolder()
@@ -63,6 +65,39 @@ class AlpineProgramsTest {
         assertEquals(AlpinePackages.Display.X11, xeyes.display)
         assertNull(xeyes.icon)
         assertEquals("xeyes", AlpinePrograms(root).program("alpine+xeyes")?.packageName)
+    }
+
+    @Test
+    fun aMetaPackagesPartsAreListedThroughTheirLinks() {
+        val root = rootfs()
+        fun write(path: String, text: String) = File(root, path).apply { parentFile!!.mkdirs(); writeText(text) }
+        File(root, "etc/apk/world").appendText("office\n")
+        File(root, "lib/apk/db/installed").appendText(
+            "\n" + listOf(
+                "P:office\no:office\nD:office-writer office-common\n",
+                "P:office-common\no:office\nF:usr/bin\nR:office\nF:usr/share/applications\nR:office-start.desktop\n",
+                "P:office-writer\no:office\nF:usr/share/applications\nR:office-writer.desktop\n",
+            ).joinToString("\n"),
+        )
+        write("usr/bin/office", "")
+        val entry = "[Desktop Entry]\nType=Application\n"
+        write("usr/lib/office/xdg/start.desktop", entry + "Name=Office\nExec=office %U\n")
+        write("usr/lib/office/xdg/writer.desktop", entry + "Name=Writer\nExec=office --writer %U\nIcon=office-writer\n")
+        write("usr/lib/office/icons/writer.png", "png")
+        val apps = File(root, "usr/share/applications").toPath()
+        // As Alpine has them: guest paths, which lead nowhere on the host.
+        Files.createSymbolicLink(apps.resolve("office-start.desktop"), Paths.get("/usr/lib/office/xdg/start.desktop"))
+        Files.createSymbolicLink(apps.resolve("office-writer.desktop"), Paths.get("../../lib/office/xdg/writer.desktop"))
+        File(root, "usr/share/icons/hicolor/128x128/apps").mkdirs()
+        Files.createSymbolicLink(File(root, "usr/share/icons/hicolor/128x128/apps/office-writer.png").toPath(), Paths.get("/usr/lib/office/icons/writer.png"))
+        val readLink: (File) -> String? = { f -> if (Files.isSymbolicLink(f.toPath())) Files.readSymbolicLink(f.toPath()).toString() else null }
+
+        val programs = AlpinePrograms(root, readLink = readLink).list().filter { it.id.startsWith("alpine+office") }
+        // Writer adds an argument to the start center's command, but comes from another part: both stay.
+        assertEquals(listOf("alpine+office-start", "alpine+office-writer"), programs.map { it.id })
+        assertEquals(listOf("office", "office"), programs.map { it.packageName })
+        assertEquals(listOf("office-common", "office-writer"), programs.map { it.owner })
+        assertEquals(File(root, "usr/lib/office/icons/writer.png"), programs[1].icon)
     }
 
     @Test
