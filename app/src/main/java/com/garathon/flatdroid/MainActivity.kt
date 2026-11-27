@@ -514,7 +514,7 @@ class MainActivity : ComponentActivity() {
                     when {
                         mobileDataPolicy() == MobileData.NEVER -> Toast.makeText(this, R.string.mobile_data_blocked, Toast.LENGTH_LONG).show()
                         offer.appId == AlpineShell.ID -> openAlpineShell(null, offer.group)
-                        else -> continueLaunch(PendingLaunch(offer.appId, prepareElectron = false, addPackages = offer.group))
+                        else -> continueLaunch(PendingLaunch(offer.appId, prepareElectron = false, addPackages = offer.group, shell = offer.shell))
                     }
                 },
                 onDismiss = { SessionController.ended(null) },
@@ -547,12 +547,18 @@ class MainActivity : ComponentActivity() {
         }
         home.meteredQuestion?.let { task ->
             MobileDataDialog(
-                onDownload = { home.meteredQuestion = null; MobileDataConsent.allowNow(this); startTask(task) },
+                // The answer holds for this network, so a download already waiting on it follows it too.
+                onDownload = { home.meteredQuestion = null; MobileDataConsent.allowNow(this); FlatpakTaskService.mobileDataChanged(); startTask(task) },
+                onWait = { home.meteredQuestion = null; MobileDataConsent.waitNow(this); FlatpakTaskService.mobileDataChanged(); startTask(task) },
                 onDismiss = { home.meteredQuestion = null },
             )
         }
         if (task.meteredWait == MeteredWait.ASK) {
-            MeteredPauseDialog(onContinue = FlatpakTaskService::continueOnMobileData, onCancel = { FlatpakTaskService.cancel(this) })
+            MeteredPauseDialog(
+                onContinue = FlatpakTaskService::continueOnMobileData,
+                onWait = FlatpakTaskService::waitForWifi,
+                onCancel = { FlatpakTaskService.cancel(this) },
+            )
         }
         val installedIds = remember(apps) { apps?.map { it.id }?.toSet() }
         // As the catalog names them (`<ID>/<branch>`), for the browser's filter; read again when the apps change.
@@ -743,6 +749,8 @@ class MainActivity : ComponentActivity() {
                         onOpenHome = { storage.openHomeInFiles(app.id) },
                         limitDevices = saved.security.limitDevices,
                         onResetFlatdroidSettings = { store.delete(); go(target.parent ?: Screen.Home) },
+                        canOpenTerminal = !sessionBusy && !taskRunning,
+                        onOpenTerminal = { go(Screen.Home); continueLaunch(PendingLaunch(app.id, prepareElectron = false, shell = true)) },
                     ),
                     onSave = { new ->
                         // Written off the main thread; a failed write (storage full) keeps the screen open.
@@ -892,7 +900,6 @@ class MainActivity : ComponentActivity() {
         FlatpakTaskService.run(this, task)
     }
 
-    /** Starts a task that downloads, first doing what the mobile data setting says on a metered connection. */
     /** Uninstalls [id]: a Flatpak, or an Alpine program's package ([InstalledApp.alpinePackage]). */
     private fun uninstall(apps: List<InstalledApp>?, id: String, deleteData: Boolean, keepRuntimes: Boolean) {
         val alpinePackage = apps?.firstOrNull { it.id == id }?.alpinePackage
@@ -901,6 +908,7 @@ class MainActivity : ComponentActivity() {
         )
     }
 
+    /** Starts a task that downloads, first doing what the mobile data setting says on a metered connection. */
     private fun startDownload(task: FlatpakTask) {
         when (mobileDataPolicy()) {
             MobileData.ALWAYS -> startTask(task)
@@ -949,8 +957,8 @@ class MainActivity : ComponentActivity() {
         home.autoOpenApp = pending.appId
         when {
             pending.prepareElectron -> SessionService.prepareElectronAndLaunch(this, pending.appId, answers)
-            pending.addPackages != null -> SessionService.addPackagesAndLaunch(this, pending.appId, pending.addPackages, answers)
-            else -> SessionService.launch(this, pending.appId, answers)
+            pending.addPackages != null -> SessionService.addPackagesAndLaunch(this, pending.appId, pending.addPackages, answers, pending.shell)
+            else -> SessionService.launch(this, pending.appId, answers, pending.shell)
         }
     }
 

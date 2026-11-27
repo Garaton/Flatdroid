@@ -10,6 +10,7 @@ import com.garathon.flatdroid.proot.DevNodes
 import com.garathon.flatdroid.proot.Fdsec
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -277,6 +278,21 @@ class LaunchPlannerTest {
         assertEquals(LaunchPlanner.FOOT_TERM, plan("org.example.Game2", "pulseaudio;").environment["TERM"])
         // Not a terminal app: no TERM.
         assertEquals(null, Ready(planner.plan("org.example.Game", dirs)).environment["TERM"])
+    }
+
+    @Test
+    fun theAppsTerminalRunsAShellInItsRoot() {
+        runtimeWithGl()
+        val id = "org.example.Editor"
+        val files = inst.app(id, metadata = appMetadata(id, "app", extra = "[Context]\nsockets=x11;\n"))
+        File(files, "bin").mkdirs()
+        // An app of another architecture: the shell runs whatever the app's command is.
+        File(files, "bin/app").writeBytes(ExecutableTest.elf(0x3e))
+        val shell = Ready(planner.plan(id, dirs, LaunchOptions(shell = true, extraArgs = listOf("--flag"))))
+        assertEquals(listOf(LaunchPlanner.RUNTIME_SHELL, "-l"), shell.command.takeLast(2))
+        assertTrue(shell.terminal)
+        assertTrue(shell.wayland)
+        assertNotNull(shell.environment["TERM"])
     }
 
     @Test

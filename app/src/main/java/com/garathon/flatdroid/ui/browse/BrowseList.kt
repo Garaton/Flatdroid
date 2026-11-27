@@ -15,7 +15,7 @@ enum class BrowseOrder(val key: String) { POPULAR("popular"), ADDED("added"), UP
 
 /**
  * How the browser's list is searched (name, ID, summary, developer, keywords), filtered (verified,
- * runtime already installed: [installedRuntimes] as `<ID>/<branch>`) and ordered ([BrowseOrder]).
+ * runtime already installed: [installedRuntimes] as `<ID>/<branch>`, not proprietary) and ordered ([BrowseOrder]).
  * The ordering itself is [BrowseItems]'s; the comparators here only serve the shared search bar's
  * menu and direction.
  */
@@ -24,6 +24,7 @@ fun browseListSpec(lists: FlathubLists, installedRuntimes: Set<String> = emptySe
     filters = listOf(
         ListFilter("verified", R.string.browse_filter_verified) { it.id in lists.verified },
         ListFilter("runtimes", R.string.browse_filter_runtimes) { it.runtime != null && it.runtime in installedRuntimes },
+        ListFilter("notProprietary", R.string.browse_filter_not_proprietary) { !it.proprietary },
     ),
     sorts = listOf(
         ListSort(BrowseOrder.POPULAR.key, R.string.browse_sort_popular, comparator = byRank(lists.popular)),

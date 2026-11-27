@@ -134,6 +134,7 @@ class AppStreamReader(languages: List<String>) {
             keywords = (defaultKeywords + keywords.value.orEmpty()).filter { it.isNotEmpty() }.distinct(),
             icon = icon,
             runtime = runtime,
+            proprietary = CatalogApp.isProprietary(license),
         )
         return CatalogEntry(app, CatalogDetails(description.value.orEmpty(), license, urls, screenshots), branch)
     }

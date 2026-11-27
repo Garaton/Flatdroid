@@ -130,6 +130,11 @@ data class LaunchOptions(
     val reduceMotion: Boolean = false,
     /** The app's desktop file says `Terminal=true`: it runs in a terminal ([LaunchPlan.terminal]). */
     val terminal: Boolean = false,
+    /**
+     * A shell in the app's root instead of the app (the per-app terminal, a developer option): `sh -l`
+     * in a terminal, with the app's binds, environment and filter.
+     */
+    val shell: Boolean = false,
     /** An Alpine program's root instead of the installation's deployments: no extensions, ld cache, run-on-the-host stand-ins or /.flatpak-info. */
     val alpine: AlpineRoot? = null,
 )
@@ -226,8 +231,9 @@ class LaunchPlanner(
         // Wayland for every app that takes it, unless one that also takes X11 is set to Force X11.
         // A terminal app's session is Wayland whatever it takes: the terminal is a Wayland window.
         val context = app.metadata.context
-        val wayland = context.wayland && !(options.forceX11 && context.waylandAndX11 && !options.terminal)
-        val waylandSession = wayland || options.terminal
+        val terminal = options.terminal || options.shell
+        val wayland = context.wayland && !(options.forceX11 && context.waylandAndX11 && !terminal)
+        val waylandSession = wayland || terminal
         val xwayland = waylandSession && options.xwayland
         var command = listOf(commandPath)
         var isElectron = false
@@ -269,7 +275,10 @@ class LaunchPlanner(
                     hostPath(app, path)?.isFile == true
                 }
             }
-        if (electronBinary != null) {
+        if (options.shell) {
+            // Alpine's root has its shell at /bin; a runtime's is /usr/bin/sh (what the ld cache's command runs too).
+            command = listOf(if (alpine != null) ALPINE_SHELL else RUNTIME_SHELL, "-l")
+        } else if (electronBinary != null) {
             isElectron = true
             val host = hostPath(app, electronBinary) ?: return PlanResult.NoCommand(appId)
             val binaryArch = (Executable.of(host) as? Executable.Elf)?.arch
@@ -310,7 +319,7 @@ class LaunchPlanner(
             val binaryArch = (hostPath(app, commandPath)?.let(Executable::of) as? Executable.Elf)?.arch
             if (binaryArch != null && binaryArch != arch) return PlanResult.WrongArchitecture(commandPath, binaryArch)
         }
-        command = command + alpine?.args.orEmpty() + options.extraArgs
+        if (!options.shell) command = command + alpine?.args.orEmpty() + options.extraArgs
 
         val mergedDirs = mergedDirs(dirs.mergedDirs, extensions)
         for (merged in mergedDirs) extraBinds += merged.dir.path to merged.guest
@@ -340,7 +349,7 @@ class LaunchPlanner(
             wayland = wayland,
             xwayland = xwayland,
             softwareRendering = options.softwareRendering,
-            terminal = if (!options.terminal) null else if (File(runtime.files, FOOT_TERMINFO).isFile) FOOT_TERM else FALLBACK_TERM,
+            terminal = if (!terminal) null else if (File(runtime.files, FOOT_TERMINFO).isFile) FOOT_TERM else FALLBACK_TERM,
             usrHas = { path -> path.startsWith("/usr/") && File(runtime.files, path.removePrefix("/usr/")).isDirectory },
             alpine = alpine != null,
         )
@@ -393,7 +402,7 @@ class LaunchPlanner(
                 wayland = waylandSession,
                 xwayland = xwayland,
                 glx = !waylandSession && !options.softwareRendering,
-                terminal = options.terminal,
+                terminal = terminal,
                 filter = Fdsec.Filter(extraSyscalls = options.extraSyscalls, noInternet = !options.network),
                 ldCache = ldCache,
                 mergedDirs = mergedDirs,
@@ -572,6 +581,9 @@ class LaunchPlanner(
         /** A terminal app's TERM: the terminal's own name where the runtime describes it, else what it is compatible with. */
         const val FOOT_TERM = "foot"
         const val FALLBACK_TERM = "xterm-256color"
+        /** The per-app terminal's shell ([LaunchOptions.shell]). */
+        const val RUNTIME_SHELL = "/usr/bin/sh"
+        const val ALPINE_SHELL = "/bin/sh"
         /** The runtime's description of [FOOT_TERM] (relative to its files). */
         const val FOOT_TERMINFO = "share/terminfo/f/foot"
         const val RESOLV_CONF = "resolv.conf"

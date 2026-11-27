@@ -20,7 +20,8 @@ import com.garathon.flatdroid.util.debug.DebugLog
  * [close]: on a metered network the task's commands are paused ([ProotFreeze]) and the next one
  * waits ([await]) while [meteredWait] says so; on an unmetered network they go on by themselves.
  * The network is checked when the task opens it (a task that waited in the queue) and whenever
- * Android's default network changes. [onWait] hears each change (null: running; [closed]: let go
+ * Android's default network changes; those changes are counted ([changes]), so a command that
+ * failed as the network went can be run again once there is one ([awaitNetwork]). [onWait] hears each change (null: running; [closed]: let go
  * because the task ends), on any thread.
  */
 internal class MeteredGate(private val context: Context, private val onWait: (wait: MeteredWait?, closed: Boolean) -> Unit) {
@@ -34,6 +35,9 @@ internal class MeteredGate(private val context: Context, private val onWait: (wa
     /** The default network as last seen, and whether it is metered. */
     private var network: Network? = null
     private var metered = false
+    /** Whether there is a default network, and how many times it changed (to another, or to none). */
+    private var online = true
+    private var changes = 0
     /** When the pause began ([SystemClock.elapsedRealtime]), and how long the earlier ones lasted. */
     private var pausedAt = 0L
     private var pausedBefore = 0L
@@ -42,12 +46,15 @@ internal class MeteredGate(private val context: Context, private val onWait: (wa
     fun open() {
         synchronized(lock) {
             network = cm?.activeNetwork
+            online = network != null
             metered = meteredNow(context)
             settle()
         }
         val cb = object : ConnectivityManager.NetworkCallback() {
             override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) =
                 seen(network, isMetered(capabilities))
+
+            override fun onLost(network: Network) = lost(network)
         }
         callback = runCatching { cm?.registerDefaultNetworkCallback(cb); cb }.getOrNull()
     }
@@ -68,12 +75,35 @@ internal class MeteredGate(private val context: Context, private val onWait: (wa
         settle()
     }
 
+    /** The user lets the task wait for Wi-Fi on this metered network, without being asked again there. */
+    fun waitForWifi() = synchronized(lock) {
+        MobileDataConsent.waitOn(network)
+        settle()
+    }
+
     /** The mobile data setting changed: it applies now. */
     fun recheck() = synchronized(lock) { settle() }
 
     /** Blocks while the task waits for the network; an interrupt (a Cancel) ends the wait. */
     fun await() = synchronized(lock) {
         while (wait != null && !closed) lock.wait()
+    }
+
+    /** How many times the default network changed so far ([online]). */
+    fun changes(): Int = synchronized(lock) { changes }
+
+    /**
+     * Blocks until there is a default network again, [millis] at most; whether there is one. An
+     * interrupt (a Cancel) ends the wait.
+     */
+    fun awaitNetwork(millis: Long): Boolean = synchronized(lock) {
+        val until = SystemClock.elapsedRealtime() + millis
+        while (!online && !closed) {
+            val left = until - SystemClock.elapsedRealtime()
+            if (left <= 0) return false
+            lock.wait(left)
+        }
+        true
     }
 
     /** How long the task has been paused in all, the pause going on now included. */
@@ -90,15 +120,25 @@ internal class MeteredGate(private val context: Context, private val onWait: (wa
     fun ended(process: ProotProcess) = synchronized(lock) { processes -= process }
 
     private fun seen(on: Network, isMetered: Boolean) = synchronized(lock) {
+        if (on != network || !online) changes++
         network = on
+        online = true
         metered = isMetered
         settle()
+        lock.notifyAll()
+    }
+
+    /** No default network for now (Wi-Fi left before mobile data took over, say); the user's answers stay. */
+    private fun lost(on: Network) = synchronized(lock) {
+        if (on != network || !online) return@synchronized
+        online = false
+        changes++
     }
 
     /** Pauses or lets go as the network, the setting and the user's yes say now. */
     private fun settle() {
         if (!metered) MobileDataConsent.clear()
-        val next = if (closed) null else meteredWait(metered, savedMobileData(context), MobileDataConsent.allowed(network))
+        val next = if (closed) null else meteredWait(metered, savedMobileData(context), MobileDataConsent.allowed(network), MobileDataConsent.waits(network))
         if (next == wait) return
         val was = wait
         wait = next

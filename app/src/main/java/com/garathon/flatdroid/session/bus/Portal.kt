@@ -31,6 +31,8 @@ import java.io.FileDescriptor
  * As [Role.PORTAL], with [cameraAsked], the camera portal is answered too, only to learn that the
  * app asks for it: a camera is present, and each `AccessCamera` is refused after [cameraAsked]
  * is called (the real portal runs from the app's next launch).
+ *
+ * With [hostCommands], Flatpak's `org.freedesktop.Flatpak` for commands "on the host" ([HostCommandBus]).
  */
 class Portal(
     private val role: Role,
@@ -48,6 +50,8 @@ class Portal(
     private val notifications: Notifications? = null,
     /** Milliseconds since the user's last input. */
     private val idleMillis: () -> Long = { 0L },
+    /** Commands "on the host"; null serves none (the app may not ask for the host). */
+    private val hostCommands: HostCommandBus? = null,
 ) {
     enum class Role { PORTAL, BACKEND }
 
@@ -72,7 +76,7 @@ class Portal(
     val names: List<String> = when (role) {
         Role.PORTAL -> listOf(PORTAL_NAME)
         Role.BACKEND -> listOf(BACKEND_NAME)
-    } + listOf(SCREENSAVER, FILE_MANAGER) + INHIBIT_NAMES + listOfNotNull(Notifications.NAME.takeIf { notifications != null })
+    } + listOf(SCREENSAVER, FILE_MANAGER) + INHIBIT_NAMES + listOfNotNull(Notifications.NAME.takeIf { notifications != null }, HostCommandBus.NAME.takeIf { hostCommands != null })
 
     /**
      * What to send for [call], whose file descriptors are [fds]: its reply (none when it asks for
@@ -128,6 +132,7 @@ class Portal(
             Notifications.IFACE -> freedesktopNotifications(call, signals)
             Notifications.PORTAL_IFACE, Notifications.IMPL_IFACE -> portalNotifications(call, fds)
             FILE_MANAGER_IFACE -> fileManager(call)
+            HostCommandBus.IFACE -> hostCommands?.answer(call, fds, signals) ?: unknownInterface(call)
             CAMERA -> camera(call, signals)
             null -> call.error(UNKNOWN_METHOD, "No interface")
             else -> unknownInterface(call)
@@ -139,7 +144,10 @@ class Portal(
         if (signal.sender != BUS || signal.iface != BUS || signal.member != "NameOwnerChanged" || signal.signature != "sss") return
         val (name, _, newOwner) = signal.body.map { it as String }
         // Notifications stay: a sender may exit right after one (notify-send does), as on a desktop.
-        if (name.startsWith(":") && newOwner.isEmpty()) inhibitions.removeOwner(name)
+        if (name.startsWith(":") && newOwner.isEmpty()) {
+            inhibitions.removeOwner(name)
+            hostCommands?.left(name)
+        }
     }
 
     /** The `SettingChanged` signal for [key] in [namespace], now [value]. */
@@ -165,6 +173,7 @@ class Portal(
         IDLE_MONITOR_PATH -> mapOf(IDLE_MONITOR to 0u)
         Notifications.PATH -> if (notifications != null) mapOf(Notifications.IFACE to 0u) else null
         FILE_MANAGER_PATH -> mapOf(FILE_MANAGER_IFACE to 0u)
+        HostCommandBus.PATH -> if (hostCommands != null) mapOf(HostCommandBus.IFACE to HostCommandBus.VERSION) else null
         else -> null
     }
 
@@ -487,7 +496,7 @@ class Portal(
         append(INTROSPECTION[INTROSPECTABLE])
         append(INTROSPECTION[PROPERTIES])
         append(INTROSPECTION[PEER])
-        for (iface in interfaces.keys) append(INTROSPECTION[iface])
+        for (iface in interfaces.keys) append(if (iface == HostCommandBus.IFACE) HostCommandBus.INTROSPECTION else INTROSPECTION[iface])
         append("</node>\n")
     }
 

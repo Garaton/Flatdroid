@@ -45,6 +45,7 @@ class SessionPortal private constructor(
     log: (String) -> Unit,
     /** The app asked for the camera portal, which this session doesn't run ([Portal]); null: not watched. */
     cameraAsked: (() -> Unit)? = null,
+    private val hostCommands: HostCommandBus? = null,
 ) : Closeable {
     @Volatile private var appearance = AndroidAppearance.of(context, user)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -61,6 +62,7 @@ class SessionPortal private constructor(
     private val portal = Portal(
         role, ::settings, ::networkStatus, AndroidLinks(context, log), inhibitions, hostPath, cameraAsked, notifications,
         idleMillis = { SystemClock.elapsedRealtime() - ViewerConnection.lastInputAt },
+        hostCommands = hostCommands,
     )
     private var client: BusClient? = null
 
@@ -189,9 +191,12 @@ class SessionPortal private constructor(
             context: Context, socket: File, role: Portal.Role, appNetwork: Boolean, user: UserSettings?,
             hostPath: (String) -> String?, keepScreenOn: (Boolean) -> Unit, log: (String) -> Unit,
             cameraAsked: (() -> Unit)? = null, appId: String = "", notify: Boolean = false,
+            hostCommands: HostCommandBus? = null,
         ): SessionPortal? {
-            val session = SessionPortal(context, appId, notify, role, appNetwork, user, hostPath, keepScreenOn, log, cameraAsked)
-            session.client = BusClient.open(socket, session.portal.names, session.portal::handle, log) ?: return null
+            val session = SessionPortal(context, appId, notify, role, appNetwork, user, hostPath, keepScreenOn, log, cameraAsked, hostCommands)
+            val client = BusClient.open(socket, session.portal.names, session.portal::handle, log) ?: return null
+            session.client = client
+            hostCommands?.send = { client.send(it) }
             session.watchNetwork()
             session.watchAppearance()
             log("[flatdroid] Flatdroid joined the session bus as ${session.portal.names.joinToString()}")

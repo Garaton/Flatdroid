@@ -34,6 +34,13 @@ object ProcTable {
     /** The state in a `stat` line: the first letter after the command's closing parenthesis (a command may hold one). */
     fun stateOf(stat: String): Char? = stat.substringAfterLast(')', "").trim().firstOrNull()
 
+    /** The process group in a `stat` line (field 5: after the state and the parent). */
+    fun groupOf(stat: String): Int? = stat.substringAfterLast(')', "").trim().split(' ').getOrNull(2)?.toIntOrNull()
+
+    /** [pid]'s process group, null when it can't be read (gone meanwhile). */
+    fun groupOf(pid: Int, procDir: File = File("/proc")): Int? =
+        try { groupOf(File(procDir, "$pid/stat").readText()) } catch (_: java.io.IOException) { null }
+
     /** Stopped (`T`), stopped by its tracer (`t`), or ended (`Z`, `X`): not running any more. */
     fun isStopped(state: Char): Boolean = state in "tTZXx"
 

@@ -26,6 +26,13 @@ class ProcTableThreadsTest {
     }
 
     @Test
+    fun processGroupAfterTheParent() {
+        assertEquals(1234, ProcTable.groupOf("1234 (sh) S 1230 1234 1230 0 -1 4194560"))
+        assertEquals(1230, ProcTable.groupOf("1236 (a) T (b) R 1231 1230 1230"))
+        assertNull(ProcTable.groupOf("1237 (cut"))
+    }
+
+    @Test
     fun noStateInABrokenLine() {
         assertNull(ProcTable.stateOf("1237 (cut"))
         assertNull(ProcTable.stateOf(""))

@@ -33,6 +33,7 @@ import com.garathon.flatdroid.flatpak.integrity.IntegrityGuard
 import com.garathon.flatdroid.setup.SetupController
 import com.garathon.flatdroid.launcher.electron.ElectronSwap
 import com.garathon.flatdroid.proot.processes.LeftoverProcesses
+import com.garathon.flatdroid.proot.ProcessResult
 import com.garathon.flatdroid.proot.ProotProcess
 import com.garathon.flatdroid.proot.RunInterruptedException
 import com.garathon.flatdroid.session.SessionController
@@ -367,11 +368,13 @@ class FlatpakTaskService : Service() {
             val command = AlpineSetup.apkCommand(args)
             FlatpakTasks.newCommand(null)
             FlatpakTasks.log("$ ${command.joinToString(" ")}", status = false)
-            val result = gated { pausedMillis, onStarted ->
-                env.run(
-                    command, ALPINE_TIMEOUT_SECONDS, extraBinds = listOf(cache.path to AlpineSetup.APK_CACHE),
-                    pausedMillis = pausedMillis, onStarted = onStarted, onLine = FlatpakTasks::output,
-                )
+            val result = againOnNetworkChange {
+                gated { pausedMillis, onStarted ->
+                    env.run(
+                        command, ALPINE_TIMEOUT_SECONDS, extraBinds = listOf(cache.path to AlpineSetup.APK_CACHE),
+                        pausedMillis = pausedMillis, onStarted = onStarted, onLine = FlatpakTasks::output,
+                    )
+                }
             }
             if (result.timedOut) throw IOException(getString(R.string.task_timed_out))
             if (result.exitCode != 0) throw IOException(result.output.lineSequence().lastOrNull { it.isNotBlank() } ?: "exit ${result.exitCode}")
@@ -396,6 +399,8 @@ class FlatpakTaskService : Service() {
                 cleanRepository(env, checkLinks = true)
                 run(env, FlatpakCommands.install(task.appIds))
             }.also {
+                // Home sorts a new app first by this, a reinstalled one too.
+                FlatpakInstallation(env.flatpakDir, env.arch).let { installation -> task.appIds.forEach(installation::markInstalled) }
                 applyExtraDataAndBaseline(env, task.appIds)
                 catalogRefreshed(popular = false)
             }
@@ -698,8 +703,10 @@ class FlatpakTaskService : Service() {
         FlatpakTasks.newCommand(phase)
         FlatpakTasks.log("$ ${command.joinToString(" ")}", status = false)
         val result = try {
-            gated { pausedMillis, onStarted ->
-                env.run(command, timeoutSeconds = TIMEOUT_SECONDS, pausedMillis = pausedMillis, onStarted = onStarted, onLine = FlatpakTasks::output)
+            againOnNetworkChange {
+                gated { pausedMillis, onStarted ->
+                    env.run(command, timeoutSeconds = TIMEOUT_SECONDS, pausedMillis = pausedMillis, onStarted = onStarted, onLine = FlatpakTasks::output)
+                }
             }
         } catch (e: RunInterruptedException) {
             if (e.killed) killed = true
@@ -726,6 +733,33 @@ class FlatpakTaskService : Service() {
             return command(gate::pausedMillis) { started = it; gate.started(it) }
         } finally {
             started?.let(gate::ended)
+        }
+    }
+
+    /**
+     * [attempt] (a command of a task that downloads), again when it failed as the network went:
+     * Android's default network changed while it ran (Wi-Fi left for mobile data, say), or it failed
+     * on the connection itself, the change being told just after. It runs again once there is a
+     * network, behind the gate as before: on mobile data it asks or waits as the setting says. What
+     * was downloaded stays in Flatpak's repository (apk's cache), so it goes on from there.
+     * [NETWORK_TRIES] at most; tasks that don't download run once.
+     */
+    private fun againOnNetworkChange(attempt: () -> ProcessResult): ProcessResult {
+        var tries = 1
+        while (true) {
+            val gate = gate
+            val before = gate?.changes()
+            val result = attempt()
+            if (gate == null || result.timedOut || result.exitCode == 0 || tries >= NETWORK_TRIES) return result
+            if (gate.changes() == before) {
+                if (!CONNECTION_ERROR.containsMatchIn(result.output)) return result
+                Thread.sleep(NETWORK_SETTLE_MS)
+            }
+            if (!gate.awaitNetwork(NETWORK_WAIT_MS)) return result
+            // The new network's DNS reaches Alpine's resolv.conf from its own callback.
+            Thread.sleep(NETWORK_SETTLE_MS)
+            tries++
+            FlatpakTasks.log(getString(R.string.task_log_network_retry))
         }
     }
 
@@ -826,7 +860,13 @@ class FlatpakTaskService : Service() {
             appScope.launch(Dispatchers.Default) { now.allowMobileData() }
         }
 
-        /** The mobile data setting changed: a running download follows it now. */
+        /** The paused download waits for Wi-Fi without asking again ([MeteredGate.waitForWifi]). */
+        fun waitForWifi() {
+            val now = gate ?: return
+            appScope.launch(Dispatchers.Default) { now.waitForWifi() }
+        }
+
+        /** The mobile data setting, or the user's answer for this network, changed: a running download follows it now. */
         fun mobileDataChanged() {
             val now = gate ?: return
             appScope.launch(Dispatchers.Default) { now.recheck() }
@@ -842,6 +882,12 @@ class FlatpakTaskService : Service() {
         private const val COMMIT_LENGTH = 64
         private const val ALPINE_TIMEOUT_SECONDS = 60 * 60L
         /** How flatpak reports repository data that is referenced but missing. */
+        /** A command that failed on the connection, as Flatpak (libostree, libcurl) reports it: `While fetching <URL>: [6] Could not resolve hostname`. */
+        private val CONNECTION_ERROR = Regex("While fetching \\S+: \\[\\d+]")
+        private const val NETWORK_TRIES = 3
+        /** For the next network's callbacks to come. */
+        private const val NETWORK_SETTLE_MS = 2_000L
+        private const val NETWORK_WAIT_MS = 60_000L
         private val MISSING_REPO_DATA = Regex("No such metadata object|While trying to checkout|Opening content object|Failed to read commit")
 
         private const val EXTRA_TASK = "task"

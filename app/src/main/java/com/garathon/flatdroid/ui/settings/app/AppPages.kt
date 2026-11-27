@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.automirrored.outlined.AddToHomeScreen
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.FolderOpen
@@ -61,6 +62,7 @@ import com.garathon.flatdroid.ui.storage.ConfirmDialog
 import com.garathon.flatdroid.ui.common.DropdownRow
 import com.garathon.flatdroid.ui.common.IconAction
 import com.garathon.flatdroid.ui.common.SettingsCard
+import com.garathon.flatdroid.ui.common.SettingTitle
 import com.garathon.flatdroid.ui.storage.StorageAction
 import com.garathon.flatdroid.ui.common.SwitchRow
 import com.garathon.flatdroid.ui.common.renderingNames
@@ -151,6 +153,17 @@ fun AppOverviewPage(s: AppPageState) = SettingsPageColumn(null) {
     }
     // The same as on the Storage page, where moving an app's data to another device starts.
     ZipCard(s, R.string.storage_part_app_data, R.string.app_settings_app_data_hint, StorageAction.IMPORT_SETTINGS, StorageAction.EXPORT_SETTINGS, (s.env.storage?.settings ?: 0L) > 0L)
+    // Starts a session: only while nothing else runs. As the global Overview's Tools card, above the danger zone.
+    if (s.env.developerOptions) {
+        SettingsCard(title = stringResource(R.string.settings_section_tools)) {
+            SettingTitle(stringResource(R.string.app_settings_terminal), developer = true)
+            Text(stringResource(R.string.app_settings_terminal_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            OutlinedButton(onClick = s.env.onOpenTerminal, enabled = s.env.canOpenTerminal) {
+                Icon(Icons.Filled.Terminal, contentDescription = null, modifier = Modifier.size(18.dp))
+                Text(stringResource(R.string.app_settings_open_terminal), modifier = Modifier.padding(start = Spacing.small))
+            }
+        }
+    }
     SettingsCard(title = stringResource(R.string.settings_section_danger), danger = true) {
         OutlinedButton(onClick = { confirm = OverviewConfirm.APP_DATA }, enabled = s.env.canChangeFiles) {
             Text(stringResource(R.string.storage_reset_app_data), color = MaterialTheme.colorScheme.error)

@@ -82,6 +82,7 @@
     <string name="metered_pause_title">Continue on mobile data?</string>
     <string name="metered_pause_text">The connection is metered now, so the download is paused. It goes on by itself on Wi-Fi.</string>
     <string name="metered_continue">Continue on mobile data</string>
+    <string name="metered_wait_wifi">Wait for Wi-Fi</string>
     <string name="settings_use_default">Use the default</string>
     <string name="settings_logline">Install, update, and launch Flatpaks on Android.</string>
     <string name="overview_time_used">Time in apps</string>
@@ -123,6 +124,9 @@
     <string name="storage_part_app_data">App data</string>
     <string name="app_settings_xwayland">Xwayland</string>
     <string name="app_settings_xwayland_hint">Also offers X11 while the app runs on Wayland, for programs it starts that only use X11, such as a launcher\'s games. They run slower than with Force X11.</string>
+    <string name="app_settings_terminal">Terminal</string>
+    <string name="app_settings_terminal_hint">A shell where the app runs, starting in its home, with the same access as the app.</string>
+    <string name="app_settings_open_terminal">Open terminal</string>
     <string name="app_settings_app_home_hint">The app\'s own home as a zip: the files and folders it saved, with Documents, Downloads and the rest.</string>
     <string name="app_settings_app_data_hint">The app\'s own settings and data, without its home. The zip has desktop Flatpak\'s layout, so it can move to another device or a computer.</string>
     <string name="storage_part_home">App home</string>
@@ -282,6 +286,7 @@
     <string name="browse_screenshots_mobile_data">Screenshots aren\'t loaded on mobile data, as set under Flatpak in Flatdroid\'s settings.</string>
     <string name="browse_filter_verified">Verified</string>
     <string name="browse_filter_runtimes">Uses installed runtimes</string>
+    <string name="browse_filter_not_proprietary">Not proprietary</string>
     <string name="browse_sort_popular">Popular</string>
     <string name="browse_sort_name">Name</string>
     <string name="browse_sort_added">Recently added</string>
@@ -416,6 +421,7 @@
     </plurals>
     <string name="task_log_baselines_at_launch">Baselines not recorded yet are recorded when each app next starts.</string>
     <string name="task_log_retrying">Trying again after the repair</string>
+    <string name="task_log_network_retry">The network changed: trying again</string>
     <plurals name="task_log_removed_broken">
         <item quantity="one">(removed %1$d file whose content was gone)</item>
         <item quantity="other">(removed %1$d files whose content was gone)</item>

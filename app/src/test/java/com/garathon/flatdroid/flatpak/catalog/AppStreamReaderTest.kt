@@ -101,6 +101,7 @@ class AppStreamReaderTest {
             maps.details.description,
         )
         assertEquals("GPL-2.0-or-later", maps.details.license)
+        assertFalse(maps.app.proprietary)
         // Only web links.
         assertEquals(listOf("homepage" to "https://apps.gnome.org/Maps/"), maps.details.urls)
         // The smallest thumbnail that is still sharp on a phone; only https pictures.
@@ -194,5 +195,14 @@ class AppStreamReaderTest {
         val again = CatalogIndex.read(dir)!!
         assertEquals(written.apps, again.apps)
         assertEquals(listOf(TextBlock.Paragraph("QGIS")), again.details("org.qgis.qgis")!!.description)
+    }
+
+    @Test
+    fun proprietaryLicensesAsFlathubWritesThem() {
+        assertTrue(CatalogApp.isProprietary("LicenseRef-proprietary"))
+        assertTrue(CatalogApp.isProprietary("LicenseRef-proprietary=https://example.com/eula"))
+        assertTrue(CatalogApp.isProprietary("MIT AND LicenseRef-proprietary"))
+        assertFalse(CatalogApp.isProprietary("GPL-3.0-or-later"))
+        assertFalse(CatalogApp.isProprietary(null))
     }
 }

@@ -1,7 +1,9 @@
 package com.garathon.flatdroid.flatpak
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -21,6 +23,19 @@ class FlatpakInstallationTest {
         assertEquals(FlatpakRef("org.xfce.mousepad", "aarch64", "stable"), app.ref)
         assertEquals("mousepad", app.metadata.command)
         assertEquals(File(tmp.root.canonicalFile, "app/org.xfce.mousepad/aarch64/stable/0123abcd/files"), app.files)
+    }
+
+    @Test
+    fun aReinstallCountsFromItsInstall() {
+        TestInstallation(tmp.root).app("org.xfce.mousepad", metadata = appMetadata)
+        val installation = FlatpakInstallation(tmp.root, "aarch64")
+        // The app's folder kept its first install's time through an uninstall.
+        File(tmp.root, "app/org.xfce.mousepad").setLastModified(1_000_000L)
+        assertEquals(1_000_000L, installation.installed("org.xfce.mousepad"))
+        assertTrue(installation.markInstalled("org.xfce.mousepad", now = 2_000_000L))
+        assertEquals(2_000_000L, installation.installed("org.xfce.mousepad"))
+        assertFalse(installation.markInstalled("a.b.Missing"))
+        assertFalse(installation.markInstalled("../x"))
     }
 
     @Test

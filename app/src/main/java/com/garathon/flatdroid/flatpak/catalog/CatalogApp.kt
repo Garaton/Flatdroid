@@ -13,7 +13,20 @@ data class CatalogApp(
     val icon: String?,
     /** The runtime it needs, as `<ID>/<branch>` (`org.gnome.Platform/49`); null when the catalog doesn't say. */
     val runtime: String? = null,
-)
+    /** Its license is proprietary ([isProprietary]): the browser can leave such apps out. */
+    val proprietary: Boolean = false,
+) {
+    companion object {
+        /**
+         * Whether AppStream's `project_license` names a proprietary license: Flathub's convention is
+         * `LicenseRef-proprietary` (alone, or with `=<terms URL>`, or in an expression). An app with no
+         * license given isn't counted as proprietary.
+         */
+        fun isProprietary(license: String?): Boolean = license?.contains(PROPRIETARY, ignoreCase = true) == true
+
+        private const val PROPRIETARY = "LicenseRef-proprietary"
+    }
+}
 
 /** What an app's page adds to [CatalogApp]: read from the index when the page opens. */
 data class CatalogDetails(

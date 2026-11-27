@@ -67,8 +67,8 @@ class CatalogIndex private constructor(
         const val LIST = "list"
         const val DETAILS = "details"
         const val SEARCH = "search"
-        /** 3: each app once (format 1 could hold an app twice, once per branch), its runtime, and [SEARCH]. 4: no verified flag (Flathub's lists say). */
-        private const val FORMAT = 4
+        /** 3: each app once (format 1 could hold an app twice, once per branch), its runtime, and [SEARCH]. 4: no verified flag (Flathub's lists say). 5: the proprietary flag. */
+        private const val FORMAT = 5
         private const val STABLE = "stable"
 
         /**
@@ -173,6 +173,7 @@ class CatalogIndex private constructor(
             writeList(out, app.keywords)
             writeOptional(out, app.icon)
             writeOptional(out, app.runtime)
+            out.writeBoolean(app.proprietary)
         }
 
         private fun readApp(input: DataInputStream) = CatalogApp(
@@ -184,6 +185,7 @@ class CatalogIndex private constructor(
             keywords = readList(input),
             icon = readOptional(input),
             runtime = readOptional(input),
+            proprietary = input.readBoolean(),
         )
 
         private fun writeDetails(out: DataOutputStream, details: CatalogDetails) {

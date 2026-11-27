@@ -53,6 +53,8 @@ data class PendingLaunch(
     val prepareElectron: Boolean,
     /** The Alpine packages the user agreed to add before this launch ([SessionState.PackagesOffer]). */
     val addPackages: PackageGroup? = null,
+    /** The app's terminal instead of the app ([com.garathon.flatdroid.launcher.LaunchOptions.shell]). */
+    val shell: Boolean = false,
 )
 
 /**

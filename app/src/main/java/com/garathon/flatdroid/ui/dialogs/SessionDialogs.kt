@@ -43,30 +43,41 @@ import com.garathon.flatdroid.ui.common.LogText
 import com.garathon.flatdroid.ui.common.rememberFlathubLinksAllowed
 import kotlinx.coroutines.launch
 
-/** A download is about to start on a metered connection (mobile data, mostly): the user decides. */
+/** A download is about to start on a metered connection (mobile data, mostly): the user decides, or it waits for Wi-Fi ([onWait]). */
 @Composable
-fun MobileDataDialog(onDownload: () -> Unit, onDismiss: () -> Unit) {
+fun MobileDataDialog(onDownload: () -> Unit, onWait: () -> Unit, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.mobile_data_title)) },
         text = { Text(stringResource(R.string.mobile_data_text)) },
         confirmButton = { Button(onClick = onDownload) { Text(stringResource(R.string.mobile_data_download)) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
+        dismissButton = {
+            Row {
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+                TextButton(onClick = onWait) { Text(stringResource(R.string.metered_wait_wifi)) }
+            }
+        },
     )
 }
 
 /**
  * A running download found itself on a metered connection and is paused (FlatpakTaskUi.meteredWait):
- * it goes on here on mobile data, or on Wi-Fi by itself. Only its buttons close it.
+ * it goes on here on mobile data, waits for Wi-Fi without the dialog ([onWait]), or goes on on
+ * Wi-Fi by itself. Only its buttons close it.
  */
 @Composable
-fun MeteredPauseDialog(onContinue: () -> Unit, onCancel: () -> Unit) {
+fun MeteredPauseDialog(onContinue: () -> Unit, onWait: () -> Unit, onCancel: () -> Unit) {
     AlertDialog(
         onDismissRequest = {},
         title = { Text(stringResource(R.string.metered_pause_title)) },
         text = { Text(stringResource(R.string.metered_pause_text)) },
         confirmButton = { Button(onClick = onContinue) { Text(stringResource(R.string.metered_continue)) } },
-        dismissButton = { TextButton(onClick = onCancel) { Text(stringResource(R.string.cancel)) } },
+        dismissButton = {
+            Row {
+                TextButton(onClick = onCancel) { Text(stringResource(R.string.cancel)) }
+                TextButton(onClick = onWait) { Text(stringResource(R.string.metered_wait_wifi)) }
+            }
+        },
     )
 }
 

@@ -322,6 +322,8 @@ object ProotCommand {
         filter: Fdsec.Filter,
         /** A terminal app's terminal ([Fdsec.wrap]). */
         tty: String? = null,
+        /** Where the command starts: the home, as Flatpak starts apps (file dialogs then open there). */
+        cwd: String = GuestPaths.HOME,
     ): ProotInvocation {
         require(command.isNotEmpty() && command[0].startsWith("/")) {
             "Guest command must start with an absolute path: $command"
@@ -334,8 +336,7 @@ object ProotCommand {
             "--link2symlink",
             "-L",
             "--rootfs=${binds.root}",
-            // As Flatpak: apps start in the home, where file dialogs then open.
-            "--cwd=${GuestPaths.HOME}",
+            "--cwd=$cwd",
             // Flatpak's hard links are symlinks into .l2s, at its host path.
             "--bind=${paths.l2sDir}",
             "--bind=${binds.runtimeFiles}:/usr",

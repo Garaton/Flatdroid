@@ -8,6 +8,7 @@ import android.media.AudioManager
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.os.ParcelFileDescriptor
 import android.system.Os
 import android.view.Display
 import android.view.Surface
@@ -34,6 +35,7 @@ import com.garathon.flatdroid.camera.ScreenStreamer
 import com.garathon.flatdroid.flatpak.integrity.AndroidLinkFs
 import com.garathon.flatdroid.session.helpers.PulseScript
 import com.garathon.flatdroid.session.bus.AndroidAppearance
+import com.garathon.flatdroid.session.bus.HostCommandBus
 import com.garathon.flatdroid.session.bus.Portal
 import com.garathon.flatdroid.session.bus.SessionPortal
 import com.garathon.flatdroid.session.helpers.SessionBus
@@ -140,6 +142,8 @@ class FlatpakLauncher(private val context: Context) {
     private val alpinePrograms = AlpinePrograms.of(rootfs)
     /** An Alpine program's root ([AlpineRoot]) while [run] launches one; null for a Flatpak. */
     private var alpineRoot: AlpineRoot? = null
+    /** This session is the app's terminal ([LaunchOptions.shell]): the app itself doesn't run, so its use isn't counted. */
+    private var shellSession = false
     /** An Alpine program's empty /app, emptied for each of its launches. */
     private val emptyApp = File(sessionDir, "alpine-app")
 
@@ -187,8 +191,9 @@ class FlatpakLauncher(private val context: Context) {
      * must first agree to an Electron swap or to Alpine packages (the offer is then in [SessionController]). [answers]:
      * the user's answers about the microphone and camera when asked before the launch.
      */
-    fun run(appId: String, answers: Map<Sensor, Boolean> = emptyMap()): Boolean {
+    fun run(appId: String, answers: Map<Sensor, Boolean> = emptyMap(), shell: Boolean = false): Boolean {
         ending = null
+        shellSession = shell
         SessionController.starting(appId, context.getString(R.string.session_reading_metadata), clearLog = true)
         // Every Flatpak could otherwise open Flatdroid's memory through /proc (same user).
         if (!FlatdroidApplication.nonDumpable) throw LaunchException(context.getString(R.string.launch_dumpable))
@@ -249,10 +254,10 @@ class FlatpakLauncher(private val context: Context) {
         }
         // X11, or a terminal app's terminal, the first time an app needs them: the user is asked first.
         SessionPackages.missing(context, PackageGroup.needed(plan.wayland, plan.terminal))?.let { group ->
-            SessionController.offerPackages(SessionState.PackagesOffer(appId, group))
+            SessionController.offerPackages(SessionState.PackagesOffer(appId, group, shell = shellSession))
             return false
         }
-        store.update { it.copy(lastOpened = System.currentTimeMillis()) }
+        if (!shellSession) store.update { it.copy(lastOpened = System.currentTimeMillis()) }
 
         // Alpine's files aren't the installation's: Alpine safe launch checks those.
         if (alpineRoot == null && userSettings?.security?.checkFilesBeforeLaunch == true && !checkFiles(appId)) return false
@@ -349,6 +354,9 @@ class FlatpakLauncher(private val context: Context) {
         var mic: MicrophoneSession? = null
         var dns: ResolvConfRefresher? = null
         var portal: SessionPortal? = null
+        // Commands the app runs "on the host" over D-Bus, for apps that may ask for the host (not Alpine programs, as the stand-ins).
+        val hostRuns = if (alpineRoot != null || !HostCommands.hostAllowed(plan.app.metadata.sessionBusPolicy, plan.app.metadata.context.sockets)) null
+            else HostRuns(prootPaths(appId), SessionController::log)
         val streamers = LinkedHashMap<String, FrameStreamer>()
         var camera: CameraSession? = null
         try {
@@ -413,6 +421,7 @@ class FlatpakLauncher(private val context: Context) {
                     log = SessionController::log,
                     cameraAsked = if (!watchCameraPortal) null else AtomicBoolean().let { seen -> { if (seen.compareAndSet(false, true)) cameraPortalSeen(store) } },
                     appId = appId, notify = settings.sendsNotifications,
+                    hostCommands = hostRuns?.let { HostCommandBus(it, ::descriptorPath) },
                 )
                 camera?.takeIf { portalNodes.isNotEmpty() }?.let {
                     cameraHelpers = startCamera(it, Fdsec.Filter(extraSyscalls = security.extraSyscallFilter, noInternet = true))
@@ -461,6 +470,7 @@ class FlatpakLauncher(private val context: Context) {
             var triedNewerFlags = false
             var triedWithoutFlatpakInfo = false
             while (true) {
+                hostRuns?.plan = plan
                 SessionController.log("[flatdroid] ${plan.command.joinToString(" ")}")
                 for ((host, guest) in plan.binds.extensions) SessionController.log("[flatdroid] extension $host -> $guest")
                 val gpuFailed = AtomicBoolean(false)
@@ -489,7 +499,7 @@ class FlatpakLauncher(private val context: Context) {
                 if (runningSince == null) {
                     runningSince = System.currentTimeMillis()
                     // Counted once the app runs, so a launch that failed or was stopped while starting isn't.
-                    store.update { it.copy(launches = it.launches + 1) }
+                    if (!shellSession) store.update { it.copy(launches = it.launches + 1) }
                 }
                 SessionController.running(
                     if (externalViewer) SessionState.Running(appId, password, username = WaylandVnc.USERNAME.takeIf { plan.wayland })
@@ -570,13 +580,14 @@ class FlatpakLauncher(private val context: Context) {
                 }
             }
             // The time the app ran, simply from its start to here: nothing is measured while it runs.
-            step { runningSince?.let { start -> store.update { it.copy(usedMillis = it.usedMillis + (System.currentTimeMillis() - start)) } } }
+            if (!shellSession) step { runningSince?.let { start -> store.update { it.copy(usedMillis = it.usedMillis + (System.currentTimeMillis() - start)) } } }
             step { dns?.stop() }
             // The sound first: a paused app is let go on below, and what it plays while it ends
             // would be heard though it was muted.
             step { player?.stop() }
             // A paused app ignores the signals that end it: let it go on first.
             step { HiddenPause.detach() }
+            step { hostRuns?.stopAll() }
             step { app?.stop() }
             step { portal?.close() }
             step { mic?.stop() }
@@ -815,6 +826,10 @@ class FlatpakLauncher(private val context: Context) {
         DesktopConfig.kdeglobals(dark, darkScheme)?.let { File(desktopDir, "kdeglobals").writeTextAtomically(it, durable = false) }
     }
 
+    /** What [fd] (a descriptor an app passed on the bus) is open on, such as `/dev/pts/3`; null when unreadable. */
+    private fun descriptorPath(fd: java.io.FileDescriptor): String? =
+        runCatching { ParcelFileDescriptor.dup(fd).use { Os.readlink("/proc/self/fd/${it.fd}") } }.getOrNull()
+
     /** The "run on the host" stand-ins, for whether this app may ask for the host, and Flatdroid's zypak when the plan has it. */
     private fun writeHostCommands(plan: LaunchPlan) {
         val metadata = plan.app.metadata
@@ -867,6 +882,7 @@ class FlatpakLauncher(private val context: Context) {
             limitDevices = security.limitDevices,
             reduceMotion = user?.reduceMotion == true,
             terminal = InstalledApps(context).runsInTerminal(appId),
+            shell = shellSession,
             alpine = alpine,
             softwareRendering = when (settings.rendering) {
                 Rendering.SOFTWARE -> true

@@ -76,6 +76,10 @@ class AppSettingsEnv(
     val limitDevices: Boolean,
     /** Removes this app's Flatdroid settings file; the screen then closes. */
     val onResetFlatdroidSettings: () -> Unit,
+    /** Nothing else runs, so the app's terminal can open ([onOpenTerminal]). */
+    val canOpenTerminal: Boolean = false,
+    /** Opens a shell in the app's own root, in a terminal (a developer option); the screen goes Home. */
+    val onOpenTerminal: () -> Unit = {},
 )
 
 /** The draft and its environment, as the pages see them. */

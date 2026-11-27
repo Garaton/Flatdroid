@@ -152,6 +152,7 @@ class SessionService : Service() {
         val prepareElectron = intent.action == ACTION_PREPARE_ELECTRON
         val packages = if (intent.action != ACTION_ADD_PACKAGES) null else PackageGroup.entries.firstOrNull { it.name == intent.getStringExtra(EXTRA_PACKAGES) }
         val shellUser = AlpineShellUser.entries.firstOrNull { it.key == intent.getStringExtra(EXTRA_SHELL_USER) }
+        val appShell = intent.getBooleanExtra(EXTRA_APP_SHELL, false)
         val answers = Sensor.entries.filter { intent.hasExtra(answerExtra(it)) }.associateWith { intent.getBooleanExtra(answerExtra(it), false) }
         val notifications = getSystemService(NotificationManager::class.java)
         val updates = scope.launch {
@@ -200,7 +201,7 @@ class SessionService : Service() {
                             SessionController.preparing(appId, getString(R.string.electron_preparing), null)
                             launcher.prepareElectron(appId)
                         }
-                        if (!launcher.run(appId, answers)) return@runInterruptible
+                        if (!launcher.run(appId, answers, shell = appShell)) return@runInterruptible
                         launcher.ending
                     }
                     // A crash, a kill or an error exit is an error, not a plain close.
@@ -491,13 +492,15 @@ class SessionService : Service() {
         private const val ACTION_ALPINE_SHELL = "com.garathon.flatdroid.action.ALPINE_SHELL"
         private const val EXTRA_PACKAGES = "packages"
         private const val EXTRA_SHELL_USER = "shellUser"
+        private const val EXTRA_APP_SHELL = "appShell"
         private const val ACTION_STOP = "com.garathon.flatdroid.action.STOP"
         private const val ACTION_ALLOW = "com.garathon.flatdroid.action.ALLOW"
         private const val ACTION_DENY = "com.garathon.flatdroid.action.DENY"
         private const val ACTION_RESUME_NO_WINDOW = "com.garathon.flatdroid.action.RESUME_NO_WINDOW"
 
         /** [answers]: the user's answers about the microphone and camera for the session, when asked before the launch. */
-        fun launch(context: Context, appId: String, answers: Map<Sensor, Boolean> = emptyMap()) = start(context, ACTION_LAUNCH, appId, answers)
+        fun launch(context: Context, appId: String, answers: Map<Sensor, Boolean> = emptyMap(), shell: Boolean = false) =
+            start(context, ACTION_LAUNCH, appId, answers) { if (shell) putExtra(EXTRA_APP_SHELL, true) }
 
         /** Alpine's shell in a terminal window (a developer option), after adding [packages] when the user agreed to. */
         fun alpineShell(context: Context, user: AlpineShellUser?, packages: PackageGroup? = null) =
@@ -511,8 +514,11 @@ class SessionService : Service() {
             start(context, ACTION_PREPARE_ELECTRON, appId, answers)
 
         /** After the user agreed to add [group] to Alpine: add it, then launch. */
-        fun addPackagesAndLaunch(context: Context, appId: String, group: PackageGroup, answers: Map<Sensor, Boolean> = emptyMap()) =
-            start(context, ACTION_ADD_PACKAGES, appId, answers) { putExtra(EXTRA_PACKAGES, group.name) }
+        fun addPackagesAndLaunch(context: Context, appId: String, group: PackageGroup, answers: Map<Sensor, Boolean> = emptyMap(), shell: Boolean = false) =
+            start(context, ACTION_ADD_PACKAGES, appId, answers) {
+                putExtra(EXTRA_PACKAGES, group.name)
+                if (shell) putExtra(EXTRA_APP_SHELL, true)
+            }
 
         /** Whether the microphone and camera questions can be posted: notifications, and their channel, aren't blocked. */
         fun canAskInNotification(context: Context): Boolean {

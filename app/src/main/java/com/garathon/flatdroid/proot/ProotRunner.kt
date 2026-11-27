@@ -84,6 +84,13 @@ object ProotRunner {
     const val MAX_LINE_CHARS = 8192
 
     /**
+     * Where a started proot's standard input, output and error go instead of Flatdroid's pipes
+     * ([start]'s stdin and onLine then get nothing): files, or paths such as `/proc/self/fd/N` that
+     * reopen what Flatdroid holds. Android 8 and later (redirects).
+     */
+    data class Stdio(val input: File, val output: File, val error: File)
+
+    /**
      * Starts [invocation]; [stdin] is written and closed. Without [stdin] the input is /dev/null, as
      * a desktop starts apps: some read a pipe on their input as data to work on (a QR scanner
      * decoding an image from it, say). Android 7 can't redirect, so there it is an empty pipe (verify).
@@ -93,17 +100,24 @@ object ProotRunner {
         workDir: File,
         stdin: ByteArray? = null,
         signals: Signals = AndroidSignals,
+        stdio: Stdio? = null,
         onLine: (String) -> Unit = {},
     ): ProotProcess {
         val builder = ProcessBuilder(invocation.argv)
             .directory(workDir)
-            .redirectErrorStream(true)
+            .redirectErrorStream(stdio == null)
         builder.environment().apply {
             clear()
             putAll(invocation.env)
         }
-        val devNull = stdin == null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
-        if (devNull) builder.redirectInput(File("/dev/null"))
+        val devNull = (stdin == null || stdio != null) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+        if (stdio != null) {
+            require(Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) { "Redirects need Android 8" }
+            // Appended to, not truncated: a file the caller opened for its output keeps what it holds.
+            builder.redirectInput(stdio.input)
+                .redirectOutput(ProcessBuilder.Redirect.appendTo(stdio.output))
+                .redirectError(ProcessBuilder.Redirect.appendTo(stdio.error))
+        } else if (devNull) builder.redirectInput(File("/dev/null"))
         val process = builder.start()
         val writer = if (devNull) null else thread(name = "proot-input") {
             try {

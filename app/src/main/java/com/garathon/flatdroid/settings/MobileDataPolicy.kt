@@ -34,12 +34,14 @@ enum class MeteredWait { ASK, WIFI }
 
 /**
  * Whether a download waits on the network as it is now: on a metered one as [setting] says, unless
- * the user [allowed] mobile data for it ([MobileDataConsent]); never on an unmetered one.
+ * the user [allowed] mobile data for it, or chose to [waitForWifi] instead of being asked
+ * ([MobileDataConsent]); never on an unmetered one.
  */
-fun meteredWait(metered: Boolean, setting: MobileData, allowed: Boolean): MeteredWait? = when {
+fun meteredWait(metered: Boolean, setting: MobileData, allowed: Boolean, waitForWifi: Boolean = false): MeteredWait? = when {
     !metered || setting == MobileData.ALWAYS -> null
     setting == MobileData.NEVER -> MeteredWait.WIFI
     allowed -> null
+    waitForWifi -> MeteredWait.WIFI
     else -> MeteredWait.ASK
 }
 
@@ -48,23 +50,37 @@ fun meteredWait(metered: Boolean, setting: MobileData, allowed: Boolean): Metere
  * paused download asks): it holds for the metered network it was given on, until a running
  * download sees an unmetered one. Android keeps the mobile network up beside Wi-Fi, so it is the
  * same network again after Wi-Fi drops; the yes is dropped on Wi-Fi so that the next drop asks.
- * Kept for Flatdroid's process only.
+ * "Wait for Wi-Fi" instead (either question) is kept the same way: downloads then wait on that
+ * network without asking, until Wi-Fi. Kept for Flatdroid's process only.
  */
 object MobileDataConsent {
     @Volatile private var network: Network? = null
+    @Volatile private var waitNetwork: Network? = null
 
     /** Yes for the network that is the default now. */
-    fun allowNow(context: Context) {
-        network = context.getSystemService(ConnectivityManager::class.java)?.activeNetwork
-    }
+    fun allowNow(context: Context) = allow(activeNetwork(context))
 
     fun allow(on: Network?) {
         network = on
+        waitNetwork = null
     }
 
     fun allowed(on: Network?): Boolean = on != null && on == network
 
-    fun clear() {
+    /** Wait for Wi-Fi on the network that is the default now, without asking again there. */
+    fun waitNow(context: Context) = waitOn(activeNetwork(context))
+
+    fun waitOn(on: Network?) {
+        waitNetwork = on
         network = null
     }
+
+    fun waits(on: Network?): Boolean = on != null && on == waitNetwork
+
+    fun clear() {
+        network = null
+        waitNetwork = null
+    }
+
+    private fun activeNetwork(context: Context) = context.getSystemService(ConnectivityManager::class.java)?.activeNetwork
 }

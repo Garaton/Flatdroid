@@ -43,11 +43,19 @@ class FlatpakInstallation(root: File, private val arch: String) {
         File(root, "app").listFiles { f -> f.isDirectory }?.map { it.name }?.filter(::isValidId)?.sorted() ?: emptyList()
 
     /**
-     * When the app was installed, in milliseconds since the epoch: its directory changes only when
-     * a branch or architecture is added, not on updates; null if it isn't installed.
+     * When the app was installed, in milliseconds since the epoch: its directory's time, which
+     * updates don't change and [markInstalled] sets; null if it isn't installed.
      */
     fun installed(id: String): Long? =
         if (isValidId(id)) File(root, "app/$id").lastModified().takeIf { it > 0 } else null
+
+    /**
+     * Records that [id] was installed now ([installed]). Flatpak's uninstall can leave the app's
+     * directory behind (its architecture's folder, or `current`), so after a reinstall its time
+     * alone would still be the first install's. Whether it was set.
+     */
+    fun markInstalled(id: String, now: Long = System.currentTimeMillis()): Boolean =
+        isValidId(id) && File(root, "app/$id").let { it.isDirectory && it.setLastModified(now) }
 
     /** The app's current deployment (the branch Flatpak marks as current, else the only one). */
     fun app(id: String): Deployment? {

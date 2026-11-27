@@ -25,6 +25,9 @@ class MobileDataPolicyTest {
     @Test
     fun aYesHoldsOnlyWhenAsked() {
         assertNull(meteredWait(metered = true, MobileData.ASK, allowed = true))
+        // Wait for Wi-Fi instead of asking; a yes still wins, and it changes nothing off mobile data.
+        assertEquals(MeteredWait.WIFI, meteredWait(metered = true, MobileData.ASK, allowed = false, waitForWifi = true))
+        assertNull(meteredWait(metered = false, MobileData.ASK, allowed = false, waitForWifi = true))
         // Off is off: an earlier yes doesn't override it.
         assertEquals(MeteredWait.WIFI, meteredWait(metered = true, MobileData.NEVER, allowed = true))
     }

@@ -129,6 +129,13 @@ import com.garathon.flatdroid.ui.settings.app.UninstallDialog
 import com.garathon.flatdroid.util.debug.DebugLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import androidx.compose.animation.core.Animatable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
+import kotlin.math.abs
 
 /** What Flathub said about an app's sizes and permissions. */
 private sealed interface Summary {
@@ -594,8 +601,11 @@ private const val WINDOW = 6
 private const val BUILT_AHEAD = 2
 
 /**
- * Screenshots full size over everything, starting at [start]; swiped through. The original picture
- * loads over the phone-sized one already shown, so something is there at once.
+ * Screenshots full size over everything, starting at [start]; swiped through sideways. Closed by
+ * its X, Back, or swiping the picture up or down past [DISMISS_DRAG] (it follows the finger and
+ * the black fades; a shorter swipe springs back). A tap does nothing, so looking closely doesn't
+ * close it. The original picture loads over the phone-sized one already shown, so something is
+ * there at once.
  */
 @Composable
 private fun ScreenshotViewer(shots: List<Screenshot>, start: Int, onClose: () -> Unit) {
@@ -603,8 +613,20 @@ private fun ScreenshotViewer(shots: List<Screenshot>, start: Int, onClose: () ->
     val loader = CatalogImages.loader(context)
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         val pager = rememberPagerState(initialPage = start) { shots.size }
-        Box(Modifier.fillMaxSize().background(Color.Black).clickable(onClick = onClose)) {
-            HorizontalPager(pager, Modifier.fillMaxSize()) { page ->
+        val scope = rememberCoroutineScope()
+        val dragY = remember { Animatable(0f) }
+        val dismissPx = with(LocalDensity.current) { DISMISS_DRAG.toPx() }
+        val swipe = Modifier.pointerInput(Unit) {
+            detectVerticalDragGestures(
+                onDragEnd = { if (abs(dragY.value) > dismissPx) onClose() else scope.launch { dragY.animateTo(0f) } },
+                onDragCancel = { scope.launch { dragY.animateTo(0f) } },
+            ) { change, amount ->
+                change.consume()
+                scope.launch { dragY.snapTo(dragY.value + amount) }
+            }
+        }
+        Box(Modifier.fillMaxSize().graphicsLayer { alpha = 1f - (abs(dragY.value) / (dismissPx * 3)).coerceAtMost(0.6f) }.background(Color.Black).then(swipe)) {
+            HorizontalPager(pager, Modifier.fillMaxSize().graphicsLayer { translationY = dragY.value }) { page ->
                 val shot = shots[page]
                 Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
                     Box(Modifier.weight(1f, fill = false)) {
@@ -717,6 +739,9 @@ private fun permissionName(permission: FlathubApp.Permission) = when (permission
 }
 
 private val SCREENSHOT_HEIGHT = 240.dp
+
+/** How far a full-size screenshot is swiped up or down to close it. */
+private val DISMISS_DRAG = 120.dp
 
 /** The buttons' height beside the header in landscape: two icon buttons, one over the other. */
 private val LANDSCAPE_BUTTON_HEIGHT = 84.dp

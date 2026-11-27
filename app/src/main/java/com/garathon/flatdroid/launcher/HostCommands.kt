@@ -34,7 +34,8 @@ object HostCommands {
      * goes by the defaults instead, where an app puts files meant for the host (an app menu entry
      * in `~/.local/share/applications`, found by `gtk-launch`).
      */
-    private const val HOST_UNSET = "XDG_CONFIG_HOME XDG_DATA_HOME XDG_CACHE_HOME XDG_STATE_HOME"
+    val HOST_UNSET_NAMES = listOf("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME")
+    private val HOST_UNSET = HOST_UNSET_NAMES.joinToString(" ")
 
     /** The message Flatpak's tools print when [FLATPAK_NAME] isn't reachable. */
     private const val NOT_PROVIDED =

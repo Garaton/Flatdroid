@@ -55,9 +55,10 @@ sealed interface SessionState {
     data class ElectronOffer(val appId: String, val version: String?, val fromArch: String, val problem: String?) : SessionState, Question
     /**
      * The app's session needs [group] in Alpine, which isn't there yet; the user is asked before
-     * Flatdroid downloads it.
+     * Flatdroid downloads it. [shell]: for the app's terminal
+     * ([com.garathon.flatdroid.launcher.LaunchOptions.shell]), which goes on after the packages.
      */
-    data class PackagesOffer(val appId: String, val group: PackageGroup) : SessionState, Question
+    data class PackagesOffer(val appId: String, val group: PackageGroup, val shell: Boolean = false) : SessionState, Question
     /** What the user agreed to (an Electron swap, Alpine packages) is being downloaded and put in place. */
     data class Preparing(val appId: String, val detail: String, val fraction: Float?) : SessionState
     /**
