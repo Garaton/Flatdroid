@@ -68,7 +68,7 @@ fun LaunchCover(
             val fraction = starting?.takeIf { ours }?.fraction
             val progress = Modifier.padding(top = 24.dp).width(240.dp)
             if (fraction != null) LinearProgressIndicator(progress = { fraction }, modifier = progress)
-            else BusyLine(progress)
+            else BusyLine(progress, background = MaterialTheme.colorScheme.background)
             if (ours) {
                 Row(Modifier.padding(top = 24.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     if (starting?.skippable == true) TextButton(onClick = onSkipCheck) { Text(stringResource(R.string.session_skip_check)) }

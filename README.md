@@ -258,6 +258,8 @@ Flatdroid does not collect, and does not care to collect any of your own persona
 
 | placeholder |
 
+Commit messages must be 80 characters maximum per line.
+
 AI usage must be disclosed.
 
 PRoot patches are to be kept to a minimum. Patches must be submitted by themselves or only with the feature they are coupled to. And the patch must be duly justified to why it wasn't pushed upstream, and what the patch contributes to Flatdroid.

@@ -216,7 +216,7 @@ private fun TaskAndSessionBar(
                 if (bar.running) {
                     val progress = bar.progress
                     if (progress != null) LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth().padding(0.dp))
-                    else BusyLine(Modifier.fillMaxWidth())
+                    else BusyLine(Modifier.fillMaxWidth(), background = if (bar.failed) colors.errorContainer else colors.secondaryContainer)
                 }
                 Row(
                     Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(start = 16.dp, end = 4.dp),
