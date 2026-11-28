@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import com.garathon.flatdroid.R
 import com.garathon.flatdroid.flatpak.InstalledApp
 import com.garathon.flatdroid.session.SessionState
+import com.garathon.flatdroid.ui.common.BusyLine
 
 /**
  * Covers Flatdroid's window while an app a home-screen shortcut started is on its way: its icon,
@@ -67,7 +68,7 @@ fun LaunchCover(
             val fraction = starting?.takeIf { ours }?.fraction
             val progress = Modifier.padding(top = 24.dp).width(240.dp)
             if (fraction != null) LinearProgressIndicator(progress = { fraction }, modifier = progress)
-            else LinearProgressIndicator(modifier = progress)
+            else BusyLine(progress)
             if (ours) {
                 Row(Modifier.padding(top = 24.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     if (starting?.skippable == true) TextButton(onClick = onSkipCheck) { Text(stringResource(R.string.session_skip_check)) }

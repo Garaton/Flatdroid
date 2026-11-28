@@ -48,7 +48,6 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -108,6 +107,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.garathon.flatdroid.ui.common.BusySpinner
 
 /**
  * The running session's screen, full screen under a slim bar (back to the app list, the soft
@@ -336,7 +336,7 @@ class ViewerActivity : ComponentActivity() {
     @Composable
     private fun Opening(modifier: Modifier) {
         Column(modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            CircularProgressIndicator(Modifier.size(32.dp))
+            BusySpinner(Modifier.size(32.dp))
             Text(stringResource(R.string.viewer_opening, appLabel), style = MaterialTheme.typography.bodyMedium, color = Color.White)
         }
     }

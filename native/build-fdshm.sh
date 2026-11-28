@@ -1,12 +1,14 @@
 #!/bin/sh
-# Builds libfdshm.so, the shm_open preload for the Wayland helpers (fdshm.c), and libfdmemfd.so,
-# its memfd_create alone for apps on kernels without memfd, for one Android ABI: shared libraries
-# without a C library, loaded into musl and glibc programs. They may need only __errno_location
-# from the program's libc.
+# Builds libfdshm.so, the shm_open preload for the Wayland helpers (fdshm.c), libfdmemfd.so,
+# its memfd_create alone for apps on kernels without memfd, and libfdstatx.so, syscall() with
+# statx's mount ID and fstatfs() on O_PATH descriptors for Alpine's commands on kernels before 5.8
+# (fdstatx.c), for one Android ABI:
+# shared libraries without a C library, loaded into musl and glibc programs. They may need only
+# __errno_location from the program's libc.
 #
 #   build-fdshm.sh <abi> <ndk dir> <output dir>
 #
-# abi: arm64-v8a or x86_64. Outputs <output dir>/libfdshm.so and libfdmemfd.so.
+# abi: arm64-v8a or x86_64. Outputs <output dir>/libfdshm.so, libfdmemfd.so and libfdstatx.so.
 set -eu
 
 API=24
@@ -30,12 +32,12 @@ mkdir -p "$OUT"
 # libfdshm.so for the helpers; libfdmemfd.so, memfd_create alone, for apps on kernels without memfd.
 fail=0
 build() {
-    name=$1 defines=$2 symbols=$3
+    name=$1 defines=$2 symbols=$3 source=${4:-fdshm.c}
     F=$OUT/$name
     "$TC/bin/clang" --target=$TRIPLE$API -O2 -Wall -Wextra -Werror \
         -ffreestanding -fno-builtin -fno-stack-protector -fPIC $ARCH_FLAGS $defines \
         -nostdlib -shared -Wl,-soname,$name -Wl,-z,relro,-z,now -Wl,-z,max-page-size=$PAGE_SIZE -Wl,--build-id=none \
-        -o "$F" "$HERE/fdshm.c"
+        -o "$F" "$HERE/$source"
     "$TC/bin/llvm-strip" --strip-all "$F"
     RE=$TC/bin/llvm-readelf
     "$RE" -dW "$F" | grep -q NEEDED && { echo "FAIL $name: needs a library" >&2; fail=1; }
@@ -51,4 +53,5 @@ build() {
 }
 build libfdshm.so "" "fchmod memfd_create shm_open shm_unlink"
 build libfdmemfd.so -DFDSHM_MEMFD_ONLY "memfd_create"
+build libfdstatx.so "" "fstatfs syscall" fdstatx.c
 [ $fail -eq 0 ] || exit 1

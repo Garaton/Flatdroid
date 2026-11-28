@@ -26,6 +26,18 @@ class ProotCommandTest {
     )
 
     @Test
+    fun oldKernelsPreloadTheStatxLibraryInAlpine() {
+        val inv = ProotCommand.alpine(paths.copy(fdstatx = "/lib/libfdstatx.so"), binds, listOf("/usr/bin/flatpak", "--version"))
+        assertTrue("--bind=/lib/libfdstatx.so:${Fdstatx.ALPINE_PATH}" in inv.argv)
+        // Inside the root only: proot's own environment would reach Android's loader.
+        assertEquals(listOf("/usr/bin/env", "LD_PRELOAD=${Fdstatx.ALPINE_PATH}", "/usr/bin/flatpak", "--version"), inv.argv.takeLast(4))
+        assertNull(inv.env["LD_PRELOAD"])
+        val without = ProotCommand.alpine(paths, binds, listOf("/usr/bin/flatpak", "--version"))
+        assertTrue(without.argv.none { "fdstatx" in it })
+        assertNull(without.env["LD_PRELOAD"])
+    }
+
+    @Test
     fun alpineArgvIsFlagsBindsThenCommand() {
         val inv = ProotCommand.alpine(paths, binds, listOf("/sbin/apk", "--version"))
         assertEquals(

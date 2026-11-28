@@ -42,6 +42,7 @@ import com.garathon.flatdroid.flatpak.tasks.FlatpakTaskUi
 import com.garathon.flatdroid.session.SessionState
 import com.garathon.flatdroid.session.SessionUi
 import com.garathon.flatdroid.ui.common.IconAction
+import com.garathon.flatdroid.ui.common.BusyLine
 
 /**
  * What the bottom bar says now: a Flatpak task under way or finished, or how the last session
@@ -116,12 +117,14 @@ fun StatusBar(
                                 is FlatpakTask.Install -> waiting.appIds
                                 is FlatpakTask.Uninstall -> waiting.appIds
                                 is FlatpakTask.AlpineInstall -> waiting.packages
+                                is FlatpakTask.AlpineRemove -> waiting.appIds
                                 else -> null
                             }
                             if (apps != null && apps.size > 1) {
                                 val group = when (waiting) {
                                     is FlatpakTask.Install -> R.string.queued_install_group
                                     is FlatpakTask.AlpineInstall -> R.string.queued_alpine_install_group
+                                    is FlatpakTask.AlpineRemove -> R.string.queued_alpine_remove_group
                                     else -> R.string.queued_uninstall_group
                                 }
                                 Text(
@@ -130,7 +133,14 @@ fun StatusBar(
                                 )
                                 for (id in apps) {
                                     Row(Modifier.padding(start = 24.dp), verticalAlignment = Alignment.CenterVertically) {
-                                        Text(if (waiting is FlatpakTask.AlpineInstall) id else queuedName(id), modifier = Modifier.weight(1f))
+                                        Text(
+                                            when (waiting) {
+                                                is FlatpakTask.AlpineInstall -> id
+                                                is FlatpakTask.AlpineRemove -> waiting.programs.first { it.appId == id }.packageName
+                                                else -> queuedName(id)
+                                            },
+                                            modifier = Modifier.weight(1f),
+                                        )
                                         IconAction(Icons.Filled.Close, R.string.task_queue_remove, { onUnqueueApp(waiting, id) }, size = 36.dp)
                                     }
                                 }
@@ -164,7 +174,7 @@ private fun queuedLabel(task: FlatpakTask, name: (String) -> String): String = w
     FlatpakTask.BaselineAll -> stringResource(R.string.queued_baseline_all)
     FlatpakTask.Repair -> stringResource(R.string.queued_repair)
     is FlatpakTask.AlpineInstall -> stringResource(R.string.queued_alpine_install, task.packages.joinToString(", "))
-    is FlatpakTask.AlpineRemove -> stringResource(R.string.queued_alpine_remove, task.packageName)
+    is FlatpakTask.AlpineRemove -> stringResource(R.string.queued_alpine_remove, task.packages.joinToString(", "))
 }
 
 @Composable
@@ -206,7 +216,7 @@ private fun TaskAndSessionBar(
                 if (bar.running) {
                     val progress = bar.progress
                     if (progress != null) LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth().padding(0.dp))
-                    else LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    else BusyLine(Modifier.fillMaxWidth())
                 }
                 Row(
                     Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(start = 16.dp, end = 4.dp),

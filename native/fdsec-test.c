@@ -4,6 +4,8 @@
  *   fdsec-test base          under `fdsec`
  *   fdsec-test extra noinet  under `fdsec --extra --no-inet` (either word alone also works)
  *   fdsec-test noconnect     under `fdsec --no-connect`
+ * Under a tracer (strace), the tracer's guard is checked too: signal 0 and prlimit64's read are
+ * harmless either way.
  * Each system call is made with arguments that are harmless whether or not it is blocked.
  * Exits 1 if any result differs from what fdsec should give.
  */
@@ -12,6 +14,9 @@
 #include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
+#include <signal.h>
+#include <stdlib.h>
+#include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/syscall.h>
 #include <unistd.h>
@@ -114,6 +119,27 @@ int main(int argc, char **argv)
 	}
 	/* A bad descriptor: EBADF when connect is allowed. */
 	expect("connect", connect(-1, 0, 0), noconnect, EACCES);
+
+	/* The tracer's guard, when traced. */
+	long tracer = -1;
+	FILE *status = fopen("/proc/self/status", "r");
+	char line[256];
+	while (status && fgets(line, sizeof line, status)) if (!strncmp(line, "TracerPid:", 10)) tracer = atol(line + 10);
+	if (status) fclose(status);
+	if (tracer > 0) {
+		struct rlimit old;
+		pid_t group = getpgid(tracer);
+		expect("kill tracer", kill(tracer, 0), base, EPERM);
+		expect("kill -1", kill(-1, 0), base, EPERM);
+		if (group > 0) expect("kill tracer group", kill(-group, 0), base, EPERM);
+		expect("tkill tracer", syscall(SYS_tkill, tracer, 0), base, EPERM);
+		expect("tgkill tracer", syscall(SYS_tgkill, tracer, tracer, 0), base, EPERM);
+		expect("prlimit64 tracer", syscall(SYS_prlimit64, tracer, RLIMIT_CPU, 0, &old), base, EPERM);
+		expect("kill self", kill(self, 0), 0, EPERM);
+		expect("kill own group", kill(0, 0), 0, EPERM);
+		/* Its own session, so its group isn't the tracer's. */
+		expect("own session", getsid(0) == self ? 0 : -1, 0, 0);
+	}
 
 	printf("%d failure(s)\n", failures);
 	return failures != 0;

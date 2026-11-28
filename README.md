@@ -10,6 +10,7 @@ An Android based Flatpak runner which uses proot to provide the needed environme
 - [Installation](#installation)
 - [Screenshots](#screenshots)
 - [Features](#features)
+- [Tested Apps](#tested apps)
 - [Building](#building)
 - [Methodology](#methodology)
 - [Security](#security)
@@ -187,6 +188,12 @@ Dependencies: `zip`, `unzip`.
 
 In case you want to modify the Alpine environment yourself, if this is to check issues, or otherwise you have been given shell access to the Alpine proot. This is not a terminal emulator like Termux, you have no consistent environment variables, or working directory, you fire one shell command at a time and your state resets each time.
 
+## Tested Apps
+
+Apps which have been tested and work well for mobile use.
+
+Obsidian, Firefox based browsers (refer to `AppFixes.md`), Chromium based browsers, LibreOffice, KdenLive, Audacity, Foliate, Kate, VS Code, VSCodium, Konsole, Gear Lever (refer to `AppFixes.md`) (AppImage support), VLC, LocalSend, KTorrent, Unofficial Homestuck Collection, Prism Launcher (it is highly recommended to use hardware input controls when you get in Minecraft).
+
 ## Building
 
 - Requirements: Android SDK platform-tools, platforms;android-37, build-tools 36, NDK 30, JDK 21, CMake 3.22.1, make, git, curl, gawk, readelf.
@@ -249,19 +256,26 @@ Flatdroid does not collect, and does not care to collect any of your own persona
 
 ## Contributing
 
-Currently Flatdroid is still under personal development, and is not in a state that I'm happy with to open for other people to build on. Therefore, until I reach that moment (UI, maybe other big features like embedded viewer/Flatpak browser) pull requests, and other contributions are closed. But, if you would like to submit issues I will be happy to review those.
+| placeholder |
+
+AI usage must be disclosed.
+
+PRoot patches are to be kept to a minimum. Patches must be submitted by themselves or only with the feature they are coupled to. And the patch must be duly justified to why it wasn't pushed upstream, and what the patch contributes to Flatdroid.
 
 ## Acknowledgments
 
 Flatdroid builds on and uses these projects:
 
-- [PRoot](https://github.com/termux/proot): GPL-2.0-or-later, built from a pinned commit with small patches in `native/patches/`
+- [Termux PRoot](https://github.com/termux/proot): GPL-2.0-or-later, built from a pinned commit with small patches in `native/patches/`
 - [talloc](https://talloc.samba.org/talloc/doc/html/index.html): LGPL-3.0-or-later
 - [Alpine Linux](https://alpinelinux.org/): rootfs and packages
 - [Flatpak](https://flatpak.org/): LGPL-2.1-or-later
 - [Flathub](https://flathub.org/)
+- [wayvnc](https://github.com/any1/wayvnc): ISC
+- [labwc](https://labwc.github.io/): GPL-2.0-only
 - [TigerVNC](https://tigervnc.org/) (Xvnc): GPL-2.0-or-later
 - [Openbox](http://openbox.org/): GPL-2.0-or-later
+- [foot](https://codeberg.org/dnkl/foot): MIT
 - [PulseAudio](https://www.freedesktop.org/wiki/Software/PulseAudio/): LGPL-2.1-or-later
 - [PipeWire](https://pipewire.org/): MIT
 - [WirePlumber](https://pipewire.pages.freedesktop.org/wireplumber/): MIT

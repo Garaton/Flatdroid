@@ -49,6 +49,7 @@ import com.garathon.flatdroid.ui.common.LogText
 import com.garathon.flatdroid.ui.dialogs.ResetDialog
 import com.garathon.flatdroid.ui.theme.FlatdroidTheme
 import com.garathon.flatdroid.ui.theme.Spacing
+import com.garathon.flatdroid.ui.common.BusySpinner
 
 /**
  * The second screen of setup, the same for everyone: the steps with their state, how far the whole
@@ -209,7 +210,7 @@ private fun StepRow(step: SetupStep, ui: SetupUi) {
                         Icon(Icons.Filled.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(MARK_SIZE))
                     StepState.RUNNING ->
                         if (fraction != null) CircularProgressIndicator(progress = { fraction }, modifier = Modifier.size(PROGRESS_SIZE), strokeWidth = PROGRESS_STROKE)
-                        else CircularProgressIndicator(Modifier.size(PROGRESS_SIZE), strokeWidth = PROGRESS_STROKE)
+                        else BusySpinner(Modifier.size(PROGRESS_SIZE), strokeWidth = PROGRESS_STROKE)
                     StepState.WAITING -> CircularProgressIndicator(progress = { 0f }, modifier = Modifier.size(PROGRESS_SIZE), strokeWidth = PROGRESS_STROKE)
                 }
             }

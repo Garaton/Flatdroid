@@ -11,7 +11,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -37,6 +36,7 @@ import com.garathon.flatdroid.flatpak.FlatpakRef
 import com.garathon.flatdroid.util.debug.DebugLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import com.garathon.flatdroid.ui.common.BusySpinner
 
 /** What Flathub said about the app of a link. */
 private sealed interface LinkApp {
@@ -114,7 +114,7 @@ fun InstallLinkDialog(
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 when (val r = result) {
                     LinkApp.Loading -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 3.dp)
+                        BusySpinner(Modifier.size(20.dp), strokeWidth = 3.dp)
                         Text(stringResource(R.string.flathub_loading))
                     }
                     LinkApp.NotFound -> Text(stringResource(R.string.flathub_not_found, appId))

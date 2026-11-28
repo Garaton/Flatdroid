@@ -16,6 +16,13 @@
  * calls of other ABIs (i386 and x32 on x86_64, AArch32 on aarch64) get ENOSYS. socket takes
  * only AF_UNIX, AF_NETLINK, AF_INET and AF_INET6 (the families Flatpak allows), any other
  * family fails with EAFNOSUPPORT: some (AF_SMC, AF_VSOCK, AF_PACKET) reach beyond the device.
+ *
+ * Its own tracer (proot, TracerPid) is out of reach: kill, tkill, tgkill, rt_sigqueueinfo,
+ * rt_tgsigqueueinfo, pidfd_open and prlimit64 aimed at it fail with EPERM, as do kill(-1) and a
+ * kill of the tracer's process group (Flatdroid's own, shared by its proots). When proot dies, each
+ * process it had stopped in a system call goes on with that call untranslated, on the device's own
+ * paths. The command also gets a session of its own (it has no terminal), so kill(0) reaches only
+ * its own processes, and they can't join the tracer's group.
  *   --extra    also pidfd_open, process_madvise, kcmp, keyctl, add_key, request_key (ENOSYS)
  *   --no-inet  socket(AF_INET or AF_INET6) fails with EACCES; Unix and netlink sockets stay
  *   --no-connect  connect fails with EACCES, for a server that only accepts connections
@@ -49,7 +56,7 @@
  *
  * No C library: the same static binary then runs in any root (glibc runtimes, Alpine's musl),
  * and stays a few KB (a static bionic binary is about 900 KB). It runs only once Flatdroid has
- * built its arguments, and reads nothing else but /proc/self/status.
+ * built its arguments, and reads nothing else but /proc/self/status (and /proc/self/stat with --tty).
  */
 #include <asm/ioctls.h>
 #include <asm/signal.h>
@@ -166,11 +173,11 @@ static __attribute__((noreturn)) void leave(int code)
 	__builtin_trap();
 }
 
-/* The Seccomp_filters count in /proc/self/status, or -1 where the kernel has no such line (or
- * /proc isn't there). */
-static long filter_count(void)
+/* The number after [key] (a "\nName:" line) in /proc/self/status, or -1 where there is no such
+ * line (or /proc isn't there). */
+static long status_number(const char *key)
 {
-	static const char key[] = "\nSeccomp_filters:";
+	unsigned long key_length = length(key);
 	char buf[8192];
 	long fd = sys6(__NR_openat, AT_FDCWD, (long)"/proc/self/status", O_RDONLY | O_CLOEXEC, 0, 0, 0);
 	if (fd < 0) return -1;
@@ -183,7 +190,7 @@ static long filter_count(void)
 	}
 	sys3(__NR_close, fd, 0, 0);
 	buf[used] = 0;
-	for (unsigned long i = 0; i + sizeof key - 1 <= used; i++) {
+	for (unsigned long i = 0; i + key_length <= used; i++) {
 		unsigned long k = 0;
 		while (key[k] && buf[i + k] == key[k]) k++;
 		if (key[k]) continue;
@@ -196,6 +203,9 @@ static long filter_count(void)
 	}
 	return -1;
 }
+
+/* The Seccomp_filters count, -1 where the kernel has no such line. */
+static long filter_count(void) { return status_number("\nSeccomp_filters:"); }
 
 /* ---- the filter */
 
@@ -225,14 +235,21 @@ static const struct rule EXTRA[] = {
 	{ __NR_keyctl, ENOSYS }, { __NR_add_key, ENOSYS }, { __NR_request_key, ENOSYS },
 };
 
+/* System calls that name a process to signal or change; aimed at the tracer they fail with EPERM. */
+static const int GUARDED[] = {
+	__NR_kill, __NR_tkill, __NR_tgkill, __NR_rt_sigqueueinfo, __NR_rt_tgsigqueueinfo, __NR_pidfd_open, __NR_prlimit64,
+};
+
 /* Big enough for every rule build() can emit; the _Static_assert below fails the build if a
  * future rule would overflow the stack array. */
-#define MAX_FILTER 96
+#define MAX_FILTER 136
 /* base (arch check, nr load) + x32 guard + newer-than-proot guard + the faccessat2 trap + the seal
  * block + ALWAYS + EXTRA + the no_connect block + the socket block (test, argument load, two EACCES
- * rules for --no-inet, the families, EAFNOSUPPORT) + the check rule. */
+ * rules for --no-inet, the families, EAFNOSUPPORT) + the tracer's guard (per call a test, the argument
+ * load, the tracer, the answer; kill also -1 and the group) + the check rule. */
 _Static_assert(5 + 2 + 2 + 2 + 6 + 2 * (sizeof ALWAYS / sizeof *ALWAYS) + 2 * (sizeof EXTRA / sizeof *EXTRA) + 2
-                   + (2 + 4 + 2 * (sizeof FAMILIES / sizeof *FAMILIES) + 1) + 5 <= MAX_FILTER,
+                   + (2 + 4 + 2 * (sizeof FAMILIES / sizeof *FAMILIES) + 1) + (4 * (sizeof GUARDED / sizeof *GUARDED) + 4) + 5
+                   <= MAX_FILTER,
                "fdsec filter would overflow MAX_FILTER");
 #define LOAD(field) BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, field))
 /* The low 32 bits of argument i (seccomp_data is little-endian on both architectures). */
@@ -240,7 +257,8 @@ _Static_assert(5 + 2 + 2 + 2 + 6 + 2 * (sizeof ALWAYS / sizeof *ALWAYS) + 2 * (s
 #define RETURN(action) BPF_STMT(BPF_RET | BPF_K, (action))
 #define IF_EQUAL(k, skip_if_not) BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, (k), 0, (skip_if_not))
 
-static unsigned build(struct sock_filter *f, int extra, int no_inet, int no_connect, int trap_faccessat2, int answer_seals)
+static unsigned build(struct sock_filter *f, int extra, int no_inet, int no_connect, int trap_faccessat2, int answer_seals,
+                      long tracer, long tracer_group)
 {
 	unsigned n = 0;
 	f[n++] = (struct sock_filter)LOAD(arch);
@@ -276,6 +294,28 @@ static unsigned build(struct sock_filter *f, int extra, int no_inet, int no_conn
 		for (unsigned i = 0; i < sizeof EXTRA / sizeof *EXTRA; i++) {
 			f[n++] = (struct sock_filter)IF_EQUAL(EXTRA[i].nr, 1);
 			f[n++] = (struct sock_filter)RETURN(SECCOMP_RET_ERRNO | EXTRA[i].err);
+		}
+	}
+	/* The tracer's guard: each call's first argument (a pid; kill's may be -1 or minus a group). The
+	 * argument load clobbers the accumulator, so every path out of a call's block returns. A pid
+	 * or group the call names is the low 32 bits (pid_t). */
+	if (tracer > 0) {
+		for (unsigned i = 0; i < sizeof GUARDED / sizeof *GUARDED; i++) {
+			int is_kill = GUARDED[i] == __NR_kill;
+			int group = is_kill && tracer_group > 0;
+			f[n++] = (struct sock_filter)IF_EQUAL(GUARDED[i], 4 + (is_kill ? 2 : 0) + (group ? 2 : 0));
+			f[n++] = (struct sock_filter)LOAD_ARG(0);
+			f[n++] = (struct sock_filter)IF_EQUAL((unsigned)tracer, 1);
+			f[n++] = (struct sock_filter)RETURN(SECCOMP_RET_ERRNO | EPERM);
+			if (is_kill) {
+				f[n++] = (struct sock_filter)IF_EQUAL(0xffffffffu, 1);
+				f[n++] = (struct sock_filter)RETURN(SECCOMP_RET_ERRNO | EPERM);
+			}
+			if (group) {
+				f[n++] = (struct sock_filter)IF_EQUAL((unsigned)-tracer_group, 1);
+				f[n++] = (struct sock_filter)RETURN(SECCOMP_RET_ERRNO | EPERM);
+			}
+			f[n++] = (struct sock_filter)RETURN(SECCOMP_RET_ALLOW);
 		}
 	}
 	if (no_connect) {
@@ -487,8 +527,13 @@ __attribute__((used)) static void start(long *sp)
 	long memfd = sys3(__NR_memfd_create, (long)"fdsec", 1 /* MFD_CLOEXEC */, 0);
 	if (memfd >= 0) sys3(__NR_close, memfd, 0, 0);
 	int answer_seals = memfd == -ENOSYS;
+	long tracer = status_number("\nTracerPid:");
+	long tracer_group = tracer > 0 ? sys3(__NR_getpgid, tracer, 0, 0) : -1;
 	struct sock_filter filter[MAX_FILTER];
-	struct sock_fprog prog = { .len = (unsigned short)build(filter, extra, no_inet, no_connect, trap_faccessat2, answer_seals), .filter = filter };
+	struct sock_fprog prog = {
+		.len = (unsigned short)build(filter, extra, no_inet, no_connect, trap_faccessat2, answer_seals, tracer, tracer_group),
+		.filter = filter,
+	};
 	long before = filter_count();
 	if (sys3(__NR_prctl, PR_SET_NO_NEW_PRIVS, 1, 0) != 0) {
 		say("fdsec: refused: prctl(PR_SET_NO_NEW_PRIVS) failed", 0);
@@ -510,6 +555,8 @@ __attribute__((used)) static void start(long *sp)
 
 	if (hold) hold_tty(hold);
 	if (tty) take_tty(tty);
+	/* Fails harmlessly where the process already leads its group. */
+	else sys3(__NR_setsid, 0, 0, 0);
 	sys3(__NR_execve, argv[i], argv + i, envp);
 	say("fdsec: cannot execute ", argv[i]);
 	leave(EXIT_EXEC);

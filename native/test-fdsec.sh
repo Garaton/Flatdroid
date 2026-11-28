@@ -1,7 +1,7 @@
 #!/bin/sh
 # Checks fdsec's filter and terminal steps on an x86_64 Linux host: builds the x86_64 libfdsec.so,
 # and fdsec-test.c and fdsec-tty-test.c with the host's cc, then runs the filter test with each
-# combination of options, then the terminal test.
+# combination of options, then under strace as a tracer (when installed), then the terminal test.
 #
 #   test-fdsec.sh <ndk dir>
 set -eu
@@ -24,6 +24,8 @@ run "$F" --extra "$T" extra
 run "$F" --no-inet "$T" noinet
 run "$F" --extra --no-inet -- "$T" extra noinet
 run "$F" --no-connect "$T" noconnect
+echo "== under a tracer"
+if command -v strace >/dev/null; then run strace -f -o /dev/null "$F" "$T" base; else echo "skipped: no strace"; fi
 echo "== terminal"
 timeout 20 "$WORK/fdsec-tty-test" run "$F" "$WORK" || fail=1
 echo "== refusals"

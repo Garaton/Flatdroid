@@ -82,7 +82,6 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -136,6 +135,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 import kotlin.math.abs
+import com.garathon.flatdroid.ui.common.BusySpinner
 
 /** What Flathub said about an app's sizes and permissions. */
 private sealed interface Summary {
@@ -299,7 +299,7 @@ fun BrowseAppScreen(
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
                     colors = ButtonDefaults.outlinedButtonColors(disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant),
                 ) {
-                    CircularProgressIndicator(Modifier.size(if (landscape) 24.dp else 16.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    BusySpinner(Modifier.size(if (landscape) 24.dp else 16.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.width(if (landscape) 12.dp else 8.dp))
                     Text(stringResource(R.string.browse_installing), style = if (landscape) MaterialTheme.typography.titleLarge else LocalTextStyle.current)
                 }
@@ -375,7 +375,7 @@ fun BrowseAppScreen(
             // Installs and size at a glance; or why Flathub didn't say.
             when (val s = summary) {
                 Summary.Loading -> Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    BusySpinner(Modifier.size(18.dp), strokeWidth = 2.dp)
                     Text(stringResource(R.string.flathub_loading), style = MaterialTheme.typography.bodySmall)
                 }
                 Summary.NotFound -> Text(stringResource(R.string.flathub_not_found, appId), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp))
@@ -395,7 +395,7 @@ fun BrowseAppScreen(
             val shown = details
             if (shown == null && catalogLoading) {
                 Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    BusySpinner(Modifier.size(18.dp), strokeWidth = 2.dp)
                     Text(stringResource(R.string.browse_loading), style = MaterialTheme.typography.bodySmall)
                 }
             }
@@ -665,7 +665,7 @@ private fun OpenButton(state: OpenState, onOpen: () -> Unit, shape: Shape, large
             ButtonContent(Icons.Filled.PlayArrow, stringResource(R.string.browse_open), large = large)
         }
         OpenState.STARTING -> FilledTonalButton(onClick = {}, enabled = false, shape = shape, modifier = modifier) {
-            CircularProgressIndicator(Modifier.size(if (large) 28.dp else 18.dp), strokeWidth = 2.dp)
+            BusySpinner(Modifier.size(if (large) 28.dp else 18.dp), strokeWidth = 2.dp)
             Spacer(Modifier.width(if (large) 12.dp else 8.dp))
             Text(stringResource(R.string.browse_starting), style = if (large) MaterialTheme.typography.titleLarge else LocalTextStyle.current)
         }

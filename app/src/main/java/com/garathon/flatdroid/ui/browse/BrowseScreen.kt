@@ -22,7 +22,6 @@ import androidx.compose.material.icons.automirrored.filled.Input
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Verified
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.VerticalDivider
@@ -65,6 +64,7 @@ import java.io.File
 import java.util.Locale
 import android.icu.text.CompactDecimalFormat
 import androidx.compose.ui.platform.LocalDensity
+import com.garathon.flatdroid.ui.common.BusySpinner
 
 /**
  * The browser's list position, search and category, kept while an app's page is open and through
@@ -189,7 +189,7 @@ fun BrowseScreen(
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when (state) {
                 CatalogState.Idle, CatalogState.Loading -> Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-                    CircularProgressIndicator()
+                    BusySpinner()
                     Text(stringResource(R.string.browse_loading), modifier = Modifier.padding(top = 12.dp))
                 }
                 CatalogState.Missing -> Message(stringResource(R.string.browse_missing), stringResource(R.string.browse_refresh), onRefresh, canRefresh)
@@ -198,7 +198,7 @@ fun BrowseScreen(
                     val category = BrowseCategory.entries.firstOrNull { it.name == listState.category }
                     val prepared = items
                     if (prepared == null) {
-                        CircularProgressIndicator(Modifier.align(Alignment.Center))
+                        BusySpinner(Modifier.align(Alignment.Center))
                         return@Box
                     }
                     val apps = remember(prepared, spec, query, category, listState.seed) { prepared.select(spec, query, category, listState.seed) }

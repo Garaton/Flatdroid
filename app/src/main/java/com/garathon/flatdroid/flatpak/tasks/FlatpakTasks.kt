@@ -43,8 +43,12 @@ sealed interface FlatpakTask {
     data object BaselineAll : FlatpakTask
     /** Adds Alpine's [packages] (`apk add`, one call); their desktop files then show as apps ([com.garathon.flatdroid.alpine.programs.AlpinePrograms]). The queue keeps every waiting add in one. */
     data class AlpineInstall(val packages: List<String>) : FlatpakTask
-    /** Removes [packageName], the Alpine package [appId]'s program came from (`apk del`), and the program's own files; its data too with [deleteData]. */
-    data class AlpineRemove(val appId: String, val packageName: String, val deleteData: Boolean) : FlatpakTask
+    /** Removes each program's Alpine package (`apk del`, one call) and the program's own files; its data too with [AlpineRemoval.deleteData]. The queue keeps every waiting removal in one. */
+    data class AlpineRemove(val programs: List<AlpineRemoval>) : FlatpakTask {
+        constructor(appId: String, packageName: String, deleteData: Boolean) : this(listOf(AlpineRemoval(appId, packageName, deleteData)))
+        val appIds: List<String> get() = programs.map { it.appId }
+        val packages: List<String> get() = programs.map { it.packageName }.distinct()
+    }
 
     /** Changes only Alpine's packages: Flatpak's repository is never touched, so nothing of it needs repairing after. */
     val alpineOnly: Boolean get() = this is AlpineInstall || this is AlpineRemove
@@ -109,14 +113,17 @@ data class FlatpakTaskUi(
  */
 data class UninstallApp(val appId: String, val deleteData: Boolean, val keepRuntimes: Boolean = false)
 
+/** One Alpine program of an [FlatpakTask.AlpineRemove]: [packageName] is the package [appId]'s program came from. */
+data class AlpineRemoval(val appId: String, val packageName: String, val deleteData: Boolean)
+
 /**
  * The rules of the task queue, apart from Android for tests. First in, first out, except that the
  * queue holds at most one install and one uninstall: a later one joins the waiting one, in its
  * place (install A, uninstall B, install C, uninstall D runs as install A and C, then uninstall B
  * and D). A duplicate is queued once, and opposites cancel out: an uninstall of an app whose
  * install waits drops that install (and isn't queued), and an install of an app whose uninstall
- * waits drops that uninstall (the app stays as it is). Alpine package adds wait as one the same
- * way, and adding a package drops its waiting removal.
+ * waits drops that uninstall (the app stays as it is). Alpine package adds and removals wait as
+ * one each the same way, and adding a package drops its waiting removal.
  */
 object TaskQueue {
     /**
@@ -130,6 +137,7 @@ object TaskQueue {
         is FlatpakTask.Install -> addInstall(queue, task.appIds, running)
         is FlatpakTask.Uninstall -> addUninstall(queue, task.apps, running)
         is FlatpakTask.AlpineInstall -> addAlpineInstall(queue, task.packages, running)
+        is FlatpakTask.AlpineRemove -> addAlpineRemove(queue, task.programs, running)
         // The same again, or what runs now (an update or refresh right after one changes nothing).
         else -> if (task in queue || task == running) queue else queue + task
     }
@@ -178,9 +186,12 @@ object TaskQueue {
     private fun addAlpineInstall(queue: List<FlatpakTask>, packages: List<String>, running: FlatpakTask?): List<FlatpakTask> {
         val adding = (running as? FlatpakTask.AlpineInstall)?.packages.orEmpty()
         val queued = queue.flatMap { (it as? FlatpakTask.AlpineInstall)?.packages.orEmpty() }
-        val removals = queue.mapNotNull { (it as? FlatpakTask.AlpineRemove)?.packageName }.toSet()
+        val removals = queue.flatMap { (it as? FlatpakTask.AlpineRemove)?.packages.orEmpty() }.toSet()
         val cancelled = packages.filter { it in removals }.toSet()
-        var result = queue.filterNot { it is FlatpakTask.AlpineRemove && it.packageName in cancelled }
+        var result = queue.mapNotNull { task ->
+            if (task !is FlatpakTask.AlpineRemove) task
+            else task.programs.filter { it.packageName !in cancelled }.takeIf { it.isNotEmpty() }?.let(FlatpakTask::AlpineRemove)
+        }
         val names = packages.distinct().filter { it !in adding && it !in queued && it !in cancelled }
         if (names.isEmpty()) return result
         val waiting = result.indexOfFirst { it is FlatpakTask.AlpineInstall }
@@ -192,6 +203,19 @@ object TaskQueue {
         return result
     }
 
+    /** As [addUninstall], for Alpine programs: one waiting removal, a program already in it keeps its place with the newer choice. */
+    private fun addAlpineRemove(queue: List<FlatpakTask>, programs: List<AlpineRemoval>, running: FlatpakTask?): List<FlatpakTask> {
+        val removing = (running as? FlatpakTask.AlpineRemove)?.appIds.orEmpty()
+        val added = programs.distinctBy { it.appId }.filter { it.appId !in removing }
+        if (added.isEmpty()) return queue
+        val waiting = queue.indexOfFirst { it is FlatpakTask.AlpineRemove }
+        if (waiting < 0) return queue + FlatpakTask.AlpineRemove(added)
+        val earlier = (queue[waiting] as FlatpakTask.AlpineRemove).programs
+        val merged = earlier.map { old -> added.firstOrNull { it.appId == old.appId } ?: old } +
+            added.filter { new -> earlier.none { it.appId == new.appId } }
+        return queue.toMutableList().also { it[waiting] = FlatpakTask.AlpineRemove(merged) }
+    }
+
     /** [appId] taken out of the waiting installs (an install left with no app goes). */
     fun withoutInstall(queue: List<FlatpakTask>, appId: String): List<FlatpakTask> = queue.mapNotNull { task ->
         if (task is FlatpakTask.Install && appId in task.appIds) (task.appIds - appId).takeIf { it.isNotEmpty() }?.let(FlatpakTask::Install) else task
@@ -200,6 +224,11 @@ object TaskQueue {
     /** [name] taken out of the waiting Alpine add (an add left with no package goes). */
     fun withoutAlpinePackage(queue: List<FlatpakTask>, name: String): List<FlatpakTask> = queue.mapNotNull { task ->
         if (task is FlatpakTask.AlpineInstall && name in task.packages) (task.packages - name).takeIf { it.isNotEmpty() }?.let(FlatpakTask::AlpineInstall) else task
+    }
+
+    /** [appId], an Alpine program, taken out of the waiting removal (a removal left with no program goes). */
+    fun withoutAlpineRemoval(queue: List<FlatpakTask>, appId: String): List<FlatpakTask> = queue.mapNotNull { task ->
+        if (task is FlatpakTask.AlpineRemove && appId in task.appIds) task.programs.filter { it.appId != appId }.takeIf { it.isNotEmpty() }?.let(FlatpakTask::AlpineRemove) else task
     }
 
     /** [appId] taken out of the waiting uninstall (an uninstall left with no app goes). */
@@ -304,13 +333,14 @@ object FlatpakTasks {
     /** Takes [appId] out of the waiting installs. */
     fun unqueueInstall(appId: String) = _ui.update { it.copy(queue = TaskQueue.withoutInstall(it.queue, appId)) }
 
-    /** Takes [appId] out of [task], a waiting install, uninstall or Alpine add (its package name); the task goes when nothing is left. */
+    /** Takes [appId] out of [task], a waiting install, uninstall, Alpine add (its package name) or Alpine removal; the task goes when nothing is left. */
     fun unqueueApp(task: FlatpakTask, appId: String) = _ui.update {
         it.copy(
             queue = when (task) {
                 is FlatpakTask.Install -> TaskQueue.withoutInstall(it.queue, appId)
                 is FlatpakTask.Uninstall -> TaskQueue.withoutUninstall(it.queue, appId)
                 is FlatpakTask.AlpineInstall -> TaskQueue.withoutAlpinePackage(it.queue, appId)
+                is FlatpakTask.AlpineRemove -> TaskQueue.withoutAlpineRemoval(it.queue, appId)
                 else -> it.queue - task
             },
         )

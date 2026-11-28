@@ -13,6 +13,7 @@ import com.garathon.flatdroid.proot.AlpineBinds
 import com.garathon.flatdroid.proot.DevNodes
 import com.garathon.flatdroid.proot.Fdsec
 import com.garathon.flatdroid.proot.Fdshm
+import com.garathon.flatdroid.proot.Fdstatx
 import com.garathon.flatdroid.proot.Fdv4l2
 import com.garathon.flatdroid.proot.GuestPaths
 import com.garathon.flatdroid.proot.ProcessResult
@@ -144,6 +145,9 @@ class AlpineEnvironment private constructor(private val context: Context) {
     /** resolv.conf for the current network (its Private DNS provider's servers when it names one that answers). */
     fun resolvConf(): String = GuestFiles.resolvConf(NetworkDns.servers(context), NetworkDns.privateDnsServers(context))
 
+    /** Whether this kernel's statx lacks the mount ID ([Fdstatx]); the kernel doesn't change while Flatdroid runs. */
+    private val statxLibraryNeeded by lazy { Fdstatx.needed(Os.uname().release) }
+
     fun paths(): ProotPaths = ProotPaths(
         proot = File(libDir, "libproot.so").path,
         loader = File(libDir, "libproot-loader.so").path,
@@ -152,6 +156,7 @@ class AlpineEnvironment private constructor(private val context: Context) {
         fdsec = File(libDir, Fdsec.LIBRARY).path,
         fdshm = File(libDir, Fdshm.LIBRARY).path,
         fdv4l2 = File(libDir, Fdv4l2.LIBRARY).path,
+        fdstatx = File(libDir, Fdstatx.LIBRARY).path.takeIf { statxLibraryNeeded },
     )
 
     /**

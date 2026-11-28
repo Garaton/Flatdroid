@@ -43,7 +43,20 @@ class ElectronTest {
         // A configuration without an entry point (Chrome's) leaves cobalt's default.
         assertEquals("/app/extra/chrome", Electron.cobaltTarget(script, "com.google.Chrome", { "[Application]\n" }) { it == "/app/extra/chrome" })
         // Only a path in /app: another is ignored, and cobalt's default is looked for.
-        assertEquals("/app/extra/ungoogled_chromium", Electron.cobaltTarget(script, appId, { "[Application]\nEntryPoint=/app/../etc/passwd\n" }) { true })
+        assertEquals("/app/ungoogled_chromium/ungoogled_chromium", Electron.cobaltTarget(script, appId, { "[Application]\nEntryPoint=/app/../etc/passwd\n" }) { true })
+    }
+
+    @Test
+    fun cobaltsNameChoosesTheDefaultPaths() {
+        val script = "#!/bin/sh\nexec cobalt \"\$@\" --no-default-browser-check\n"
+        // Brave's layout: a name, no entry point, the browser in /app/<name>/<name>.
+        val config = "[Application]\nName=brave\nConfigDir=BraveSoftware/Brave-Browser\n"
+        assertEquals("/app/brave/brave", Electron.cobaltTarget(script, "com.brave.Browser", { config }) { it == "/app/brave/brave" })
+        assertEquals("/app/extra/brave", Electron.cobaltTarget(script, "com.brave.Browser", { config }) { it == "/app/extra/brave" })
+        // /app/<name>/<name> comes first, as in cobalt.
+        assertEquals("/app/brave/brave", Electron.cobaltTarget(script, "com.brave.Browser", { config }) { true })
+        // A name that is a path is ignored.
+        assertEquals("/app/browser/browser", Electron.cobaltTarget(script, "com.brave.Browser", { "[Application]\nName=../x\n" }) { true })
     }
 
     @Test

@@ -4,7 +4,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -17,6 +16,7 @@ import androidx.compose.ui.unit.dp
 import com.garathon.flatdroid.R
 import com.garathon.flatdroid.ui.common.FlatdroidIcon
 import com.garathon.flatdroid.ui.theme.FlatdroidTheme
+import com.garathon.flatdroid.ui.common.BusySpinner
 
 /** While the Alpine environment is reset: a screen of its own, so it doesn't pass for a step of setup. [detail] is what it is doing. */
 @Composable
@@ -28,7 +28,7 @@ fun ResetScreen(detail: String, modifier: Modifier = Modifier) {
     ) {
         FlatdroidIcon(size = 64.dp)
         Text(stringResource(R.string.reset_screen_title), style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
-        CircularProgressIndicator()
+        BusySpinner()
         Text(
             detail.ifEmpty { stringResource(R.string.reset_running) },
             style = MaterialTheme.typography.bodyMedium,

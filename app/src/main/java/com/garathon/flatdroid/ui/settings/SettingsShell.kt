@@ -32,7 +32,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -55,6 +54,7 @@ import com.garathon.flatdroid.R
 import com.garathon.flatdroid.ui.common.LocalDeveloperOptions
 import com.garathon.flatdroid.ui.common.aboveKeyboard
 import com.garathon.flatdroid.ui.theme.Spacing
+import com.garathon.flatdroid.ui.common.BusySpinner
 
 /** A page of a settings screen: its icon in the rail, and its title (the rail has no text, the page shows it). */
 interface SettingsPage {
@@ -175,7 +175,7 @@ fun SettingsTopBar(
     ) {
         Box(Modifier.weight(1f)) { title() }
         if (busy) {
-            Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 3.dp) }
+            Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) { BusySpinner(Modifier.size(24.dp), strokeWidth = 3.dp) }
         } else {
             IconButton(onClick = onSave, enabled = canSave) { Icon(Icons.Filled.Check, contentDescription = stringResource(R.string.settings_save)) }
         }

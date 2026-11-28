@@ -486,11 +486,11 @@ class FlatpakTaskService : Service() {
             }
             is FlatpakTask.AlpineRemove -> {
                 // Flatdroid's own aren't listed as programs; refused here too.
-                if (!AlpinePackages.isPackageName(task.packageName) || task.packageName in AlpinePrograms.FLATDROID_PACKAGES) {
-                    throw IOException(getString(R.string.task_alpine_own_package, task.packageName))
+                task.packages.firstOrNull { !AlpinePackages.isPackageName(it) || it in AlpinePrograms.FLATDROID_PACKAGES }?.let {
+                    throw IOException(getString(R.string.task_alpine_own_package, it))
                 }
-                apk(env, listOf("del", task.packageName))
-                removeAppFiles(task.appId, task.deleteData)
+                apk(env, listOf("del") + task.packages)
+                for (program in task.programs) removeAppFiles(program.appId, program.deleteData)
             }
             FlatpakTask.ReinstallAll -> {
                 val installation = FlatpakInstallation(env.flatpakDir, env.arch)
@@ -921,8 +921,9 @@ class FlatpakTaskService : Service() {
                 is FlatpakTask.RemoveRuntime -> intent.putExtra(EXTRA_TASK, "removeRuntime").putExtra(EXTRA_APP_ID, task.runtimeId)
                 FlatpakTask.ReinstallAll -> intent.putExtra(EXTRA_TASK, "reinstallAll")
                 is FlatpakTask.AlpineInstall -> intent.putExtra(EXTRA_TASK, "alpineInstall").putExtra(EXTRA_APP_IDS, task.packages.toTypedArray())
-                is FlatpakTask.AlpineRemove -> intent.putExtra(EXTRA_TASK, "alpineRemove").putExtra(EXTRA_APP_ID, task.appId)
-                    .putExtra(EXTRA_PACKAGE, task.packageName).putExtra(EXTRA_DELETE_DATA, booleanArrayOf(task.deleteData))
+                is FlatpakTask.AlpineRemove -> intent.putExtra(EXTRA_TASK, "alpineRemove").putExtra(EXTRA_APP_IDS, task.appIds.toTypedArray())
+                    .putExtra(EXTRA_PACKAGE, task.programs.map { it.packageName }.toTypedArray())
+                    .putExtra(EXTRA_DELETE_DATA, task.programs.map { it.deleteData }.toBooleanArray())
             }
             try {
                 ContextCompat.startForegroundService(context, intent)
@@ -1011,10 +1012,11 @@ class FlatpakTaskService : Service() {
                 "alpineInstall" -> intent.getStringArrayExtra(EXTRA_APP_IDS)?.toList()
                     ?.takeIf { names -> names.isNotEmpty() && names.all(AlpinePackages::isPackageName) }?.let { FlatpakTask.AlpineInstall(it) }
                 "alpineRemove" -> {
-                    val id = intent.getStringExtra(EXTRA_APP_ID)?.takeIf(AlpineProgramIds::isId)
-                    val name = intent.getStringExtra(EXTRA_PACKAGE)?.takeIf(AlpinePackages::isPackageName)
-                    val deleteData = intent.getBooleanArrayExtra(EXTRA_DELETE_DATA)?.singleOrNull()
-                    if (id == null || name == null || deleteData == null) null else FlatpakTask.AlpineRemove(id, name, deleteData)
+                    val ids = intent.getStringArrayExtra(EXTRA_APP_IDS)?.toList()?.takeIf { ids -> ids.isNotEmpty() && ids.all(AlpineProgramIds::isId) }
+                    val names = intent.getStringArrayExtra(EXTRA_PACKAGE)?.takeIf { names -> names.all(AlpinePackages::isPackageName) }
+                    val deleteData = intent.getBooleanArrayExtra(EXTRA_DELETE_DATA)
+                    if (ids == null || names?.size != ids.size || deleteData?.size != ids.size) null
+                    else FlatpakTask.AlpineRemove(ids.indices.map { AlpineRemoval(ids[it], names[it], deleteData[it]) })
                 }
                 else -> null
             }
@@ -1036,7 +1038,7 @@ class FlatpakTaskService : Service() {
             FlatpakTask.RefreshCatalog -> context.getString(R.string.task_refreshing_catalog)
             FlatpakTask.ReinstallAll -> context.getString(R.string.task_reinstalling_all)
             is FlatpakTask.AlpineInstall -> context.getString(R.string.task_alpine_installing, task.packages.joinToString(", "))
-            is FlatpakTask.AlpineRemove -> context.getString(R.string.task_alpine_removing, task.packageName)
+            is FlatpakTask.AlpineRemove -> context.getString(R.string.task_alpine_removing, task.packages.joinToString(", "))
         }
     }
 }

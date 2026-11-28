@@ -98,6 +98,21 @@ class TaskQueueTest {
     }
 
     @Test
+    fun alpineRemovalsWaitAsOne() {
+        val htop = AlpineRemoval("alpine+htop", "htop", deleteData = false)
+        val mc = AlpineRemoval("alpine+mc", "mc", deleteData = false)
+        assertEquals(
+            listOf(AlpineRemove(listOf(htop.copy(deleteData = true), mc)), FlatpakTask.UpdateAll),
+            queue(AlpineRemove(listOf(htop)), FlatpakTask.UpdateAll, AlpineRemove(listOf(mc)), AlpineRemove(listOf(htop.copy(deleteData = true)))),
+        )
+        // What is being removed now isn't removed again.
+        assertEquals(listOf(AlpineRemove(listOf(mc))), queue(AlpineRemove(listOf(htop, mc)), running = AlpineRemove(listOf(htop))))
+        val q = queue(AlpineRemove(listOf(htop)), AlpineRemove(listOf(mc)))
+        assertEquals(listOf(AlpineRemove(listOf(mc))), TaskQueue.withoutAlpineRemoval(q, "alpine+htop"))
+        assertEquals(emptyList<FlatpakTask>(), TaskQueue.withoutAlpineRemoval(TaskQueue.withoutAlpineRemoval(q, "alpine+htop"), "alpine+mc"))
+    }
+
+    @Test
     fun aPackageTakenOutOfTheWaitingAlpineAdd() {
         val q = queue(AlpineInstall(listOf("htop", "mc")), FlatpakTask.UpdateAll)
         assertEquals(listOf(AlpineInstall(listOf("mc")), FlatpakTask.UpdateAll), TaskQueue.withoutAlpinePackage(q, "htop"))

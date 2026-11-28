@@ -19,6 +19,8 @@ data class ProotPaths(
     val fdshm: String,
     /** nativeLibraryDir/libfdv4l2.so ([Fdv4l2]). */
     val fdv4l2: String,
+    /** nativeLibraryDir/libfdstatx.so ([Fdstatx]), preloaded into Alpine's commands; null where the kernel doesn't need it. */
+    val fdstatx: String? = null,
     /** link2symlink's backing files, where Flatpak's hard links end up; null for the rootfs's `.l2s`. An Alpine program has its own. */
     private val ownL2sDir: String? = null,
 ) {
@@ -29,7 +31,7 @@ data class ProotPaths(
     fun withL2sDir(dir: String) = copy(ownL2sDir = dir)
 
     init {
-        for (path in listOfNotNull(proot, loader, tmpDir, rootfs, fdsec, fdshm, fdv4l2, ownL2sDir)) {
+        for (path in listOfNotNull(proot, loader, tmpDir, rootfs, fdsec, fdshm, fdv4l2, fdstatx, ownL2sDir)) {
             require(path.startsWith("/") && ':' !in path) { "Unusable path: $path" }
         }
     }
@@ -249,11 +251,14 @@ object ProotCommand {
         for ((guest, host) in binds.fakeProc) argv += "--bind=$host:$guest"
         for ((host, guest) in binds.extra) argv += "--bind=$host:$guest"
         argv += "--bind=${paths.fdshm}:${Fdshm.ALPINE_PATH}"
+        paths.fdstatx?.let { argv += "--bind=$it:${Fdstatx.ALPINE_PATH}" }
         argv += "--bind=${paths.fdsec}:${Fdsec.ALPINE_PATH}"
+        // Set inside the root: in proot's own environment Android's loader would look for it too.
+        val guestCommand = if (paths.fdstatx != null) Fdstatx.preloaded(command) else command
         argv += when {
-            filter != null -> Fdsec.wrap(Fdsec.ALPINE_PATH, filter, command, tty)
-            tty != null -> Fdsec.terminalOnly(Fdsec.ALPINE_PATH, command, tty)
-            else -> command
+            filter != null -> Fdsec.wrap(Fdsec.ALPINE_PATH, filter, guestCommand, tty)
+            tty != null -> Fdsec.terminalOnly(Fdsec.ALPINE_PATH, guestCommand, tty)
+            else -> guestCommand
         }
 
         val env = linkedMapOf(

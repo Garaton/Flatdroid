@@ -155,7 +155,7 @@ val fdshmTasks = architectures.keys.associateWith { abi ->
     tasks.register<BuildHelperTask>("buildFdshm_$abi") {
         this.abi = abi
         script = rootProject.file("native/build-fdshm.sh")
-        sources.from(rootProject.file("native/fdshm.c"))
+        sources.from(rootProject.file("native/fdshm.c"), rootProject.file("native/fdstatx.c"))
         ndkDirectory = androidComponents.sdkComponents.ndkDirectory
         outputDirectory = layout.buildDirectory.dir("generated/fdshm/$abi")
     }

@@ -13,7 +13,6 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material.icons.filled.UploadFile
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -48,6 +47,7 @@ import com.garathon.flatdroid.ui.storage.StorageList
 import com.garathon.flatdroid.ui.storage.StorageRow
 import com.garathon.flatdroid.ui.storage.StorageSegment
 import com.garathon.flatdroid.ui.storage.storageColors
+import com.garathon.flatdroid.ui.common.BusySpinner
 
 /** A row of the apps and runtimes list, with Flatdroid's environment among them. */
 private sealed interface FlatpakEntry {
@@ -160,7 +160,7 @@ fun GlobalStoragePage(s: GlobalPageState) = SettingsPageColumn(R.string.settings
 
     env.taskText?.let { text ->
         Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 3.dp)
+            BusySpinner(Modifier.size(20.dp), strokeWidth = 3.dp)
             Text(text, style = MaterialTheme.typography.bodySmall)
         }
     }

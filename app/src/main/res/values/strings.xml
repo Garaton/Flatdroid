@@ -361,10 +361,11 @@
     <string name="queued_install">Install %1$s</string>
     <string name="queued_uninstall">Uninstall %1$s</string>
     <string name="queued_alpine_install">Add Alpine packages: %1$s</string>
-    <string name="queued_alpine_remove">Remove the Alpine package %1$s</string>
+    <string name="queued_alpine_remove">Remove Alpine packages: %1$s</string>
     <string name="queued_install_group">Install</string>
     <string name="queued_uninstall_group">Uninstall</string>
     <string name="queued_alpine_install_group">Add Alpine packages</string>
+    <string name="queued_alpine_remove_group">Remove Alpine packages</string>
     <string name="queued_reinstall">Reinstall %1$s</string>
     <string name="queued_remove_runtime">Uninstall the runtime %1$s</string>
     <string name="queued_update_all">Update all apps</string>
@@ -401,7 +402,7 @@
     <string name="task_log_metered_goes_on">(going on)</string>
     <string name="task_timed_out">Timed out</string>
     <string name="task_alpine_installing">Adding Alpine packages: %1$s</string>
-    <string name="task_alpine_removing">Removing the Alpine package %1$s</string>
+    <string name="task_alpine_removing">Removing Alpine packages: %1$s</string>
     <string name="task_alpine_own_package">%1$s is one of Flatdroid\'s own packages and stays</string>
     <string name="task_log_done">(done)</string>
     <string name="task_log_failed">(%1$s)</string>
@@ -429,7 +430,7 @@
     <string name="log_top">Top</string>
     <string name="log_bottom">Bottom</string>
     <string name="settings_viewer">Show apps in</string>
-    <string name="settings_viewer_hint">The chosen VNC viewer for interacting with Flatpaks. Flatdroid\'s viewer is recommended due to its better security, resource usage, and compatibility with Flatdroid\'s features. However, external VNC viewer apps are supported. An app with no window open is paused only in Flatdroid\'s viewer, and only on Wayland.</string>
+    <string name="settings_viewer_hint">The chosen VNC viewer for interacting with Flatpaks. Flatdroid\'s viewer is recommended due to its better security, resource usage, and compatibility with Flatdroid\'s features. However, external VNC viewer apps are supported.</string>
     <string name="settings_viewer_flatdroid">Flatdroid\'s viewer</string>
     <string name="settings_viewer_external_warning">WARNING: The display is reachable on localhost:%1$d of this phone, so any app can try to connect. While Flatdroid\'s viewer uses an unreachable private socket.</string>
     <string name="settings_viewer_none">None chosen</string>

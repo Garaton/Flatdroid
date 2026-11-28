@@ -45,6 +45,7 @@ import com.garathon.flatdroid.R
 import com.garathon.flatdroid.flatpak.InstalledApp
 import com.garathon.flatdroid.session.SessionState
 import com.garathon.flatdroid.ui.common.IconAction
+import com.garathon.flatdroid.ui.common.BusySpinner
 
 /**
  * The app that starts or runs, pinned above the list in the shape of a list row: its icon and
@@ -140,6 +141,6 @@ private fun Dial(fraction: Float?, onClick: (() -> Unit)?) {
         contentAlignment = Alignment.Center,
     ) {
         if (fraction != null) CircularProgressIndicator(progress = { fraction }, modifier = Modifier.size(24.dp), strokeWidth = 3.dp)
-        else CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 3.dp)
+        else BusySpinner(Modifier.size(24.dp), strokeWidth = 3.dp)
     }
 }
