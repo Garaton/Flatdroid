@@ -20,6 +20,7 @@ import com.garathon.flatdroid.proot.ProotProcess
 import com.garathon.flatdroid.session.helpers.SessionBus
 import com.garathon.flatdroid.session.helpers.SessionScript
 import com.garathon.flatdroid.session.helpers.WaylandVnc
+import com.garathon.flatdroid.session.helpers.XAuthority
 import com.garathon.flatdroid.setup.rootfs.AndroidTarFs
 import com.garathon.flatdroid.setup.rootfs.deleteTree
 import com.garathon.flatdroid.storage.AppData
@@ -96,6 +97,11 @@ class SessionHelpers(private val context: Context, private val env: AlpineEnviro
         File(vncDir, File(SessionScript.GUEST_XWAYLAND).name).apply {
             writeTextAtomically(SessionScript.XWAYLAND_WRAPPER, durable = false)
             Os.chmod(path, 0x1c0) // 0700
+        }
+        // A new cookie each session, for Xwayland and the app (the X socket folder is bound to both).
+        File(x11Dir, File(GuestPaths.X_AUTHORITY).name).apply {
+            writeBytes(XAuthority.file(XAuthority.cookie()))
+            Os.chmod(path, 0x180) // 0600
         }
         File(sessionDir, OPENBOX_RC).writeTextAtomically(GuestFiles.openboxRc(files.titleBars), durable = false)
         val themerc = GuestFiles.themerc(files.darkDecorations)

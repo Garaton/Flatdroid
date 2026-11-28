@@ -103,6 +103,8 @@ object LaunchEnvironment {
             env["SDL_VIDEODRIVER"] = "wayland"
             if (xwayland) {
                 env["DISPLAY"] = XWAYLAND_DISPLAY
+                // Xwayland lets in only clients with the session's cookie.
+                env["XAUTHORITY"] = GuestPaths.X_AUTHORITY
                 // Xwayland runs among the helpers, in another proot: no MIT-SHM, as with Xvnc.
                 env["QT_X11_NO_MITSHM"] = "1"
                 // The compositor's X window manager doesn't reparent windows. Java's AWT assumes one that does

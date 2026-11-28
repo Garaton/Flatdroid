@@ -88,8 +88,10 @@ object SessionScript {
     /**
      * Xwayland as labwc starts it, without MIT-SHM: the app and the helpers run in separate proots,
      * whose emulated SysV shared memory they can't share (Xvnc runs without it for the same reason).
+     * Only clients with the session's cookie ([GuestPaths.X_AUTHORITY]) get in: wlroots also
+     * listens on an abstract socket, which `-nolisten local` can't drop, as it isn't Xwayland's own.
      */
-    const val XWAYLAND_WRAPPER = "#!/bin/sh\nexec /usr/bin/Xwayland \"$@\" -extension MIT-SHM\n"
+    const val XWAYLAND_WRAPPER = "#!/bin/sh\nexec /usr/bin/Xwayland \"$@\" -extension MIT-SHM -auth ${GuestPaths.X_AUTHORITY}\n"
     /** A terminal app's terminal: foot's configuration, its fonts, and where its command writes the terminal's name ([Fdsec.holdTerminal]). */
     const val GUEST_FOOT_CONFIG = "$GUEST_VNC_DIR/foot.ini"
     const val GUEST_TERMINAL_FONTS = "$GUEST_VNC_DIR/fonts.conf"

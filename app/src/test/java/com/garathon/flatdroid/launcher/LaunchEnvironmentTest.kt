@@ -126,5 +126,7 @@ class LaunchEnvironmentTest {
         assertEquals("1", withX["QT_X11_NO_MITSHM"])
         assertEquals("1", withX["_JAVA_AWT_WM_NONREPARENTING"])
         assertEquals(null, plain["_JAVA_AWT_WM_NONREPARENTING"])
+        assertEquals("/tmp/.X11-unix/Xauthority", withX["XAUTHORITY"])
+        assertEquals(null, plain["XAUTHORITY"])
     }
 }

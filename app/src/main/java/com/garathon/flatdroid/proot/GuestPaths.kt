@@ -6,6 +6,8 @@ import android.annotation.SuppressLint
 object GuestPaths {
     /** Xvnc's socket directory. */
     const val X11_DIR = "/tmp/.X11-unix"
+    /** Xwayland's cookie ([com.garathon.flatdroid.session.helpers.XAuthority]), in the X socket folder the app gets with it. */
+    const val X_AUTHORITY = "$X11_DIR/Xauthority"
 
     /**
      * The Wayland compositor's socket directory: its XDG_RUNTIME_DIR among the helpers, bound

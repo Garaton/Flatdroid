@@ -9,8 +9,8 @@ import java.nio.charset.CodingErrorAction
 /**
  * D-Bus's wire format, only the parts Flatdroid's own services need. Values are Kotlin types by
  * signature: `y` [UByte], `b` [Boolean], `n` [Short], `q` [UShort], `i` [Int], `u` [UInt], `x`
- * [Long], `t` [ULong], `d` [Double], `s`, `o` and `g` [String], `h` [UnixFd], `a` [List] (a dict
- * [Map]), `(…)` [Struct], `v` [Variant]. Messages reach Flatdroid through `dbus-daemon`, which
+ * [Long], `t` [ULong], `d` [Double], `s`, `o` and `g` [String], `h` [UnixFd], `ay` [ByteArray],
+ * any other `a` [List] (a dict [Map]), `(…)` [Struct], `v` [Variant]. Messages reach Flatdroid through `dbus-daemon`, which
  * checks them, but their bodies are an app's: every read here is bounded by the message's own
  * length, nesting and the limits below, and anything else is a [WireException].
  */
@@ -223,6 +223,8 @@ object DBusWire {
             align(alignment(element[0]))
             val end = position + length
             if (end > bytes.size) throw WireException("past the end")
+            // Bytes stay bytes: a list of boxed ones would take about 20 times the message's size.
+            if (element == "y") return bytes.copyOfRange(position, end.toInt()).also { position = end.toInt() }
             return if (element[0] == '{') {
                 val (keyType, valueType) = Signature.split(element.substring(1, element.length - 1))
                 val map = LinkedHashMap<Any?, Any?>()
@@ -348,6 +350,8 @@ object DBusWire {
                     write(keyType, key)
                     write(valueType, item)
                 }
+            } else if (element == "y" && value is ByteArray) {
+                out.write(value)
             } else {
                 val list = value as? List<*> ?: throw WireException("$value isn't a list")
                 for (item in list) write(element, item)

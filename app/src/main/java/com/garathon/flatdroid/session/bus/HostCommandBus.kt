@@ -2,7 +2,6 @@ package com.garathon.flatdroid.session.bus
 
 import com.garathon.flatdroid.proot.Fdsec
 import java.io.FileDescriptor
-import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Flatpak's "run on the host" over D-Bus: `org.freedesktop.Flatpak.Development` under
@@ -16,8 +15,10 @@ import java.util.concurrent.ConcurrentHashMap
  * the command's controlling terminal, as Flatpak's helper makes it; otherwise each given one is
  * the command's as it is (pipes for a query's output, say), and a missing one `/dev/null`. Other
  * descriptor numbers are refused (NotSupported): a new proot can't be handed them (verify which
- * apps pass them). At most [MAX_RUNNING] run at once. `HostCommandExited` goes to the caller alone
- * ([send]); with the watch-bus flag a command ends when its caller leaves the bus.
+ * apps pass them). At most [MAX_RUNNING] run or start at once. A command starts on a thread of its
+ * own ([Commands.start]), so the bus goes on meanwhile; its reply follows from there once it runs
+ * (or couldn't start), and `HostCommandExited` after it, to the caller alone ([send]). With the
+ * watch-bus flag a command ends when its caller leaves the bus, also while it was starting.
  */
 class HostCommandBus(
     private val commands: Commands,
@@ -26,8 +27,12 @@ class HostCommandBus(
 ) {
     /** What starts and signals the commands. */
     interface Commands {
-        /** Starts [command]; its pid, or null when it couldn't. [exited] gets its wait status once it ends. */
-        fun start(command: Command, exited: (Int) -> Unit): Int?
+        /**
+         * Starts [command] on a thread of its own, which calls [started] with its pid (null when it
+         * couldn't start), then [exited] with its pid and wait status once it ends. False when it
+         * can't be tried at all; then neither is called.
+         */
+        fun start(command: Command, started: (Int?) -> Unit, exited: (pid: Int, status: Int) -> Unit): Boolean
 
         /** Sends [signal] to [pid] (to its process group with [group]); whether it was sent. */
         fun signal(pid: Int, signal: Int, group: Boolean): Boolean
@@ -47,20 +52,25 @@ class HostCommandBus(
         val stdio: Map<Int, FileDescriptor> = emptyMap(),
     )
 
-    /** How signals reach the bus; set once the connection is open. */
+    /** How replies and signals reach the bus; set once the connection is open. Called from the commands' threads too. */
     @Volatile var send: (Message) -> Unit = {}
 
     private class Running(val owner: String, val watchBus: Boolean)
-    private val running = ConcurrentHashMap<Int, Running>()
+    private val lock = Any()
+    private val running = HashMap<Int, Running>()
+    /** Commands started and not running yet. */
+    private var starting = 0
+    /** Callers that left the bus while a command was starting: a watched one of theirs ends once it runs. */
+    private val gone = HashSet<String>()
 
-    /** The reply to [call]; a command that already ended adds its `HostCommandExited` to [signals], sent after the reply. */
-    fun answer(call: Message, fds: List<FileDescriptor>, signals: MutableList<Message>): Message = when (call.member) {
-        "HostCommand" -> hostCommand(call, fds, signals)
+    /** The reply to [call]; null for a HostCommand that is starting, whose reply follows ([send]). */
+    fun answer(call: Message, fds: List<FileDescriptor>): Message? = when (call.member) {
+        "HostCommand" -> hostCommand(call, fds)
         "HostCommandSignal" -> {
             if (call.signature != "uub") invalid(call, "Expected (uub)")
             else {
                 val pid = (call.body[0] as UInt).toInt()
-                val owner = running[pid]?.owner
+                val owner = synchronized(lock) { running[pid]?.owner }
                 if (owner == null || owner != call.sender) call.error(INVALID_ARGS, "No such pid $pid")
                 else {
                     commands.signal(pid, (call.body[1] as UInt).toInt(), call.body[2] as Boolean)
@@ -71,7 +81,7 @@ class HostCommandBus(
         else -> call.error(UNKNOWN_METHOD, "Unknown method ${call.member} on $IFACE")
     }
 
-    private fun hostCommand(call: Message, fds: List<FileDescriptor>, signals: MutableList<Message>): Message {
+    private fun hostCommand(call: Message, fds: List<FileDescriptor>): Message? {
         if (call.signature != "ayaaya{uh}a{ss}u") return invalid(call, "Expected (ayaaya{uh}a{ss}u)")
         val cwd = bytes(call.body[0])
         val argv = (call.body[1] as List<*>).map(::bytes)
@@ -88,42 +98,60 @@ class HostCommandBus(
         val stdio = given.mapValues { it.value!! }
         val tty = stdio.values.map(pathOf).toSet().singleOrNull()?.takeIf { stdio.keys == STANDARD && Fdsec.isTerminal(it) }
         val owner = call.sender ?: return invalid(call, "No sender")
-        if (running.size >= MAX_RUNNING) return call.error(LIMITS_EXCEEDED, "Too many host commands")
-        val command = Command(cwd, argv, env, clearEnv = flags and CLEAR_ENV != 0u, tty = tty, stdio = if (tty == null) stdio else emptyMap())
-        var startedPid = 0
-        val exits = ArrayList<Int>(1)
-        val pid = commands.start(command) { status ->
-            synchronized(exits) {
-                if (startedPid == 0) exits += status else send(exited(startedPid, owner, status))
-            }
-        } ?: return call.error(FAILED, "The command could not start")
-        running[pid] = Running(owner, watchBus = flags and WATCH_BUS != 0u)
-        synchronized(exits) {
-            startedPid = pid
-            // It ended before its pid was known here: its signal follows the reply that names the pid.
-            exits.firstOrNull()?.let { signals += exited(pid, owner, it) }
+        val watchBus = flags and WATCH_BUS != 0u
+        synchronized(lock) {
+            if (running.size + starting >= MAX_RUNNING) return call.error(LIMITS_EXCEEDED, "Too many host commands")
+            starting++
         }
-        return call.reply("u", pid.toUInt())
+        val command = Command(cwd, argv, env, clearEnv = flags and CLEAR_ENV != 0u, tty = tty, stdio = if (tty == null) stdio else emptyMap())
+        val tried = commands.start(
+            command,
+            started = { pid -> started(call, owner, watchBus, pid) },
+            exited = { pid, status -> send(exited(pid, owner, status)) },
+        )
+        if (tried) return null
+        synchronized(lock) { doneStarting() }
+        return call.error(FAILED, "The command could not start")
+    }
+
+    /** [call]'s command runs as [pid] (null: it couldn't start): its reply, and its end if its caller already left. */
+    private fun started(call: Message, owner: String, watchBus: Boolean, pid: Int?) {
+        val ownerLeft = synchronized(lock) {
+            if (pid != null) running[pid] = Running(owner, watchBus)
+            (owner in gone).also { doneStarting() }
+        }
+        if (call.expectsReply) send(if (pid == null) call.error(FAILED, "The command could not start") else call.reply("u", pid.toUInt()))
+        if (pid != null && watchBus && ownerLeft) commands.signal(pid, SIGKILL, group = true)
+    }
+
+    /** Under [lock]. */
+    private fun doneStarting() {
+        starting--
+        if (starting == 0) gone.clear()
     }
 
     private fun exited(pid: Int, owner: String, status: Int): Message {
-        running.remove(pid)
+        synchronized(lock) { running.remove(pid) }
         return Message.signal(PATH, IFACE, "HostCommandExited", "uu", pid.toUInt(), status.toUInt()).copy(destination = owner)
     }
 
     /** [name] left the bus: the commands it started to be watched end with it (Flatpak sends them SIGKILL). */
     fun left(name: String) {
-        for ((pid, run) in running) if (run.owner == name && run.watchBus) commands.signal(pid, SIGKILL, group = true)
+        val pids = synchronized(lock) {
+            if (starting > 0) gone += name
+            running.filterValues { it.owner == name && it.watchBus }.keys.toList()
+        }
+        for (pid in pids) commands.signal(pid, SIGKILL, group = true)
     }
 
-    /** Every command still running, for the session's end. */
-    fun runningPids(): Set<Int> = running.keys.toSet()
+    /** Every command still running. */
+    fun runningPids(): Set<Int> = synchronized(lock) { running.keys.toSet() }
 
     private fun invalid(call: Message, text: String) = call.error(INVALID_ARGS, text)
 
     /** A byte string as Flatpak sends paths and arguments: NUL-terminated. */
     private fun bytes(value: Any?): String =
-        (value as List<*>).map { (it as UByte).toByte() }.toByteArray().decodeToString().trimEnd('\u0000')
+        (value as ByteArray).decodeToString().trimEnd('\u0000')
 
     companion object {
         const val NAME = "org.freedesktop.Flatpak"

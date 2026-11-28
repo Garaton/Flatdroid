@@ -80,7 +80,7 @@ class Portal(
 
     /**
      * What to send for [call], whose file descriptors are [fds]: its reply (none when it asks for
-     * none), then any signal it causes (a request's `Response` goes after the reply that names
+     * none, or when a host command's follows once it started), then any signal it causes (a request's `Response` goes after the reply that names
      * the request, as the real portal sends it).
      */
     fun handle(call: Message, fds: List<FileDescriptor> = emptyList()): List<Message> {
@@ -95,10 +95,11 @@ class Portal(
         } catch (e: ArgumentException) {
             call.error(INVALID_ARGS, e.message ?: "Invalid arguments")
         }
-        return listOfNotNull(reply.takeIf { call.expectsReply }) + signals
+        return listOfNotNull(reply?.takeIf { call.expectsReply }) + signals
     }
 
-    private fun answer(call: Message, fds: List<FileDescriptor>, signals: MutableList<Message>): Message {
+    /** Null when the reply follows later (a host command starting). */
+    private fun answer(call: Message, fds: List<FileDescriptor>, signals: MutableList<Message>): Message? {
         val iface = call.iface
         val member = call.member ?: return call.error(UNKNOWN_METHOD, "No method")
         if (iface == PEER) {
@@ -132,7 +133,7 @@ class Portal(
             Notifications.IFACE -> freedesktopNotifications(call, signals)
             Notifications.PORTAL_IFACE, Notifications.IMPL_IFACE -> portalNotifications(call, fds)
             FILE_MANAGER_IFACE -> fileManager(call)
-            HostCommandBus.IFACE -> hostCommands?.answer(call, fds, signals) ?: unknownInterface(call)
+            HostCommandBus.IFACE -> if (hostCommands != null) hostCommands.answer(call, fds) else unknownInterface(call)
             CAMERA -> camera(call, signals)
             null -> call.error(UNKNOWN_METHOD, "No interface")
             else -> unknownInterface(call)

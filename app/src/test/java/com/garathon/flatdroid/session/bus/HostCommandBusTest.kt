@@ -8,16 +8,23 @@ import java.io.FileDescriptor
 
 class HostCommandBusTest {
     private val started = mutableListOf<HostCommandBus.Command>()
-    private val exits = mutableListOf<(Int) -> Unit>()
+    /** Each start's pid and its two callbacks, for starts and ends a test makes happen later. */
+    private val starts = mutableListOf<Triple<Int, (Int?) -> Unit, (Int, Int) -> Unit>>()
     private val signalled = mutableListOf<Triple<Int, Int, Boolean>>()
+    /** Whether a start runs at once (else the test calls its callback), and an exit status to end with at once. */
+    private var runAtOnce = true
     private var exitAtOnce: Int? = null
+    private var refuse = false
     private var nextPid = 100
     private val commands = object : HostCommandBus.Commands {
-        override fun start(command: HostCommandBus.Command, exited: (Int) -> Unit): Int {
-            started += command
-            exits += exited
-            exitAtOnce?.let(exited)
-            return nextPid++
+        override fun start(command: HostCommandBus.Command, started: (Int?) -> Unit, exited: (Int, Int) -> Unit): Boolean {
+            if (refuse) return false
+            this@HostCommandBusTest.started += command
+            val pid = nextPid++
+            starts += Triple(pid, started, exited)
+            if (runAtOnce) started(pid)
+            exitAtOnce?.let { exited(pid, it) }
+            return true
         }
 
         override fun signal(pid: Int, signal: Int, group: Boolean) = signalled.add(Triple(pid, signal, group))
@@ -37,7 +44,7 @@ class HostCommandBusTest {
         override fun showFolder(path: String) = false
     }
 
-    private fun bytes(text: String) = (text + "\u0000").toByteArray().map { it.toUByte() }
+    private fun bytes(text: String) = (text + "\u0000").toByteArray()
 
     private fun hostCommand(
         argv: List<String>, fds: Map<Int, Int>, cwd: String = "/home/user", env: Map<String, String> = emptyMap(), flags: UInt = 0u, sender: String = ":1.9",
@@ -52,8 +59,11 @@ class HostCommandBusTest {
 
     @Test
     fun aTerminalOnAllThreeBecomesTheCommandsTerminal() {
-        val replies = portal.handle(hostCommand(listOf("/bin/sh", "-l"), mapOf(0 to 0, 1 to 0, 2 to 0), env = mapOf("TERM" to "xterm")), listOf(pty))
-        assertEquals(listOf(100u), replies.single().body)
+        // The reply follows from the command's start, not from the bus's handler.
+        assertTrue(portal.handle(hostCommand(listOf("/bin/sh", "-l"), mapOf(0 to 0, 1 to 0, 2 to 0), env = mapOf("TERM" to "xterm")), listOf(pty)).isEmpty())
+        assertEquals(listOf(100u), sent.single().body)
+        assertEquals(3u, sent.single().replySerial)
+        assertEquals(":1.9", sent.single().destination)
         val command = started.single()
         assertEquals("/dev/pts/3", command.tty)
         assertTrue(command.stdio.isEmpty())
@@ -83,22 +93,40 @@ class HostCommandBusTest {
         assertEquals("org.freedesktop.DBus.Error.InvalidArgs", error(hostCommand(listOf("sh"), emptyMap(), env = mapOf("1X" to "y")), emptyList()))
         assertEquals("org.freedesktop.DBus.Error.InvalidArgs", error(hostCommand(listOf("sh"), mapOf(0 to 5)), listOf(pty)))
         assertTrue(started.isEmpty())
-        repeat(HostCommandBus.MAX_RUNNING) { portal.handle(hostCommand(listOf("sh"), emptyMap()), emptyList()) }
+        // Commands still starting count towards the limit.
+        runAtOnce = false
+        repeat(HostCommandBus.MAX_RUNNING / 2) { portal.handle(hostCommand(listOf("sh"), emptyMap()), emptyList()) }
+        runAtOnce = true
+        repeat(HostCommandBus.MAX_RUNNING / 2) { portal.handle(hostCommand(listOf("sh"), emptyMap()), emptyList()) }
         assertEquals("org.freedesktop.DBus.Error.LimitsExceeded", error(hostCommand(listOf("sh"), emptyMap()), emptyList()))
+    }
+
+    @Test
+    fun aCommandThatCantStartFails() {
+        refuse = true
+        assertEquals("org.freedesktop.DBus.Error.Failed", portal.handle(hostCommand(listOf("sh"), emptyMap()), emptyList()).single().errorName)
+        refuse = false
+        runAtOnce = false
+        assertTrue(portal.handle(hostCommand(listOf("sh"), emptyMap()), emptyList()).isEmpty())
+        starts.single().second(null)
+        assertEquals("org.freedesktop.DBus.Error.Failed", sent.single().errorName)
+        // Neither takes a place.
+        repeat(HostCommandBus.MAX_RUNNING) { runAtOnce = true; portal.handle(hostCommand(listOf("sh"), emptyMap()), emptyList()) }
+        assertEquals(HostCommandBus.MAX_RUNNING, bus.runningPids().size)
     }
 
     @Test
     fun exitsGoToTheCallerAfterTheReply() {
         exitAtOnce = 256
-        val replies = portal.handle(hostCommand(listOf("false"), emptyMap()), emptyList())
-        assertEquals(DBusWire.METHOD_RETURN, replies[0].type)
-        assertEquals("HostCommandExited", replies[1].member)
-        assertEquals(listOf(100u, 256u), replies[1].body)
-        assertEquals(":1.9", replies[1].destination)
+        portal.handle(hostCommand(listOf("false"), emptyMap()), emptyList())
+        assertEquals(DBusWire.METHOD_RETURN, sent[0].type)
+        assertEquals("HostCommandExited", sent[1].member)
+        assertEquals(listOf(100u, 256u), sent[1].body)
+        assertEquals(":1.9", sent[1].destination)
         exitAtOnce = null
         portal.handle(hostCommand(listOf("sleep", "9"), emptyMap()), emptyList())
-        exits.last()(9)
-        assertEquals(listOf(101u, 9u), sent.single().body)
+        starts.last().third(101, 9)
+        assertEquals(listOf(101u, 9u), sent.last().body)
         assertTrue(bus.runningPids().isEmpty())
     }
 
@@ -116,6 +144,16 @@ class HostCommandBusTest {
         portal.handle(hostCommand(listOf("sh"), emptyMap(), flags = HostCommandBus.WATCH_BUS), emptyList())
         portal.handle(hostCommand(listOf("sh"), emptyMap()), emptyList())
         portal.handle(Message.signal("/org/freedesktop/DBus", "org.freedesktop.DBus", "NameOwnerChanged", "sss", ":1.9", ":1.9", "").copy(sender = "org.freedesktop.DBus"))
+        assertEquals(listOf(Triple(100, 9, true)), signalled)
+    }
+
+    @Test
+    fun aWatchedCommandWhoseCallerLeftWhileItStartedEndsOnceItRuns() {
+        runAtOnce = false
+        portal.handle(hostCommand(listOf("sh"), emptyMap(), flags = HostCommandBus.WATCH_BUS), emptyList())
+        portal.handle(Message.signal("/org/freedesktop/DBus", "org.freedesktop.DBus", "NameOwnerChanged", "sss", ":1.9", ":1.9", "").copy(sender = "org.freedesktop.DBus"))
+        assertTrue(signalled.isEmpty())
+        starts.single().second(100)
         assertEquals(listOf(Triple(100, 9, true)), signalled)
     }
 

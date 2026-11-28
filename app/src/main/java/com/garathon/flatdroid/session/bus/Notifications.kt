@@ -205,7 +205,7 @@ class Notifications(private val shower: Shower) {
         val alpha = v[3] as? Boolean ?: return null
         val bits = v[4] as? Int ?: return null
         val channels = v[5] as? Int ?: return null
-        val data = (v[6] as? List<*>)?.let(::bytes) ?: return null
+        val data = (v[6] as? ByteArray)?.takeIf { it.size <= MAX_IMAGE_BYTES } ?: return null
         if (bits != 8 || channels != (if (alpha) 4 else 3) || width !in 1..MAX_SIDE || height !in 1..MAX_SIDE) return null
         if (stride < width * channels || data.size < stride.toLong() * (height - 1) + width * channels) return null
         return Image.Pixels(width, height, stride, alpha, channels, data)
@@ -223,7 +223,7 @@ class Notifications(private val shower: Shower) {
         val kind = struct.values.getOrNull(0) as? String
         val content = (struct.values.getOrNull(1) as? Variant)?.value
         return when (kind) {
-            "bytes" -> (content as? List<*>)?.let(::bytes)?.let { Image.Encoded(it) }
+            "bytes" -> (content as? ByteArray)?.takeIf { it.size <= MAX_IMAGE_BYTES }?.let { Image.Encoded(it) }
             // A regular file only (the real portal asks for a sealed memfd, one too): a pipe the app
             // never writes to would stop this reader, and so the whole bus.
             "file-descriptor" -> (content as? UnixFd)?.let { fds.getOrNull(it.index) }?.takeIf(Confined::isRegular)?.let { fd ->
@@ -231,13 +231,6 @@ class Notifications(private val shower: Shower) {
             }
             else -> null
         }
-    }
-
-    private fun bytes(list: List<*>): ByteArray? {
-        if (list.size > MAX_IMAGE_BYTES) return null
-        val out = ByteArray(list.size)
-        for ((i, b) in list.withIndex()) out[i] = (b as? UByte)?.toByte() ?: return null
-        return out
     }
 
     /** At most [MAX_TEXT] characters. */

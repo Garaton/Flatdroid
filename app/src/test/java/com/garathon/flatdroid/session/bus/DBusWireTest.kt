@@ -67,6 +67,17 @@ class DBusWireTest {
     }
 
     @Test
+    fun byteArraysDecodeAsBytes() {
+        val call = Message.call("a.b", "/", "a.b", "M", "ayv(ay)", byteArrayOf(1, -2, 3), Variant("ay", byteArrayOf()), Struct(byteArrayOf(9)))
+        val body = DBusWire.decode(DBusWire.encode(call, 1u)).body
+        assertArrayEquals(byteArrayOf(1, -2, 3), body[0] as ByteArray)
+        assertArrayEquals(byteArrayOf(), (body[1] as Variant).value as ByteArray)
+        assertArrayEquals(byteArrayOf(9), (body[2] as Struct).values[0] as ByteArray)
+        // A list of bytes still encodes, to the same bytes.
+        assertArrayEquals(DBusWire.encode(call, 1u), DBusWire.encode(call.copy(body = listOf(listOf(1.toUByte(), 254.toUByte(), 3.toUByte())) + call.body.drop(1)), 1u))
+    }
+
+    @Test
     fun anEmptyArrayStillPadsToItsElements() {
         // An empty array of 8-aligned elements: length 0, then padding to 8 (which the length leaves out).
         val call = Message.call("a.b", "/", "a.b", "M", "yax", 1.toUByte(), emptyList<Long>())
